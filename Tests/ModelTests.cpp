@@ -219,3 +219,112 @@ TEST_CASE ("Input names for the track's input setting", "[model][record]")
     t.setProperty (ids::input, 7, nullptr);
     CHECK (model::inputName (t, names) == "In 8 + In 9");
 }
+
+TEST_CASE ("Splitting a recording into cycle passes", "[model][cycle]")
+{
+    SECTION ("no cycle: one piece, shifted by the latency")
+    {
+        const auto pieces = model::splitRecording (2.0, 5.0, 0.01, false, 0.0, 4.0);
+        REQUIRE (pieces.size() == 1);
+        CHECK (pieces[0].timelineStart == 2.0);
+        CHECK (pieces[0].fileOffset == 0.01);
+        CHECK_THAT (pieces[0].length, WithinAbs (4.99, 1e-9));
+    }
+
+    SECTION ("cycle never reached: one piece")
+    {
+        const auto pieces = model::splitRecording (0.0, 3.0, 0.0, true, 0.0, 4.0);
+        REQUIRE (pieces.size() == 1);
+        CHECK (pieces[0].length == 3.0);
+    }
+
+    SECTION ("three full passes and a short fourth")
+    {
+        // Cycle 2..6 s (4 s long), recording from 2 s for 13 s, no latency.
+        const auto pieces = model::splitRecording (2.0, 13.0, 0.0, true, 2.0, 6.0);
+        REQUIRE (pieces.size() == 4);
+
+        for (int i = 0; i < 4; ++i)
+        {
+            CHECK (pieces[(size_t) i].timelineStart == 2.0);
+            CHECK (pieces[(size_t) i].fileOffset == 4.0 * i);
+        }
+
+        CHECK (pieces[0].length == 4.0);
+        CHECK (pieces[2].length == 4.0);
+        CHECK_THAT (pieces[3].length, WithinAbs (1.0, 1e-9));
+    }
+
+    SECTION ("punch in mid-cycle: a partial first pass, then whole passes")
+    {
+        const auto pieces = model::splitRecording (3.0, 7.0, 0.005, true, 2.0, 6.0);
+        REQUIRE (pieces.size() == 2);
+        CHECK (pieces[0].timelineStart == 3.0);
+        CHECK (pieces[0].length == 3.0);
+        CHECK (pieces[0].fileOffset == 0.005);
+        CHECK (pieces[1].timelineStart == 2.0);
+        CHECK_THAT (pieces[1].fileOffset, WithinAbs (3.005, 1e-9));
+        CHECK_THAT (pieces[1].length, WithinAbs (3.995, 1e-9));
+    }
+}
+
+TEST_CASE ("Take folders switch, flatten, split and save", "[model][cycle]")
+{
+    juce::UndoManager um;
+    auto p = model::createProject();
+    auto t = model::addTrack (p, "Vox", nullptr);
+    const juce::File file ("/tmp/riff-takes/Vox#01.wav");
+
+    auto r = model::addTakeFolder (t, file, 2.0, 4.0, { 0.01, 4.01, 8.01 }, 2, &um);
+    REQUIRE (model::numTakes (r) == 3);
+    CHECK ((int) r[ids::activeTake] == 2);
+    CHECK (num (r, ids::offset) == 8.01);
+    CHECK (r[ids::name].toString() == "Vox: Take 3");
+
+    um.beginNewTransaction();
+    model::setActiveTake (r, 0, &um);
+    CHECK (num (r, ids::offset) == 0.01);
+    CHECK (r[ids::name].toString() == "Vox: Take 1");
+    um.undo();
+    CHECK (num (r, ids::offset) == 8.01);
+
+    // Splitting shifts every take, so switching takes later still lines up.
+    auto right = model::splitRegion (r, 3.0, nullptr);
+    REQUIRE (right.isValid());
+    CHECK (model::numTakes (right) == 3);
+    CHECK_THAT (num (right.getChild (0), ids::offset), WithinAbs (1.01, 1e-9));
+    CHECK_THAT (num (right.getChild (2), ids::offset), WithinAbs (9.01, 1e-9));
+    CHECK (right.getChild (0)[ids::id] != r.getChild (0)[ids::id]);
+
+    // Trimming the left edge can't go past the earliest take's start in the file.
+    model::trimRegionStart (r, 0.0, 0.0, nullptr);
+    CHECK_THAT (num (r, ids::start), WithinAbs (1.99, 1e-9));
+
+    // JSON round trip keeps the takes.
+    const auto projectFile = juce::File ("/tmp/riff-takes/Song.riff");
+    juce::String error;
+    auto loaded = model::fromJson (model::toJson (p, projectFile), projectFile, error);
+    REQUIRE (loaded.isValid());
+    const auto lr = loaded.getChild (0).getChild (0);
+    CHECK (model::numTakes (lr) == 3);
+    CHECK (juce::File (lr.getChild (1)[ids::file].toString()) == file);
+
+    um.beginNewTransaction();
+    model::flattenTakes (r, &um);
+    CHECK (model::numTakes (r) == 0);
+    CHECK_FALSE (r.hasProperty (ids::activeTake));
+    um.undo();
+    CHECK (model::numTakes (r) == 3);
+}
+
+TEST_CASE ("Cycle range is ordered and not undoable", "[model][cycle]")
+{
+    auto p = model::createProject();
+    CHECK_FALSE ((bool) p[ids::cycleEnabled]);
+    CHECK_FALSE ((bool) p[ids::countIn]);
+
+    model::setCycle (p, 8.0, 4.0, true);
+    CHECK (num (p, ids::cycleStart) == 4.0);
+    CHECK (num (p, ids::cycleEnd) == 8.0);
+    CHECK ((bool) p[ids::cycleEnabled]);
+}

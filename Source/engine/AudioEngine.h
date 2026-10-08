@@ -4,6 +4,8 @@
 #include <atomic>
 #include <array>
 #include "PlaybackGraph.h"
+#include "LatencyMeasure.h"
+#include <optional>
 
 namespace riff
 {
@@ -45,6 +47,12 @@ public:
     double getPlayheadSeconds() const noexcept;
     void setPlayheadSeconds (double seconds) noexcept;
 
+    /** Like setPlayheadSeconds but allows negative times, for a count-in before bar 1. */
+    void setPlayheadSecondsAllowingNegative (double seconds) noexcept
+    {
+        playheadSample.store ((juce::int64) std::llround (seconds * sampleRate.load()));
+    }
+
     double getSampleRate() const noexcept     { return sampleRate.load(); }
 
     // --- Recording (message thread) -------------------------------------------
@@ -73,8 +81,16 @@ public:
 
     static constexpr int maxTakes = 64;
 
-    /** Opens a WAV file per request and starts capturing input while the transport plays. */
-    bool startRecording (const std::vector<RecordRequest>& requests, juce::String& error);
+    /**
+        Opens a WAV file per request and starts capturing input while the
+        transport plays, from `recordFromSample` onwards. If the playhead is
+        before that point (a count-in), the metronome clicks until it gets there.
+    */
+    bool startRecording (const std::vector<RecordRequest>& requests, juce::String& error,
+                         std::optional<juce::int64> recordFromSample = std::nullopt);
+
+    /** True while the playhead is still before the record-from point. */
+    bool isCountingIn() const noexcept;
 
     /** Stops capturing, finishes the files and returns what was recorded. */
     std::vector<FinishedTake> stopRecording();
@@ -84,6 +100,14 @@ public:
 
     /** True (once) if the disk couldn't keep up and some input was lost. */
     bool takeRecordingOverflow() noexcept     { return recordOverflow.exchange (false); }
+
+    // --- Latency measurement (message thread) ----------------------------------
+    /** Plays test bursts and records `inputChannel`; normal playback is muted meanwhile. */
+    bool startLatencyMeasurement (int inputChannel, juce::String& error);
+    bool isMeasuringLatency() const noexcept  { return measureState.load() != 0; }
+
+    /** The result once the measurement has finished; empty while it's still running. */
+    std::optional<latency::Result> takeLatencyMeasurement();
 
     /** Input + output latency reported by the device, in samples. */
     int getRoundTripLatencySamples();
@@ -125,6 +149,8 @@ private:
                       float* mixL, float* mixR, int numSamples, bool playingNow) noexcept;
     void recordChunk (const float* const* inputs, int numInputs, int inputOffset, int numSamples) noexcept;
     void renderClick (const PlaybackGraph& graph, float* mixL, float* mixR, int numSamples) noexcept;
+    void renderMeasurement (const float* const* inputs, int numInputs,
+                            float* const* outputs, int numOutputs, int numSamples) noexcept;
     static void storeMax (std::atomic<float>& target, float value) noexcept;
 
     juce::AudioDeviceManager deviceManager;
@@ -149,6 +175,14 @@ private:
     std::array<std::atomic<Take*>, maxTakes> takeSlots {};      // what the audio thread sees
     std::atomic<bool> recording { false };
     std::atomic<bool> recordOverflow { false };
+    std::atomic<juce::int64> recordFrom { 0 };
+
+    // --- Latency measurement ---------------------------------------------------
+    std::atomic<int> measureState { 0 };     // 0 idle, 1 running, 2 finished
+    juce::AudioBuffer<float> measureBuffer;  // allocated before measureState becomes 1
+    std::vector<float> measureBurst;
+    std::vector<int> measurePositions;
+    int measurePos = 0, measureInput = 0;
 
     // --- Audio-thread state (sized in prepare) --------------------------------
     juce::AudioBuffer<float> trackBuffer, mixBuffer, silence;

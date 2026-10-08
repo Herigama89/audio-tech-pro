@@ -49,6 +49,40 @@ namespace riff::model
     juce::ValueTree addRecordedRegion (juce::ValueTree track, const juce::File& file, double start,
                                        double recordedLength, double latencySeconds, juce::UndoManager* um);
 
+    // --- Loop recording / take folders --------------------------------------
+
+    /** One recorded pass: where it sits on the timeline and where it starts in the file. */
+    struct TakePiece
+    {
+        double timelineStart = 0.0;
+        double fileOffset = 0.0;
+        double length = 0.0;
+    };
+
+    /**
+        Splits one continuous recording into pieces on the timeline.
+
+        Without a cycle (or if the recording never reached the cycle end) this
+        is a single piece. With a cycle, the first piece runs from the record
+        start to the cycle end and every later pass covers the whole cycle; the
+        file was written continuously while the playhead wrapped.
+    */
+    std::vector<TakePiece> splitRecording (double recordStart, double recordedLength, double latency,
+                                           bool cycleOn, double cycleStart, double cycleEnd);
+
+    /** A region holding several takes of the same section; `activeIndex` is the one that plays. */
+    juce::ValueTree addTakeFolder (juce::ValueTree track, const juce::File& file, double start, double length,
+                                   const std::vector<double>& takeOffsets, int activeIndex, juce::UndoManager* um);
+
+    int numTakes (const juce::ValueTree& region);
+    void setActiveTake (juce::ValueTree region, int index, juce::UndoManager* um);
+
+    /** Keeps the active take and removes the others. */
+    void flattenTakes (juce::ValueTree region, juce::UndoManager* um);
+
+    // --- Cycle ----------------------------------------------------------------
+    void setCycle (juce::ValueTree project, double start, double end, bool enabled);
+
     void deleteRegion (juce::ValueTree region, juce::UndoManager* um);
     void deleteTrack (juce::ValueTree track, juce::UndoManager* um);
 

@@ -43,6 +43,8 @@ struct PlaybackGraph
     float masterGain = 0.8f;
 
     bool metronome = false;
+    bool cycleEnabled = false;
+    juce::int64 cycleStart = 0, cycleEnd = 0;   // samples; playback wraps from end to start
     double secondsPerBeat = 0.5;
     int beatsPerBar = 4;
     std::vector<Track> tracks;

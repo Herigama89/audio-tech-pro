@@ -5,9 +5,12 @@
 /**
     Names used in the project tree.
 
-    PROJECT  { name, tempo, timeSigNumerator, masterGain, metronome }
+    PROJECT  { name, tempo, timeSigNumerator, masterGain, metronome,
+               cycleEnabled, cycleStart, cycleEnd, countIn }
       TRACK  { id, name, colour, volume, pan, mute, solo, armed, monitor, input, inputStereo }
-        REGION { id, name, file, start, offset, length, gain }
+        REGION { id, name, file, start, offset, length, gain, activeTake? }
+          TAKE { id, name, file, offset }       (only in take folders from loop recording;
+                                                 the region's file/offset mirror the active take)
 
     All times are in seconds (double). The engine converts them to samples
     at the device's sample rate when it builds its playback graph.
@@ -20,6 +23,7 @@ namespace riff::ids
     RIFF_DECLARE_ID (PROJECT)
     RIFF_DECLARE_ID (TRACK)
     RIFF_DECLARE_ID (REGION)
+    RIFF_DECLARE_ID (TAKE)
 
     // Properties
     RIFF_DECLARE_ID (id)
@@ -42,6 +46,11 @@ namespace riff::ids
     RIFF_DECLARE_ID (monitor)      // hear the input through the track while armed
     RIFF_DECLARE_ID (input)        // first input channel (index among the device's active inputs)
     RIFF_DECLARE_ID (inputStereo)  // true: record `input` and `input + 1`
+    RIFF_DECLARE_ID (cycleEnabled)
+    RIFF_DECLARE_ID (cycleStart)
+    RIFF_DECLARE_ID (cycleEnd)
+    RIFF_DECLARE_ID (countIn)      // one bar of click before recording
+    RIFF_DECLARE_ID (activeTake)   // index of the TAKE child that's playing
 
     #undef RIFF_DECLARE_ID
 }

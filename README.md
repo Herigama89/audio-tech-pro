@@ -1,10 +1,14 @@
 # Riff: a Logic-style DAW
 
-A native DAW in C++20 + JUCE 8. Phase 0 is complete and Phase 1 is under way.
-Riff has a multitrack arrange view, an undoable project model, saving and
-opening projects, audio recording with latency compensation, a metronome, and
-input monitoring. All of it runs on a real-time engine that never blocks the
-audio thread.
+A native DAW in C++20 + JUCE 8. Phases 0 and 1 are complete. Riff has:
+
+- a multitrack arrange view and an undoable project model
+- saving and opening projects
+- audio recording with measured latency compensation
+- loop (cycle) recording into takes
+- a count-in, a metronome, and input monitoring
+
+All of it runs on a real-time engine that never blocks the audio thread.
 
 ## Build and run
 
@@ -55,6 +59,7 @@ The tests cover:
 - **Model:** tracks and regions, undo and redo, move, split, trim, and the JSON round trip.
 - **Engine:** sample-accurate region placement, source offsets, mute, solo, volume, pan, resampling alignment, and swapping graphs mid-playback.
 - **Recording:** WAV output, punch-in position, input monitoring, the metronome, and latency compensation.
+- **Cycle:** sample-exact wrap, count-in clicks, splitting loop recordings into passes, take folders (switch, split, flatten, save), and the latency estimator, including a full loopback through a simulated cable.
 
 ## Using it
 
@@ -64,6 +69,10 @@ The tests cover:
 | Arm a track | Click its **R** button. Right-click **R** to choose the input: mono, or a stereo pair. |
 | Monitor the input | **I** on an armed track. Use headphones, or a mic near speakers will feed back. |
 | Metronome | **K** or the **Click** button |
+| Cycle (loop) | Drag in the **top half of the ruler** to set the range. Click the bar, press **C**, or use **Cycle** to turn it on or off. |
+| Loop recording | Turn Cycle on and record. Each pass becomes a take. Click a take folder's name bar (or right-click it, then **Takes**) to switch takes, or choose **Keep only this take**. |
+| Count-in | **Count** gives one bar of click before recording starts. |
+| Latency calibration | **Audio > Calibrate recording latency...** Connect a cable from output 1 to an input and click **Measure**. Riff stores the difference from the driver's reported latency and applies it to every recording. |
 | Add audio | Drag files from Finder onto a track, or onto empty space for a new track. Or use **Import** (Cmd+I) to place them at the playhead. |
 | Play / stop | Space |
 | Go to start | Return |
@@ -125,10 +134,10 @@ Tests/                    Catch2 unit tests
 - [x] Metronome
 - [x] Latency compensation from the device's reported latency
 - [x] `Audio Files/` folder next to saved projects
-- [ ] Cycle (loop) region in the ruler, and cycle recording into take lanes
-- [ ] Count-in before recording
-- [ ] Loopback calibration test, for interfaces that misreport their latency
-- [ ] Disk streaming for long files, instead of loading whole files into memory
+- [x] Cycle (loop) region in the ruler, and cycle recording into take folders
+- [x] Count-in before recording
+- [x] Loopback latency calibration, saved between sessions
+- [ ] Later: comping (stitching the best parts of several takes), and disk streaming for very long files
 
 ## Later phases
 

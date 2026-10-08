@@ -60,6 +60,9 @@ private:
     void beginRecording();
     void finishRecording();
     void toggleMetronome();
+    void toggleCycle();
+    void showAudioMenu();
+    void showLatencyCalibration();
     juce::File recordingFolder() const;
     juce::File nextTakeFile (const juce::ValueTree& track) const;
 
@@ -98,6 +101,7 @@ private:
     juce::TextButton newButton { "New" }, openButton { "Open" }, saveButton { "Save" };
     juce::TextButton undoButton { "Undo" }, redoButton { "Redo" };
     juce::TextButton rewindButton { "|<" }, playButton { "Play" }, recordButton { "Rec" }, clickButton { "Click" };
+    juce::TextButton cycleButton { "Cycle" }, countInButton { "Count" };
     juce::TextButton addTrackButton { "+ Track" }, importButton { "Import" }, settingsButton { "Audio" };
     juce::Label positionLabel, tempoLabel, tempoCaption { {}, "BPM" }, masterCaption { {}, "Master" }, statusLabel;
     juce::Slider masterSlider;
@@ -111,6 +115,14 @@ private:
     std::unique_ptr<juce::FileChooser> fileChooser;
     juce::ScopedMessageBox messageBox;
     double lastPaintedPlayhead = -1.0;
+
+    // Settings kept between sessions (not part of any project).
+    juce::ApplicationProperties appProperties;
+    double recordingOffsetMs = 0.0;
+
+    // The cycle as it was when recording started (it can't change while recording).
+    bool recordCycleOn = false;
+    double recordCycleStart = 0.0, recordCycleEnd = 0.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

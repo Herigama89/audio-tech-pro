@@ -373,3 +373,176 @@ TEST_CASE ("Metronome clicks on the beat", "[engine]")
     CHECK (out[12000] == 0.0f);          // silence between beats
     CHECK (out[23990] == 0.0f);
 }
+
+#include "engine/LatencyMeasure.h"
+
+TEST_CASE ("Playback wraps at the cycle end on the exact sample", "[engine][cycle]")
+{
+    Fixture f;
+    // Audio: 0.25 for the first half second, 0.75 after.
+    juce::AudioBuffer<float> b (1, 96000);
+    for (int i = 0; i < 96000; ++i)
+        b.setSample (0, i, i < 24000 ? 0.25f : 0.75f);
+    const auto file = f.temp.dir.getChildFile ("steps.wav");
+    {
+        std::unique_ptr<juce::OutputStream> out = std::make_unique<juce::FileOutputStream> (file);
+        juce::WavAudioFormat wav;
+        auto writer = wav.createWriterFor (out, juce::AudioFormatWriterOptions{}.withSampleRate (48000.0).withNumChannels (1).withBitsPerSample (24));
+        writer->writeFromAudioSampleBuffer (b, 0, 96000);
+    }
+
+    model::addRegion (model::addTrack (f.project, "A", nullptr), file, 0.0, 2.0, nullptr);
+    model::setCycle (f.project, 0.25, 0.75, true); // samples 12000 .. 36000
+    f.player.setProject (f.project);
+
+    f.engine.setPlayheadSeconds (0.25);
+    f.engine.play();
+
+    const auto out = renderLeft (f.engine, 30000, 512);
+    // 24000 samples of cycle, then back to 12000.
+    CHECK_THAT (out[11999], WithinAbs (0.25f * 0.8f, 1e-4));   // sample 23999
+    CHECK_THAT (out[12000], WithinAbs (0.75f * 0.8f, 1e-4));   // sample 24000
+    CHECK_THAT (out[23999], WithinAbs (0.75f * 0.8f, 1e-4));   // sample 35999, last in the cycle
+    CHECK_THAT (out[24000], WithinAbs (0.25f * 0.8f, 1e-4));   // wrapped to 12000
+    CHECK (f.engine.getPlayheadSeconds() == (12000.0 + 6000.0) / 48000.0);
+}
+
+TEST_CASE ("Playhead parked after the cycle plays on", "[engine][cycle]")
+{
+    Fixture f;
+    model::setCycle (f.project, 0.0, 0.5, true);
+    f.player.setProject (f.project);
+    f.engine.setPlayheadSeconds (1.0);
+    f.engine.play();
+    renderLeft (f.engine, 4800);
+    CHECK_THAT (f.engine.getPlayheadSeconds(), WithinAbs (1.1, 1e-9));
+}
+
+TEST_CASE ("Count-in clicks, then recording starts on the downbeat", "[engine][record]")
+{
+    Fixture f;
+    f.player.setProject (f.project);  // metronome off
+    const auto file = f.temp.dir.getChildFile ("ci.wav");
+
+    juce::String error;
+    REQUIRE (f.engine.startRecording ({ { "a", file, 0, 1 } }, error, (juce::int64) 0));
+    f.engine.setPlayheadSecondsAllowingNegative (-2.0);  // one bar at 120 BPM
+    f.engine.play();
+    CHECK (f.engine.isCountingIn());
+
+    std::vector<float> out;
+    renderWithInput (f.engine, 96000 + 24000, 0.3f, 2, &out);
+    CHECK_FALSE (f.engine.isCountingIn());
+
+    // Clicks on each beat of the count-in...
+    for (int beat = 0; beat < 4; ++beat)
+    {
+        float peak = 0.0f;
+        for (int i = beat * 24000; i < beat * 24000 + 400; ++i)
+            peak = juce::jmax (peak, std::abs (out[(size_t) i]));
+        CHECK (peak > 0.1f);
+    }
+
+    // ...but not after it, because the metronome is off.
+    float after = 0.0f;
+    for (int i = 96000; i < 96000 + 400; ++i)
+        after = juce::jmax (after, std::abs (out[(size_t) i]));
+    CHECK (after == 0.0f);
+
+    const auto takes = f.engine.stopRecording();
+    REQUIRE (takes.size() == 1);
+    CHECK (takes[0].startSample == 0);
+    CHECK (takes[0].numSamples == 24000);
+}
+
+TEST_CASE ("Recording through cycle passes is one continuous file", "[engine][record][cycle]")
+{
+    Fixture f;
+    model::setCycle (f.project, 0.0, 0.5, true);
+    f.player.setProject (f.project);
+
+    juce::String error;
+    REQUIRE (f.engine.startRecording ({ { "a", f.temp.dir.getChildFile ("loop.wav"), 0, 1 } }, error, (juce::int64) 0));
+    f.engine.play();
+    renderWithInput (f.engine, 24000 * 3 + 5000, 0.2f);
+
+    const auto takes = f.engine.stopRecording();
+    REQUIRE (takes.size() == 1);
+    CHECK (takes[0].numSamples == 77000);
+
+    const auto pieces = model::splitRecording (0.0, 77000.0 / 48000.0, 0.0, true, 0.0, 0.5);
+    REQUIRE (pieces.size() == 4);
+    CHECK_THAT (pieces[3].length, WithinAbs (5000.0 / 48000.0, 1e-9));
+}
+
+TEST_CASE ("Latency estimator finds a loopback delay", "[latency]")
+{
+    const double rate = 48000.0;
+    const auto length = latency::measurementLength (rate);
+    const auto burst = latency::makeBurst (rate);
+    juce::Random random (42);
+
+    for (const int trueDelay : { 0, 37, 517, 2400 })
+    {
+        std::vector<float> recorded ((size_t) length);
+        for (auto& s : recorded)
+            s = 0.01f * (random.nextFloat() - 0.5f); // a little noise
+
+        for (const auto pos : latency::burstPositions (rate))
+            for (size_t i = 0; i < burst.size(); ++i)
+                if (pos + trueDelay + (int) i < length)
+                    recorded[(size_t) (pos + trueDelay) + i] += -0.3f * burst[i]; // quieter and inverted
+
+        const auto result = latency::estimateDelay (recorded.data(), length, rate);
+        INFO ("true delay " << trueDelay);
+        CHECK (result.ok);
+        CHECK (result.delaySamples == trueDelay);
+    }
+
+    SECTION ("silence is reported as a failure")
+    {
+        std::vector<float> silence ((size_t) length, 0.0f);
+        const auto result = latency::estimateDelay (silence.data(), length, rate);
+        CHECK_FALSE (result.ok);
+        CHECK (result.error.isNotEmpty());
+    }
+}
+
+TEST_CASE ("Engine latency measurement through a simulated cable", "[latency][engine]")
+{
+    Fixture f;
+    f.player.setProject (f.project);
+
+    juce::String error;
+    REQUIRE (f.engine.startLatencyMeasurement (0, error));
+    CHECK (f.engine.isMeasuringLatency());
+
+    // Loop the output back into the input 300 samples later.
+    constexpr int cableDelay = 300, block = 256;
+    std::vector<float> line ((size_t) (48000 * 5), 0.0f);
+    juce::AudioBuffer<float> in (1, block), out (2, block);
+    std::optional<latency::Result> result;
+
+    for (int t = 0; t + block < (int) line.size() && ! result.has_value(); t += block)
+    {
+        for (int i = 0; i < block; ++i)
+            in.setSample (0, i, t + i >= cableDelay ? line[(size_t) (t + i - cableDelay)] : 0.0f);
+
+        f.engine.render (in.getArrayOfReadPointers(), 1, out.getArrayOfWritePointers(), 2, block);
+
+        for (int i = 0; i < block; ++i)
+            line[(size_t) (t + i)] = out.getSample (0, i);
+
+        result = f.engine.takeLatencyMeasurement();
+    }
+
+    REQUIRE (result.has_value());
+    CHECK (result->ok);
+    CHECK (result->delaySamples == cableDelay);
+    CHECK_FALSE (f.engine.isMeasuringLatency());
+
+    // Normal playback resumes afterwards.
+    f.engine.play();
+    renderLeft (f.engine, 512);
+    CHECK (f.engine.getPlayheadSeconds() > 0.0);
+}

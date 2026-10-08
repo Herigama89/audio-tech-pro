@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include "model/Project.h"
 #include "ui/Theme.h"
+#include "ui/LatencyCalibrator.h"
 
 namespace riff
 {
@@ -20,7 +21,7 @@ MainComponent::MainComponent()
 
     // --- Toolbar ----------------------------------------------------------------
     for (auto* b : { &newButton, &openButton, &saveButton, &undoButton, &redoButton,
-                     &rewindButton, &playButton, &recordButton, &clickButton,
+                     &rewindButton, &playButton, &recordButton, &clickButton, &cycleButton, &countInButton,
                      &addTrackButton, &importButton, &settingsButton })
     {
         b->setWantsKeyboardFocus (false); // keep Space for play/stop
@@ -36,12 +37,19 @@ MainComponent::MainComponent()
     playButton.onClick     = [this] { togglePlay(); };
     recordButton.onClick   = [this] { toggleRecord(); };
     clickButton.onClick    = [this] { toggleMetronome(); };
+    cycleButton.onClick    = [this] { toggleCycle(); };
+    countInButton.onClick  = [this]
+    {
+        project.setProperty (ids::countIn, ! (bool) project[ids::countIn], nullptr);
+    };
+    cycleButton.setColour (juce::TextButton::buttonOnColourId, theme::solo);
+    countInButton.setColour (juce::TextButton::buttonOnColourId, theme::accent);
     recordButton.setColour (juce::TextButton::buttonOnColourId, theme::danger);
     recordButton.setColour (juce::TextButton::textColourOffId, theme::danger.brighter (0.3f));
     clickButton.setColour (juce::TextButton::buttonOnColourId, theme::accent);
     addTrackButton.onClick = [this] { addTrack(); };
     importButton.onClick   = [this] { importAudio(); };
-    settingsButton.onClick = [this] { showAudioSettings(); };
+    settingsButton.onClick = [this] { showAudioMenu(); };
 
     newButton.setTooltip ("New project (Cmd+N)");
     openButton.setTooltip ("Open project (Cmd+O)");
@@ -52,6 +60,9 @@ MainComponent::MainComponent()
     playButton.setTooltip ("Play / stop (Space)");
     recordButton.setTooltip ("Record on armed tracks (R). Arms the selected track if none are armed.");
     clickButton.setTooltip ("Metronome (K)");
+    cycleButton.setTooltip ("Cycle (C). Drag in the top half of the ruler to set the range; click it to turn it on or off.\n"
+                            "Recording with Cycle on makes a new take on every pass.");
+    countInButton.setTooltip ("One bar of click before recording starts");
     addTrackButton.setTooltip ("New audio track");
     importButton.setTooltip ("Import audio files at the playhead (Cmd+I)");
     settingsButton.setTooltip ("Audio device settings");
@@ -123,6 +134,14 @@ MainComponent::MainComponent()
     undoManager.addChangeListener (this);
     engine.getDeviceManager().addChangeListener (this);
 
+    // --- Settings ---------------------------------------------------------------
+    juce::PropertiesFile::Options settingsOptions;
+    settingsOptions.applicationName = "Riff";
+    settingsOptions.filenameSuffix = "settings";
+    settingsOptions.osxLibrarySubFolder = "Application Support";
+    appProperties.setStorageParameters (settingsOptions);
+    recordingOffsetMs = appProperties.getUserSettings()->getDoubleValue ("recordingOffsetMs", 0.0);
+
     // --- Start ------------------------------------------------------------------
     startupError = engine.initialise();
     setProject (model::createProject(), {});
@@ -176,18 +195,20 @@ void MainComponent::resized()
         bar.removeFromLeft (gapAfter);
     };
 
-    place (newButton, 52);
-    place (openButton, 56);
-    place (saveButton, 52, 16);
-    place (undoButton, 52);
-    place (redoButton, 52, 16);
-    place (rewindButton, 36);
-    place (playButton, 56);
-    place (recordButton, 44, 10);
-    place (positionLabel, 196, 10);
-    place (tempoLabel, 50, 2);
-    place (tempoCaption, 32, 8);
-    place (clickButton, 50, 16);
+    place (newButton, 48);
+    place (openButton, 52);
+    place (saveButton, 48, 12);
+    place (undoButton, 50);
+    place (redoButton, 50, 12);
+    place (rewindButton, 30);
+    place (playButton, 52);
+    place (recordButton, 42, 8);
+    place (cycleButton, 52, 8);
+    place (positionLabel, 184, 8);
+    place (tempoLabel, 44, 2);
+    place (tempoCaption, 30, 8);
+    place (countInButton, 54);
+    place (clickButton, 48, 12);
 
     auto placeRight = [&bar] (juce::Component& c, int width, int gapBefore = 4)
     {
@@ -195,11 +216,11 @@ void MainComponent::resized()
         bar.removeFromRight (gapBefore);
     };
 
-    placeRight (settingsButton, 60, 16);
-    placeRight (masterSlider, 110, 2);
-    placeRight (masterCaption, 48, 16);
-    placeRight (importButton, 64);
-    placeRight (addTrackButton, 70);
+    placeRight (settingsButton, 56, 12);
+    placeRight (masterSlider, 84, 2);
+    placeRight (masterCaption, 44, 12);
+    placeRight (importButton, 60);
+    placeRight (addTrackButton, 64);
 
     // Status line
     statusLabel.setBounds (area.removeFromBottom (statusHeight).reduced (10, 0));
@@ -254,6 +275,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     if (key == juce::KeyPress::spaceKey)                               { togglePlay(); return true; }
     if (key == juce::KeyPress ('r', 0, 0) || key == juce::KeyPress ('R', 0, 0)) { toggleRecord(); return true; }
     if (key == juce::KeyPress ('k', 0, 0) || key == juce::KeyPress ('K', 0, 0)) { toggleMetronome(); return true; }
+    if (key == juce::KeyPress ('c', 0, 0) || key == juce::KeyPress ('C', 0, 0)) { toggleCycle(); return true; }
     if (key == juce::KeyPress::returnKey)                              { returnToStart(); return true; }
     if (key == juce::KeyPress ('z', cmd, 0))                           { undo(); return true; }
     if (key == juce::KeyPress ('z', shiftCmd, 0)
@@ -539,9 +561,29 @@ void MainComponent::togglePlay()
         finishRecording();
 
     if (engine.isPlaying())
+    {
         engine.stop();
-    else
-        engine.play();
+        return;
+    }
+
+    // With Cycle on, playback starts inside the cycle.
+    if ((bool) project[ids::cycleEnabled])
+    {
+        const double start = project[ids::cycleStart], end = project[ids::cycleEnd];
+        const auto now = engine.getPlayheadSeconds();
+        if (now < start || now >= end)
+            engine.setPlayheadSeconds (start);
+    }
+
+    engine.play();
+}
+
+void MainComponent::toggleCycle()
+{
+    if (engine.isRecording())
+        return; // the cycle is locked while recording
+
+    project.setProperty (ids::cycleEnabled, ! (bool) project[ids::cycleEnabled], nullptr);
 }
 
 void MainComponent::toggleMetronome()
@@ -610,15 +652,33 @@ void MainComponent::beginRecording()
         requests.push_back ({ track[ids::id].toString(), nextTakeFile (track), first, channels });
     }
 
+    // Where recording begins: right here when punching in during playback;
+    // otherwise at the playhead, or at the cycle start when Cycle is on.
+    const auto rate = engine.getSampleRate();
+    recordCycleOn = project[ids::cycleEnabled];
+    recordCycleStart = project[ids::cycleStart];
+    recordCycleEnd = project[ids::cycleEnd];
+
+    const bool wasPlaying = engine.isPlaying();
+    auto start = engine.getPlayheadSeconds();
+
+    if (! wasPlaying && recordCycleOn && (start < recordCycleStart || start >= recordCycleEnd))
+        start = recordCycleStart;
+
     juce::String error;
-    if (! engine.startRecording (requests, error))
+    if (! engine.startRecording (requests, error, (juce::int64) std::llround (start * rate)))
     {
         showError ("Couldn't start recording", error);
         return;
     }
 
-    if (! engine.isPlaying())
+    if (! wasPlaying)
+    {
+        const bool countIn = project[ids::countIn];
+        const auto barLength = model::secondsPerBeat (project) * (int) project.getProperty (ids::timeSigNumerator, 4);
+        engine.setPlayheadSecondsAllowingNegative (countIn ? start - barLength : start);
         engine.play();
+    }
 }
 
 void MainComponent::finishRecording()
@@ -632,6 +692,8 @@ void MainComponent::finishRecording()
 
     undoManager.beginNewTransaction ("Record");
     juce::ValueTree last;
+    const auto totalLatency = latency + recordingOffsetMs / 1000.0;
+    const auto cycleLength = recordCycleEnd - recordCycleStart;
 
     for (const auto& take : takes)
     {
@@ -639,10 +701,56 @@ void MainComponent::finishRecording()
         if (! track.isValid())
             continue; // the track was deleted while recording; the file stays on disk
 
-        auto region = model::addRecordedRegion (track, take.file, (double) take.startSample / rate,
-                                                (double) take.numSamples / rate, latency, &undoManager);
-        if (region.isValid())
+        const auto pieces = model::splitRecording ((double) take.startSample / rate, (double) take.numSamples / rate,
+                                                   totalLatency, recordCycleOn, recordCycleStart, recordCycleEnd);
+        if (pieces.empty())
+            continue;
+
+        // One pass: an ordinary region.
+        if (pieces.size() == 1)
+        {
+            const auto& p = pieces.front();
+            auto region = model::addRegion (track, take.file, p.timelineStart, p.length, &undoManager);
+            region.setProperty (ids::offset, p.fileOffset, &undoManager);
             last = region;
+            continue;
+        }
+
+        // Several passes over the cycle: whole passes become takes in one take
+        // folder. A partial first pass (punched in mid-cycle) stays its own region,
+        // and a last pass shorter than a quarter of the cycle is dropped.
+        std::vector<double> takeOffsets;
+
+        for (size_t i = 0; i < pieces.size(); ++i)
+        {
+            const auto& p = pieces[i];
+            const bool startsAtCycle = std::abs (p.timelineStart - recordCycleStart) < 1e-6;
+            const bool isLast = i == pieces.size() - 1;
+
+            if (! startsAtCycle)
+            {
+                auto region = model::addRegion (track, take.file, p.timelineStart, p.length, &undoManager);
+                region.setProperty (ids::offset, p.fileOffset, &undoManager);
+                last = region;
+            }
+            else if (! isLast || p.length >= cycleLength * 0.25)
+            {
+                takeOffsets.push_back (p.fileOffset);
+            }
+        }
+
+        if (takeOffsets.size() == 1)
+        {
+            auto region = model::addRegion (track, take.file, recordCycleStart, cycleLength, &undoManager);
+            region.setProperty (ids::offset, takeOffsets.front(), &undoManager);
+            last = region;
+        }
+        else if (takeOffsets.size() > 1)
+        {
+            // The newest take plays, as in Logic.
+            last = model::addTakeFolder (track, take.file, recordCycleStart, cycleLength, takeOffsets,
+                                         (int) takeOffsets.size() - 1, &undoManager);
+        }
     }
 
     if (last.isValid())
@@ -730,6 +838,8 @@ void MainComponent::timerCallback()
     playButton.setToggleState (playing, juce::dontSendNotification);
     recordButton.setToggleState (engine.isRecording(), juce::dontSendNotification);
     clickButton.setToggleState ((bool) project[ids::metronome], juce::dontSendNotification);
+    cycleButton.setToggleState ((bool) project[ids::cycleEnabled], juce::dontSendNotification);
+    countInButton.setToggleState ((bool) project[ids::countIn], juce::dontSendNotification);
 
     if (engine.takeRecordingOverflow())
         showError ("Recording glitch", "The disk couldn't keep up, so a moment of audio was lost. "
@@ -758,6 +868,10 @@ juce::String MainComponent::formatPosition (double seconds) const
     // Bars.Beats.16ths (from the tempo) and minutes:seconds
     const auto beatLength = model::secondsPerBeat (project);
     const int beatsPerBar = project.getProperty (ids::timeSigNumerator, 4);
+
+    if (seconds < 0.0) // count-in: show the beats left
+        return "Count-in   " + juce::String ((int) std::ceil (-seconds / beatLength - 1e-9));
+
     const auto beats = seconds / beatLength;
 
     const auto bar = (int) std::floor (beats / beatsPerBar) + 1;
@@ -783,6 +897,37 @@ juce::String MainComponent::deviceStatusText() const
     return device->getName() + "  |  " + juce::String (sr / 1000.0, 1) + " kHz  |  buffer " + juce::String (bs)
          + "  |  ~" + juce::String (latencyMs, 1) + " ms round trip"
          + "        Drag regions to move (hold Cmd to skip the grid), drag edges to trim, Cmd+scroll to zoom";
+}
+
+void MainComponent::showAudioMenu()
+{
+    juce::PopupMenu menu;
+    menu.addItem ("Audio device settings...", [this] { showAudioSettings(); });
+    menu.addItem ("Calibrate recording latency...", [this] { showLatencyCalibration(); });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&settingsButton));
+}
+
+void MainComponent::showLatencyCalibration()
+{
+    if (engine.isRecording())
+        return;
+
+    engine.stop();
+
+    auto calibrator = std::make_unique<LatencyCalibrator> (engine, recordingOffsetMs, [this] (double ms)
+    {
+        recordingOffsetMs = ms;
+        appProperties.getUserSettings()->setValue ("recordingOffsetMs", ms);
+        appProperties.saveIfNeeded();
+    });
+
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned (calibrator.release());
+    options.dialogTitle = "Calibrate recording latency";
+    options.dialogBackgroundColour = theme::background;
+    options.useNativeTitleBar = true;
+    options.resizable = false;
+    options.launchAsync();
 }
 
 void MainComponent::showAudioSettings()

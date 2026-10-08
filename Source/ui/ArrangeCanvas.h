@@ -50,7 +50,7 @@ public:
     std::function<void()> onViewChanged;
 
 private:
-    enum class DragMode { none, scrub, move, trimStart, trimEnd };
+    enum class DragMode { none, scrub, move, trimStart, trimEnd, cycleNew, cycleMove };
 
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { repaint(); }
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override             { repaint(); }
@@ -64,6 +64,10 @@ private:
     void paintGrid (juce::Graphics& g);
     void paintRegion (juce::Graphics& g, const juce::ValueTree& region, int trackIndex);
     void paintLiveTakes (juce::Graphics& g);
+    void paintCycle (juce::Graphics& g);
+    void showTakeMenu (juce::ValueTree region);
+    void addTakeItems (juce::PopupMenu& menu, juce::ValueTree region);
+    juce::Rectangle<float> cycleBounds() const;
     void setPlayheadFromX (float x);
     void zoomAround (float x, double factor);
 
@@ -77,6 +81,8 @@ private:
     DragMode dragMode = DragMode::none;
     juce::ValueTree dragRegion;
     double dragOriginalStart = 0.0, dragMouseDownTime = 0.0, dragSourceLength = 0.0;
+    double dragCycleStart = 0.0, dragCycleEnd = 0.0;
+    bool clickedTakeHeader = false;
     int dropHighlightTrack = -2; // -2: none, -1 / out of range: "new track" zone
 };
 

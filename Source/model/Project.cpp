@@ -25,7 +25,7 @@ namespace
             const auto name = tree.getPropertyName (i);
             auto value = tree.getProperty (name);
 
-            if (tree.hasType (ids::REGION) && name == ids::file)
+            if ((tree.hasType (ids::REGION) || tree.hasType (ids::TAKE)) && name == ids::file)
             {
                 const juce::File f (value.toString());
                 value = projectDir.exists() ? f.getRelativePathFrom (projectDir) : f.getFullPathName();
@@ -70,7 +70,7 @@ namespace
 
             auto value = prop.value;
 
-            if (tree.hasType (ids::REGION) && prop.name == ids::file)
+            if ((tree.hasType (ids::REGION) || tree.hasType (ids::TAKE)) && prop.name == ids::file)
             {
                 const auto path = value.toString();
                 value = juce::File::isAbsolutePath (path) ? path
@@ -80,7 +80,7 @@ namespace
             tree.setProperty (prop.name, value, nullptr);
         }
 
-        if ((tree.hasType (ids::TRACK) || tree.hasType (ids::REGION)) && ! tree.hasProperty (ids::id))
+        if ((tree.hasType (ids::TRACK) || tree.hasType (ids::REGION) || tree.hasType (ids::TAKE)) && ! tree.hasProperty (ids::id))
             tree.setProperty (ids::id, newId(), nullptr);
 
         if (auto* children = obj->getProperty ("children").getArray())
@@ -96,6 +96,16 @@ namespace
 
         return tree;
     }
+
+    /** Moves where a region (and every take in it) starts reading its file. */
+    void shiftOffsets (juce::ValueTree region, double delta, juce::UndoManager* um)
+    {
+        region.setProperty (ids::offset, (double) region[ids::offset] + delta, um);
+
+        for (auto take : region)
+            if (take.hasType (ids::TAKE))
+                take.setProperty (ids::offset, (double) take[ids::offset] + delta, um);
+    }
 }
 
 //==============================================================================
@@ -107,6 +117,10 @@ juce::ValueTree createProject (const juce::String& name)
     project.setProperty (ids::timeSigNumerator, 4, nullptr);
     project.setProperty (ids::masterGain, 0.8, nullptr);
     project.setProperty (ids::metronome, false, nullptr);
+    project.setProperty (ids::countIn, false, nullptr);
+    project.setProperty (ids::cycleEnabled, false, nullptr);
+    project.setProperty (ids::cycleStart, 0.0, nullptr);
+    project.setProperty (ids::cycleEnd, 8.0, nullptr); // 4 bars at 120 BPM
     return project;
 }
 
@@ -172,13 +186,18 @@ void trimRegionStart (juce::ValueTree region, double newStart, double sourceLeng
     juce::ignoreUnused (sourceLength);
 
     const double start  = region[ids::start];
-    const double offset = region[ids::offset];
     const double end    = start + (double) region[ids::length];
+
+    // Smallest offset among the region and its takes: none may go below 0.
+    double offset = region[ids::offset];
+    for (const auto& take : region)
+        if (take.hasType (ids::TAKE))
+            offset = juce::jmin (offset, (double) take[ids::offset]);
 
     // Can't reveal audio from before the start of the file, or go before 0.
     newStart = juce::jlimit (juce::jmax (0.0, start - offset), end - minRegionLength, newStart);
 
-    region.setProperty (ids::offset, offset + (newStart - start), um);
+    shiftOffsets (region, newStart - start, um);
     region.setProperty (ids::start, newStart, um);
     region.setProperty (ids::length, end - newStart, um);
 }
@@ -197,7 +216,6 @@ void trimRegionEnd (juce::ValueTree region, double newEnd, double sourceLength, 
 juce::ValueTree splitRegion (juce::ValueTree region, double time, juce::UndoManager* um)
 {
     const double start  = region[ids::start];
-    const double offset = region[ids::offset];
     const double end    = regionEnd (region);
 
     if (time <= start + minRegionLength || time >= end - minRegionLength)
@@ -207,8 +225,11 @@ juce::ValueTree splitRegion (juce::ValueTree region, double time, juce::UndoMana
     auto right = region.createCopy();
     right.setProperty (ids::id, newId(), nullptr);
     right.setProperty (ids::start, time, nullptr);
-    right.setProperty (ids::offset, offset + (time - start), nullptr);
+    shiftOffsets (right, time - start, nullptr);
     right.setProperty (ids::length, end - time, nullptr);
+
+    for (auto take : right)
+        take.setProperty (ids::id, newId(), nullptr);
 
     region.setProperty (ids::length, time - start, um);
     parent.addChild (right, parent.indexOf (region) + 1, um);
@@ -226,6 +247,115 @@ juce::ValueTree addRecordedRegion (juce::ValueTree track, const juce::File& file
     auto region = addRegion (track, file, start, recordedLength - latencySeconds, um);
     region.setProperty (ids::offset, latencySeconds, um);
     return region;
+}
+
+//==============================================================================
+std::vector<TakePiece> splitRecording (double recordStart, double recordedLength, double latency,
+                                       bool cycleOn, double cycleStart, double cycleEnd)
+{
+    // Audio at file position f was played at wall-clock time (f - latency)
+    // after the recording started, so usable wall-clock time is:
+    const auto usable = recordedLength - latency;
+    std::vector<TakePiece> pieces;
+
+    if (usable <= 0.0)
+        return pieces;
+
+    const auto cycleLength = cycleEnd - cycleStart;
+    const bool wraps = cycleOn && cycleLength > minRegionLength
+                       && recordStart < cycleEnd && recordStart + usable > cycleEnd;
+
+    if (! wraps)
+    {
+        pieces.push_back ({ recordStart, latency, usable });
+        return pieces;
+    }
+
+    // First pass: from the record start up to the cycle end.
+    const auto firstLength = cycleEnd - recordStart;
+    pieces.push_back ({ recordStart, latency, firstLength });
+
+    // Every later pass covers the cycle (the last one may be cut short).
+    for (double wall = firstLength; wall < usable - minRegionLength; wall += cycleLength)
+        pieces.push_back ({ cycleStart, latency + wall, juce::jmin (cycleLength, usable - wall) });
+
+    return pieces;
+}
+
+juce::ValueTree addTakeFolder (juce::ValueTree track, const juce::File& file, double start, double length,
+                               const std::vector<double>& takeOffsets, int activeIndex, juce::UndoManager* um)
+{
+    jassert (! takeOffsets.empty());
+
+    juce::ValueTree region { ids::REGION };
+    region.setProperty (ids::id, newId(), nullptr);
+    region.setProperty (ids::start, start, nullptr);
+    region.setProperty (ids::length, length, nullptr);
+    region.setProperty (ids::gain, 1.0, nullptr);
+
+    for (size_t i = 0; i < takeOffsets.size(); ++i)
+    {
+        juce::ValueTree take { ids::TAKE };
+        take.setProperty (ids::id, newId(), nullptr);
+        take.setProperty (ids::name, "Take " + juce::String ((int) i + 1), nullptr);
+        take.setProperty (ids::file, file.getFullPathName(), nullptr);
+        take.setProperty (ids::offset, takeOffsets[i], nullptr);
+        region.appendChild (take, nullptr);
+    }
+
+    const auto active = juce::jlimit (0, (int) takeOffsets.size() - 1, activeIndex);
+    const auto chosen = region.getChild (active);
+    region.setProperty (ids::activeTake, active, nullptr);
+    region.setProperty (ids::file, chosen[ids::file], nullptr);
+    region.setProperty (ids::offset, chosen[ids::offset], nullptr);
+    region.setProperty (ids::name, track[ids::name].toString() + ": " + chosen[ids::name].toString(), nullptr);
+
+    track.appendChild (region, um);
+    return region;
+}
+
+int numTakes (const juce::ValueTree& region)
+{
+    int n = 0;
+    for (const auto& child : region)
+        if (child.hasType (ids::TAKE))
+            ++n;
+    return n;
+}
+
+void setActiveTake (juce::ValueTree region, int index, juce::UndoManager* um)
+{
+    const auto take = region.getChild (index);
+    if (! take.hasType (ids::TAKE))
+        return;
+
+    region.setProperty (ids::activeTake, index, um);
+    region.setProperty (ids::file, take[ids::file], um);
+    region.setProperty (ids::offset, take[ids::offset], um);
+
+    const auto trackName = region.getParent()[ids::name].toString();
+    region.setProperty (ids::name, trackName.isNotEmpty() ? trackName + ": " + take[ids::name].toString()
+                                                          : take[ids::name].toString(), um);
+}
+
+void flattenTakes (juce::ValueTree region, juce::UndoManager* um)
+{
+    for (int i = region.getNumChildren(); --i >= 0;)
+        if (region.getChild (i).hasType (ids::TAKE))
+            region.removeChild (i, um);
+
+    region.removeProperty (ids::activeTake, um);
+}
+
+void setCycle (juce::ValueTree project, double start, double end, bool enabled)
+{
+    // The cycle is a transport setting, not an edit, so it isn't undoable.
+    if (end < start)
+        std::swap (start, end);
+
+    project.setProperty (ids::cycleStart, juce::jmax (0.0, start), nullptr);
+    project.setProperty (ids::cycleEnd, juce::jmax (start + minRegionLength, end), nullptr);
+    project.setProperty (ids::cycleEnabled, enabled, nullptr);
 }
 
 void deleteRegion (juce::ValueTree region, juce::UndoManager* um)

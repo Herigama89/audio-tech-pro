@@ -71,11 +71,15 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
     graph->secondsPerBeat = model::secondsPerBeat (project);
     graph->beatsPerBar = juce::jlimit (1, 16, (int) project.getProperty (ids::timeSigNumerator, 4));
 
+    auto toSamples = [sampleRate] (double seconds) { return (juce::int64) std::llround (seconds * sampleRate); };
+
+    graph->cycleEnabled = project.getProperty (ids::cycleEnabled, false);
+    graph->cycleStart = toSamples (project.getProperty (ids::cycleStart, 0.0));
+    graph->cycleEnd = toSamples (project.getProperty (ids::cycleEnd, 0.0));
+
     bool anySolo = false;
     for (const auto& track : project)
         anySolo = anySolo || (bool) track[ids::solo];
-
-    auto toSamples = [sampleRate] (double seconds) { return (juce::int64) std::llround (seconds * sampleRate); };
 
     for (const auto& track : project)
     {

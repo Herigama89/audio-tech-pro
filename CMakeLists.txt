@@ -34,6 +34,7 @@ set(RIFF_CORE_SOURCES
     Source/engine/AudioEngine.cpp
     Source/engine/AudioFileCache.cpp
     Source/engine/ProjectPlayer.cpp
+    Source/engine/LatencyMeasure.cpp
 )
 
 set(RIFF_DEFINITIONS
@@ -62,6 +63,7 @@ target_sources(Riff PRIVATE
     Source/ui/Theme.cpp
     Source/ui/TrackHeaders.cpp
     Source/ui/ArrangeCanvas.cpp
+    Source/ui/LatencyCalibrator.cpp
 )
 
 target_include_directories(Riff PRIVATE Source)

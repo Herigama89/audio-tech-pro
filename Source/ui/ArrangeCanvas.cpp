@@ -83,6 +83,14 @@ void ArrangeCanvas::paint (juce::Graphics& g)
 
     paintGrid (g);
 
+    // Tint the lanes inside an active cycle.
+    if ((bool) project[ids::cycleEnabled])
+    {
+        const auto c = cycleBounds();
+        g.setColour (theme::solo.withAlpha (0.05f));
+        g.fillRect (c.getX(), (float) TimelineState::rulerHeight, c.getWidth(), (float) getHeight());
+    }
+
     for (int i = 0; i < numTracks; ++i)
     {
         const auto track = project.getChild (i);
@@ -184,9 +192,9 @@ void ArrangeCanvas::paintRuler (juce::Graphics& g)
         if (bar % labelEvery == 0)
         {
             g.setColour (theme::dimText);
-            g.fillRect (x, rh * 0.45f, 1.0f, rh * 0.55f);
+            g.fillRect (x, rh * 0.5f, 1.0f, rh * 0.5f);
             g.setColour (theme::text);
-            g.drawText (juce::String (bar + 1), (int) x + 4, 2, 40, 14, juce::Justification::centredLeft);
+            g.drawText (juce::String (bar + 1), (int) x + 4, (int) (rh * 0.5f), 40, (int) (rh * 0.5f) - 2, juce::Justification::centredLeft);
         }
 
         if (showBeats)
@@ -199,6 +207,25 @@ void ArrangeCanvas::paintRuler (juce::Graphics& g)
 
     g.setColour (theme::outline);
     g.fillRect (0.0f, rh - 1.0f, (float) getWidth(), 1.0f);
+
+    paintCycle (g);
+}
+
+juce::Rectangle<float> ArrangeCanvas::cycleBounds() const
+{
+    const auto x0 = timeline.timeToX (project.getProperty (ids::cycleStart, 0.0));
+    const auto x1 = timeline.timeToX (project.getProperty (ids::cycleEnd, 0.0));
+    return { x0, 2.0f, juce::jmax (2.0f, x1 - x0), (float) TimelineState::rulerHeight * 0.5f - 3.0f };
+}
+
+void ArrangeCanvas::paintCycle (juce::Graphics& g)
+{
+    // The cycle lives in the top half of the ruler, as in Logic.
+    const auto r = cycleBounds();
+    const bool on = project[ids::cycleEnabled];
+
+    g.setColour (on ? theme::solo.withAlpha (0.85f) : theme::outline.brighter (0.2f));
+    g.fillRoundedRectangle (r, 3.0f);
 }
 
 void ArrangeCanvas::paintLiveTakes (juce::Graphics& g)
@@ -256,8 +283,16 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
     g.setColour (juce::Colour (0xff15161a));
     g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
     const auto textArea = header.withLeft (juce::jmax (header.getX(), 0.0f)).reduced (5.0f, 0.0f);
-    g.drawText (missing ? region[ids::name].toString() + "  (file missing)" : region[ids::name].toString(),
-                textArea, juce::Justification::centredLeft, true);
+    auto label = region[ids::name].toString();
+
+    if (const auto takes = model::numTakes (region); takes > 0)
+        label << "  (" << ((int) region.getProperty (ids::activeTake, 0) + 1) << " of " << takes << ")  "
+              << juce::String::fromUTF8 ("\xe2\x96\xbe"); // down-pointing triangle
+
+    if (missing)
+        label << "  (file missing)";
+
+    g.drawText (label, textArea, juce::Justification::centredLeft, true);
 
     // Waveform, drawn only for the visible part
     if (! missing)
@@ -315,8 +350,24 @@ void ArrangeCanvas::mouseDown (const juce::MouseEvent& e)
     grabKeyboardFocus();
     dragMode = DragMode::none;
 
+    clickedTakeHeader = false;
+
     if (e.y < TimelineState::rulerHeight)
     {
+        // The playhead and cycle stay put while recording, so takes line up.
+        if (engine.isRecording())
+            return;
+
+        if (e.y < TimelineState::rulerHeight / 2)
+        {
+            const auto c = cycleBounds();
+            dragMouseDownTime = timeline.xToTime ((float) e.x);
+            dragCycleStart = project.getProperty (ids::cycleStart, 0.0);
+            dragCycleEnd = project.getProperty (ids::cycleEnd, 0.0);
+            dragMode = (e.position.x >= c.getX() && e.position.x <= c.getRight()) ? DragMode::cycleMove : DragMode::cycleNew;
+            return;
+        }
+
         dragMode = DragMode::scrub;
         setPlayheadFromX ((float) e.x);
         return;
@@ -351,9 +402,22 @@ void ArrangeCanvas::mouseDown (const juce::MouseEvent& e)
             undoManager.beginNewTransaction ("Delete region");
             model::deleteRegion (region, &undoManager);
         });
+
+        if (model::numTakes (region) > 0)
+        {
+            juce::PopupMenu takesMenu;
+            addTakeItems (takesMenu, region);
+            menu.addSeparator();
+            menu.addSubMenu ("Takes", takesMenu);
+        }
+
         menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
         return;
     }
+
+    // A click (not a drag) on a take folder's name bar opens its take menu.
+    if (model::numTakes (region) > 0 && e.position.y < regionBounds (region, trackIndex).getY() + 16.0f)
+        clickedTakeHeader = true;
 
     const auto bounds = regionBounds (region, trackIndex);
     const bool wideEnough = bounds.getWidth() > edgeGrab * 3.0f;
@@ -390,6 +454,10 @@ void ArrangeCanvas::mouseDrag (const juce::MouseEvent& e)
             if (! dragRegion.isValid() || ! dragRegion.getParent().isValid())
                 break;
 
+            // Ignore tiny wobbles so a click never nudges a region onto the grid.
+            if (e.getDistanceFromDragStart() < 4)
+                break;
+
             const auto newStart = maybeSnap (dragOriginalStart + timeline.xToTime ((float) e.x) - dragMouseDownTime);
             const auto targetIndex = juce::jlimit (0, project.getNumChildren() - 1, timeline.trackIndexAt (e.y));
             auto target = project.getChild (targetIndex);
@@ -407,15 +475,81 @@ void ArrangeCanvas::mouseDrag (const juce::MouseEvent& e)
             model::trimRegionEnd (dragRegion, maybeSnap (timeline.xToTime ((float) e.x)), dragSourceLength, &undoManager);
             break;
 
+        case DragMode::cycleNew:
+        {
+            if (e.getDistanceFromDragStart() < 4)
+                break;
+
+            const auto a = maybeSnap (dragMouseDownTime);
+            const auto b = maybeSnap (timeline.xToTime ((float) e.x));
+            if (std::abs (b - a) >= model::minRegionLength)
+                model::setCycle (project, juce::jmin (a, b), juce::jmax (a, b), true);
+            break;
+        }
+
+        case DragMode::cycleMove:
+        {
+            if (e.getDistanceFromDragStart() < 4)
+                break;
+
+            const auto length = dragCycleEnd - dragCycleStart;
+            const auto newStart = maybeSnap (dragCycleStart + timeline.xToTime ((float) e.x) - dragMouseDownTime);
+            model::setCycle (project, newStart, newStart + length, true);
+            break;
+        }
+
         case DragMode::none:
             break;
     }
 }
 
-void ArrangeCanvas::mouseUp (const juce::MouseEvent&)
+void ArrangeCanvas::mouseUp (const juce::MouseEvent& e)
 {
+    const bool wasClick = e.getDistanceFromDragStart() < 4;
+
+    // Clicking the cycle bar turns the cycle on and off.
+    if (dragMode == DragMode::cycleMove && wasClick)
+        project.setProperty (ids::cycleEnabled, ! (bool) project[ids::cycleEnabled], nullptr);
+
+    if (clickedTakeHeader && wasClick && dragRegion.isValid())
+        showTakeMenu (dragRegion);
+
+    clickedTakeHeader = false;
     dragMode = DragMode::none;
     dragRegion = {};
+}
+
+void ArrangeCanvas::addTakeItems (juce::PopupMenu& menu, juce::ValueTree region)
+{
+    const int active = region.getProperty (ids::activeTake, 0);
+
+    for (int i = 0; i < region.getNumChildren(); ++i)
+    {
+        const auto take = region.getChild (i);
+        if (! take.hasType (ids::TAKE))
+            continue;
+
+        menu.addItem (take[ids::name].toString(), true, i == active, [this, region, i]
+        {
+            undoManager.beginNewTransaction ("Choose take");
+            model::setActiveTake (region, i, &undoManager);
+        });
+    }
+
+    menu.addSeparator();
+    menu.addItem ("Keep only this take", [this, region]
+    {
+        undoManager.beginNewTransaction ("Keep only this take");
+        model::flattenTakes (region, &undoManager);
+    });
+}
+
+void ArrangeCanvas::showTakeMenu (juce::ValueTree region)
+{
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Takes");
+    addTakeItems (menu, region);
+    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
 }
 
 void ArrangeCanvas::mouseMove (const juce::MouseEvent& e)

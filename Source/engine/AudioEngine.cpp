@@ -120,7 +120,13 @@ void AudioEngine::storeMax (std::atomic<float>& target, float value) noexcept
 //==============================================================================
 // Recording
 //==============================================================================
-bool AudioEngine::startRecording (const std::vector<RecordRequest>& requests, juce::String& error)
+bool AudioEngine::isCountingIn() const noexcept
+{
+    return recording.load() && playheadSample.load() < recordFrom.load();
+}
+
+bool AudioEngine::startRecording (const std::vector<RecordRequest>& requests, juce::String& error,
+                                  std::optional<juce::int64> recordFromSample)
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
@@ -180,6 +186,7 @@ bool AudioEngine::startRecording (const std::vector<RecordRequest>& requests, ju
     }
 
     takes = std::move (newTakes);
+    recordFrom.store (recordFromSample.value_or (playheadSample.load()));
 
     for (size_t i = 0; i < takes.size(); ++i)
         takeSlots[i].store (takes[i].get(), std::memory_order_release);
@@ -233,6 +240,38 @@ std::vector<AudioEngine::LiveTake> AudioEngine::getLiveTakes() const
     }
 
     return live;
+}
+
+bool AudioEngine::startLatencyMeasurement (int inputChannel, juce::String& error)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    if (measureState.load() != 0 || isRecording())
+    {
+        error = "Stop recording first.";
+        return false;
+    }
+
+    const auto rate = sampleRate.load();
+    measureBurst = latency::makeBurst (rate);
+    measurePositions = latency::burstPositions (rate);
+    measureBuffer.setSize (1, latency::measurementLength (rate));
+    measureBuffer.clear();
+    measurePos = 0;
+    measureInput = inputChannel;
+
+    measureState.store (1, std::memory_order_release); // the audio thread takes over from here
+    return true;
+}
+
+std::optional<latency::Result> AudioEngine::takeLatencyMeasurement()
+{
+    if (measureState.load (std::memory_order_acquire) != 2)
+        return std::nullopt;
+
+    auto result = latency::estimateDelay (measureBuffer.getReadPointer (0), measureBuffer.getNumSamples(), sampleRate.load());
+    measureState.store (0);
+    return result;
 }
 
 int AudioEngine::getRoundTripLatencySamples()
@@ -341,10 +380,21 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
         if (outputs[ch] != nullptr)
             juce::FloatVectorOperations::clear (outputs[ch], numSamples);
 
+    // Latency measurement takes over the device while it runs.
+    if (measureState.load (std::memory_order_acquire) == 1)
+    {
+        renderMeasurement (inputs, numInputs, outputs, numOutputs, numSamples);
+        callbackCounter.fetch_add (1, std::memory_order_release);
+        return;
+    }
+
     // Pick up the latest graph once per block.
     const auto* graph = currentGraph.load (std::memory_order_acquire);
     const bool isPlayingNow = playing.load();
     const bool isRecordingNow = recording.load (std::memory_order_acquire);
+    const auto recordStart = recordFrom.load();
+
+    const bool cycling = graph != nullptr && graph->cycleEnabled && graph->cycleEnd > graph->cycleStart;
 
     if (graph != nullptr)
         masterGain.setTargetValue (graph->masterGain);
@@ -353,25 +403,45 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
 
     while (offset < numSamples)
     {
-        const int n = juce::jmin (numSamples - offset, mixBuffer.getNumSamples());
+        int n = juce::jmin (numSamples - offset, mixBuffer.getNumSamples());
+        const auto position = playheadSample.load();
+
+        // Split the chunk at the cycle end and at the record-from point, so
+        // both happen on exactly the right sample.
+        if (isPlayingNow && cycling && position < graph->cycleEnd)
+            n = (int) juce::jmin ((juce::int64) n, graph->cycleEnd - position);
+
+        if (isPlayingNow && isRecordingNow && position < recordStart)
+            n = (int) juce::jmin ((juce::int64) n, recordStart - position);
+
         auto* mixL = mixBuffer.getWritePointer (0);
         auto* mixR = mixBuffer.getWritePointer (1);
         juce::FloatVectorOperations::clear (mixL, n);
         juce::FloatVectorOperations::clear (mixR, n);
 
-        if (isRecordingNow && isPlayingNow)
+        if (isRecordingNow && isPlayingNow && position >= recordStart)
             recordChunk (inputs, numInputs, offset, n);
 
         if (graph != nullptr)
         {
             renderChunk (*graph, inputs, numInputs, offset, mixL, mixR, n, isPlayingNow);
 
-            if (isPlayingNow && graph->metronome)
+            const bool countingIn = isRecordingNow && position < recordStart;
+            if (isPlayingNow && (graph->metronome || countingIn))
                 renderClick (*graph, mixL, mixR, n);
         }
 
         if (isPlayingNow)
-            playheadSample.fetch_add (n);
+        {
+            const auto next = position + n;
+
+            // Wrap at the cycle end. Only when we arrive at it from inside, so the
+            // playhead can still be parked after the cycle and play on from there.
+            if (cycling && position < graph->cycleEnd && next >= graph->cycleEnd)
+                playheadSample.store (graph->cycleStart);
+            else
+                playheadSample.store (next);
+        }
 
         for (int i = 0; i < n; ++i)
         {
@@ -544,7 +614,7 @@ void AudioEngine::renderClick (const PlaybackGraph& graph, float* mixL, float* m
     {
         if (blockStart + i == nextBeatSample)
         {
-            const bool downbeat = graph.beatsPerBar > 0 && beat % graph.beatsPerBar == 0;
+            const bool downbeat = graph.beatsPerBar > 0 && ((beat % graph.beatsPerBar) + graph.beatsPerBar) % graph.beatsPerBar == 0;
             clickPhaseInc = juce::MathConstants<double>::twoPi * (downbeat ? 1600.0 : 1100.0) / rate;
             clickAmplitude = downbeat ? 0.5f : 0.32f;
             clickPhase = 0.0;
@@ -565,6 +635,39 @@ void AudioEngine::renderClick (const PlaybackGraph& graph, float* mixL, float* m
             --clickSamplesLeft;
         }
     }
+}
+
+void AudioEngine::renderMeasurement (const float* const* inputs, int numInputs,
+                                     float* const* outputs, int numOutputs, int numSamples) noexcept
+{
+    const auto total = measureBuffer.getNumSamples();
+    const auto burstLength = (int) measureBurst.size();
+    auto* captured = measureBuffer.getWritePointer (0);
+    const float* in = (measureInput < numInputs && inputs[measureInput] != nullptr) ? inputs[measureInput] : nullptr;
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const auto pos = measurePos + i;
+        float out = 0.0f;
+
+        if (pos < total)
+        {
+            for (const auto start : measurePositions)
+                if (pos >= start && pos < start + burstLength)
+                    out = measureBurst[(size_t) (pos - start)];
+
+            captured[pos] = in != nullptr ? in[i] : 0.0f;
+        }
+
+        for (int ch = 0; ch < numOutputs; ++ch)
+            if (outputs[ch] != nullptr)
+                outputs[ch][i] = out;
+    }
+
+    measurePos += numSamples;
+
+    if (measurePos >= total)
+        measureState.store (2, std::memory_order_release);
 }
 
 } // namespace riff
