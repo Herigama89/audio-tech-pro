@@ -1,0 +1,7 @@
+build/
+cmake-build-*/
+.DS_Store
+.vscode/
+.idea/
+*.xcodeproj/
+compile_commands.json
