@@ -248,6 +248,7 @@ Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderC
 - [ ] MIDI genre generator, with a built-in drum kit
 - [x] Console mode for the master: your UA SSL G Bus Compressor plugin, with a hardware-style face
 - [x] Console mode for the strips: your UA SSL 4000 E channel strip plugin driven from each strip's console section
+- [ ] Console strips, part 2: an IN key on every strip (bypasses the whole channel strip plugin, keeps it loaded), and every 4000 E control on the strip itself: filters, EQ frequencies, Q and bell switches, compressor, gate/expander, input and output
 - [ ] Claude AI assistant (with your own API key)
 - [ ] Screen recording of the app with its audio, up to 4K (Mac)
 - [ ] Several audio interfaces at once (aggregate device)
