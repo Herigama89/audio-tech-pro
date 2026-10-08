@@ -218,6 +218,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     waveforms.onChange = [this] { canvas.repaint(); };
 
     timeline.addChangeListener (this);
+    fileCache.addChangeListener (this);
     undoManager.addChangeListener (this);
     engine.getDeviceManager().addChangeListener (this);
 
@@ -320,6 +321,7 @@ MainComponent::~MainComponent()
     engine.stop();
     engine.getDeviceManager().removeChangeListener (this);
     rack.getKnownPlugins().removeChangeListener (this);
+    fileCache.removeChangeListener (this);
     undoManager.removeChangeListener (this);
     timeline.removeChangeListener (this);
     project.removeListener (this);
@@ -1045,6 +1047,10 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
         updateScrollBars();
         commandManager.commandStatusChanged(); // the selection changed what the Track commands act on
     }
+    else if (source == &fileCache)
+    {
+        canvas.repaint();   // "loading" labels go away
+    }
     else if (source == &rack.getKnownPlugins())
     {
         mixer.getConsolePanel().setCandidates (console::findBusCompressors (rack.getKnownPlugins().getTypes()));
@@ -1094,6 +1100,14 @@ void MainComponent::timerCallback()
     clickButton.setToggleState ((bool) project[ids::metronome], juce::dontSendNotification);
     cycleButton.setToggleState ((bool) project[ids::cycleEnabled], juce::dontSendNotification);
     countInButton.setToggleState ((bool) project[ids::countIn], juce::dontSendNotification);
+
+    // While audio decodes in the background, say so in the status line.
+    if (const bool loading = fileCache.isLoading(); loading || wasLoadingAudio)
+    {
+        statusLabel.setText (loading ? "Loading audio: " + fileCache.currentlyLoading() + "..." : deviceStatusText(),
+                             juce::dontSendNotification);
+        wasLoadingAudio = loading;
+    }
 
     if (engine.takeRecordingOverflow())
         showError ("Recording glitch", "The disk couldn't keep up, so a moment of audio was lost. "
@@ -1573,6 +1587,12 @@ void MainComponent::exportSong()
     const bool cycle = project[ids::cycleEnabled];
     const double start = cycle ? (double) project[ids::cycleStart] : 0.0;
     const double end = cycle ? (double) project[ids::cycleEnd] : model::projectEnd (project) + 2.0;
+
+    if (fileCache.isLoading())
+    {
+        showError ("Still loading audio", "Some audio files are still loading. Try again in a moment.");
+        return;
+    }
 
     if (! cycle && model::projectEnd (project) <= 0.0)
     {

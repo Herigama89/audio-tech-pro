@@ -495,6 +495,8 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
 
     if (missing)
         label << "  (file missing)";
+    else if (! isMidi && fileCache.isPending (file))
+        label << "  (loading...)";
 
     g.drawText (label, textArea, juce::Justification::centredLeft, true);
 

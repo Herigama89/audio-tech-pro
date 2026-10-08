@@ -8,11 +8,13 @@ ProjectPlayer::ProjectPlayer (AudioEngine& e, AudioFileCache& c, InstrumentRack*
     : engine (e), cache (c), rack (r), effects (fx)
 {
     engine.getDeviceManager().addChangeListener (this);
+    cache.addChangeListener (this);   // audio finished loading in the background
 }
 
 ProjectPlayer::~ProjectPlayer()
 {
     engine.getDeviceManager().removeChangeListener (this);
+    cache.removeChangeListener (this);
     project.removeListener (this);
     cancelPendingUpdate();
 }
@@ -28,8 +30,14 @@ void ProjectPlayer::setProject (juce::ValueTree newProject)
     rebuildNow();
 }
 
-void ProjectPlayer::changeListenerCallback (juce::ChangeBroadcaster*)
+void ProjectPlayer::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
+    if (source == &cache)
+    {
+        requestRebuild();   // newly loaded audio joins the song
+        return;
+    }
+
     // Device settings changed: rebuild if the sample rate is different.
     if (auto* device = engine.getDeviceManager().getCurrentAudioDevice())
         if (std::abs (device->getCurrentSampleRate() - builtForRate) > 0.5)

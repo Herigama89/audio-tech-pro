@@ -17,6 +17,36 @@ class SnapshotTool
 public:
     explicit SnapshotTool (juce::File outputFolder) : out (std::move (outputFolder)) {}
 
+    /** Imports an audio file the way the Import command does, timing each step (to find hangs). */
+    int importTest (const juce::File& file)
+    {
+        MainComponent main (false);
+        main.setSize (1440, 920);
+        main.setProject (model::createProject(), {});
+        auto stamp = [start = juce::Time::getMillisecondCounterHiRes()] (const char* what)
+        {
+            std::cout << what << " at " << (int) (juce::Time::getMillisecondCounterHiRes() - start) << " ms" << std::endl;
+        };
+
+        stamp ("start");
+        main.canvas.importFiles ({ file.getFullPathName() }, main.selectedTrackIndex(), 0.0);
+        stamp ("imported");
+        pump (main, 1500);
+        stamp ("after 1.5 s of events (the screen keeps updating)");
+        main.fileCache.waitUntilIdle (120000);
+        stamp ("audio loaded");
+        main.createComponentSnapshot (main.getLocalBounds());
+        stamp ("painted");
+        main.showMixer();
+        pump (main, 500);
+        main.canvas.importFiles ({ file.getFullPathName() }, -1, 2.0);
+        stamp ("imported with the mixer open");
+        pump (main, 1500);
+        main.createComponentSnapshot (main.getLocalBounds());
+        stamp ("painted again");
+        return 0;
+    }
+
     int run()
     {
         out.createDirectory();
@@ -26,6 +56,8 @@ public:
         MainComponent main (false);
         main.setSize (1440, 920);
         buildDemoProject (main);
+        main.player.rebuildNow();
+        main.fileCache.waitUntilIdle (60000);   // audio decodes in the background
         main.player.rebuildNow();
 
         // Play a second of the song so the meters and the compressor's needle move.
@@ -246,9 +278,11 @@ int main (int argc, char* argv[])
     juce::ScopedJuceInitialiser_GUI init;
     riff::ConsoleLook look;
     juce::LookAndFeel::setDefaultLookAndFeel (&look);
-    const auto folder = argc > 1 ? juce::File (juce::String (argv[1]))
+    const auto folder = (argc > 1 && juce::String (argv[1]) != "--import") ? juce::File (juce::String (argv[1]))
                                  : juce::File::getCurrentWorkingDirectory().getChildFile ("snapshots");
-    const auto result = riff::SnapshotTool (folder).run();
+    const auto result = (argc > 2 && juce::String (argv[1]) == "--import")
+                       ? riff::SnapshotTool (juce::File::getCurrentWorkingDirectory()).importTest (juce::File (juce::String (argv[2])))
+                       : riff::SnapshotTool (folder).run();
     juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
     return result;
 }

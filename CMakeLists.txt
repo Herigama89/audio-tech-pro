@@ -52,6 +52,12 @@ set(RIFF_DEFINITIONS
     JUCE_PLUGINHOST_VST3=1
 )
 
+# Converting a song's sample rate is heavy maths: optimise it even in Debug builds,
+# or loading a 44.1 kHz song into a 48 kHz session takes a very long time.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    set_source_files_properties(Source/engine/AudioFileCache.cpp PROPERTIES COMPILE_OPTIONS "-O2")
+endif()
+
 # Audio Units exist only on macOS.
 if(APPLE)
     list(APPEND RIFF_DEFINITIONS JUCE_PLUGINHOST_AU=1)

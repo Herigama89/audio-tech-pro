@@ -1380,3 +1380,36 @@ TEST_CASE ("The console Dynamics has its own IN switch", "[console]")
     c.setSettings (s);
     CHECK (sinePeakThrough (c, 1000.0, 1.0f) == 1.0f);
 }
+
+TEST_CASE ("Audio files load in the background without blocking", "[cache]")
+{
+    TempDir temp;
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    const auto wav = writeConstantWav (temp.dir.getChildFile ("song.wav"), 44100.0, 44100 * 4, 0.5f);
+
+    AudioFileCache cache (formats, true);
+
+    // The first request only queues the file.
+    CHECK (cache.get (wav, 48000.0) == nullptr);
+    CHECK (cache.isLoading());
+    CHECK (cache.isPending (wav));
+
+    REQUIRE (cache.waitUntilIdle (30000));
+    CHECK_FALSE (cache.isLoading());
+
+    // Now it's there, converted to 48 kHz (4 s = 192000 samples), level unchanged.
+    const auto audio = cache.get (wav, 48000.0);
+    REQUIRE (audio != nullptr);
+    CHECK (std::abs (audio->getNumSamples() - 192000) <= 2);
+    CHECK_THAT (audio->getSample (0, 96000), WithinAbs (0.5, 0.01));
+    CHECK_THAT (audio->getSample (1, 96000), WithinAbs (0.5, 0.01));
+
+    // A file that can't be read doesn't keep retrying.
+    const auto junk = temp.dir.getChildFile ("junk.wav");
+    junk.replaceWithText ("not audio");
+    CHECK (cache.get (junk, 48000.0) == nullptr);
+    REQUIRE (cache.waitUntilIdle (30000));
+    CHECK (cache.get (junk, 48000.0) == nullptr);
+    CHECK_FALSE (cache.isLoading());
+}

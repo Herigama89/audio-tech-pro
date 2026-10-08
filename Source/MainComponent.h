@@ -140,7 +140,8 @@ private:
 
     // --- Engine and model ---------------------------------------------------
     AudioEngine engine;
-    AudioFileCache fileCache { engine.getFormatManager() };
+    AudioFileCache fileCache { engine.getFormatManager(), true };   // decodes in the background
+    bool wasLoadingAudio = false;
     InstrumentRack rack;
     EffectRack effectRack { rack.getFormatManager() };
     ProjectPlayer player { engine, fileCache, &rack, &effectRack };
