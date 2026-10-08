@@ -121,7 +121,7 @@ void AudioEngine::timerCallback()
 
 void AudioEngine::collectGarbage()
 {
-    if (! deviceRunning.load())
+    if (! deviceRunning.load() && ! bouncing.load())
     {
         retired.clear(); // no callback can be running
         return;
@@ -163,6 +163,108 @@ AudioEngine::Levels AudioEngine::takeLevels() noexcept
 {
     return { peakOutL.exchange (0.0f), peakOutR.exchange (0.0f),
              peakInL.exchange (0.0f),  peakInR.exchange (0.0f) };
+}
+
+std::pair<float, float> AudioEngine::takeTrackLevel (int slot) noexcept
+{
+    if (! juce::isPositiveAndBelow (slot, PlaybackGraph::maxTracks))
+        return { 0.0f, 0.0f };
+
+    return { trackPeaks[(size_t) slot * 2].exchange (0.0f), trackPeaks[(size_t) slot * 2 + 1].exchange (0.0f) };
+}
+
+juce::String AudioEngine::bounce (const juce::File& file, double startSeconds, double endSeconds, int bitDepth,
+                                  std::function<bool (double)> progress)
+{
+    if (isRecording() || isMeasuringLatency())
+        return "Stop recording first.";
+
+    beginOfflineRender();
+    auto error = renderOffline (file, startSeconds, endSeconds, bitDepth, std::move (progress));
+    endOfflineRender();
+    return error;
+}
+
+void AudioEngine::beginOfflineRender()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    // Take the engine away from the device while we render it ourselves.
+    offlineWasAttached = deviceManager.getCurrentAudioDevice() != nullptr;
+    deviceManager.removeAudioCallback (this);
+
+    offlineSavedPlayhead = playheadSample.load();
+    offlineSavedPlaying = playing.load();
+    bouncing.store (true); // keeps old graphs alive until the offline render has moved on
+}
+
+void AudioEngine::endOfflineRender()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    bouncing.store (false);
+    playing.store (offlineSavedPlaying);
+    playheadSample.store (offlineSavedPlayhead);
+
+    if (offlineWasAttached)
+        deviceManager.addAudioCallback (this);
+}
+
+juce::String AudioEngine::renderOffline (const juce::File& file, double startSeconds, double endSeconds, int bitDepth,
+                                         std::function<bool (double)> progress)
+{
+    if (endSeconds <= startSeconds)
+        return "There's nothing to export yet.";
+
+    file.deleteFile();
+    auto fileStream = std::make_unique<juce::FileOutputStream> (file);
+    if (fileStream->failedToOpen())
+        return "Couldn't write " + file.getFullPathName();
+
+    std::unique_ptr<juce::OutputStream> stream = std::move (fileStream);
+    const auto rate = sampleRate.load();
+    juce::WavAudioFormat wav;
+    auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}
+                                                   .withSampleRate (rate)
+                                                   .withNumChannels (2)
+                                                   .withBitsPerSample (bitDepth));
+    if (writer == nullptr)
+        return "Couldn't create the WAV file.";
+
+    playheadSample.store ((juce::int64) std::llround (startSeconds * rate));
+    playing.store (true);
+
+    const auto total = (juce::int64) std::llround ((endSeconds - startSeconds) * rate);
+    juce::AudioBuffer<float> block (2, 1024);
+    juce::String error;
+
+    for (juce::int64 done = 0; done < total;)
+    {
+        const auto n = (int) juce::jmin ((juce::int64) block.getNumSamples(), total - done);
+        render (nullptr, 0, block.getArrayOfWritePointers(), 2, n);
+
+        if (! writer->writeFromAudioSampleBuffer (block, 0, n))
+        {
+            error = "Writing the file failed (is the disk full?).";
+            break;
+        }
+
+        done += n;
+
+        if (progress && ! progress ((double) done / (double) total))
+        {
+            error = "cancelled";
+            break;
+        }
+    }
+
+    writer.reset();
+    playing.store (false);
+
+    if (error.isNotEmpty())
+        file.deleteFile();
+
+    return error;
 }
 
 void AudioEngine::storeMax (std::atomic<float>& target, float value) noexcept
@@ -555,8 +657,12 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
             renderChunk (*graph, inputs, numInputs, offset, mixL, mixR, n, isPlayingNow, resetNotes, liveMidiPending);
             liveMidiPending = false;
 
+            // The master chain (e.g. a limiter) on the sum of every track; the click comes after it.
+            for (const auto& effect : graph->masterInserts)
+                effect->process (mixL, mixR, n);
+
             const bool countingIn = isRecordingNow && position < recordStart;
-            if (isPlayingNow && (graph->metronome || countingIn))
+            if (isPlayingNow && (graph->metronome || countingIn) && ! bouncing)
                 renderClick (*graph, mixL, mixR, n);
         }
 
@@ -708,6 +814,8 @@ void AudioEngine::renderChunk (const PlaybackGraph& graph, const float* const* i
         juce::FloatVectorOperations::clear (tR, n);
         bool anyAudio = false;
 
+        const bool hasInserts = ! track.inserts.empty();
+
         // Instruments always run, even when muted, so their notes start and stop on time.
         if (track.isInstrument)
         {
@@ -731,8 +839,8 @@ void AudioEngine::renderChunk (const PlaybackGraph& graph, const float* const* i
                 anyAudio = true;
             }
         }
-        // Silent and not fading: nothing to do.
-        else if (! state.gainL.isSmoothing() && ! state.gainR.isSmoothing()
+        // Silent and not fading, with no effect tails to keep running: nothing to do.
+        else if (! hasInserts && ! state.gainL.isSmoothing() && ! state.gainR.isSmoothing()
                  && state.gainL.getCurrentValue() <= 0.0f && state.gainR.getCurrentValue() <= 0.0f)
         {
             continue;
@@ -778,7 +886,12 @@ void AudioEngine::renderChunk (const PlaybackGraph& graph, const float* const* i
             anyAudio = true;
         }
 
-        if (! anyAudio)
+        // Insert effects, before the fader (as on a console). They run even on
+        // silence so delays and reverbs ring out.
+        for (const auto& effect : track.inserts)
+            effect->process (tL, tR, n);
+
+        if (! anyAudio && ! hasInserts)
         {
             // Still advance the gain ramps so they stay in sync with time.
             state.gainL.skip (n);
@@ -786,11 +899,20 @@ void AudioEngine::renderChunk (const PlaybackGraph& graph, const float* const* i
             continue;
         }
 
+        float peakL = 0.0f, peakR = 0.0f;
+
         for (int i = 0; i < n; ++i)
         {
-            mixL[i] += tL[i] * state.gainL.getNextValue();
-            mixR[i] += tR[i] * state.gainR.getNextValue();
+            const auto l = tL[i] * state.gainL.getNextValue();
+            const auto r = tR[i] * state.gainR.getNextValue();
+            mixL[i] += l;
+            mixR[i] += r;
+            peakL = juce::jmax (peakL, std::abs (l));
+            peakR = juce::jmax (peakR, std::abs (r));
         }
+
+        storeMax (trackPeaks[(size_t) track.slot * 2], peakL);
+        storeMax (trackPeaks[(size_t) track.slot * 2 + 1], peakR);
     }
 }
 

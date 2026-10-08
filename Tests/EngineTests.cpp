@@ -694,3 +694,172 @@ TEST_CASE ("Recording MIDI captures what you play, at the playhead", "[engine][m
     CHECK (takes[0].midiEvents[0].data1 == 62);
     CHECK (takes[0].midiEvents[1].sample == 8192);
 }
+
+#include "engine/BuiltInEffects.h"
+#include "engine/EffectRack.h"
+
+namespace
+{
+    std::unique_ptr<BuiltInEffect> makeEffect (const juce::String& type, double rate = 48000.0)
+    {
+        auto e = BuiltInEffect::create (type);
+        REQUIRE (e != nullptr);
+        e->prepare (rate, 4096);
+        return e;
+    }
+
+    void setParam (BuiltInEffect& e, const juce::String& id, float v)
+    {
+        const auto& params = e.getInfo().params;
+        for (size_t i = 0; i < params.size(); ++i)
+            if (params[i].id == id)
+                e.setParameter ((int) i, v);
+    }
+
+    float sineLevelAfter (BuiltInEffect& e, double freq, double rate = 48000.0)
+    {
+        std::vector<float> l (16384), r (16384);
+        for (size_t i = 0; i < l.size(); ++i)
+            l[i] = r[i] = 0.25f * (float) std::sin (juce::MathConstants<double>::twoPi * freq * (double) i / rate);
+        e.process (l.data(), r.data(), (int) l.size());
+        return peakIn (l, 8000, 16384); // after it settles
+    }
+}
+
+TEST_CASE ("Built-in effects do what they say", "[effects]")
+{
+    SECTION ("EQ boosts and cuts around its bands")
+    {
+        auto eq = makeEffect ("eq");
+        CHECK_THAT (sineLevelAfter (*eq, 1000.0), WithinAbs (0.25, 0.005));   // flat by default
+
+        setParam (*eq, "midGain", 12.0f);
+        CHECK (sineLevelAfter (*eq, 1000.0) > 0.25f * 3.5f);                 // ~ +12 dB at the centre
+
+        auto cut = makeEffect ("eq");
+        setParam (*cut, "lowGain", -18.0f);
+        CHECK (sineLevelAfter (*cut, 40.0) < 0.25f * 0.2f);
+        CHECK_THAT (sineLevelAfter (*cut, 5000.0), WithinAbs (0.25, 0.01));   // highs untouched
+    }
+
+    SECTION ("compressor turns loud signals down")
+    {
+        auto comp = makeEffect ("compressor");
+        setParam (*comp, "threshold", -24.0f);
+        setParam (*comp, "ratio", 10.0f);
+        const auto out = sineLevelAfter (*comp, 200.0);       // -12 dBFS in, 12 dB over the threshold
+        const auto db = juce::Decibels::gainToDecibels (out);
+        CHECK (db < -20.0f);
+        CHECK (db > -24.5f);
+    }
+
+    SECTION ("delay repeats after its time")
+    {
+        auto delay = makeEffect ("delay");
+        setParam (*delay, "time", 100.0f);    // 4800 samples
+        setParam (*delay, "mix", 1.0f);
+        setParam (*delay, "feedback", 0.0f);
+        delay->prepare (48000.0, 4096);        // start at the new time without gliding
+
+        std::vector<float> l (8192, 0.0f), r (8192, 0.0f);
+        l[0] = r[0] = 1.0f;
+        delay->process (l.data(), r.data(), 8192);
+        CHECK (l[0] == 0.0f);                   // fully wet: no dry impulse
+        CHECK_THAT (l[4800], WithinAbs (1.0f, 1e-3));
+        CHECK (peakIn (l, 4802, 8192) < 1e-3f);
+    }
+
+    SECTION ("reverb leaves a tail")
+    {
+        auto reverb = makeEffect ("reverb");
+        std::vector<float> l (48000, 0.0f), r (48000, 0.0f);
+        l[0] = r[0] = 1.0f;
+        reverb->process (l.data(), r.data(), 48000);
+        CHECK (peakIn (l, 10000, 20000) > 1e-4f);
+    }
+
+    SECTION ("limiter never goes over its ceiling")
+    {
+        auto limiter = makeEffect ("limiter");
+        setParam (*limiter, "ceiling", -6.0f);
+        std::vector<float> l (4800), r (4800);
+        for (size_t i = 0; i < l.size(); ++i)
+            l[i] = r[i] = (i % 100 < 50 ? 1.0f : -1.0f);
+        limiter->process (l.data(), r.data(), 4800);
+        CHECK (peakIn (l, 0, 4800) <= juce::Decibels::decibelsToGain (-6.0f) + 1e-6f);
+    }
+}
+
+TEST_CASE ("Insert chains run on tracks and on the master", "[engine][mixer]")
+{
+    Fixture f;
+    EffectRack effects (f.rack.getFormatManager());
+    ProjectPlayer player (f.engine, f.cache, &f.rack, &effects);
+
+    const auto wav = writeConstantWav (f.temp.dir.getChildFile ("loud.wav"), 48000.0, 96000, 0.9f);
+    auto track = model::addTrack (f.project, "A", nullptr);
+    model::addRegion (track, wav, 0.0, 2.0, nullptr);
+    f.project.setProperty (ids::masterGain, 1.0, nullptr);
+
+    auto limiter = model::addBuiltinInsert (model::chainFor (f.project, track[ids::id]), "limiter", 0, nullptr);
+    limiter.setProperty ("ceiling", -12.0, nullptr);
+    player.setProject (f.project);
+    f.engine.play();
+
+    auto out = renderLeft (f.engine, 9600);
+    CHECK_THAT (out[9000], WithinAbs (juce::Decibels::decibelsToGain (-12.0f), 1e-3));
+
+    // Bypassed: the signal passes untouched.
+    limiter.setProperty (ids::bypass, true, nullptr);
+    player.rebuildNow();
+    out = renderLeft (f.engine, 9600);
+    CHECK_THAT (out[9000], WithinAbs (0.9f, 1e-3));
+
+    // On the master instead.
+    auto masterLimiter = model::addBuiltinInsert (model::chainFor (f.project, model::masterOwner), "limiter", 0, nullptr);
+    masterLimiter.setProperty ("ceiling", -10.0, nullptr);
+    player.rebuildNow();
+    out = renderLeft (f.engine, 9600);
+    CHECK_THAT (out[9000], WithinAbs (juce::Decibels::decibelsToGain (-10.0f), 1e-3));
+
+    // Track meters see the post-fader level.
+    const auto [l, r] = f.engine.takeTrackLevel (player.slotOf (track[ids::id]));
+    CHECK_THAT (l, WithinAbs (0.9f, 1e-3));
+    CHECK_THAT (r, WithinAbs (0.9f, 1e-3));
+}
+
+TEST_CASE ("Exporting renders the song to a WAV file", "[engine][export]")
+{
+    Fixture f;
+    const auto wav = writeConstantWav (f.temp.dir.getChildFile ("a.wav"), 48000.0, 48000, 0.5f);
+    model::addRegion (model::addTrack (f.project, "A", nullptr), wav, 0.5, 1.0, nullptr);
+    f.project.setProperty (ids::metronome, true, nullptr); // must not end up in the file
+    f.player.setProject (f.project);
+
+    f.engine.setPlayheadSeconds (3.0);
+    const auto out = f.temp.dir.getChildFile ("Song.wav");
+    double lastProgress = 0.0;
+    const auto error = f.engine.bounce (out, 0.0, 2.0, 24, [&] (double p) { lastProgress = p; return true; });
+
+    CHECK (error.isEmpty());
+    CHECK (lastProgress == 1.0);
+    CHECK (f.engine.getPlayheadSeconds() == 3.0);   // put back afterwards
+    CHECK_FALSE (f.engine.isPlaying());
+
+    auto reader = std::unique_ptr<juce::AudioFormatReader> (f.engine.getFormatManager().createReaderFor (out));
+    REQUIRE (reader != nullptr);
+    CHECK (reader->lengthInSamples == 96000);
+    CHECK (reader->numChannels == 2);
+
+    juce::AudioBuffer<float> data (2, 96000);
+    reader->read (&data, 0, 96000, 0, true, true);
+    CHECK (data.getMagnitude (0, 0, 23900) == 0.0f);                      // silence before the region, no click
+    CHECK_THAT (data.getSample (0, 30000), WithinAbs (0.5f * 0.8f, 1e-4));
+    CHECK_THAT (data.getSample (1, 70000), WithinAbs (0.5f * 0.8f, 1e-4));
+    CHECK (data.getMagnitude (0, 72100, 96000 - 72100) == 0.0f);
+
+    // Cancelling removes the partial file.
+    const auto cancelled = f.temp.dir.getChildFile ("Cancelled.wav");
+    CHECK (f.engine.bounce (cancelled, 0.0, 2.0, 24, [] (double) { return false; }) == "cancelled");
+    CHECK_FALSE (cancelled.exists());
+}

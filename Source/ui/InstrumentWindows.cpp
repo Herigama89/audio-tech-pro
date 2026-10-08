@@ -1,6 +1,7 @@
 #include "InstrumentWindows.h"
 #include "Theme.h"
 #include "../model/Project.h"
+#include "../engine/BuiltInEffects.h"
 
 namespace riff
 {
@@ -84,6 +85,83 @@ void SynthPanel::resized()
         column = area.removeFromLeft (84);
         c->label.setBounds (column.removeFromTop (20));
         c->slider.setBounds (column);
+    }
+}
+
+//==============================================================================
+EffectPanel::EffectPanel (juce::ValueTree i, juce::UndoManager& um)
+    : insert (i), undoManager (um)
+{
+    const auto* info = findBuiltInEffect (insert[ids::effect].toString());
+
+    bypassButton.onClick = [this]
+    {
+        undoManager.beginNewTransaction ("Bypass");
+        insert.setProperty (ids::bypass, bypassButton.getToggleState(), &undoManager);
+    };
+    addAndMakeVisible (bypassButton);
+
+    if (info != nullptr)
+    {
+        for (const auto& p : info->params)
+        {
+            auto* k = knobs.add (new Knob());
+            k->id = p.id;
+
+            k->slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+            k->slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 76, 18);
+            k->slider.setRange (p.min, p.max, 0.0);
+            if (p.midPoint > p.min && p.midPoint < p.max)
+                k->slider.setSkewFactorFromMidPoint (p.midPoint);
+            k->slider.setDoubleClickReturnValue (true, p.defaultValue);
+            k->slider.setNumDecimalPlacesToDisplay (p.max > 100.0f ? 0 : (p.max > 10.0f ? 1 : 2));
+            k->slider.setTextValueSuffix (p.suffix);
+            k->slider.onDragStart = [this, name = p.name] { undoManager.beginNewTransaction (name); };
+            k->slider.onValueChange = [this, k] { insert.setProperty (juce::Identifier (k->id), k->slider.getValue(), &undoManager); };
+            addAndMakeVisible (k->slider);
+
+            k->label.setText (p.name, juce::dontSendNotification);
+            k->label.setJustificationType (juce::Justification::centred);
+            addAndMakeVisible (k->label);
+        }
+    }
+
+    insert.addListener (this);
+    refresh();
+    setSize (juce::jmax (260, knobs.size() * 86 + 24), 170);
+}
+
+EffectPanel::~EffectPanel()
+{
+    insert.removeListener (this);
+}
+
+void EffectPanel::refresh()
+{
+    const auto* info = findBuiltInEffect (insert[ids::effect].toString());
+    bypassButton.setToggleState ((bool) insert[ids::bypass], juce::dontSendNotification);
+
+    for (int i = 0; i < knobs.size() && info != nullptr; ++i)
+        knobs[i]->slider.setValue (insert.getProperty (juce::Identifier (knobs[i]->id), info->params[(size_t) i].defaultValue),
+                                   juce::dontSendNotification);
+}
+
+void EffectPanel::paint (juce::Graphics& g)
+{
+    g.fillAll (theme::background);
+}
+
+void EffectPanel::resized()
+{
+    auto area = getLocalBounds().reduced (12);
+    bypassButton.setBounds (area.removeFromTop (24).removeFromLeft (100));
+    area.removeFromTop (6);
+
+    for (auto* k : knobs)
+    {
+        auto column = area.removeFromLeft (86);
+        k->label.setBounds (column.removeFromTop (20));
+        k->slider.setBounds (column);
     }
 }
 

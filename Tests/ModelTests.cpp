@@ -17,7 +17,7 @@ TEST_CASE ("New project has defaults and no tracks", "[model]")
     CHECK (p.hasType (ids::PROJECT));
     CHECK (p[ids::name].toString() == "Song");
     CHECK (num (p, ids::tempo) == 120.0);
-    CHECK (p.getNumChildren() == 0);
+    CHECK (model::numTracks (p) == 0);
 }
 
 TEST_CASE ("Adding tracks and regions, with undo and redo", "[model][undo]")
@@ -31,7 +31,7 @@ TEST_CASE ("Adding tracks and regions, with undo and redo", "[model][undo]")
     um.beginNewTransaction();
     auto region = model::addRegion (track, juce::File ("/tmp/kick.wav"), 2.0, 4.0, &um);
 
-    REQUIRE (p.getNumChildren() == 1);
+    REQUIRE (model::numTracks (p) == 1);
     REQUIRE (track.getNumChildren() == 1);
     CHECK (region[ids::name].toString() == "kick");
     CHECK (num (region, ids::start) == 2.0);
@@ -42,11 +42,11 @@ TEST_CASE ("Adding tracks and regions, with undo and redo", "[model][undo]")
     um.undo();
     CHECK (track.getNumChildren() == 0);
     um.undo();
-    CHECK (p.getNumChildren() == 0);
+    CHECK (model::numTracks (p) == 0);
 
     um.redo();
     um.redo();
-    CHECK (p.getNumChildren() == 1);
+    CHECK (model::numTracks (p) == 1);
     CHECK (p.getChild (0).getNumChildren() == 1);
 }
 
@@ -151,7 +151,7 @@ TEST_CASE ("JSON round trip with relative audio paths", "[model][file]")
     REQUIRE (loaded.isValid());
     CHECK (error.isEmpty());
     CHECK (num (loaded, ids::tempo) == 97.5);
-    REQUIRE (loaded.getNumChildren() == 1);
+    REQUIRE (model::numTracks (loaded) == 1);
 
     const auto lt = loaded.getChild (0);
     CHECK (lt[ids::name].toString() == "Vocal");
@@ -408,4 +408,58 @@ TEST_CASE ("Recorded MIDI events become notes", "[model][midi]")
         CHECK_THAT (notes[0].length, WithinAbs (0.5, 1e-9));
         CHECK_THAT (notes[1].length, WithinAbs (0.2, 1e-9));
     }
+}
+
+TEST_CASE ("Mixer chains and inserts", "[model][mixer]")
+{
+    juce::UndoManager um;
+    auto p = model::createProject();
+    auto t = model::addTrack (p, "Vox", nullptr);
+
+    // The mixer stays after the tracks, whatever gets added.
+    CHECK (p.getChild (model::numTracks (p)).hasType (ids::MIXER));
+    model::addTrack (p, "Gtr", nullptr);
+    CHECK (model::numTracks (p) == 2);
+    CHECK (p.getChild (2).hasType (ids::MIXER));
+
+    CHECK_FALSE (model::findChain (p, t[ids::id]).isValid());
+    auto chain = model::chainFor (p, t[ids::id]);
+    CHECK (model::findChain (p, t[ids::id]) == chain);
+
+    um.beginNewTransaction();
+    auto eq = model::addBuiltinInsert (chain, "eq", 0, &um);
+    auto comp = model::addBuiltinInsert (chain, "compressor", 0, &um); // goes first
+    CHECK (chain.getChild (0) == comp);
+    CHECK (chain.getChild (1) == eq);
+
+    um.undo();
+    CHECK (chain.getNumChildren() == 0);
+    um.redo();
+    CHECK (chain.getNumChildren() == 2);
+
+    um.beginNewTransaction();
+    model::removeInsert (comp, &um);
+    CHECK (chain.getNumChildren() == 1);
+
+    // Saved and loaded with the project.
+    eq.setProperty ("lowGain", 4.5, nullptr);
+    const juce::File f ("/tmp/riff-mix/Song.riff");
+    juce::String error;
+    auto loaded = model::fromJson (model::toJson (p, f), f, error);
+    REQUIRE (loaded.isValid());
+    const auto lc = model::findChain (loaded, t[ids::id]);
+    REQUIRE (lc.getNumChildren() == 1);
+    CHECK (lc.getChild (0)[ids::effect].toString() == "eq");
+    CHECK ((double) lc.getChild (0)["lowGain"] == 4.5);
+}
+
+TEST_CASE ("Older project files get a mixer after their tracks", "[model][mixer]")
+{
+    const juce::String json = R"({"riffVersion": 1, "project": {"type": "PROJECT", "tempo": 100,
+        "children": [ {"type": "TRACK", "id": "a", "name": "A"}, {"type": "TRACK", "id": "b", "name": "B"} ]}})";
+    juce::String error;
+    auto p = model::fromJson (json, juce::File ("/tmp/x.riff"), error);
+    REQUIRE (p.isValid());
+    CHECK (model::numTracks (p) == 2);
+    CHECK (p.getChild (2).hasType (ids::MIXER));
 }

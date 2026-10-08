@@ -5,6 +5,7 @@
 #include "AudioEngine.h"
 #include "AudioFileCache.h"
 #include "InstrumentRack.h"
+#include "EffectRack.h"
 
 namespace riff
 {
@@ -21,7 +22,11 @@ class ProjectPlayer final : private juce::ValueTree::Listener,
                             private juce::ChangeListener
 {
 public:
-    ProjectPlayer (AudioEngine& engine, AudioFileCache& cache, InstrumentRack* rack = nullptr);
+    ProjectPlayer (AudioEngine& engine, AudioFileCache& cache, InstrumentRack* rack = nullptr,
+                   EffectRack* effects = nullptr);
+
+    /** The slot a track was given in the graph (for its meter), or -1. */
+    int slotOf (const juce::String& trackId) const;
     ~ProjectPlayer() override;
 
     /** Switches to a different project tree (after New / Open). */
@@ -55,6 +60,9 @@ private:
     AudioEngine& engine;
     AudioFileCache& cache;
     InstrumentRack* rack;
+    EffectRack* effects;
+
+    std::vector<std::shared_ptr<Effect>> buildChain (const juce::String& owner, double sampleRate, juce::StringArray& insertIds);
     juce::String liveMidiTrackId;
     juce::ValueTree project;
     double builtForRate = 0.0;

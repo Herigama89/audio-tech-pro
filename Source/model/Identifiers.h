@@ -16,6 +16,14 @@
           TAKE { id, name, file, offset }       (only in take folders from loop recording;
                                                  the region's file/offset mirror the active take)
           NOTE { pitch, start, length, velocity }   (only in MIDI regions)
+      MIXER                                     (always the last child of PROJECT)
+        CHAIN { owner }                         (owner = a track id, or "master")
+          INSERT { id, kind ("builtin" | "plugin"), effect, pluginDescription,
+                   pluginState, bypass, <effect parameters by name> }
+
+    Tracks are the PROJECT's children before MIXER; use model::numTracks().
+    Insert chains live apart from tracks so that a track's children stay
+    just its regions, and so undoing a track deletion brings its effects back.
 
     All times are in seconds (double). The engine converts them to samples
     at the device's sample rate when it builds its playback graph.
@@ -35,6 +43,9 @@ namespace riff::ids
     RIFF_DECLARE_ID (REGION)
     RIFF_DECLARE_ID (TAKE)
     RIFF_DECLARE_ID (NOTE)
+    RIFF_DECLARE_ID (MIXER)
+    RIFF_DECLARE_ID (CHAIN)
+    RIFF_DECLARE_ID (INSERT)
 
     // Properties
     RIFF_DECLARE_ID (id)
@@ -79,6 +90,11 @@ namespace riff::ids
     RIFF_DECLARE_ID (synthSustain)    // 0..1
     RIFF_DECLARE_ID (synthRelease)
     RIFF_DECLARE_ID (synthGain)       // linear
+
+    // Mixer
+    RIFF_DECLARE_ID (owner)
+    RIFF_DECLARE_ID (effect)          // built-in effect type: "eq", "compressor", "delay", "reverb", "limiter"
+    RIFF_DECLARE_ID (bypass)
 
     #undef RIFF_DECLARE_ID
 }

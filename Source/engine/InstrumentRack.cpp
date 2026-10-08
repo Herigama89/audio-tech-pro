@@ -130,6 +130,9 @@ void InstrumentRack::loadPlugin (const juce::ValueTree& track, const juce::Strin
             return;
         }
 
+        if (it->second.instrument != nullptr && onPluginReplaced)
+            onPluginReplaced (id); // its window shows the old instance
+
         auto plugin = std::make_shared<PluginInstrument> (std::move (instance));
         plugin->setStateBase64 (state);
         plugin->prepare (sampleRate, maxBlockSize);

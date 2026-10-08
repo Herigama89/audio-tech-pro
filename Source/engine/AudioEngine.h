@@ -135,6 +135,25 @@ public:
     struct Levels { float outL = 0, outR = 0, inL = 0, inR = 0; };
     Levels takeLevels() noexcept;
 
+    /** Post-fader peak of a track since the last call (by the track's slot in the graph). */
+    std::pair<float, float> takeTrackLevel (int slot) noexcept;
+
+    // --- Export (message thread) ------------------------------------------------
+    /**
+        Renders [start, end) of the project faster than real time into a WAV
+        file. The audio device is paused meanwhile. `progress` gets 0..1 and
+        returns false to cancel. Returns an error message, or empty on success.
+    */
+    juce::String bounce (const juce::File& file, double startSeconds, double endSeconds, int bitDepth,
+                         std::function<bool (double)> progress);
+
+    /** The same in three steps, so the render can run on a background thread:
+        begin and end on the message thread, renderOffline on any one thread. */
+    void beginOfflineRender();
+    juce::String renderOffline (const juce::File& file, double startSeconds, double endSeconds, int bitDepth,
+                                std::function<bool (double)> progress);
+    void endOfflineRender();
+
     // --- Rendering, public so tests can drive the engine without a device --
     void prepare (double newSampleRate, int maxBlockSize);
     void render (const float* const* inputs, int numInputs,
@@ -241,6 +260,10 @@ private:
     float clickAmplitude = 0.0f;
 
     std::atomic<float> peakOutL { 0 }, peakOutR { 0 }, peakInL { 0 }, peakInR { 0 };
+    std::array<std::atomic<float>, PlaybackGraph::maxTracks * 2> trackPeaks {};
+    std::atomic<bool> bouncing { false };
+    bool offlineWasAttached = false, offlineSavedPlaying = false;
+    juce::int64 offlineSavedPlayhead = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioEngine)
 };

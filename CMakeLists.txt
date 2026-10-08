@@ -38,6 +38,8 @@ set(RIFF_CORE_SOURCES
     Source/engine/BuiltInSynth.cpp
     Source/engine/PluginInstrument.cpp
     Source/engine/InstrumentRack.cpp
+    Source/engine/BuiltInEffects.cpp
+    Source/engine/EffectRack.cpp
 )
 
 set(RIFF_DEFINITIONS
@@ -75,6 +77,7 @@ target_sources(Riff PRIVATE
     Source/ui/LatencyCalibrator.cpp
     Source/ui/PianoRoll.cpp
     Source/ui/InstrumentWindows.cpp
+    Source/ui/Mixer.cpp
 )
 
 target_include_directories(Riff PRIVATE Source)

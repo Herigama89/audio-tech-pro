@@ -121,7 +121,26 @@ namespace riff::model
     void deleteRegion (juce::ValueTree region, juce::UndoManager* um);
     void deleteTrack (juce::ValueTree track, juce::UndoManager* um);
 
+    // --- Mixer ----------------------------------------------------------------
+    inline const juce::String masterOwner { "master" };
+    inline const juce::String builtinKind { "builtin" }, pluginKind { "plugin" };
+
+    /** The MIXER node, created (unundoably) if the project doesn't have one yet. */
+    juce::ValueTree mixerOf (juce::ValueTree project);
+
+    /** The insert chain of a track (or masterOwner), created if needed. */
+    juce::ValueTree chainFor (juce::ValueTree project, const juce::String& owner);
+
+    /** The chain if it exists, without creating it. */
+    juce::ValueTree findChain (const juce::ValueTree& project, const juce::String& owner);
+
+    juce::ValueTree addBuiltinInsert (juce::ValueTree chain, const juce::String& effectType, int index, juce::UndoManager* um);
+    juce::ValueTree addPluginInsert (juce::ValueTree chain, const juce::String& descriptionXml, int index, juce::UndoManager* um);
+    void removeInsert (juce::ValueTree insert, juce::UndoManager* um);
+
     // --- Queries ----------------------------------------------------------
+    /** Tracks are the first children of the project; the MIXER node comes after them. */
+    int numTracks (const juce::ValueTree& project);
     juce::ValueTree findById (const juce::ValueTree& project, const juce::String& id);
     juce::ValueTree trackOf (const juce::ValueTree& region);
     double regionEnd (const juce::ValueTree& region);

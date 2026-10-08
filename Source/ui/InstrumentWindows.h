@@ -63,4 +63,32 @@ private:
     juce::OwnedArray<Control> controls;
 };
 
+/** Knobs for one of Riff's built-in effects, bound (undoably) to its INSERT node. */
+class EffectPanel final : public juce::Component,
+                          private juce::ValueTree::Listener
+{
+public:
+    EffectPanel (juce::ValueTree insert, juce::UndoManager& um);
+    ~EffectPanel() override;
+
+    void paint (juce::Graphics& g) override;
+    void resized() override;
+
+private:
+    struct Knob
+    {
+        juce::String id;
+        juce::Slider slider;
+        juce::Label label;
+    };
+
+    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { refresh(); }
+    void refresh();
+
+    juce::ValueTree insert;
+    juce::UndoManager& undoManager;
+    juce::ToggleButton bypassButton { "Bypass" };
+    juce::OwnedArray<Knob> knobs;
+};
+
 } // namespace riff

@@ -270,7 +270,8 @@ void TrackHeaderList::rebuild()
     headers.clear();
 
     for (const auto& track : project)
-        content.addAndMakeVisible (headers.add (new TrackHeader (track, undoManager, timeline, inputNames, instrumentMenu)));
+        if (track.hasType (ids::TRACK))
+            content.addAndMakeVisible (headers.add (new TrackHeader (track, undoManager, timeline, inputNames, instrumentMenu)));
 
     resized();
     repaint();
@@ -285,7 +286,7 @@ void TrackHeaderList::paint (juce::Graphics& g)
     g.fillRect (0, 0, getWidth(), TimelineState::rulerHeight);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (11.0f));
-    g.drawText (juce::String (project.getNumChildren()) + (project.getNumChildren() == 1 ? " track" : " tracks"),
+    g.drawText (juce::String (model::numTracks (project)) + (model::numTracks (project) == 1 ? " track" : " tracks"),
                 getLocalBounds().removeFromTop (TimelineState::rulerHeight).reduced (12, 0),
                 juce::Justification::centredLeft);
 }

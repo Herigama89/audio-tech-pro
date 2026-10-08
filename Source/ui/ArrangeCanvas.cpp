@@ -65,7 +65,7 @@ void ArrangeCanvas::paint (juce::Graphics& g)
 {
     g.fillAll (theme::background);
 
-    const int numTracks = project.getNumChildren();
+    const int numTracks = model::numTracks (project);
 
     // Lanes
     for (int i = 0; i < numTracks; ++i)
@@ -152,7 +152,7 @@ void ArrangeCanvas::paintGrid (juce::Graphics& g)
 
     const auto t0 = timeline.scrollSeconds;
     const auto t1 = timeline.xToTime ((float) getWidth());
-    const auto bottom = (float) juce::jmin (getHeight(), timeline.trackTop (project.getNumChildren()));
+    const auto bottom = (float) juce::jmin (getHeight(), timeline.trackTop (model::numTracks (project)));
 
     for (auto i = (juce::int64) std::floor (t0 / grid); (double) i * grid <= t1; ++i)
     {
@@ -373,7 +373,7 @@ juce::ValueTree ArrangeCanvas::regionAt (juce::Point<float> pos, int& trackIndex
     const auto index = timeline.trackIndexAt ((int) pos.y);
     trackIndexOut = index;
 
-    if (index < 0 || index >= project.getNumChildren())
+    if (index < 0 || index >= model::numTracks (project))
         return {};
 
     const auto track = project.getChild (index);
@@ -426,7 +426,7 @@ void ArrangeCanvas::mouseDown (const juce::MouseEvent& e)
     if (! region.isValid())
     {
         timeline.selectedRegionId = {};
-        if (trackIndex >= 0 && trackIndex < project.getNumChildren())
+        if (trackIndex >= 0 && trackIndex < model::numTracks (project))
             timeline.selectedTrackId = project.getChild (trackIndex)[ids::id].toString();
         timeline.changed();
         return;
@@ -506,7 +506,7 @@ void ArrangeCanvas::mouseDrag (const juce::MouseEvent& e)
                 break;
 
             const auto newStart = maybeSnap (dragOriginalStart + timeline.xToTime ((float) e.x) - dragMouseDownTime);
-            const auto targetIndex = juce::jlimit (0, project.getNumChildren() - 1, timeline.trackIndexAt (e.y));
+            const auto targetIndex = juce::jlimit (0, model::numTracks (project) - 1, timeline.trackIndexAt (e.y));
             auto target = project.getChild (targetIndex);
 
             // MIDI belongs on instrument tracks and audio on audio tracks.
@@ -619,7 +619,7 @@ void ArrangeCanvas::mouseDoubleClick (const juce::MouseEvent& e)
     }
 
     // Double-click an empty spot on an instrument track: a new one-bar MIDI region there.
-    if (trackIndex < 0 || trackIndex >= project.getNumChildren())
+    if (trackIndex < 0 || trackIndex >= model::numTracks (project))
         return;
 
     auto track = project.getChild (trackIndex);
@@ -674,7 +674,7 @@ void ArrangeCanvas::mouseWheelMove (const juce::MouseEvent& e, const juce::Mouse
 
         timeline.scrollSeconds = juce::jmax (0.0, timeline.scrollSeconds - dx * pixelsPerUnit / timeline.pixelsPerSecond);
 
-        const auto contentHeight = (project.getNumChildren() + 1) * TimelineState::trackHeight;
+        const auto contentHeight = (model::numTracks (project) + 1) * TimelineState::trackHeight;
         const auto maxScrollY = juce::jmax (0, contentHeight - (getHeight() - TimelineState::rulerHeight));
         timeline.scrollY = juce::jlimit (0, maxScrollY, timeline.scrollY - juce::roundToInt (dy * pixelsPerUnit));
     }
@@ -706,7 +706,7 @@ bool ArrangeCanvas::isInterestedInFileDrag (const juce::StringArray& files)
 void ArrangeCanvas::fileDragMove (const juce::StringArray&, int, int y)
 {
     const auto index = timeline.trackIndexAt (y);
-    const auto highlight = (index < 0 || index >= project.getNumChildren()) ? project.getNumChildren() : index;
+    const auto highlight = (index < 0 || index >= model::numTracks (project)) ? model::numTracks (project) : index;
 
     if (highlight != dropHighlightTrack)
     {
@@ -745,7 +745,7 @@ void ArrangeCanvas::importFiles (const juce::StringArray& files, int trackIndex,
         juce::ValueTree track;
 
         // The first file goes on the track under the drop; the rest each get a new track.
-        if (! usedExistingTrack && trackIndex >= 0 && trackIndex < project.getNumChildren()
+        if (! usedExistingTrack && trackIndex >= 0 && trackIndex < model::numTracks (project)
             && ! model::isInstrumentTrack (project.getChild (trackIndex)))
         {
             track = project.getChild (trackIndex);

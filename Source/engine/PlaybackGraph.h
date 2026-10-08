@@ -2,6 +2,7 @@
 
 #include "AudioFileCache.h"
 #include "Instrument.h"
+#include "Effect.h"
 #include <vector>
 
 namespace riff
@@ -45,6 +46,8 @@ struct PlaybackGraph
         std::shared_ptr<Instrument> instrument;   // owned by the InstrumentRack; may be null while loading
         bool receivesLiveMidi = false;            // the track your MIDI keyboard plays
 
+        std::vector<std::shared_ptr<Effect>> inserts;   // in order, bypassed ones left out
+
         bool monitorInput = false;  // armed + monitor: pass the input through this track
         int inputChannel = 0;       // index among the device's active inputs
         bool inputStereo = false;
@@ -61,6 +64,7 @@ struct PlaybackGraph
     double secondsPerBeat = 0.5;
     int beatsPerBar = 4;
     std::vector<Track> tracks;
+    std::vector<std::shared_ptr<Effect>> masterInserts;
 };
 
 } // namespace riff

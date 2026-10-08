@@ -2,6 +2,7 @@
 #include "model/Project.h"
 #include "ui/Theme.h"
 #include "ui/LatencyCalibrator.h"
+#include "engine/BuiltInEffects.h"
 
 namespace riff
 {
@@ -20,17 +21,17 @@ MainComponent::MainComponent()
     theme::apply (getLookAndFeel());
 
     // --- Toolbar ----------------------------------------------------------------
-    for (auto* b : { &newButton, &openButton, &saveButton, &undoButton, &redoButton,
+    for (auto* b : { &fileButton, &mixerButton, &undoButton, &redoButton,
                      &rewindButton, &playButton, &recordButton, &clickButton, &cycleButton, &countInButton,
-                     &addTrackButton, &importButton, &settingsButton })
+                     &addTrackButton, &settingsButton })
     {
         b->setWantsKeyboardFocus (false); // keep Space for play/stop
         addAndMakeVisible (b);
     }
 
-    newButton.onClick      = [this] { newProject(); };
-    openButton.onClick     = [this] { openProject(); };
-    saveButton.onClick     = [this] { saveProject(); };
+    fileButton.onClick     = [this] { showFileMenu(); };
+    mixerButton.onClick    = [this] { toggleMixer(); };
+    mixerButton.setColour (juce::TextButton::buttonOnColourId, theme::accent);
     undoButton.onClick     = [this] { undo(); };
     redoButton.onClick     = [this] { redo(); };
     rewindButton.onClick   = [this] { returnToStart(); };
@@ -54,12 +55,10 @@ MainComponent::MainComponent()
         menu.addItem ("Instrument track (MIDI)", [this] { addTrack (model::instrumentKind); });
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addTrackButton));
     };
-    importButton.onClick   = [this] { importAudio(); };
     settingsButton.onClick = [this] { showAudioMenu(); };
 
-    newButton.setTooltip ("New project (Cmd+N)");
-    openButton.setTooltip ("Open project (Cmd+O)");
-    saveButton.setTooltip ("Save (Cmd+S), Save As (Cmd+Shift+S)");
+    fileButton.setTooltip ("New, open, save, import audio, export the song");
+    mixerButton.setTooltip ("Show the mixer (X)");
     undoButton.setTooltip ("Undo (Cmd+Z)");
     redoButton.setTooltip ("Redo (Cmd+Shift+Z)");
     rewindButton.setTooltip ("Go to start (Return)");
@@ -70,7 +69,6 @@ MainComponent::MainComponent()
                             "Recording with Cycle on makes a new take on every pass.");
     countInButton.setTooltip ("One bar of click before recording starts");
     addTrackButton.setTooltip ("New audio or instrument track");
-    importButton.setTooltip ("Import audio files at the playhead (Cmd+I)");
     settingsButton.setTooltip ("Audio device settings");
 
     positionLabel.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 18.0f, juce::Font::bold));
@@ -145,6 +143,18 @@ MainComponent::MainComponent()
         showError ("Plugin problem on \"" + trackName + "\"", error);
     };
     rack.onPluginReplaced = [this] (const juce::String& trackId) { editorWindows.erase (trackId); };
+
+    // Effects and the mixer
+    effectRack.onEffectReady = [this] { player.requestRebuild(); };
+    effectRack.onLoadError = [this] (const juce::String& error) { showError ("Plugin problem", error); };
+    effectRack.onEffectReplaced = [this] (const juce::String& insertId) { editorWindows.erase (insertId); };
+    mixer.onOpenInsert = [this] (juce::ValueTree insert) { openInsertWindow (insert); };
+    mixer.onChooseEffect = [this] (const juce::String& owner, int slot, juce::ValueTree existing, juce::Component& target)
+    {
+        showEffectMenu (owner, slot, existing, target);
+    };
+    mixer.onClose = [this] { closeMixer(); };
+    addChildComponent (mixer);
     headers.inputNames = [this] { return engine.getActiveInputChannelNames(); };
     waveforms.onChange = [this] { canvas.repaint(); };
 
@@ -229,9 +239,7 @@ void MainComponent::resized()
         bar.removeFromLeft (gapAfter);
     };
 
-    place (newButton, 48);
-    place (openButton, 52);
-    place (saveButton, 48, 12);
+    place (fileButton, 52, 12);
     place (undoButton, 50);
     place (redoButton, 50, 12);
     place (rewindButton, 30);
@@ -253,7 +261,7 @@ void MainComponent::resized()
     placeRight (settingsButton, 56, 12);
     placeRight (masterSlider, 84, 2);
     placeRight (masterCaption, 44, 12);
-    placeRight (importButton, 60);
+    placeRight (mixerButton, 60);
     placeRight (addTrackButton, 64);
 
     // Status line
@@ -261,6 +269,8 @@ void MainComponent::resized()
 
     if (pianoRoll.isVisible())
         pianoRoll.setBounds (area.removeFromBottom (juce::jlimit (200, 360, getHeight() / 3)));
+    else if (mixer.isVisible())
+        mixer.setBounds (area.removeFromBottom (juce::jlimit (300, 420, getHeight() / 2)));
 
     // Meters on the right
     auto meters = area.removeFromRight (meterWidth).reduced (8, 10);
@@ -285,7 +295,7 @@ void MainComponent::updateScrollBars()
     hScroll.setCurrentRange (timeline.scrollSeconds, visibleSeconds, juce::dontSendNotification);
 
     const auto visibleHeight = canvas.getHeight() - TimelineState::rulerHeight;
-    const auto contentHeight = juce::jmax ((project.getNumChildren() + 1) * TimelineState::trackHeight,
+    const auto contentHeight = juce::jmax ((model::numTracks (project) + 1) * TimelineState::trackHeight,
                                            timeline.scrollY + visibleHeight);
     vScroll.setRangeLimits (0.0, contentHeight, juce::dontSendNotification);
     vScroll.setCurrentRange (timeline.scrollY, visibleHeight, juce::dontSendNotification);
@@ -313,6 +323,8 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     if (key == juce::KeyPress ('r', 0, 0) || key == juce::KeyPress ('R', 0, 0)) { toggleRecord(); return true; }
     if (key == juce::KeyPress ('k', 0, 0) || key == juce::KeyPress ('K', 0, 0)) { toggleMetronome(); return true; }
     if (key == juce::KeyPress ('c', 0, 0) || key == juce::KeyPress ('C', 0, 0)) { toggleCycle(); return true; }
+    if (key == juce::KeyPress ('x', 0, 0) || key == juce::KeyPress ('X', 0, 0)) { toggleMixer(); return true; }
+    if (key == juce::KeyPress ('e', cmd, 0))                           { exportSong(); return true; }
     if (key == juce::KeyPress::returnKey)                              { returnToStart(); return true; }
     if (key == juce::KeyPress ('z', cmd, 0))                           { undo(); return true; }
     if (key == juce::KeyPress ('z', shiftCmd, 0)
@@ -368,6 +380,7 @@ void MainComponent::setProject (juce::ValueTree newProject, const juce::File& fi
 
     player.setProject (project);
     headers.setProject (project);
+    mixer.setProject (project);
     canvas.setProject (project);
 
     dirty = false;
@@ -442,6 +455,7 @@ void MainComponent::saveProject (std::function<void()> then)
 
     // Plugins keep their own settings; copy them into the project first.
     rack.storePluginStates (project);
+    effectRack.storePluginStates (model::mixerOf (project));
 
     juce::String error;
     if (! model::save (project, projectFile, error))
@@ -528,7 +542,7 @@ void MainComponent::addTrack (const juce::String& kind)
 {
     const bool instrument = kind == model::instrumentKind;
     undoManager.beginNewTransaction ("New track");
-    auto track = model::addTrack (project, (instrument ? "Inst " : "Audio ") + juce::String (project.getNumChildren() + 1),
+    auto track = model::addTrack (project, (instrument ? "Inst " : "Audio ") + juce::String (model::numTracks (project) + 1),
                                   &undoManager, -1, kind);
     timeline.selectedTrackId = track[ids::id].toString();
     timeline.changed();
@@ -537,7 +551,7 @@ void MainComponent::addTrack (const juce::String& kind)
 void MainComponent::addTrack()
 {
     undoManager.beginNewTransaction ("New track");
-    auto track = model::addTrack (project, "Audio " + juce::String (project.getNumChildren() + 1), &undoManager);
+    auto track = model::addTrack (project, "Audio " + juce::String (model::numTracks (project) + 1), &undoManager);
     timeline.selectedTrackId = track[ids::id].toString();
     timeline.changed();
 }
@@ -669,7 +683,7 @@ void MainComponent::beginRecording()
         if (! track.isValid())
         {
             undoManager.beginNewTransaction ("New track");
-            track = model::addTrack (project, "Audio " + juce::String (project.getNumChildren() + 1), &undoManager);
+            track = model::addTrack (project, "Audio " + juce::String (model::numTracks (project) + 1), &undoManager);
             timeline.selectedTrackId = track[ids::id].toString();
             timeline.changed();
         }
@@ -902,6 +916,8 @@ void MainComponent::timerCallback()
     const auto levels = engine.takeLevels();
     inputMeter.push (levels.inL, levels.inR);
     outputMeter.push (levels.outL, levels.outR);
+    mixer.setMasterLevels (levels.outL, levels.outR);
+    mixerButton.setToggleState (mixer.isVisible(), juce::dontSendNotification);
 
     const auto playhead = engine.getPlayheadSeconds();
     positionLabel.setText (formatPosition (playhead), juce::dontSendNotification);
@@ -1032,6 +1048,7 @@ void MainComponent::openPianoRoll (juce::ValueTree region)
     timeline.selectedTrackId = region.getParent()[ids::id].toString();
     timeline.changed();
 
+    mixer.setVisible (false);
     pianoRoll.setVisible (true);
     resized();
     pianoRoll.setRegion (region);
@@ -1179,6 +1196,250 @@ void MainComponent::showPluginScanner()
             safe->appProperties.saveIfNeeded();
             safe->scannerWindow.reset();
         });
+    });
+}
+
+//==============================================================================
+// Mixer and effects
+//==============================================================================
+void MainComponent::showMixer()
+{
+    closePianoRoll();
+    mixer.setVisible (true);
+    resized();
+}
+
+void MainComponent::closeMixer()
+{
+    mixer.setVisible (false);
+    resized();
+    canvas.grabKeyboardFocus();
+}
+
+void MainComponent::toggleMixer()
+{
+    if (mixer.isVisible())
+        closeMixer();
+    else
+        showMixer();
+}
+
+void MainComponent::showEffectMenu (const juce::String& owner, int slot, juce::ValueTree existing, juce::Component& target)
+{
+    // Puts the chosen effect in the slot (replacing what's there), as one undo step.
+    auto place = [this, owner, slot, existing] (std::function<juce::ValueTree (juce::ValueTree chain, int index)> make)
+    {
+        undoManager.beginNewTransaction (existing.isValid() ? "Replace effect" : "Add effect");
+        auto chain = model::chainFor (project, owner);
+        auto index = existing.isValid() ? chain.indexOf (existing) : juce::jmin (slot, chain.getNumChildren());
+
+        if (existing.isValid())
+            model::removeInsert (existing, &undoManager);
+
+        auto insert = make (chain, index);
+
+        // Open its window (plugins need a moment to load).
+        juce::Timer::callAfterDelay (insert[ids::kind].toString() == model::pluginKind ? 600 : 50,
+                                     [safe = juce::Component::SafePointer<MainComponent> (this), insert]
+        {
+            if (safe != nullptr && insert.getParent().isValid())
+                safe->openInsertWindow (insert);
+        });
+    };
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Riff effects");
+
+    for (const auto& info : builtInEffects())
+        menu.addItem (info.name, [this, place, type = info.type]
+        {
+            place ([this, type] (juce::ValueTree chain, int index)
+                   { return model::addBuiltinInsert (chain, type, index, &undoManager); });
+        });
+
+    std::map<juce::String, juce::PopupMenu> byMaker;
+    int numEffects = 0;
+
+    for (const auto& type : rack.getKnownPlugins().getTypes())
+    {
+        if (type.isInstrument)
+            continue;
+
+        ++numEffects;
+        const auto xml = type.createXml()->toString (juce::XmlElement::TextFormat().singleLine());
+        byMaker[type.manufacturerName.isNotEmpty() ? type.manufacturerName : "Other"]
+            .addItem (type.name + "  (" + type.pluginFormatName + ")", [this, place, xml]
+            {
+                place ([this, xml] (juce::ValueTree chain, int index)
+                       { return model::addPluginInsert (chain, xml, index, &undoManager); });
+            });
+    }
+
+    menu.addSeparator();
+
+    if (numEffects > 0)
+    {
+        juce::PopupMenu plugins;
+        for (auto& [maker, sub] : byMaker)
+            plugins.addSubMenu (maker, sub);
+        menu.addSubMenu ("Plugins", plugins);
+    }
+    else
+    {
+        menu.addItem ("No plugins yet. Scan for them first.", false, false, [] {});
+    }
+
+    menu.addItem ("Scan for plugins...", [this] { showPluginScanner(); });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+}
+
+void MainComponent::openInsertWindow (const juce::ValueTree& insert)
+{
+    const auto id = insert[ids::id].toString();
+
+    if (auto it = editorWindows.find (id); it != editorWindows.end())
+    {
+        it->second->toFront (true);
+        return;
+    }
+
+    auto closer = [this, id]
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this), id]
+        {
+            if (safe != nullptr)
+                safe->editorWindows.erase (id);
+        });
+    };
+
+    // Title: "<track name>: <effect>" (or "Master: ...").
+    const auto owner = insert.getParent()[ids::owner].toString();
+    const auto track = model::findById (project, owner);
+    const auto where = track.isValid() ? track[ids::name].toString() : juce::String ("Master");
+
+    if (insert[ids::kind].toString() == model::pluginKind)
+    {
+        auto* plugin = effectRack.getPlugin (id);
+        if (plugin == nullptr)
+        {
+            showError ("Plugin not loaded yet", "The plugin is still loading, or it failed to load. Try again in a moment.");
+            return;
+        }
+
+        if (auto* editor = plugin->createEditorAndMakeActive())
+            editorWindows[id] = std::make_unique<EditorWindow> (where + ": " + plugin->getName(), editor,
+                                                                editor->isResizable(), closer);
+        else
+            showError ("No window", plugin->getName() + " doesn't have its own window.");
+        return;
+    }
+
+    const auto* info = findBuiltInEffect (insert[ids::effect].toString());
+    editorWindows[id] = std::make_unique<EditorWindow> (where + ": " + (info != nullptr ? info->name : juce::String ("Effect")),
+                                                        new EffectPanel (insert, undoManager), false, closer);
+}
+
+//==============================================================================
+// File menu and export
+//==============================================================================
+void MainComponent::showFileMenu()
+{
+    juce::PopupMenu menu;
+    menu.addItem ("New", [this] { newProject(); });
+    menu.addItem ("Open...", [this] { openProject(); });
+    menu.addItem ("Save", [this] { saveProject(); });
+    menu.addItem ("Save As...", [this] { saveProjectAs(); });
+    menu.addSeparator();
+    menu.addItem ("Import Audio...", [this] { importAudio(); });
+    menu.addItem ("Export Song as WAV...", [this] { exportSong(); });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&fileButton));
+}
+
+namespace
+{
+    /** Renders the song on a background thread with a progress window. */
+    class ExportJob final : public juce::ThreadWithProgressWindow
+    {
+    public:
+        ExportJob (AudioEngine& e, juce::File f, double s, double en, std::function<void (const juce::String&)> done)
+            : ThreadWithProgressWindow ("Exporting " + f.getFileName(), true, true),
+              engine (e), file (std::move (f)), start (s), end (en), onDone (std::move (done)) {}
+
+        void run() override
+        {
+            error = engine.renderOffline (file, start, end, 24, [this] (double p)
+            {
+                setProgress (p);
+                return ! threadShouldExit();
+            });
+        }
+
+        void threadComplete (bool userPressedCancel) override
+        {
+            engine.endOfflineRender();
+            onDone (userPressedCancel ? juce::String ("cancelled") : error);
+            delete this;
+        }
+
+    private:
+        AudioEngine& engine;
+        juce::File file;
+        double start, end;
+        std::function<void (const juce::String&)> onDone;
+        juce::String error;
+    };
+}
+
+void MainComponent::exportSong()
+{
+    if (engine.isRecording())
+        return;
+
+    // With Cycle on, export the cycle; otherwise the whole song plus two seconds for tails.
+    const bool cycle = project[ids::cycleEnabled];
+    const double start = cycle ? (double) project[ids::cycleStart] : 0.0;
+    const double end = cycle ? (double) project[ids::cycleEnd] : model::projectEnd (project) + 2.0;
+
+    if (! cycle && model::projectEnd (project) <= 0.0)
+    {
+        showError ("Nothing to export", "Record or import something first.");
+        return;
+    }
+
+    const auto folder = projectFile != juce::File() ? projectFile.getParentDirectory()
+                                                    : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+    fileChooser = std::make_unique<juce::FileChooser> ("Export song", folder.getChildFile (project[ids::name].toString() + ".wav"), "*.wav");
+
+    fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
+                              [this, start, end] (const juce::FileChooser& chooser)
+    {
+        auto file = chooser.getResult();
+        if (file == juce::File())
+            return;
+
+        file = file.withFileExtension (".wav");
+        engine.stop();
+        engine.beginOfflineRender();
+
+        auto* job = new ExportJob (engine, file, start, end, [safe = juce::Component::SafePointer<MainComponent> (this), file] (const juce::String& error)
+        {
+            if (safe == nullptr)
+                return;
+
+            if (error.isEmpty())
+            {
+                safe->messageBox = juce::AlertWindow::showScopedAsync (
+                    juce::MessageBoxOptions::makeOptionsOkCancel (juce::MessageBoxIconType::InfoIcon, "Export finished",
+                                                                  "Saved " + file.getFileName() + ".", "Show in Finder", "OK", safe.getComponent()),
+                    [file] (int result) { if (result == 1) file.revealToUser(); });
+            }
+            else if (error != "cancelled")
+            {
+                safe->showError ("Export failed", error);
+            }
+        });
+
+        job->launchThread();
     });
 }
 

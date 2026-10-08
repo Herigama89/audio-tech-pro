@@ -81,7 +81,8 @@ namespace
             tree.setProperty (prop.name, value, nullptr);
         }
 
-        if ((tree.hasType (ids::TRACK) || tree.hasType (ids::REGION) || tree.hasType (ids::TAKE)) && ! tree.hasProperty (ids::id))
+        if ((tree.hasType (ids::TRACK) || tree.hasType (ids::REGION) || tree.hasType (ids::TAKE) || tree.hasType (ids::INSERT))
+            && ! tree.hasProperty (ids::id))
             tree.setProperty (ids::id, newId(), nullptr);
 
         if (auto* children = obj->getProperty ("children").getArray())
@@ -122,6 +123,7 @@ juce::ValueTree createProject (const juce::String& name)
     project.setProperty (ids::cycleEnabled, false, nullptr);
     project.setProperty (ids::cycleStart, 0.0, nullptr);
     project.setProperty (ids::cycleEnd, 8.0, nullptr); // 4 bars at 120 BPM
+    mixerOf (project);
     return project;
 }
 
@@ -130,7 +132,7 @@ juce::ValueTree addTrack (juce::ValueTree project, const juce::String& name, juc
 {
     jassert (project.hasType (ids::PROJECT));
 
-    const auto colour = palette[(size_t) project.getNumChildren() % std::size (palette)];
+    const auto colour = palette[(size_t) numTracks (project) % std::size (palette)];
 
     juce::ValueTree track { ids::TRACK };
     track.setProperty (ids::id, newId(), nullptr);
@@ -159,7 +161,9 @@ juce::ValueTree addTrack (juce::ValueTree project, const juce::String& name, juc
         track.setProperty (ids::synthGain, 0.5, nullptr);
     }
 
-    project.addChild (track, index, um);
+    // Tracks always come before the MIXER node.
+    const auto count = numTracks (project);
+    project.addChild (track, (index < 0 || index > count) ? count : index, um);
     return track;
 }
 
@@ -505,6 +509,77 @@ void deleteTrack (juce::ValueTree track, juce::UndoManager* um)
 }
 
 //==============================================================================
+//==============================================================================
+int numTracks (const juce::ValueTree& project)
+{
+    int n = 0;
+    for (const auto& child : project)
+        if (child.hasType (ids::TRACK))
+            ++n;
+    return n;
+}
+
+juce::ValueTree mixerOf (juce::ValueTree project)
+{
+    auto mixer = project.getChildWithName (ids::MIXER);
+
+    if (! mixer.isValid())
+    {
+        mixer = juce::ValueTree (ids::MIXER);
+        project.appendChild (mixer, nullptr);
+    }
+
+    return mixer;
+}
+
+juce::ValueTree findChain (const juce::ValueTree& project, const juce::String& owner)
+{
+    const auto mixer = project.getChildWithName (ids::MIXER);
+    return mixer.getChildWithProperty (ids::owner, owner);
+}
+
+juce::ValueTree chainFor (juce::ValueTree project, const juce::String& owner)
+{
+    auto chain = findChain (project, owner);
+
+    if (! chain.isValid())
+    {
+        chain = juce::ValueTree (ids::CHAIN);
+        chain.setProperty (ids::owner, owner, nullptr);
+        mixerOf (project).appendChild (chain, nullptr);
+    }
+
+    return chain;
+}
+
+juce::ValueTree addBuiltinInsert (juce::ValueTree chain, const juce::String& effectType, int index, juce::UndoManager* um)
+{
+    juce::ValueTree insert { ids::INSERT };
+    insert.setProperty (ids::id, newId(), nullptr);
+    insert.setProperty (ids::kind, builtinKind, nullptr);
+    insert.setProperty (ids::effect, effectType, nullptr);
+    insert.setProperty (ids::bypass, false, nullptr);
+    chain.addChild (insert, index, um);
+    return insert;
+}
+
+juce::ValueTree addPluginInsert (juce::ValueTree chain, const juce::String& descriptionXml, int index, juce::UndoManager* um)
+{
+    juce::ValueTree insert { ids::INSERT };
+    insert.setProperty (ids::id, newId(), nullptr);
+    insert.setProperty (ids::kind, pluginKind, nullptr);
+    insert.setProperty (ids::pluginDescription, descriptionXml, nullptr);
+    insert.setProperty (ids::bypass, false, nullptr);
+    chain.addChild (insert, index, um);
+    return insert;
+}
+
+void removeInsert (juce::ValueTree insert, juce::UndoManager* um)
+{
+    if (auto parent = insert.getParent(); parent.isValid())
+        parent.removeChild (insert, um);
+}
+
 juce::ValueTree findById (const juce::ValueTree& project, const juce::String& id)
 {
     if (id.isEmpty())
@@ -512,6 +587,9 @@ juce::ValueTree findById (const juce::ValueTree& project, const juce::String& id
 
     for (const auto& track : project)
     {
+        if (! track.hasType (ids::TRACK))
+            continue;
+
         if (track[ids::id].toString() == id)
             return track;
 
@@ -537,7 +615,8 @@ double projectEnd (const juce::ValueTree& project)
 {
     double end = 0.0;
     for (const auto& track : project)
-        for (const auto& region : track)
+        if (track.hasType (ids::TRACK))
+            for (const auto& region : track)
             end = juce::jmax (end, regionEnd (region));
     return end;
 }
@@ -600,6 +679,17 @@ juce::ValueTree fromJson (const juce::String& json, const juce::File& projectFil
     {
         error = "The project file has no project in it.";
         return {};
+    }
+
+    if (tree.isValid())
+    {
+        // Older files have no mixer; and the mixer must come after every track.
+        auto mixer = tree.getChildWithName (ids::MIXER);
+        if (mixer.isValid())
+            tree.removeChild (mixer, nullptr);
+        else
+            mixer = juce::ValueTree (ids::MIXER);
+        tree.appendChild (mixer, nullptr);
     }
 
     return tree;

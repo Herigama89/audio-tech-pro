@@ -12,6 +12,8 @@
 #include "ui/LevelMeter.h"
 #include "ui/PianoRoll.h"
 #include "ui/InstrumentWindows.h"
+#include "ui/Mixer.h"
+#include "engine/EffectRack.h"
 
 namespace riff
 {
@@ -75,6 +77,13 @@ private:
     void openPianoRoll (juce::ValueTree region);
     void closePianoRoll();
     void updateLiveMidiTrack();
+    void showFileMenu();
+    void exportSong();
+    void showMixer();
+    void closeMixer();
+    void toggleMixer();
+    void showEffectMenu (const juce::String& owner, int slot, juce::ValueTree existing, juce::Component& target);
+    void openInsertWindow (const juce::ValueTree& insert);
     void createMidiRegionFromTake (juce::ValueTree track, const AudioEngine::FinishedTake& take, juce::ValueTree& last);
     juce::File recordingFolder() const;
     juce::File nextTakeFile (const juce::ValueTree& track) const;
@@ -101,7 +110,8 @@ private:
     AudioEngine engine;
     AudioFileCache fileCache { engine.getFormatManager() };
     InstrumentRack rack;
-    ProjectPlayer player { engine, fileCache, &rack };
+    EffectRack effectRack { rack.getFormatManager() };
+    ProjectPlayer player { engine, fileCache, &rack, &effectRack };
     juce::UndoManager undoManager;
     juce::ValueTree project;
     juce::File projectFile;
@@ -112,11 +122,11 @@ private:
     TimelineState timeline;
     WaveformCache waveforms { engine.getFormatManager() };
 
-    juce::TextButton newButton { "New" }, openButton { "Open" }, saveButton { "Save" };
+    juce::TextButton fileButton { "File" }, mixerButton { "Mixer" };
     juce::TextButton undoButton { "Undo" }, redoButton { "Redo" };
     juce::TextButton rewindButton { "|<" }, playButton { "Play" }, recordButton { "Rec" }, clickButton { "Click" };
     juce::TextButton cycleButton { "Cycle" }, countInButton { "Count" };
-    juce::TextButton addTrackButton { "+ Track" }, importButton { "Import" }, settingsButton { "Audio" };
+    juce::TextButton addTrackButton { "+ Track" }, settingsButton { "Audio" };
     juce::Label positionLabel, tempoLabel, tempoCaption { {}, "BPM" }, masterCaption { {}, "Master" }, statusLabel;
     juce::Slider masterSlider;
 
@@ -125,6 +135,7 @@ private:
     juce::ScrollBar hScroll { false }, vScroll { true };
     LevelMeter inputMeter { "IN" }, outputMeter { "OUT" };
     PianoRoll pianoRoll { undoManager, engine };
+    MixerPanel mixer { undoManager, engine, player };
 
     juce::TooltipWindow tooltips { this, 600 };
     std::unique_ptr<juce::FileChooser> fileChooser;

@@ -10,6 +10,8 @@ instruments) is well under way. Riff has:
 - a count-in, a metronome, and input monitoring
 - instrument tracks with a built-in synth or a VST3 / Audio Unit instrument plugin
 - MIDI regions, a piano roll, and MIDI keyboard playing and recording
+- a mixer with insert effects (built-in, VST3 and Audio Unit) on every track and the master
+- export of the song to WAV
 
 All of it runs on a real-time engine that never blocks the audio thread.
 
@@ -62,6 +64,7 @@ The tests cover:
 - **Model:** tracks and regions, undo and redo, move, split, trim, and the JSON round trip.
 - **Engine:** sample-accurate region placement, source offsets, mute, solo, volume, pan, resampling alignment, and swapping graphs mid-playback.
 - **Recording:** WAV output, punch-in position, input monitoring, the metronome, and latency compensation.
+- **Mixer:** insert chains in the project (order, undo, save, older files), every built-in effect's behaviour, track and master chains in the engine, bypass, track meters, and exporting (length, contents, no click, cancel).
 - **MIDI:** notes, splitting, quantize, the JSON round trip, turning recorded events into notes, synth timing and release, sample-accurate note playback, stop releasing notes, live MIDI routing, and MIDI recording positions.
 - **Cycle:** sample-exact wrap, count-in clicks, splitting loop recordings into passes, take folders (switch, split, flatten, save), and the latency estimator, including a full loopback through a simulated cable.
 
@@ -77,6 +80,11 @@ The tests cover:
 | Loop recording | Turn Cycle on and record. Each pass becomes a take. Click a take folder's name bar (or right-click it, then **Takes**) to switch takes, or choose **Keep only this take**. |
 | Count-in | **Count** gives one bar of click before recording starts. |
 | Latency calibration | **Audio > Calibrate recording latency...** Connect a cable from output 1 to an input and click **Measure**. Riff stores the difference from the driver's reported latency and applies it to every recording. |
+| File | **File** menu: New, Open, Save, Save As, Import Audio (Cmd+I), Export Song as WAV (Cmd+E). The old shortcuts still work. |
+| Mixer | **Mixer** button or **X**. Each strip has a name, 6 effect slots, pan, fader, meter, M and S; the master strip is on the right. |
+| Add an effect | Click an empty slot in the mixer, then pick a Riff effect (EQ, Compressor, Delay, Reverb, Limiter) or one of your plugins under **Plugins**. Effects run top to bottom, before the fader. |
+| Change an effect | Click a filled slot to open its window. Right-click it to **Bypass**, **Replace...** or **Remove**. |
+| Export | **File > Export Song as WAV...** exports the whole song plus 2 seconds for reverb tails, or just the cycle range when Cycle is on. The file is 24-bit at your interface's sample rate; the metronome is never included. |
 | New instrument track | **+ Track > Instrument track (MIDI)**. It starts with Riff Synth. |
 | Choose an instrument | Click the instrument button on the track (it shows "Riff Synth" at first). Pick **Riff Synth**, or a plugin under **Plugins**. **Show plugin window** / **Show synth controls** opens its window. |
 | Find your plugins | Instrument button > **Scan for plugins...**, then **Options > Scan for new or updated VST3 / AudioUnit plug-ins**. Run this once; the list is remembered. |
@@ -161,7 +169,17 @@ Tests/                    Catch2 unit tests
 - [ ] Velocity editing, pitch bend and controllers in the piano roll
 - [ ] A sampler instrument (also used by the drum machine in Phase 4)
 
+## Phase 3: mixer and effects
+
+- [x] Mixer with a strip per track and a master strip: insert slots, pan, fader, post-fader meters, mute, solo
+- [x] Built-in effects: EQ (low shelf, mid peak, high shelf), compressor, delay, reverb, limiter
+- [x] VST3 and Audio Unit effects in any slot, with their windows and saved settings
+- [x] Export the song (or the cycle range) to a 24-bit WAV, faster than real time, with progress and cancel
+- [ ] CLAP instruments and effects
+- [ ] Aux buses and sends
+- [ ] Automation of volume, pan and effect parameters
+- [ ] Plugin delay compensation
+
 ## Later phases
 
-- **Phase 3:** Mixer and effects. Channel strips with plugin inserts (VST3 / AU / CLAP), sends, buses, automation, and delay compensation.
 - **Phase 4:** Drums and loops. Step sequencer and a tempo-synced loop browser.

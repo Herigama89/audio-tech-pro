@@ -4,8 +4,8 @@
 namespace riff
 {
 
-ProjectPlayer::ProjectPlayer (AudioEngine& e, AudioFileCache& c, InstrumentRack* r)
-    : engine (e), cache (c), rack (r)
+ProjectPlayer::ProjectPlayer (AudioEngine& e, AudioFileCache& c, InstrumentRack* r, EffectRack* fx)
+    : engine (e), cache (c), rack (r), effects (fx)
 {
     engine.getDeviceManager().addChangeListener (this);
 }
@@ -43,6 +43,34 @@ void ProjectPlayer::setLiveMidiTrack (const juce::String& trackId)
         liveMidiTrackId = trackId;
         triggerAsyncUpdate();
     }
+}
+
+int ProjectPlayer::slotOf (const juce::String& trackId) const
+{
+    auto it = slots.find (trackId);
+    return it != slots.end() ? it->second : -1;
+}
+
+std::vector<std::shared_ptr<Effect>> ProjectPlayer::buildChain (const juce::String& owner, double sampleRate,
+                                                                juce::StringArray& insertIds)
+{
+    std::vector<std::shared_ptr<Effect>> chain;
+
+    if (effects == nullptr)
+        return chain;
+
+    for (const auto& insert : model::findChain (project, owner))
+    {
+        insertIds.add (insert[ids::id].toString());
+
+        if ((bool) insert[ids::bypass])
+            continue;
+
+        if (auto effect = effects->effectFor (insert, sampleRate, AudioEngine::maxChunkSize))
+            chain.push_back (std::move (effect));
+    }
+
+    return chain;
 }
 
 int ProjectPlayer::slotFor (const juce::String& trackId)
@@ -86,6 +114,9 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
     graph->cycleStart = toSamples (project.getProperty (ids::cycleStart, 0.0));
     graph->cycleEnd = toSamples (project.getProperty (ids::cycleEnd, 0.0));
 
+    juce::StringArray insertIds;
+    graph->masterInserts = buildChain (model::masterOwner, sampleRate, insertIds);
+
     bool anySolo = false;
     for (const auto& track : project)
         anySolo = anySolo || (bool) track[ids::solo];
@@ -108,6 +139,7 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         if (t.slot < 0)
             continue;
 
+        t.inserts = buildChain (track[ids::id].toString(), sampleRate, insertIds);
         t.isInstrument = model::isInstrumentTrack (track);
         t.receivesLiveMidi = t.isInstrument && track[ids::id].toString() == liveMidiTrackId;
 
@@ -173,6 +205,9 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
 
         graph->tracks.push_back (std::move (t));
     }
+
+    if (effects != nullptr)
+        effects->removeAllExcept (insertIds);
 
     if (rack != nullptr)
     {
