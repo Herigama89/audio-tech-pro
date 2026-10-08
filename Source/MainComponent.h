@@ -14,6 +14,7 @@
 #include "ui/InstrumentWindows.h"
 #include "ui/Mixer.h"
 #include "engine/EffectRack.h"
+#include "ui/ConsoleLook.h"
 
 namespace riff
 {
@@ -109,6 +110,8 @@ private:
     void refreshProjectControls();
     juce::String deviceStatusText() const;
     juce::String formatPosition (double seconds) const;
+    juce::String formatClock (double seconds) const;
+    juce::Rectangle<int> lcdBounds() const;
     void showAudioSettings();
     void showKeyCommands();
     void applyKeyPreset (const juce::String& preset);
@@ -151,12 +154,26 @@ private:
     TimelineState timeline;
     WaveformCache waveforms { engine.getFormatManager() };
 
-    juce::TextButton fileButton { "File" }, mixerButton { "Mixer" };
+    juce::TextButton fileButton { "File" };
     juce::TextButton undoButton { "Undo" }, redoButton { "Redo" };
-    juce::TextButton rewindButton { "|<" }, playButton { "Play" }, recordButton { "Rec" }, clickButton { "Click" };
-    juce::TextButton cycleButton { "Cycle" }, countInButton { "Count" };
     juce::TextButton addTrackButton { "+ Track" }, settingsButton { "Audio" };
-    juce::Label positionLabel, tempoLabel, tempoCaption { {}, "BPM" }, masterCaption { {}, "Master" }, statusLabel;
+
+    // Transport keys (cream, with icons; their captions are painted underneath)
+    IconButton rewindButton    { "Start",   IconButton::Icon::toStart };
+    IconButton backBarButton   { "Rewind",  IconButton::Icon::rewind };
+    IconButton forwardButton   { "Forward", IconButton::Icon::forward };
+    IconButton stopButton      { "Stop",    IconButton::Icon::stop };
+    IconButton playButton      { "Play",    IconButton::Icon::play,   juce::Colour (0xff3d9f4f) };
+    IconButton recordButton    { "Rec",     IconButton::Icon::record, juce::Colour (0xffd8352d) };
+    IconButton cycleButton     { "Cycle",   IconButton::Icon::cycle,  juce::Colour (0xffe9b949) };
+    IconButton countInButton   { "Count",   IconButton::Icon::countIn, juce::Colour (0xff5a9cff) };
+    IconButton clickButton     { "Click",   IconButton::Icon::metronome, juce::Colour (0xff5a9cff) };
+    IconButton mixerButton     { "Mixer",   IconButton::Icon::mixer,  juce::Colour (0xff5a9cff) };
+    IconButton editorButton    { "Editor",  IconButton::Icon::pianoRoll, juce::Colour (0xff5a9cff) };
+    IconButton keysButton      { "Keys",    IconButton::Icon::keys };
+
+    juce::Label positionLabel, clockLabel, tempoLabel, tempoCaption { {}, "BPM" },
+                masterCaption { {}, "Master" }, statusLabel;
     juce::Slider masterSlider;
 
     TrackHeaderList headers { undoManager, timeline };

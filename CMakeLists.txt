@@ -74,6 +74,7 @@ set(RIFF_UI_SOURCES
     Source/MainComponent.cpp
     Source/MainCommands.cpp
     Source/ui/Theme.cpp
+    Source/ui/ConsoleLook.cpp
     Source/ui/Commands.cpp
     Source/ui/KeyCommands.cpp
     Source/ui/TrackHeaders.cpp

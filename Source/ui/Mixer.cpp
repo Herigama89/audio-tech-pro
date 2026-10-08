@@ -2,6 +2,8 @@
 #include "Theme.h"
 #include "../model/Project.h"
 #include "../engine/BuiltInEffects.h"
+#include "../engine/MasterBusCompressor.h"
+#include "../engine/ConsoleChannel.h"
 
 namespace riff
 {
@@ -35,13 +37,31 @@ namespace
 ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     : owner (o), project (p), track (t)
 {
-    nameLabel.setJustificationType (juce::Justification::centred);
-    nameLabel.setFont (juce::FontOptions (12.5f, juce::Font::bold));
-    addAndMakeVisible (nameLabel);
+    // Console section: EQ (cream, blue, cream, red caps as on the classic desks), Dynamics, IN
+    if (! isMaster())
+    {
+        setupConsoleKnob (hfKnob,  ids::consoleHF,  look::Knob::cream, -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "HF 8 kHz", " dB");
+        setupConsoleKnob (hmfKnob, ids::consoleHMF, look::Knob::blue,  -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "HMF 2.5 kHz", " dB");
+        setupConsoleKnob (lmfKnob, ids::consoleLMF, look::Knob::cream, -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "LMF 400 Hz", " dB");
+        setupConsoleKnob (lfKnob,  ids::consoleLF,  look::Knob::red,   -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "LF 100 Hz", " dB");
+        setupConsoleKnob (dynKnob, ids::consoleDynamics, look::Knob::black, 0.0, ConsoleChannel::maxDynamics, "Dynamics", "");
+
+        look::key (consoleInButton, look::Key::console);
+        consoleInButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xfff0b43c));
+        consoleInButton.setWantsKeyboardFocus (false);
+        consoleInButton.setTooltip ("Switch the strip's EQ and Dynamics in or out");
+        consoleInButton.onClick = [this]
+        {
+            owner.getUndoManager().beginNewTransaction ("Console in");
+            track.setProperty (ids::consoleIn, ! (bool) track.getProperty (ids::consoleIn, true), &owner.getUndoManager());
+        };
+        addAndMakeVisible (consoleInButton);
+    }
 
     for (int i = 0; i < numSlots; ++i)
     {
         auto* b = slots.add (new juce::TextButton());
+        look::key (*b, look::Key::slot);
         b->setWantsKeyboardFocus (false);
         b->setTooltip ("Click to add an effect, or open this one. Right-click for bypass and remove.");
         b->addMouseListener (this, false);
@@ -51,6 +71,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     for (int i = 0; i < numSends; ++i)
     {
         auto* b = sendButtons.add (new juce::TextButton());
+        look::key (*b, look::Key::slot);
         b->setWantsKeyboardFocus (false);
         b->setTooltip ("Send to an aux bus (e.g. a shared reverb). Click to choose the bus.");
         b->onClick = [this, i] { showSendMenu (i); };
@@ -58,8 +79,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         b->setVisible (hasSends());
 
         auto* s = sendLevels.add (new juce::Slider());
-        s->setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-        s->setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+        look::knob (*s, look::Knob::black, false);
         s->setRange (minDb, 6.0, 0.1);
         s->setSkewFactorFromMidPoint (-12.0);
         s->setDoubleClickReturnValue (true, 0.0);
@@ -76,9 +96,15 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         s->setVisible (hasSends());
     }
 
-    panKnob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-    panKnob.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+    look::knob (panKnob, look::Knob::cream);
+    look::onLight (panKnob);
     panKnob.setRange (-1.0, 1.0, 0.01);
+    panKnob.setPopupDisplayEnabled (true, true, nullptr);
+    panKnob.textFromValueFunction = [] (double value)
+    {
+        const auto amount = juce::roundToInt (std::abs (value) * 64.0);
+        return amount == 0 ? juce::String ("C") : (value < 0 ? "L" : "R") + juce::String (amount);
+    };
     panKnob.setDoubleClickReturnValue (true, 0.0);
     panKnob.setScrollWheelEnabled (false);
     panKnob.onDragStart = [this] { owner.getUndoManager().beginNewTransaction ("Pan"); };
@@ -87,7 +113,8 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     panKnob.setVisible (! isMaster());
 
     fader.setSliderStyle (juce::Slider::LinearVertical);
-    fader.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+    look::fader (fader);
+    look::onLight (fader);
     fader.setRange (minDb, 6.0, 0.1);
     fader.setSkewFactorFromMidPoint (-12.0);
     fader.setDoubleClickReturnValue (true, 0.0);
@@ -105,12 +132,15 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     addAndMakeVisible (meter);
 
     dbLabel.setJustificationType (juce::Justification::centred);
-    dbLabel.setFont (juce::FontOptions (11.0f));
-    dbLabel.setColour (juce::Label::textColourId, theme::dimText);
+    dbLabel.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 11.0f, juce::Font::plain));
+    dbLabel.setColour (juce::Label::textColourId, theme::lcdText);
+    dbLabel.setColour (juce::Label::backgroundColourId, theme::lcd);
+    dbLabel.setColour (juce::Label::outlineColourId, juce::Colours::black);
     addAndMakeVisible (dbLabel);
 
     for (auto* b : { &muteButton, &soloButton })
     {
+        look::key (*b, look::Key::console);
         b->setWantsKeyboardFocus (false);
         addAndMakeVisible (b);
         b->setVisible (! isMaster());
@@ -129,6 +159,25 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     };
 
     refresh();
+}
+
+void ChannelStrip::setupConsoleKnob (juce::Slider& knob, const juce::Identifier& property, look::Knob cap,
+                                     double min, double max, const juce::String& name, const juce::String& suffix)
+{
+    look::knob (knob, cap);
+    look::onLight (knob);
+    knob.setRange (min, max, 0.1);
+    knob.setDoubleClickReturnValue (true, 0.0);
+    knob.setScrollWheelEnabled (false);
+    knob.setPopupDisplayEnabled (true, true, nullptr);
+    knob.setTooltip (name);
+    knob.textFromValueFunction = [name, suffix] (double v)
+    {
+        return name + "  " + (v > 0.05 && suffix.isNotEmpty() ? "+" : "") + juce::String (v, 1) + suffix;
+    };
+    knob.onDragStart = [this, name] { owner.getUndoManager().beginNewTransaction (name); };
+    knob.onValueChange = [this, &knob, property] { track.setProperty (property, knob.getValue(), &owner.getUndoManager()); };
+    addAndMakeVisible (knob);
 }
 
 juce::String ChannelStrip::getOwnerId() const
@@ -212,7 +261,15 @@ void ChannelStrip::showSendMenu (int index)
 
 void ChannelStrip::refresh()
 {
-    nameLabel.setText (isMaster() ? juce::String ("Master") : track[ids::name].toString(), juce::dontSendNotification);
+    if (! isMaster())
+    {
+        hfKnob.setValue (track.getProperty (ids::consoleHF, 0.0), juce::dontSendNotification);
+        hmfKnob.setValue (track.getProperty (ids::consoleHMF, 0.0), juce::dontSendNotification);
+        lmfKnob.setValue (track.getProperty (ids::consoleLMF, 0.0), juce::dontSendNotification);
+        lfKnob.setValue (track.getProperty (ids::consoleLF, 0.0), juce::dontSendNotification);
+        dynKnob.setValue (track.getProperty (ids::consoleDynamics, 0.0), juce::dontSendNotification);
+        consoleInButton.setToggleState ((bool) track.getProperty (ids::consoleIn, true), juce::dontSendNotification);
+    }
 
     const auto gain = isMaster() ? (double) project.getProperty (ids::masterGain, 0.8)
                                  : (double) track.getProperty (ids::volume, 1.0);
@@ -234,6 +291,7 @@ void ChannelStrip::refresh()
         sendButtons[i]->setButtonText (bus.isValid() ? (bus[ids::name].toString() + ((bool) send[ids::pre] ? " (pre)" : ""))
                                                      : juce::String ("Send"));
         sendButtons[i]->setColour (juce::TextButton::textColourOffId, bus.isValid() ? theme::text : theme::dimText);
+        sendButtons[i]->setColour (juce::TextButton::buttonColourId, bus.isValid() ? juce::Colour (0xff3a4a3f) : theme::slotDark);
         sendLevels[i]->setEnabled (bus.isValid());
         sendLevels[i]->setValue (gainToDb (send.getProperty (ids::level, 0.0)), juce::dontSendNotification);
     }
@@ -247,13 +305,13 @@ void ChannelStrip::refresh()
         {
             const bool off = insert[ids::bypass];
             b->setButtonText (insertName (insert));
-            b->setColour (juce::TextButton::buttonColourId, off ? theme::panel : theme::selection.brighter (0.15f));
+            b->setColour (juce::TextButton::buttonColourId, off ? theme::slotDark : juce::Colour (0xff35466e));
             b->setColour (juce::TextButton::textColourOffId, off ? theme::dimText : theme::text);
         }
         else
         {
             b->setButtonText ({});
-            b->setColour (juce::TextButton::buttonColourId, theme::panel.darker (0.2f));
+            b->setColour (juce::TextButton::buttonColourId, theme::slotDark);
             b->setColour (juce::TextButton::textColourOffId, theme::dimText);
         }
     }
@@ -311,80 +369,315 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
 
 void ChannelStrip::paint (juce::Graphics& g)
 {
-    g.fillAll (isMaster() ? theme::toolbar : theme::panel);
+    const auto bounds = getLocalBounds();
 
-    const auto colour = isMaster() ? theme::text : model::trackColour (track);
-    g.setColour (colour);
-    g.fillRect (0, 0, getWidth(), 3);
+    // Console metal: light grey with a soft vertical sheen
+    g.setGradientFill (juce::ColourGradient (theme::console.brighter (0.06f), 0.0f, 0.0f,
+                                             theme::consoleShade, (float) getWidth(), 0.0f, false));
+    g.fillRect (bounds);
 
-    g.setColour (theme::background);
+    // Section dividers and edges
+    g.setColour (theme::consoleDark.withAlpha (0.6f));
+    g.fillRect (0, consoleHeight + 4, getWidth(), 1);
+    g.setColour (juce::Colours::white.withAlpha (0.5f));
+    g.fillRect (0, consoleHeight + 5, getWidth(), 1);
+    g.fillRect (0, 0, 1, getHeight());
+    g.setColour (theme::consoleDark);
     g.fillRect (getWidth() - 1, 0, 1, getHeight());
+
+    g.setColour (theme::ink);
+    if (isMaster())
+    {
+        g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        g.drawText ("STEREO", juce::Rectangle<int> (0, 40, getWidth(), 20), juce::Justification::centred, false);
+        g.drawText ("OUT", juce::Rectangle<int> (0, 60, getWidth(), 20), juce::Justification::centred, false);
+    }
+    else
+    {
+        // Engraved captions under the console knobs
+        g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
+        auto caption = [&g] (const juce::Component& knob, const juce::String& text)
+        {
+            g.drawText (text, knob.getBounds().translated (0, knob.getHeight() - 3).withHeight (11).expanded (6, 0),
+                        juce::Justification::centred, false);
+        };
+        caption (hfKnob, "HF");
+        caption (hmfKnob, "HMF");
+        caption (lmfKnob, "LMF");
+        caption (lfKnob, "LF");
+        caption (dynKnob, "DYN");
+        caption (panKnob, "PAN");
+
+        g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+        g.drawText ("EQ", juce::Rectangle<int> (8, 4, 30, 14), juce::Justification::centredLeft, false);
+    }
+
+    // Name plate in the track's colour
+    const auto plate = bounds.withTop (bounds.getBottom() - 24).reduced (3, 2).toFloat();
+    const auto plateColour = isMaster() ? theme::toolbar : model::trackColour (track).withMultipliedSaturation (0.85f);
+    g.setColour (plateColour);
+    g.fillRoundedRectangle (plate, 2.0f);
+    g.setColour (juce::Colours::black.withAlpha (0.4f));
+    g.drawRoundedRectangle (plate, 2.0f, 1.0f);
+
+    const auto name = isMaster() ? juce::String ("Master") : track[ids::name].toString();
+    g.setColour (plateColour.getPerceivedBrightness() > 0.55f ? theme::ink : juce::Colours::white);
+    g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
+    g.drawFittedText (name, plate.reduced (3.0f, 0.0f).toNearestInt(), juce::Justification::centred, 1, 0.8f);
 }
 
 void ChannelStrip::resized()
 {
-    auto area = getLocalBounds().reduced (5, 4).withTrimmedTop (2);
+    auto area = getLocalBounds().reduced (5, 0);
 
-    nameLabel.setBounds (area.removeFromTop (20));
-    area.removeFromTop (2);
+    // Console section
+    auto console = area.removeFromTop (consoleHeight).withTrimmedTop (4);
+    if (! isMaster())
+    {
+        consoleInButton.setBounds (console.getRight() - 30, console.getY(), 30, 15);
+        console.removeFromTop (16);
+
+        auto grid = console.removeFromTop (88);
+        auto top = grid.removeFromTop (44), bottom = grid;
+        const auto knobSize = 36;
+        hfKnob.setBounds (top.removeFromLeft (top.getWidth() / 2).withSizeKeepingCentre (knobSize, knobSize).translated (0, -4));
+        hmfKnob.setBounds (top.withSizeKeepingCentre (knobSize, knobSize).translated (0, -4));
+        lmfKnob.setBounds (bottom.removeFromLeft (bottom.getWidth() / 2).withSizeKeepingCentre (knobSize, knobSize).translated (0, -4));
+        lfKnob.setBounds (bottom.withSizeKeepingCentre (knobSize, knobSize).translated (0, -4));
+
+        auto row = console.removeFromTop (44);
+        dynKnob.setBounds (row.removeFromLeft (row.getWidth() / 2).withSizeKeepingCentre (knobSize, knobSize).translated (0, -4));
+        panKnob.setBounds (row.withSizeKeepingCentre (knobSize, knobSize).translated (0, -4));
+    }
+
+    area.removeFromTop (8);
 
     for (auto* b : slots)
     {
-        b->setBounds (area.removeFromTop (20));
+        b->setBounds (area.removeFromTop (16));
         area.removeFromTop (2);
     }
 
-    area.removeFromTop (2);
+    area.removeFromTop (3);
 
-    if (hasSends())
+    for (int i = 0; i < numSends; ++i)
     {
-        for (int i = 0; i < numSends; ++i)
+        auto row = area.removeFromTop (18);
+        if (hasSends())
         {
-            auto row = area.removeFromTop (22);
-            sendLevels[i]->setBounds (row.removeFromRight (22));
-            row.removeFromRight (2);
+            sendLevels[i]->setBounds (row.removeFromRight (20));
+            row.removeFromRight (3);
             sendButtons[i]->setBounds (row);
-            area.removeFromTop (2);
         }
+        area.removeFromTop (2);
     }
 
-    area.removeFromTop (2);
+    area.removeFromBottom (26);   // name plate
 
     if (! isMaster())
     {
-        panKnob.setBounds (area.removeFromTop (34).withSizeKeepingCentre (34, 34));
-
-        auto buttons = area.removeFromBottom (22);
+        auto buttons = area.removeFromBottom (20);
         muteButton.setBounds (buttons.removeFromLeft (buttons.getWidth() / 2 - 2));
         buttons.removeFromLeft (4);
         soloButton.setBounds (buttons);
-        area.removeFromBottom (4);
+        area.removeFromBottom (5);
     }
 
-    dbLabel.setBounds (area.removeFromBottom (16));
+    area.removeFromTop (3);
+    dbLabel.setBounds (area.removeFromTop (16).withSizeKeepingCentre (52, 16));
+    area.removeFromTop (6);
 
-    auto faderArea = area.withSizeKeepingCentre (juce::jmin (area.getWidth(), 64), area.getHeight());
-    meter.setBounds (faderArea.removeFromRight (22));
+    auto faderArea = area.withSizeKeepingCentre (juce::jmin (area.getWidth(), 72), area.getHeight() - 4);
+    meter.setBounds (faderArea.removeFromRight (14).withTrimmedBottom (2));
+    faderArea.removeFromRight (4);
     fader.setBounds (faderArea);
+}
+
+//==============================================================================
+// Master Bus Compressor panel
+//==============================================================================
+MasterBusCompressorPanel::MasterBusCompressorPanel (juce::UndoManager& um, AudioEngine& e)
+    : undoManager (um), engine (e)
+{
+    addAndMakeVisible (vu);
+
+    using C = MasterBusCompressor;
+    setup (threshold, ids::busCompThreshold, look::Knob::blue, C::minThresholdDb, C::maxThresholdDb, 0.1,
+           [] (double v) { return juce::String (v, 1) + " dB"; }, "Threshold");
+    setup (makeup, ids::busCompMakeup, look::Knob::black, 0.0, C::maxMakeupDb, 0.1,
+           [] (double v) { return "+" + juce::String (v, 1) + " dB"; }, "Make-up");
+    setup (attack, ids::busCompAttack, look::Knob::black, 0.0, (double) C::attacksMs.size() - 1, 1.0,
+           [] (double v) { return C::attackText ((int) v) + " ms"; }, "Attack");
+    setup (release, ids::busCompRelease, look::Knob::black, 0.0, (double) C::releasesS.size() - 1, 1.0,
+           [] (double v) { return (int) v == C::autoRelease ? juce::String ("Auto") : C::releaseText ((int) v) + " s"; }, "Release");
+    setup (ratio, ids::busCompRatio, look::Knob::black, 0.0, (double) C::ratios.size() - 1, 1.0,
+           [] (double v) { return C::ratioText ((int) v) + ":1"; }, "Ratio");
+    setup (mix, ids::busCompMix, look::Knob::cream, 0.0, 1.0, 0.01,
+           [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + "% wet"; }, "Mix");
+
+    threshold.setDoubleClickReturnValue (true, -10.0);
+    makeup.setDoubleClickReturnValue (true, 0.0);
+    mix.setDoubleClickReturnValue (true, 1.0);
+
+    look::key (inButton, look::Key::cream);
+    inButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xfff3d36b));
+    inButton.setWantsKeyboardFocus (false);
+    inButton.setTooltip ("Switch the Master Bus Compressor in or out");
+    inButton.onClick = [this]
+    {
+        undoManager.beginNewTransaction ("Master Bus Compressor in");
+        MasterBusCompressor::setInProject (project, ids::busCompOn, ! MasterBusCompressor::fromProject (project).enabled, &undoManager);
+    };
+    addAndMakeVisible (inButton);
+}
+
+void MasterBusCompressorPanel::setup (juce::Slider& knob, const juce::Identifier& property, look::Knob cap, double min, double max,
+                                      double step, std::function<juce::String (double)> text, const juce::String& name)
+{
+    look::knob (knob, cap);
+    look::onLight (knob);
+    knob.setRange (min, max, step);
+    knob.setScrollWheelEnabled (false);
+    knob.setPopupDisplayEnabled (true, true, nullptr);
+    knob.textFromValueFunction = text;
+    knob.setTooltip (name);
+    knob.onDragStart = [this, name] { undoManager.beginNewTransaction ("Master Bus Compressor " + name.toLowerCase()); };
+    knob.onValueChange = [this, &knob, property, step]
+    {
+        const auto value = knob.getValue();
+        MasterBusCompressor::setInProject (project, property, step >= 1.0 ? juce::var ((int) value) : juce::var (value), &undoManager);
+        repaint();
+    };
+    addAndMakeVisible (knob);
+    captions.push_back ({ &knob, name, std::move (text) });
+}
+
+void MasterBusCompressorPanel::setProject (juce::ValueTree newProject)
+{
+    project = newProject;
+    refresh();
+}
+
+void MasterBusCompressorPanel::refresh()
+{
+    if (! project.isValid())
+        return;
+
+    const auto s = MasterBusCompressor::fromProject (project);
+    threshold.setValue (s.thresholdDb, juce::dontSendNotification);
+    makeup.setValue (s.makeupDb, juce::dontSendNotification);
+    attack.setValue (s.attack, juce::dontSendNotification);
+    release.setValue (s.release, juce::dontSendNotification);
+    ratio.setValue (s.ratio, juce::dontSendNotification);
+    mix.setValue (s.mix, juce::dontSendNotification);
+    inButton.setToggleState (s.enabled, juce::dontSendNotification);
+    repaint();
+}
+
+void MasterBusCompressorPanel::updateMeter()
+{
+    vu.push (engine.takeBusCompGainReduction());
+}
+
+void MasterBusCompressorPanel::paint (juce::Graphics& g)
+{
+    auto bounds = getLocalBounds();
+
+    g.setGradientFill (juce::ColourGradient (theme::console.brighter (0.08f), 0.0f, 0.0f,
+                                             theme::consoleShade, (float) getWidth(), (float) getHeight(), false));
+    g.fillRect (bounds);
+    g.setColour (theme::consoleDark);
+    g.fillRect (0, 0, 1, getHeight());
+    g.fillRect (getWidth() - 1, 0, 1, getHeight());
+
+    // Title under the meter
+    g.setColour (theme::ink);
+    g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+    g.drawText ("MASTER BUS", juce::Rectangle<int> (0, vu.getBottom() + 6, getWidth(), 15), juce::Justification::centred, false);
+    g.drawText ("COMPRESSOR", juce::Rectangle<int> (0, vu.getBottom() + 21, getWidth(), 15), juce::Justification::centred, false);
+
+    // The control box
+    const auto box = juce::Rectangle<int> (10, threshold.getY() - 10, getWidth() - 20, mix.getBottom() + 34 - (threshold.getY() - 10)).toFloat();
+    g.setColour (theme::consoleShade.darker (0.06f));
+    g.fillRoundedRectangle (box, 8.0f);
+    g.setColour (theme::consoleDark);
+    g.drawRoundedRectangle (box, 8.0f, 1.2f);
+
+    for (const auto& c : captions)
+    {
+        const auto r = c.knob->getBounds();
+        g.setColour (theme::ink);
+        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        g.drawText (c.name, r.translated (0, r.getHeight() - 2).withHeight (13).expanded (12, 0), juce::Justification::centred, false);
+        g.setColour (theme::inkDim);
+        g.setFont (juce::FontOptions (10.5f));
+        g.drawText (c.text (c.knob->getValue()), r.translated (0, r.getHeight() + 10).withHeight (12).expanded (12, 0),
+                    juce::Justification::centred, false);
+    }
+
+    // IN lamp
+    const auto lamp = juce::Rectangle<float> (12.0f, 12.0f).withCentre ({ (float) inButton.getRight() + 22.0f, (float) inButton.getBounds().getCentreY() });
+    const bool on = inButton.getToggleState();
+    g.setColour (on ? juce::Colour (0xfff7d548) : juce::Colour (0xff6b6040));
+    g.fillRoundedRectangle (lamp, 2.0f);
+    if (on)
+    {
+        g.setColour (juce::Colour (0xfff7d548).withAlpha (0.3f));
+        g.fillRoundedRectangle (lamp.expanded (3.0f), 4.0f);
+    }
+    g.setColour (juce::Colours::black.withAlpha (0.6f));
+    g.drawRoundedRectangle (lamp, 2.0f, 1.0f);
+
+    g.setColour (theme::ink);
+    g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+    g.drawText ("Bypass / In", inButton.getBounds().translated (0, inButton.getHeight() + 2).withHeight (12).expanded (20, 0),
+                juce::Justification::centred, false);
+}
+
+void MasterBusCompressorPanel::resized()
+{
+    auto area = getLocalBounds().reduced (12, 8);
+
+    vu.setBounds (area.removeFromTop (118).withSizeKeepingCentre (juce::jmin (area.getWidth(), 220), 118));
+    area.removeFromTop (48);
+
+    constexpr int knob = 46, rowHeight = 74;
+    auto column = [&] (juce::Rectangle<int> row, bool left)
+    {
+        return (left ? row.removeFromLeft (row.getWidth() / 2) : row.withTrimmedLeft (row.getWidth() / 2)).withSizeKeepingCentre (knob, knob);
+    };
+
+    for (auto [l, r] : { std::pair { &threshold, &makeup }, std::pair { &attack, &release }, std::pair { &ratio, &mix } })
+    {
+        auto row = area.removeFromTop (rowHeight);
+        l->setBounds (column (row, true).withY (row.getY()));
+        r->setBounds (column (row, false).withY (row.getY()));
+    }
+
+    area.removeFromTop (30);
+    inButton.setBounds (area.removeFromTop (34).withSizeKeepingCentre (46, 32).translated (-18, 0));
 }
 
 //==============================================================================
 // MixerPanel
 //==============================================================================
 MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p)
-    : undoManager (um), engine (e), player (p)
+    : undoManager (um), engine (e), player (p), busComp (um, e)
 {
     title.setText ("Mixer", juce::dontSendNotification);
     title.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+    title.setColour (juce::Label::textColourId, theme::text);
     addAndMakeVisible (title);
 
+    look::key (closeButton, look::Key::dark);
     closeButton.setWantsKeyboardFocus (false);
     closeButton.onClick = [this] { if (onClose) onClose(); };
     addAndMakeVisible (closeButton);
 
     viewport.setViewedComponent (&stripHolder, false);
-    viewport.setScrollBarsShown (false, true);
+    viewport.setScrollBarsShown (true, true);
     addAndMakeVisible (viewport);
+    addAndMakeVisible (busComp);
 
     startTimerHz (30);
 }
@@ -399,6 +692,7 @@ void MixerPanel::setProject (juce::ValueTree newProject)
     project.removeListener (this);
     project = newProject;
     project.addListener (this);
+    busComp.setProject (project);
     rebuild();
 }
 
@@ -412,6 +706,8 @@ void MixerPanel::changed (const juce::ValueTree& parent)
 
 void MixerPanel::handleAsyncUpdate()
 {
+    busComp.refresh();
+
     if (std::exchange (needsRebuild, false))
     {
         rebuild();
@@ -447,6 +743,8 @@ void MixerPanel::timerCallback()
         const auto [l, r] = engine.takeTrackLevel (player.slotOf (s->getOwnerId()));
         s->pushLevels (l, r);
     }
+
+    busComp.updateMeter();
 }
 
 void MixerPanel::setMasterLevels (float left, float right)
@@ -457,28 +755,36 @@ void MixerPanel::setMasterLevels (float left, float right)
 
 void MixerPanel::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::background);
-    g.setColour (theme::toolbar);
-    g.fillRect (getLocalBounds().removeFromTop (28));
-    g.setColour (theme::outline);
+    g.fillAll (theme::consoleDark);
+
+    const auto header = getLocalBounds().removeFromTop (headerHeight).toFloat();
+    g.setGradientFill (juce::ColourGradient (theme::toolbar.brighter (0.1f), 0.0f, 0.0f, theme::toolbarDark, 0.0f, header.getBottom(), false));
+    g.fillRect (header);
+    g.setColour (juce::Colours::black);
     g.fillRect (0, 0, getWidth(), 1);
-    g.fillRect (0, 27, getWidth(), 1);
+    g.fillRect (0, headerHeight - 1, getWidth(), 1);
 }
 
 void MixerPanel::resized()
 {
     auto area = getLocalBounds();
-    auto header = area.removeFromTop (28).reduced (8, 3);
+    auto header = area.removeFromTop (headerHeight).reduced (8, 3);
     closeButton.setBounds (header.removeFromRight (60));
     title.setBounds (header);
 
+    // The master section is as tall as the strips need, and scrolls with them if the pane is short.
+    const auto stripHeight = juce::jmax (ChannelStrip::minimumHeight, area.getHeight());
+
     if (masterStrip != nullptr)
-        masterStrip->setBounds (area.removeFromRight (ChannelStrip::stripWidth + 10));
+        masterStrip->setBounds (area.removeFromRight (ChannelStrip::stripWidth).withHeight (juce::jmin (stripHeight, area.getHeight())));
+
+    busComp.setBounds (area.removeFromRight (MasterBusCompressorPanel::panelWidth));
 
     viewport.setBounds (area);
 
-    const auto height = area.getHeight() - (stripHolder.getWidth() > area.getWidth() ? viewport.getScrollBarThickness() : 0);
-    stripHolder.setSize (juce::jmax (area.getWidth(), strips.size() * ChannelStrip::stripWidth), juce::jmax (100, height));
+    const auto wide = strips.size() * ChannelStrip::stripWidth > area.getWidth();
+    const auto height = juce::jmax (ChannelStrip::minimumHeight, area.getHeight() - (wide ? viewport.getScrollBarThickness() : 0));
+    stripHolder.setSize (juce::jmax (area.getWidth(), strips.size() * ChannelStrip::stripWidth), height);
 
     for (int i = 0; i < strips.size(); ++i)
         strips[i]->setBounds (i * ChannelStrip::stripWidth, 0, ChannelStrip::stripWidth, stripHolder.getHeight());

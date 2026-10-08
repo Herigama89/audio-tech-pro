@@ -20,6 +20,8 @@ public:
 
     juce::ValueTree getTrack() const { return track; }
 
+    static constexpr int numberWidth = 30;
+
     void paint (juce::Graphics& g) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent& e) override;

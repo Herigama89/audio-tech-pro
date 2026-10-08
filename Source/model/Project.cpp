@@ -10,9 +10,10 @@ namespace
 {
     // Track colours, cycled as tracks are added.
     const juce::Colour palette[] = {
-        juce::Colour (0xff4aa3ff), juce::Colour (0xff3ddc84), juce::Colour (0xffffc043),
-        juce::Colour (0xffff7a59), juce::Colour (0xffb38cff), juce::Colour (0xff36d1dc),
-        juce::Colour (0xffff5fa2), juce::Colour (0xffa3d977),
+        // Console colours: gold, red, orange, green, teal, blue, purple, rose
+        juce::Colour (0xffd9a72b), juce::Colour (0xffcf3b2f), juce::Colour (0xffe0702a),
+        juce::Colour (0xff3f9a3c), juce::Colour (0xff2f9b8f), juce::Colour (0xff3866c4),
+        juce::Colour (0xff8a4fc4), juce::Colour (0xffc9467f),
     };
 
     juce::String newId() { return juce::Uuid().toDashedString(); }

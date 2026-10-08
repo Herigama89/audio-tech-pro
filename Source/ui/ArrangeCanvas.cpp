@@ -87,7 +87,7 @@ void ArrangeCanvas::paint (juce::Graphics& g)
     if ((bool) project[ids::cycleEnabled])
     {
         const auto c = cycleBounds();
-        g.setColour (theme::solo.withAlpha (0.05f));
+        g.setColour (juce::Colour (0xffe8892a).withAlpha (0.06f));
         g.fillRect (c.getX(), (float) TimelineState::rulerHeight, c.getWidth(), (float) getHeight());
     }
 
@@ -186,7 +186,8 @@ void ArrangeCanvas::paintRuler (juce::Graphics& g)
     const auto barLength = beat * beatsPerBar;
     const auto rh = (float) TimelineState::rulerHeight;
 
-    g.setColour (theme::toolbar);
+    // Gold ruler
+    g.setGradientFill (juce::ColourGradient (theme::gold.brighter (0.12f), 0.0f, 0.0f, theme::goldDark, 0.0f, rh, false));
     g.fillRect (0.0f, 0.0f, (float) getWidth(), rh);
 
     // Label every Nth bar so numbers don't collide.
@@ -205,21 +206,22 @@ void ArrangeCanvas::paintRuler (juce::Graphics& g)
 
         if (bar % labelEvery == 0)
         {
-            g.setColour (theme::dimText);
-            g.fillRect (x, rh * 0.5f, 1.0f, rh * 0.5f);
-            g.setColour (theme::text);
+            g.setColour (theme::ink.withAlpha (0.7f));
+            g.fillRect (x, rh * 0.45f, 1.0f, rh * 0.55f);
+            g.setColour (theme::ink);
+            g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
             g.drawText (juce::String (bar + 1), (int) x + 4, (int) (rh * 0.5f), 40, (int) (rh * 0.5f) - 2, juce::Justification::centredLeft);
         }
 
         if (showBeats)
         {
-            g.setColour (theme::outline);
+            g.setColour (theme::ink.withAlpha (0.35f));
             for (int b = 1; b < beatsPerBar; ++b)
                 g.fillRect (timeline.timeToX ((double) bar * barLength + b * beat), rh * 0.75f, 1.0f, rh * 0.25f);
         }
     }
 
-    g.setColour (theme::outline);
+    g.setColour (juce::Colours::black.withAlpha (0.6f));
     g.fillRect (0.0f, rh - 1.0f, (float) getWidth(), 1.0f);
 
     paintCycle (g);
@@ -238,8 +240,10 @@ void ArrangeCanvas::paintCycle (juce::Graphics& g)
     const auto r = cycleBounds();
     const bool on = project[ids::cycleEnabled];
 
-    g.setColour (on ? theme::solo.withAlpha (0.85f) : theme::outline.brighter (0.2f));
+    g.setColour (on ? juce::Colour (0xffe8892a) : theme::goldDark.withAlpha (0.55f));
     g.fillRoundedRectangle (r, 3.0f);
+    g.setColour (theme::ink.withAlpha (on ? 0.6f : 0.25f));
+    g.drawRoundedRectangle (r.reduced (0.5f), 3.0f, 1.0f);
 }
 
 void ArrangeCanvas::paintMidiNotes (juce::Graphics& g, const juce::ValueTree& region,
@@ -267,7 +271,7 @@ void ArrangeCanvas::paintMidiNotes (juce::Graphics& g, const juce::ValueTree& re
 
     juce::Graphics::ScopedSaveState save (g);
     g.reduceClipRegion (body.toNearestInt());
-    g.setColour (colour.brighter (0.6f));
+    g.setColour (colour.brighter (0.8f));
 
     for (const auto& note : region)
     {
@@ -470,14 +474,15 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
     const bool isMidi = model::isMidiRegion (region);
     const bool missing = ! isMidi && ! file.existsAsFile();
 
-    g.setColour ((missing ? theme::danger : colour).withAlpha (0.25f));
-    g.fillRoundedRectangle (bounds, 4.0f);
+    // Solid body in a deep shade of the track colour, a brighter name bar on top.
+    const auto base = missing ? theme::danger : colour;
+    g.setGradientFill (juce::ColourGradient (base.darker (0.05f), 0.0f, bounds.getY(), base.darker (0.45f), 0.0f, bounds.getBottom(), false));
+    g.fillRoundedRectangle (bounds, 3.0f);
 
-    // Header strip with the region name
     auto header = bounds.withHeight ((float) regionHeader);
-    g.setColour ((missing ? theme::danger : colour).withAlpha (0.85f));
-    g.fillRoundedRectangle (header, 4.0f);
-    g.fillRect (header.withTrimmedTop (4.0f));
+    g.setColour (base.withMultipliedSaturation (0.9f).brighter (0.1f));
+    g.fillRoundedRectangle (header, 3.0f);
+    g.fillRect (header.withTrimmedTop (3.0f));
 
     g.setColour (juce::Colour (0xff15161a));
     g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
@@ -510,14 +515,14 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
             const auto tStart = offset + (x0 - body.getX()) / timeline.pixelsPerSecond;
             const auto tEnd   = offset + (x1 - body.getX()) / timeline.pixelsPerSecond;
 
-            g.setColour (colour.brighter (0.5f).withAlpha (0.9f));
+            g.setColour (colour.brighter (0.75f).withAlpha (0.95f));
             thumb.drawChannels (g, juce::Rectangle<float> (x0, body.getY(), x1 - x0, body.getHeight()).toNearestInt(),
                                 tStart, tEnd, (float) (double) region.getProperty (ids::gain, 1.0));
         }
     }
 
-    g.setColour (selected ? juce::Colours::white : colour.withAlpha (0.9f));
-    g.drawRoundedRectangle (bounds.reduced (0.5f), 4.0f, selected ? 2.0f : 1.0f);
+    g.setColour (selected ? juce::Colours::white : base.darker (0.8f));
+    g.drawRoundedRectangle (bounds.reduced (0.5f), 3.0f, selected ? 2.0f : 1.0f);
 }
 
 //==============================================================================

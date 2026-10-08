@@ -1,5 +1,7 @@
 #include <JuceHeader.h>
 #include "MainComponent.h"
+#include "ui/ConsoleLook.h"
+#include "ui/Theme.h"
 
 class RiffApplication final : public juce::JUCEApplication
 {
@@ -10,12 +12,14 @@ public:
 
     void initialise (const juce::String&) override
     {
+        juce::LookAndFeel::setDefaultLookAndFeel (&look);
         mainWindow = std::make_unique<MainWindow> (getApplicationName());
     }
 
     void shutdown() override
     {
         mainWindow = nullptr;
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
     }
 
     void systemRequestedQuit() override
@@ -36,7 +40,7 @@ private:
     {
     public:
         explicit MainWindow (const juce::String& name)
-            : DocumentWindow (name, juce::Colour (0xff1c1d21), DocumentWindow::allButtons)
+            : DocumentWindow (name, riff::theme::background, DocumentWindow::allButtons)
         {
             setUsingNativeTitleBar (true);
             setContentOwned (new riff::MainComponent(), true);
@@ -55,6 +59,7 @@ private:
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainWindow)
     };
 
+    riff::ConsoleLook look;   // the whole app's look; outlives every window
     std::unique_ptr<MainWindow> mainWindow;
 };
 

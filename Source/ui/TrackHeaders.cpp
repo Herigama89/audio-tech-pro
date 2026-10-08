@@ -1,5 +1,6 @@
 #include "TrackHeaders.h"
 #include "Theme.h"
+#include "ConsoleLook.h"
 #include "../model/Project.h"
 #include "../engine/BuiltInEffects.h"
 #include "../AppInfo.h"
@@ -26,11 +27,17 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
     instrumentButton.setWantsKeyboardFocus (false);
     instrumentButton.setTooltip ("Choose the instrument, or open its window");
     instrumentButton.onClick = [this] { if (instrumentMenu) instrumentMenu (track, instrumentButton); };
-    instrumentButton.setColour (juce::TextButton::buttonColourId, theme::selection);
+    look::key (instrumentButton, look::Key::console);
     addChildComponent (instrumentButton);
     instrumentButton.setVisible (isInstrument);
     nameLabel.setEditable (false, true, false);
-    nameLabel.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+    nameLabel.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+    nameLabel.setColour (juce::Label::textColourId, theme::ink);
+    nameLabel.setColour (juce::Label::textWhenEditingColourId, theme::ink);
+    nameLabel.setColour (juce::Label::backgroundWhenEditingColourId, theme::cream.brighter (0.3f));
+    nameLabel.setColour (juce::TextEditor::textColourId, theme::ink);
+    nameLabel.setColour (juce::TextEditor::highlightColourId, theme::gold.withAlpha (0.5f));
+    nameLabel.setColour (juce::CaretComponent::caretColourId, theme::ink);
     nameLabel.onTextChange = [this]
     {
         undoManager.beginNewTransaction ("Rename track");
@@ -43,6 +50,7 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
     {
         b->setClickingTogglesState (false);
         b->setWantsKeyboardFocus (false);
+        look::key (*b, look::Key::console);
         addAndMakeVisible (b);
     }
 
@@ -84,6 +92,7 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
     };
 
     volumeSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+    look::onLight (volumeSlider);
     volumeSlider.setScrollWheelEnabled (false); // let the wheel scroll the track list
     volumeSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
     volumeSlider.setRange (minDb, 6.0, 0.1);
@@ -95,9 +104,8 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
     volumeSlider.onValueChange = [this] { track.setProperty (ids::volume, dbToGain (volumeSlider.getValue()), &undoManager); };
     addAndMakeVisible (volumeSlider);
 
-    panKnob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+    look::knob (panKnob, look::Knob::black, false);
     panKnob.setScrollWheelEnabled (false);
-    panKnob.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
     panKnob.setRange (-1.0, 1.0, 0.01);
     panKnob.setDoubleClickReturnValue (true, 0.0);
     panKnob.setPopupDisplayEnabled (true, true, nullptr);
@@ -153,32 +161,57 @@ void TrackHeader::refresh()
 void TrackHeader::paint (juce::Graphics& g)
 {
     const bool selected = timeline.selectedTrackId == track[ids::id].toString();
+    auto area = getLocalBounds();
 
-    g.fillAll (selected ? theme::selection : theme::panel);
+    // Cream body
+    const auto body = selected ? theme::cream.brighter (0.12f) : theme::cream;
+    g.setGradientFill (juce::ColourGradient (body.brighter (0.05f), 0.0f, 0.0f, body.darker (0.04f), 0.0f, (float) getHeight(), false));
+    g.fillRect (area);
 
+    // Number column: gold when selected
+    auto number = area.removeFromLeft (numberWidth);
+    g.setColour (selected ? theme::gold : theme::creamShade);
+    g.fillRect (number);
+    g.setColour (theme::creamDeep);
+    g.fillRect (number.getRight() - 1, 0, 1, getHeight());
+
+    g.setColour (theme::ink);
+    g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+    g.drawText (juce::String (track.getParent().indexOf (track) + 1), number.withTrimmedLeft (4), juce::Justification::centred, false);
+
+    // The track's colour, as a tab on the left edge
     g.setColour (model::trackColour (track));
-    g.fillRect (0, 0, 5, getHeight());
+    g.fillRect (0, 0, 4, getHeight());
 
-    g.setColour (theme::background);
+    // Kind, under the name
+    g.setColour (theme::inkDim);
+    g.setFont (juce::FontOptions (10.5f));
+    const auto kind = isBus ? "Aux bus" : (isInstrument ? "" : "Audio");
+    g.drawText (kind, nameLabel.getBounds().translated (3, 18).withHeight (12), juce::Justification::centredLeft, false);
+
+    // Divider
+    g.setColour (theme::creamDeep.darker (0.15f));
     g.fillRect (0, getHeight() - 1, getWidth(), 1);
+    g.setColour (juce::Colours::white.withAlpha (0.35f));
+    g.fillRect (numberWidth, 0, getWidth() - numberWidth, 1);
 }
 
 void TrackHeader::resized()
 {
-    auto area = getLocalBounds().withTrimmedLeft (12).withTrimmedRight (8).withTrimmedBottom (1);
+    auto area = getLocalBounds().withTrimmedLeft (numberWidth + 6).withTrimmedRight (8).withTrimmedBottom (1);
 
-    auto top = area.removeFromTop (38).withTrimmedTop (8).withHeight (22);
+    auto top = area.removeFromTop (36).withTrimmedTop (8).withHeight (20);
     for (auto* b : { &automationButton, &monitorButton, &armButton, &soloButton, &muteButton })
     {
         if (! b->isVisible())
             continue;
-        b->setBounds (top.removeFromRight (22));
+        b->setBounds (top.removeFromRight (20));
         top.removeFromRight (3);
     }
     top.removeFromRight (3);
     nameLabel.setBounds (top);
 
-    auto bottom = area.withHeight (30);
+    auto bottom = area.withTrimmedTop (4).withHeight (30);
     panKnob.setBounds (bottom.removeFromRight (30));
     bottom.removeFromRight (6);
 
@@ -373,8 +406,10 @@ void TrackHeaderList::paint (juce::Graphics& g)
     g.fillAll (theme::background);
 
     // Corner above the headers, level with the ruler.
-    g.setColour (theme::toolbar);
+    g.setColour (theme::toolbarDark);
     g.fillRect (0, 0, getWidth(), TimelineState::rulerHeight);
+    g.setColour (juce::Colours::black);
+    g.fillRect (0, TimelineState::rulerHeight - 1, getWidth(), 1);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (11.0f));
     g.drawText (juce::String (model::numTracks (project)) + (model::numTracks (project) == 1 ? " track" : " tracks"),

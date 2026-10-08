@@ -1,7 +1,8 @@
-# Riff: a Logic-style DAW
+# Audio Tech Pro
 
-A native DAW in C++20 + JUCE 8. Phases 0 and 1 are complete, and Phase 2 (MIDI and
-instruments) is well under way. Riff has:
+A native DAW in C++20 + JUCE 8, in the spirit of Logic Pro, with a console-style
+look (navy control bar, cream track headers, a gold ruler, and a mixer with
+coloured knobs and metal fader caps). It has:
 
 - a multitrack arrange view and an undoable project model
 - saving and opening projects
@@ -15,6 +16,9 @@ instruments) is well under way. Riff has:
 - automation of volume, pan and built-in effect knobs
 - plugin delay compensation
 - export of the song to WAV
+- a console section on every mixer strip: four-band EQ (HF, HMF, LMF, LF) and one-knob Dynamics
+- the Master Bus Compressor on the master, with a gain-reduction VU meter
+- Logic Pro's key commands, a full menu bar, and a Key Commands window to change any key
 
 All of it runs on a real-time engine that never blocks the audio thread.
 
@@ -30,7 +34,7 @@ brew install cmake ninja
 cd riff
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
-open build/Riff_artefacts/Debug/Riff.app
+open "build/AudioTechPro_artefacts/Debug/Audio Tech Pro.app"
 ```
 
 - The first configure downloads JUCE and Catch2, which takes a few minutes.
@@ -41,7 +45,7 @@ open build/Riff_artefacts/Debug/Riff.app
 ```bat
 cmake -B build
 cmake --build build --config Debug
-build\Riff_artefacts\Debug\Riff.exe
+"build\AudioTechPro_artefacts\Debug\Audio Tech Pro.exe"
 ```
 
 ### Linux (Debian/Ubuntu)
@@ -52,14 +56,14 @@ sudo apt install build-essential cmake ninja-build git libasound2-dev libjack-ja
   libxext-dev libxinerama-dev libxrandr-dev libxrender-dev
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
-./build/Riff_artefacts/Debug/Riff
+"./build/AudioTechPro_artefacts/Debug/Audio Tech Pro"
 ```
 
 ## Tests
 
 ```bash
-cmake --build build --target RiffTests
-./build/RiffTests_artefacts/Debug/RiffTests
+cmake --build build --target AudioTechProTests
+./build/AudioTechProTests_artefacts/Debug/AudioTechProTests
 ```
 
 The tests cover:
@@ -70,7 +74,36 @@ The tests cover:
 - **Routing and automation:** sends before and after the fader, mute silencing sends, bus effects, solo-safe buses, volume fades and effect knobs following their lanes, and delay compensation lining up tracks and buses to the sample.
 - **Mixer:** insert chains in the project (order, undo, save, older files), every built-in effect's behaviour, track and master chains in the engine, bypass, track meters, and exporting (length, contents, no click, cancel).
 - **MIDI:** notes, splitting, quantize, the JSON round trip, turning recorded events into notes, synth timing and release, sample-accurate note playback, stop releasing notes, live MIDI routing, and MIDI recording positions.
+- **Console and Master Bus Compressor:** EQ bands, Dynamics, IN switches, ratio, make-up, mix, fading in without a click, settings saved with the project, and both running in the engine.
+- **Key commands:** every command has a name and menu, and the Logic Pro preset has Logic's keys with no key used twice.
 - **Cycle:** sample-exact wrap, count-in clicks, splitting loop recordings into passes, take folders (switch, split, flatten, save), and the latency estimator, including a full loopback through a simulated cable.
+
+## Key commands (Logic Pro preset)
+
+These are Logic Pro's default keys for everything the app can do. Change any of
+them in **Key Commands** (Option+K, or the **Keys** button), where you can also
+go back to the preset.
+
+| Key | Command | Key | Command |
+| --- | --- | --- | --- |
+| Space | Play / stop | R | Record |
+| Return | Go to beginning | , / . | Back / forward one bar |
+| C | Cycle | Cmd+U | Set cycle to the selected region |
+| K | Metronome | Shift+K | Count-in |
+| X | Mixer | P or E | Piano roll |
+| A | Show automation | Q | Quantize the selected MIDI region |
+| M / Ctrl+M | Mute selected track | S / Ctrl+S | Solo selected track |
+| Up / Down | Select track above / below | Cmd+Delete | Delete track |
+| Option+Cmd+A | New audio track | Option+Cmd+S | New instrument track |
+| Cmd+T | Split at playhead | Delete | Delete region |
+| Cmd+Z / Shift+Cmd+Z | Undo / redo | Cmd+Left / Right | Zoom out / in |
+| Cmd+N / O / S | New / open / save | Shift+Cmd+S | Save as |
+| Shift+Cmd+I | Import audio | Cmd+B | Bounce (export) |
+| Option+K | Key Commands | Cmd+, | Audio settings |
+
+In Logic, M and S mute and solo regions; this app doesn't have region mute yet,
+so they act on the selected track. The menu bar uses Logic's menu names: File,
+Edit, Track, Navigate, Record, Mix, View.
 
 ## Using it
 
@@ -83,19 +116,22 @@ The tests cover:
 | Cycle (loop) | Drag in the **top half of the ruler** to set the range. Click the bar, press **C**, or use **Cycle** to turn it on or off. |
 | Loop recording | Turn Cycle on and record. Each pass becomes a take. Click a take folder's name bar (or right-click it, then **Takes**) to switch takes, or choose **Keep only this take**. |
 | Count-in | **Count** gives one bar of click before recording starts. |
-| Latency calibration | **Audio > Calibrate recording latency...** Connect a cable from output 1 to an input and click **Measure**. Riff stores the difference from the driver's reported latency and applies it to every recording. |
+| Latency calibration | **Audio > Calibrate recording latency...** Connect a cable from output 1 to an input and click **Measure**. The app stores the difference from the driver's reported latency and applies it to every recording. |
 | File | **File** menu: New, Open, Save, Save As, Import Audio (Cmd+I), Export Song as WAV (Cmd+E). The old shortcuts still work. |
-| Mixer | **Mixer** button or **X**. Each strip has a name, 6 effect slots, pan, fader, meter, M and S; the master strip is on the right. |
-| Add an effect | Click an empty slot in the mixer, then pick a Riff effect (EQ, Compressor, Delay, Reverb, Limiter) or one of your plugins under **Plugins**. Effects run top to bottom, before the fader. |
+| Mixer | **Mixer** key or **X**. Each strip, top to bottom: the console section, 6 effect slots, 2 sends, the fader and meter, M and S, and the name plate. The Master Bus Compressor and the master strip are on the right. |
+| Console EQ and Dynamics | On every strip: HF (8 kHz shelf), HMF (2.5 kHz), LMF (400 Hz), LF (100 Hz shelf), each +/-15 dB, and DYN, a one-knob compressor (turn it up for more). **IN** switches the section in or out. Double-click a knob to reset it. It runs before the effect slots. |
+| Master Bus Compressor | Next to the master strip. Click **IN** to switch it on. Threshold, Make-up, Attack (0.1 to 30 ms), Release (0.1 to 1.2 s, or Auto), Ratio (2, 4 or 10:1) and Mix (for parallel compression). The meter shows how much it's turning the mix down. It sits after the master effect slots and before the master fader, and is included when you bounce. |
+| Add an effect | Click an empty slot in the mixer, then pick a built-in effect (EQ, Compressor, Delay, Reverb, Limiter) or one of your plugins under **Plugins**. Effects run top to bottom, before the fader. |
 | Change an effect | Click a filled slot to open its window. Right-click it to **Bypass**, **Replace...** or **Remove**. |
 | Aux bus | **+ Track > Aux bus**, or **New aux bus** from a send's menu. Put an effect (e.g. Reverb at 100% mix) on the bus. |
 | Send | On a mixer strip, click **Send** under the effect slots and choose a bus; the small knob is the send level. In the same menu: **Pre-fader** and **Remove send**. |
-| Automation | Click **A** on a track to show its automation line over the lane. Click to add points, drag to move them (they snap to the grid; hold Cmd to move freely), double-click a point to remove it. Right-click **A** to pick what to automate: Volume, Pan, or any knob of a Riff effect on that track. |
+| Automation | Click **A** on a track to show its automation line over the lane. Click to add points, drag to move them (they snap to the grid; hold Cmd to move freely), double-click a point to remove it. Right-click **A** to pick what to automate: Volume, Pan, or any knob of a built-in effect on that track. |
+| Clear automation | Right-click **A**, then **Clear ... automation** (the line you're looking at) or **Clear all automation on this track**. Undo brings it back. |
 | Export | **File > Export Song as WAV...** exports the whole song plus 2 seconds for reverb tails, or just the cycle range when Cycle is on. The file is 24-bit at your interface's sample rate; the metronome is never included. |
-| New instrument track | **+ Track > Instrument track (MIDI)**. It starts with Riff Synth. |
-| Choose an instrument | Click the instrument button on the track (it shows "Riff Synth" at first). Pick **Riff Synth**, or a plugin under **Plugins**. **Show plugin window** / **Show synth controls** opens its window. |
+| New instrument track | **+ Track > Instrument track (MIDI)**. It starts with Tech Synth. |
+| Choose an instrument | Click the instrument button on the track (it shows "Tech Synth" at first). Pick **Tech Synth**, or a plugin under **Plugins**. **Show plugin window** / **Show synth controls** opens its window. |
 | Find your plugins | Instrument button > **Scan for plugins...**, then **Options > Scan for new or updated VST3 / AudioUnit plug-ins**. Run this once; the list is remembered. |
-| Play with a MIDI keyboard | Plug it in; Riff listens to every MIDI input. It plays the armed instrument track, or else the selected one. |
+| Play with a MIDI keyboard | Plug it in; The app listens to every MIDI input. It plays the armed instrument track, or else the selected one. |
 | Record MIDI | Arm an instrument track and press **R**. With Cycle on, each pass merges into the same region. |
 | Make a MIDI region | Double-click an empty spot on an instrument track to get a one-bar region. |
 | Piano roll | Double-click a MIDI region. Click to add a note (drag to set its length), drag a note to move it, drag its right edge to resize, Shift-click to select several, Delete to remove, **Q** to quantize to 16ths, Cmd+A to select all. Click the keyboard on the left to hear a pitch. |
@@ -112,16 +148,16 @@ The tests cover:
 | Scroll | Trackpad, the scroll wheel (with Shift to go sideways), or the scroll bars |
 | Track controls | Name (double-click to rename), **M**ute, **S**olo, volume, pan. Right-click a track for Delete. |
 | Tempo | Double-click the BPM value. The ruler and grid follow it. |
-| Save / open | Cmd+S, Cmd+Shift+S, Cmd+O. Projects are `.riff` files. |
+| Save / open | Cmd+S, Cmd+Shift+S, Cmd+O. Projects are `.atp` files; older `.riff` projects open too. |
 
 Recordings go to an `Audio Files` folder next to a saved project. For a
-project you haven't saved yet, they go to `Music/Riff/Recordings/<project name>`.
+project you haven't saved yet, they go to `Music/Audio Tech Pro/Recordings/<project name>`.
 Each take is named after its track, for example `Vocals#01.wav`.
 
 Recordings are shifted earlier by the round-trip latency your interface
 reports, so they line up with what you heard while playing.
 
-Projects store audio paths relative to the `.riff` file. If you keep the audio
+Projects store audio paths relative to the project file. If you keep the audio
 next to the project, you can move the folder and it still opens.
 
 ## Code layout
@@ -136,13 +172,22 @@ Source/
     PlaybackGraph.h       immutable snapshot the audio thread renders
     ProjectPlayer.*       watches the model and rebuilds the graph when it changes
     AudioFileCache.*      decodes and resamples audio files into memory
+    ConsoleChannel.*      each strip's EQ and Dynamics
+    MasterBusCompressor.* the compressor on the master
   ui/
+    ConsoleLook.*         the look: knobs, fader caps, keys, transport icons, the VU meter
+    Commands.*            every command and the key presets (Logic Pro)
+    KeyCommands.*         the Key Commands window
+    Mixer.*               channel strips, the Master Bus Compressor panel
     ArrangeCanvas.*       ruler, lanes, regions, waveforms, mouse editing, file drops
     TrackHeaders.*        per-track name / mute / solo / volume / pan
     TimelineState.h       zoom, scroll and selection shared by the views
     WaveformCache.h, LevelMeter.h, Theme.*
-  MainComponent.*         toolbar, layout, shortcuts, project lifecycle
+  MainComponent.*         control bar, layout, project lifecycle
+  MainCommands.cpp        what each command does, and the menu bar
+  AppInfo.h               the app's name, in one place
 Tests/                    Catch2 unit tests
+Tools/Snapshots.cpp       renders the main views to PNG files (cmake -DRIFF_BUILD_SNAPSHOTS=ON)
 ```
 
 ### How an edit reaches your speakers
@@ -172,7 +217,7 @@ Tests/                    Catch2 unit tests
 - [x] Piano roll: draw, move, resize, delete, quantize, keyboard preview
 - [x] MIDI keyboard input (hot-plug), live playing, MIDI recording (merging on cycle)
 - [x] VST3 and Audio Unit instrument hosting: scanning, plugin windows, settings saved in the project
-- [ ] CLAP hosting (needs Riff's own CLAP host layer; JUCE doesn't host CLAP)
+- [ ] CLAP hosting (needs our own CLAP host layer; JUCE doesn't host CLAP)
 - [ ] Velocity editing, pitch bend and controllers in the piano roll
 - [ ] A sampler instrument (also used by the drum machine in Phase 4)
 
@@ -187,6 +232,19 @@ Tests/                    Catch2 unit tests
 - [x] Plugin delay compensation across tracks and buses; recordings account for it too
 - [ ] CLAP instruments and effects (next)
 - [ ] Automation of plugin parameters, and moving faders that follow automation
+
+## Audio Tech Pro features
+
+- [x] New name, console skin, Logic Pro key commands and menus, Key Commands window
+- [x] Master Bus Compressor with a VU meter; console EQ and Dynamics on every strip
+- [ ] Key presets for other DAWs (Pro Tools, Ableton Live, FL Studio, Cubase)
+- [ ] MIDI genre generator, with a built-in drum kit
+- [ ] Console mode for Universal Audio owners: your UAD channel strip and bus compressor plugins driven from the strips and the Master Bus Compressor panel
+- [ ] Claude AI assistant (with your own API key)
+- [ ] Screen recording of the app with its audio, up to 4K (Mac)
+- [ ] Several audio interfaces at once (aggregate device)
+- [ ] The Audio Tech Pro plugin suite
+- [ ] CLAP hosting
 
 ## Later phases
 

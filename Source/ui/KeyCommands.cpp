@@ -31,7 +31,7 @@ KeyCommandsPanel::KeyCommandsPanel (juce::KeyPressMappingSet& mappings, const ju
     help.setColour (juce::Label::textColourId, theme::dimText);
     addAndMakeVisible (help);
 
-    editor.setColours (theme::panel, theme::accent);
+    editor.setColours (theme::panel, theme::text);
     addAndMakeVisible (editor);
 
     setSize (620, 640);

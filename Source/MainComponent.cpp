@@ -12,7 +12,8 @@ namespace riff
 
 namespace
 {
-    constexpr int toolbarHeight = 48;
+    constexpr int toolbarHeight = 100;    // two rows: display row, transport row
+    constexpr int toolbarTopRow = 50;
     constexpr int headerWidth = 232;
     constexpr int scrollBarSize = 12;
     constexpr int meterWidth = 84;
@@ -21,69 +22,93 @@ namespace
 
 MainComponent::MainComponent (bool openAudioDevice)
 {
-    theme::apply (getLookAndFeel());
-
     // --- Toolbar ----------------------------------------------------------------
-    for (auto* b : { &fileButton, &mixerButton, &undoButton, &redoButton,
-                     &rewindButton, &playButton, &recordButton, &clickButton, &cycleButton, &countInButton,
-                     &addTrackButton, &settingsButton })
+    for (auto* b : std::initializer_list<juce::Button*> { &fileButton, &undoButton, &redoButton, &addTrackButton, &settingsButton,
+                                                          &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
+                                                          &recordButton, &cycleButton, &countInButton, &clickButton,
+                                                          &mixerButton, &editorButton, &keysButton })
     {
         b->setWantsKeyboardFocus (false); // keep Space for play/stop
         addAndMakeVisible (b);
     }
 
-    fileButton.onClick     = [this] { showFileMenu(); };
-    mixerButton.onClick    = [this] { toggleMixer(); };
-    mixerButton.setColour (juce::TextButton::buttonOnColourId, theme::accent);
-    undoButton.onClick     = [this] { undo(); };
-    redoButton.onClick     = [this] { redo(); };
-    rewindButton.onClick   = [this] { returnToStart(); };
-    playButton.onClick     = [this] { togglePlay(); };
-    recordButton.onClick   = [this] { toggleRecord(); };
-    clickButton.onClick    = [this] { toggleMetronome(); };
-    cycleButton.onClick    = [this] { toggleCycle(); };
-    countInButton.onClick  = [this]
+    for (auto* b : { &fileButton, &undoButton, &redoButton, &addTrackButton, &settingsButton })
+        look::key (*b, look::Key::dark);
+
+    // The keys run the same commands as the menus and shortcuts.
+    auto bind = [this] (juce::Button& b, juce::CommandID id) { b.onClick = [this, id] { commandManager.invokeDirectly (id, true); }; };
+    bind (rewindButton, commands::goToStart);
+    bind (backBarButton, commands::rewindBar);
+    bind (forwardButton, commands::forwardBar);
+    bind (playButton, commands::play);
+    bind (recordButton, commands::record);
+    bind (cycleButton, commands::toggleCycle);
+    bind (countInButton, commands::toggleCountIn);
+    bind (clickButton, commands::toggleMetronome);
+    bind (mixerButton, commands::showMixer);
+    bind (editorButton, commands::showPianoRoll);
+    bind (keysButton, commands::keyCommands);
+    bind (undoButton, commands::undo);
+    bind (redoButton, commands::redo);
+    stopButton.onClick = [this]
     {
-        project.setProperty (ids::countIn, ! (bool) project[ids::countIn], nullptr);
+        // Stop; pressed while stopped, go back to the start (as on a tape machine).
+        if (engine.isRecording())
+            finishRecording();
+        if (engine.isPlaying())
+            engine.stop();
+        else
+            returnToStart();
     };
-    cycleButton.setColour (juce::TextButton::buttonOnColourId, theme::solo);
-    countInButton.setColour (juce::TextButton::buttonOnColourId, theme::accent);
-    recordButton.setColour (juce::TextButton::buttonOnColourId, theme::danger);
-    recordButton.setColour (juce::TextButton::textColourOffId, theme::danger.brighter (0.3f));
-    clickButton.setColour (juce::TextButton::buttonOnColourId, theme::accent);
+
+    fileButton.onClick = [this] { showFileMenu(); };
     addTrackButton.onClick = [this]
     {
         juce::PopupMenu menu;
-        menu.addItem ("Audio track", [this] { addTrack (model::audioKind); });
-        menu.addItem ("Instrument track (MIDI)", [this] { addTrack (model::instrumentKind); });
-        menu.addItem ("Aux bus (for sends)", [this] { addTrack (model::busKind); });
+        menu.addCommandItem (&commandManager, commands::newAudioTrack, "Audio track");
+        menu.addCommandItem (&commandManager, commands::newInstrumentTrack, "Instrument track (MIDI)");
+        menu.addCommandItem (&commandManager, commands::newAuxBus, "Aux bus (for sends)");
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addTrackButton));
     };
     settingsButton.onClick = [this] { showAudioMenu(); };
 
-    fileButton.setTooltip ("New, open, save, import audio, export the song");
-    mixerButton.setTooltip ("Show the mixer (X)");
+    fileButton.setTooltip ("New, open, save, import audio, bounce the song");
     undoButton.setTooltip ("Undo (Cmd+Z)");
-    redoButton.setTooltip ("Redo (Cmd+Shift+Z)");
-    rewindButton.setTooltip ("Go to start (Return)");
+    redoButton.setTooltip ("Redo (Shift+Cmd+Z)");
+    rewindButton.setTooltip ("Go to beginning (Return)");
+    backBarButton.setTooltip ("Back one bar (,)");
+    forwardButton.setTooltip ("Forward one bar (.)");
+    stopButton.setTooltip ("Stop. Press again to go to the beginning.");
     playButton.setTooltip ("Play / stop (Space)");
     recordButton.setTooltip ("Record on armed tracks (R). Arms the selected track if none are armed.");
-    clickButton.setTooltip ("Metronome (K)");
-    cycleButton.setTooltip ("Cycle (C). Drag in the top half of the ruler to set the range; click it to turn it on or off.\n"
+    cycleButton.setTooltip ("Cycle (C). Drag in the top half of the ruler to set the range.\n"
                             "Recording with Cycle on makes a new take on every pass.");
-    countInButton.setTooltip ("One bar of click before recording starts");
-    addTrackButton.setTooltip ("New audio or instrument track");
-    settingsButton.setTooltip ("Audio device settings");
+    countInButton.setTooltip ("Count-in: one bar of click before recording (Shift+K)");
+    clickButton.setTooltip ("Metronome (K)");
+    mixerButton.setTooltip ("Mixer (X)");
+    editorButton.setTooltip ("Piano roll for the selected MIDI region (P)");
+    keysButton.setTooltip ("Key commands (Option+K)");
+    addTrackButton.setTooltip ("New audio track, instrument track or aux bus");
+    settingsButton.setTooltip ("Audio device settings, latency calibration, key commands");
 
-    positionLabel.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 18.0f, juce::Font::bold));
+    // The display in the middle of the bar
+    positionLabel.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 24.0f, juce::Font::plain));
     positionLabel.setJustificationType (juce::Justification::centred);
-    positionLabel.setColour (juce::Label::textColourId, theme::accent);
-    positionLabel.setColour (juce::Label::backgroundColourId, theme::background);
+    positionLabel.setColour (juce::Label::textColourId, theme::lcdText);
+    positionLabel.setTooltip ("Bar, beat, 16th");
+    positionLabel.setInterceptsMouseClicks (false, false);
     addAndMakeVisible (positionLabel);
 
+    clockLabel.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 24.0f, juce::Font::plain));
+    clockLabel.setJustificationType (juce::Justification::centred);
+    clockLabel.setColour (juce::Label::textColourId, theme::lcdText);
+    clockLabel.setInterceptsMouseClicks (false, false);
+    addAndMakeVisible (clockLabel);
+
     tempoLabel.setEditable (false, true, false);
-    tempoLabel.setJustificationType (juce::Justification::centredRight);
-    tempoLabel.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+    tempoLabel.setJustificationType (juce::Justification::centred);
+    tempoLabel.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 24.0f, juce::Font::plain));
+    tempoLabel.setColour (juce::Label::textColourId, theme::lcdText);
     tempoLabel.setTooltip ("Double-click to change the tempo");
     tempoLabel.onTextChange = [this]
     {
@@ -97,17 +122,22 @@ MainComponent::MainComponent (bool openAudioDevice)
     };
     addAndMakeVisible (tempoLabel);
 
-    for (auto* l : { &tempoCaption, &masterCaption })
-    {
-        l->setColour (juce::Label::textColourId, theme::dimText);
-        l->setFont (juce::FontOptions (12.0f));
-        addAndMakeVisible (l);
-    }
+    tempoCaption.setColour (juce::Label::textColourId, theme::lcdDim);
+    tempoCaption.setFont (juce::FontOptions (10.0f));
+    tempoCaption.setJustificationType (juce::Justification::centred);
+    tempoCaption.setInterceptsMouseClicks (false, false);
+    addAndMakeVisible (tempoCaption);
+
+    masterCaption.setColour (juce::Label::textColourId, theme::dimText);
+    masterCaption.setFont (juce::FontOptions (12.0f));
+    masterCaption.setJustificationType (juce::Justification::centredRight);
+    addAndMakeVisible (masterCaption);
 
     masterSlider.setSliderStyle (juce::Slider::LinearHorizontal);
     masterSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
     masterSlider.setRange (0.0, 1.0, 0.001);
     masterSlider.setScrollWheelEnabled (false);
+    masterSlider.setTooltip ("Master volume");
     masterSlider.onDragStart = [this] { undoManager.beginNewTransaction ("Master volume"); };
     masterSlider.onValueChange = [this] { project.setProperty (ids::masterGain, masterSlider.getValue(), &undoManager); };
     addAndMakeVisible (masterSlider);
@@ -269,51 +299,112 @@ MainComponent::~MainComponent()
 //==============================================================================
 // Layout
 //==============================================================================
+juce::Rectangle<int> MainComponent::lcdBounds() const
+{
+    return juce::Rectangle<int> (440, 42).withCentre ({ getWidth() / 2, toolbarTopRow / 2 + 1 });
+}
+
 void MainComponent::paint (juce::Graphics& g)
 {
     g.fillAll (theme::background);
-    g.setColour (theme::toolbar);
-    g.fillRect (getLocalBounds().removeFromTop (toolbarHeight));
-    g.setColour (theme::outline);
+
+    // Navy control bar
+    const auto bar = getLocalBounds().removeFromTop (toolbarHeight).toFloat();
+    g.setGradientFill (juce::ColourGradient (theme::toolbar.brighter (0.08f), 0.0f, bar.getY(),
+                                             theme::toolbarDark, 0.0f, bar.getBottom(), false));
+    g.fillRect (bar);
+    g.setColour (juce::Colours::black.withAlpha (0.25f));
+    g.fillRect (0, toolbarTopRow, getWidth(), 1);
+    g.setColour (juce::Colours::white.withAlpha (0.05f));
+    g.fillRect (0, toolbarTopRow + 1, getWidth(), 1);
+    g.setColour (juce::Colours::black);
     g.fillRect (0, toolbarHeight - 1, getWidth(), 1);
+
+    // The display
+    const auto lcd = lcdBounds().toFloat();
+    g.setColour (juce::Colours::black.withAlpha (0.5f));
+    g.fillRoundedRectangle (lcd.translated (0.0f, 1.0f).expanded (1.0f), 6.0f);
+    g.setGradientFill (juce::ColourGradient (theme::lcd.brighter (0.06f), 0.0f, lcd.getY(), theme::lcd, 0.0f, lcd.getBottom(), false));
+    g.fillRoundedRectangle (lcd, 5.0f);
+    g.setColour (theme::outline.darker (0.3f));
+    g.drawRoundedRectangle (lcd.reduced (0.5f), 5.0f, 1.0f);
+
+    g.setColour (theme::lcdDim.withAlpha (0.4f));
+    for (auto* c : { &positionLabel, &clockLabel })
+        g.fillRect ((float) c->getRight() + 1.0f, lcd.getY() + 8.0f, 1.0f, lcd.getHeight() - 16.0f);
+
+    g.setColour (theme::lcdDim);
+    g.setFont (juce::FontOptions (9.5f));
+    const auto captionY = lcd.getBottom() - 13.0f;
+    g.drawText ("BAR   BEAT   DIV", juce::Rectangle<float> ((float) positionLabel.getX(), captionY, (float) positionLabel.getWidth(), 11.0f),
+                juce::Justification::centred, false);
+    g.drawText ("TIME", juce::Rectangle<float> ((float) clockLabel.getX(), captionY, (float) clockLabel.getWidth(), 11.0f),
+                juce::Justification::centred, false);
+
+    // Captions under the keys
+    g.setFont (juce::FontOptions (11.0f));
+    for (auto* b : std::initializer_list<juce::Button*> { &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
+                                                          &recordButton, &cycleButton, &countInButton, &clickButton,
+                                                          &mixerButton, &editorButton, &keysButton })
+    {
+        g.setColour (b->getToggleState() ? theme::cream : theme::text.withAlpha (0.78f));
+        g.drawText (b->getName(), b->getBounds().translated (0, b->getHeight() + 1).withHeight (13).expanded (8, 0),
+                    juce::Justification::centred, false);
+    }
 }
 
 void MainComponent::resized()
 {
     auto area = getLocalBounds();
+    auto toolbar = area.removeFromTop (toolbarHeight);
 
-    // Toolbar
-    auto bar = area.removeFromTop (toolbarHeight).reduced (10, 9);
-    auto place = [&bar] (juce::Component& c, int width, int gapAfter = 4)
+    // Row 1: file and edit keys | the display | master volume and audio
     {
-        c.setBounds (bar.removeFromLeft (width));
-        bar.removeFromLeft (gapAfter);
-    };
+        auto row = toolbar.removeFromTop (toolbarTopRow).reduced (12, 10);
+        auto left = [&row] (juce::Component& c, int width, int gap = 6) { c.setBounds (row.removeFromLeft (width)); row.removeFromLeft (gap); };
+        auto right = [&row] (juce::Component& c, int width, int gap = 6) { c.setBounds (row.removeFromRight (width)); row.removeFromRight (gap); };
 
-    place (fileButton, 52, 12);
-    place (undoButton, 50);
-    place (redoButton, 50, 12);
-    place (rewindButton, 30);
-    place (playButton, 52);
-    place (recordButton, 42, 8);
-    place (cycleButton, 52, 8);
-    place (positionLabel, 184, 8);
-    place (tempoLabel, 44, 2);
-    place (tempoCaption, 30, 8);
-    place (countInButton, 54);
-    place (clickButton, 48, 12);
+        left (fileButton, 54, 12);
+        left (undoButton, 54);
+        left (redoButton, 54, 12);
+        left (addTrackButton, 74);
 
-    auto placeRight = [&bar] (juce::Component& c, int width, int gapBefore = 4)
+        right (settingsButton, 62, 14);
+        right (masterSlider, 120, 4);
+        right (masterCaption, 52);
+
+        auto lcd = lcdBounds().reduced (6, 2);
+        auto numbers = lcd.withTrimmedBottom (12);
+        positionLabel.setBounds (numbers.removeFromLeft (150));
+        clockLabel.setBounds (numbers.removeFromLeft (190));
+        auto tempo = lcd.withLeft (numbers.getX());
+        tempoLabel.setBounds (tempo.withTrimmedBottom (12));
+        tempoCaption.setBounds (tempo.removeFromBottom (12).translated (0, 1));
+    }
+
+    // Row 2: transport keys in the middle, views on the right
     {
-        c.setBounds (bar.removeFromRight (width));
-        bar.removeFromRight (gapBefore);
-    };
+        constexpr int keyWidth = 44, keyHeight = 30, gap = 6;
+        auto row = toolbar.withTrimmedTop (5).withHeight (keyHeight);
 
-    placeRight (settingsButton, 56, 12);
-    placeRight (masterSlider, 84, 2);
-    placeRight (masterCaption, 44, 12);
-    placeRight (mixerButton, 60);
-    placeRight (addTrackButton, 64);
+        const std::initializer_list<juce::Component*> transport { &rewindButton, &backBarButton, &forwardButton, &stopButton,
+                                                                  &playButton, &recordButton, &cycleButton, &countInButton, &clickButton };
+        const int totalWidth = (int) transport.size() * (keyWidth + gap) + 14;
+        int x = getWidth() / 2 - totalWidth / 2;
+
+        for (auto* c : transport)
+        {
+            c->setBounds (x, row.getY(), keyWidth, keyHeight);
+            x += keyWidth + gap + (c == &recordButton ? 14 : 0);
+        }
+
+        x = getWidth() - 12 - 3 * keyWidth - 2 * gap;
+        for (auto* c : { (juce::Component*) &mixerButton, (juce::Component*) &editorButton, (juce::Component*) &keysButton })
+        {
+            c->setBounds (x, row.getY(), keyWidth, keyHeight);
+            x += keyWidth + gap;
+        }
+    }
 
     // Status line
     statusLabel.setBounds (area.removeFromBottom (statusHeight).reduced (10, 0));
@@ -321,7 +412,9 @@ void MainComponent::resized()
     if (pianoRoll.isVisible())
         pianoRoll.setBounds (area.removeFromBottom (juce::jlimit (200, 360, getHeight() / 3)));
     else if (mixer.isVisible())
-        mixer.setBounds (area.removeFromBottom (juce::jlimit (300, 420, getHeight() / 2)));
+        mixer.setBounds (area.removeFromBottom (juce::jmin (area.getHeight() - 120,
+                                                            juce::jlimit (ChannelStrip::minimumHeight + MixerPanel::headerHeight, 660,
+                                                                          (int) (getHeight() * 0.68)))));
 
     // Meters on the right
     auto meters = area.removeFromRight (meterWidth).reduced (8, 10);
@@ -953,12 +1046,15 @@ void MainComponent::timerCallback()
     outputMeter.push (levels.outL, levels.outR);
     mixer.setMasterLevels (levels.outL, levels.outR);
     mixerButton.setToggleState (mixer.isVisible(), juce::dontSendNotification);
+    editorButton.setToggleState (pianoRoll.isVisible(), juce::dontSendNotification);
 
     const auto playhead = engine.getPlayheadSeconds();
     positionLabel.setText (formatPosition (playhead), juce::dontSendNotification);
+    clockLabel.setText (formatClock (playhead), juce::dontSendNotification);
 
     const bool playing = engine.isPlaying();
-    playButton.setButtonText (playing ? "Stop" : "Play");
+    if (playing != playButton.getToggleState() || engine.isRecording() != recordButton.getToggleState())
+        repaint (0, toolbarTopRow, getWidth(), toolbarHeight - toolbarTopRow);   // the captions under the keys
     playButton.setToggleState (playing, juce::dontSendNotification);
     recordButton.setToggleState (engine.isRecording(), juce::dontSendNotification);
     clickButton.setToggleState ((bool) project[ids::metronome], juce::dontSendNotification);
@@ -994,7 +1090,7 @@ juce::String MainComponent::formatPosition (double seconds) const
     const int beatsPerBar = project.getProperty (ids::timeSigNumerator, 4);
 
     if (seconds < 0.0) // count-in: show the beats left
-        return "Count-in   " + juce::String ((int) std::ceil (-seconds / beatLength - 1e-9));
+        return "- " + juce::String ((int) std::ceil (-seconds / beatLength - 1e-9)) + " -";
 
     const auto beats = seconds / beatLength;
 
@@ -1002,9 +1098,14 @@ juce::String MainComponent::formatPosition (double seconds) const
     const auto beat = (int) std::floor (beats) % beatsPerBar + 1;
     const auto sixteenth = (int) std::floor ((beats - std::floor (beats)) * 4.0) + 1;
 
-    const auto totalMs = (juce::int64) std::llround (seconds * 1000.0);
-    return juce::String::formatted ("%3d.%d.%d   %02d:%02d.%03d", bar, beat, sixteenth,
-                                    (int) (totalMs / 60000), (int) (totalMs / 1000) % 60, (int) (totalMs % 1000));
+    return juce::String::formatted ("%3d  %d  %d", bar, beat, sixteenth);
+}
+
+juce::String MainComponent::formatClock (double seconds) const
+{
+    const auto totalMs = (juce::int64) std::llround (juce::jmax (0.0, seconds) * 1000.0);
+    return juce::String::formatted ("%02d:%02d:%02d.%03d", (int) (totalMs / 3600000), (int) (totalMs / 60000) % 60,
+                                    (int) (totalMs / 1000) % 60, (int) (totalMs % 1000));
 }
 
 juce::String MainComponent::deviceStatusText() const

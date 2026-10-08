@@ -22,28 +22,45 @@ public:
     {
         auto area = getLocalBounds();
 
-        g.setColour (theme::dimText);
-        g.setFont (juce::FontOptions (11.0f));
-        g.drawText (label, area.removeFromBottom (16), juce::Justification::centred);
+        if (label.isNotEmpty())
+        {
+            g.setColour (theme::dimText);
+            g.setFont (juce::FontOptions (11.0f));
+            g.drawText (label, area.removeFromBottom (16), juce::Justification::centred);
+        }
 
-        auto bars = area.toFloat().reduced (2.0f, 0.0f);
-        const auto barWidth = (bars.getWidth() - 3.0f) / 2.0f;
+        // Black housing with two LED columns
+        auto housing = area.toFloat();
+        g.setColour (juce::Colour (0xff0d0e10));
+        g.fillRoundedRectangle (housing, 2.5f);
+        g.setColour (juce::Colours::black);
+        g.drawRoundedRectangle (housing.reduced (0.5f), 2.5f, 1.0f);
+
+        auto bars = housing.reduced (2.0f, 3.0f);
+        const auto barWidth = (bars.getWidth() - 2.0f) / 2.0f;
         drawBar (g, bars.removeFromLeft (barWidth), levelL);
-        bars.removeFromLeft (3.0f);
+        bars.removeFromLeft (2.0f);
         drawBar (g, bars.removeFromLeft (barWidth), levelR);
     }
 
 private:
     static void drawBar (juce::Graphics& g, juce::Rectangle<float> r, float linear)
     {
-        g.setColour (theme::panel);
-        g.fillRoundedRectangle (r, 2.0f);
-
         const auto db = juce::Decibels::gainToDecibels (linear, -60.0f);
-        const auto proportion = juce::jmap (db, -60.0f, 0.0f, 0.0f, 1.0f);
+        const auto lit = juce::jmap (db, -60.0f, 0.0f, 0.0f, 1.0f);
 
-        g.setColour (db > -0.5f ? theme::danger : db > -12.0f ? theme::meterAmber : theme::meterGreen);
-        g.fillRoundedRectangle (r.withTop (r.getBottom() - r.getHeight() * proportion), 2.0f);
+        constexpr float segment = 3.0f, gap = 1.0f;
+        const auto count = juce::jmax (1, (int) ((r.getHeight() + gap) / (segment + gap)));
+
+        for (int i = 0; i < count; ++i)
+        {
+            const auto proportion = (float) (i + 1) / (float) count;
+            const auto segDb = juce::jmap (proportion, -60.0f, 0.0f);
+            const auto colour = segDb > -1.0f ? theme::danger : segDb > -12.0f ? theme::meterAmber : theme::meterGreen;
+            const auto y = r.getBottom() - (float) (i + 1) * (segment + gap) + gap;
+            g.setColour (proportion <= lit + 0.5f / (float) count ? colour : colour.withAlpha (0.12f));
+            g.fillRect (r.getX(), y, r.getWidth(), segment);
+        }
     }
 
     juce::String label;

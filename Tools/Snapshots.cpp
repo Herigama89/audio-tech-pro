@@ -7,6 +7,7 @@
 #include "model/Project.h"
 #include "engine/MasterBusCompressor.h"
 #include "ui/KeyCommands.h"
+#include "ui/ConsoleLook.h"
 
 namespace riff
 {
@@ -38,7 +39,10 @@ public:
                 pump (main, 20);
         }
 
-        pump (main, 1500);   // waveforms load on a background thread
+        // Waveforms start loading the first time they're painted, on a background thread.
+        main.createComponentSnapshot (main.getLocalBounds());
+        pump (main, 2500);
+        pump (main, 200);
         save (main, "arrange.png");
 
         main.showMixer();
@@ -204,7 +208,11 @@ private:
 int main (int argc, char* argv[])
 {
     juce::ScopedJuceInitialiser_GUI init;
+    riff::ConsoleLook look;
+    juce::LookAndFeel::setDefaultLookAndFeel (&look);
     const auto folder = argc > 1 ? juce::File (juce::String (argv[1]))
                                  : juce::File::getCurrentWorkingDirectory().getChildFile ("snapshots");
-    return riff::SnapshotTool (folder).run();
+    const auto result = riff::SnapshotTool (folder).run();
+    juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+    return result;
 }
