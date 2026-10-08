@@ -6,6 +6,7 @@
 #include "engine/BuiltInEffects.h"
 #include "ui/Commands.h"
 #include "ui/KeyCommands.h"
+#include "engine/ConsolePlugins.h"
 
 namespace riff
 {
@@ -179,7 +180,31 @@ MainComponent::MainComponent (bool openAudioDevice)
     rack.onPluginReplaced = [this] (const juce::String& trackId) { editorWindows.erase (trackId); };
 
     // Effects and the mixer
-    effectRack.onEffectReady = [this] { player.requestRebuild(); };
+    effectRack.onEffectReady = [this]
+    {
+        player.requestRebuild();
+        mixer.getConsolePanel().refresh();   // a bus compressor plugin may have just loaded
+    };
+
+    // Console mode: the user's own bus compressor plugin on the master.
+    {
+        auto& console = mixer.getConsolePanel();
+        console.onLoadPlugin = [this] (const juce::PluginDescription& d)
+        {
+            if (auto xml = d.createXml())
+            {
+                undoManager.beginNewTransaction ("Master Bus Compressor plugin");
+                model::setBusCompPlugin (project, xml->toString (juce::XmlElement::TextFormat().singleLine()), &undoManager);
+            }
+        };
+        console.onRemovePlugin = [this]
+        {
+            undoManager.beginNewTransaction ("Remove Master Bus Compressor plugin");
+            for (const auto& insert : model::insertsOf (model::findChain (project, model::busCompOwner)))
+                model::removeInsert (insert, &undoManager);
+        };
+        console.onOpenPluginWindow = [this] (juce::ValueTree insert) { openInsertWindow (insert); };
+    }
     effectRack.onLoadError = [this] (const juce::String& error) { showError ("Plugin problem", error); };
     effectRack.onEffectReplaced = [this] (const juce::String& insertId) { editorWindows.erase (insertId); };
     mixer.onOpenInsert = [this] (juce::ValueTree insert) { openInsertWindow (insert); };
@@ -220,6 +245,9 @@ MainComponent::MainComponent (bool openAudioDevice)
     // The list of plugins found by earlier scans.
     if (auto xml = appProperties.getUserSettings()->getXmlValue ("knownPlugins"))
         rack.getKnownPlugins().recreateFromXml (*xml);
+
+    mixer.getConsolePanel().setCandidates (console::findBusCompressors (rack.getKnownPlugins().getTypes()));
+    rack.getKnownPlugins().addChangeListener (this);   // a new scan may find one
 
     // --- Menus and key commands -------------------------------------------------
     keyPreset = appProperties.getUserSettings()->getValue ("keyPreset", commands::presetNames()[0]);
@@ -291,6 +319,7 @@ MainComponent::~MainComponent()
     stopTimer();
     engine.stop();
     engine.getDeviceManager().removeChangeListener (this);
+    rack.getKnownPlugins().removeChangeListener (this);
     undoManager.removeChangeListener (this);
     timeline.removeChangeListener (this);
     project.removeListener (this);
@@ -1015,6 +1044,11 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
     {
         updateScrollBars();
         commandManager.commandStatusChanged(); // the selection changed what the Track commands act on
+    }
+    else if (source == &rack.getKnownPlugins())
+    {
+        mixer.getConsolePanel().setCandidates (console::findBusCompressors (rack.getKnownPlugins().getTypes()));
+        mixer.resized();
     }
     else if (source == commandManager.getKeyMappings())
     {

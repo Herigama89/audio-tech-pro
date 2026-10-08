@@ -42,6 +42,7 @@ set(RIFF_CORE_SOURCES
     Source/engine/EffectRack.cpp
     Source/engine/MasterBusCompressor.cpp
     Source/engine/ConsoleChannel.cpp
+    Source/engine/ConsolePlugins.cpp
 )
 
 set(RIFF_DEFINITIONS
@@ -69,6 +70,12 @@ juce_add_gui_app(AudioTechPro
 
 juce_generate_juce_header(AudioTechPro)
 
+# Artwork compiled into the app
+juce_add_binary_data(AudioTechProData
+    HEADER_NAME BinaryData.h
+    NAMESPACE   BinaryData
+    SOURCES     Resources/MasterBusCompressorPanel.png)
+
 # Everything on screen except the app's entry point (the snapshot tool reuses it).
 set(RIFF_UI_SOURCES
     Source/MainComponent.cpp
@@ -83,6 +90,7 @@ set(RIFF_UI_SOURCES
     Source/ui/PianoRoll.cpp
     Source/ui/InstrumentWindows.cpp
     Source/ui/Mixer.cpp
+    Source/ui/BusCompConsolePanel.cpp
 )
 
 target_sources(AudioTechPro PRIVATE
@@ -101,6 +109,7 @@ target_compile_definitions(AudioTechPro PRIVATE
 
 target_link_libraries(AudioTechPro
     PRIVATE
+        AudioTechProData
         juce::juce_audio_utils
         juce::juce_audio_devices
         juce::juce_audio_formats
@@ -131,6 +140,7 @@ if(RIFF_BUILD_TESTS)
         Tests/ModelTests.cpp
         Tests/EngineTests.cpp
         Tests/CommandTests.cpp
+        Tests/ConsoleTests.cpp
     )
 
     target_include_directories(AudioTechProTests PRIVATE Source)
@@ -176,7 +186,7 @@ if(RIFF_BUILD_SNAPSHOTS)
     target_sources(Snapshots PRIVATE Tools/Snapshots.cpp ${RIFF_CORE_SOURCES} ${RIFF_UI_SOURCES})
     target_include_directories(Snapshots PRIVATE Source)
     target_compile_definitions(Snapshots PRIVATE ${RIFF_DEFINITIONS} JUCE_MODAL_LOOPS_PERMITTED=1)
-    target_link_libraries(Snapshots PRIVATE juce::juce_gui_extra juce::juce_audio_utils juce::juce_dsp)
+    target_link_libraries(Snapshots PRIVATE AudioTechProData juce::juce_gui_extra juce::juce_audio_utils juce::juce_dsp)
     if(APPLE)
         target_link_libraries(Snapshots PRIVATE "-framework CoreAudioKit")
     endif()

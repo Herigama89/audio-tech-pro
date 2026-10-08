@@ -1311,3 +1311,54 @@ TEST_CASE ("The console section runs on a track in the engine", "[console]")
     const auto out = renderLeft (f.engine, 24000);
     CHECK_THAT (out[20000], WithinAbs (0.5 * 0.8 * juce::Decibels::decibelsToGain (6.0), 0.01));
 }
+
+TEST_CASE ("A bus compressor plugin on the master replaces the built-in one", "[console-mode]")
+{
+    Fixture f;
+    EffectRack effects { f.rack.getFormatManager() };
+    ProjectPlayer player (f.engine, f.cache, &f.rack, &effects);
+
+    const auto wav = writeConstantWav (f.temp.dir.getChildFile ("loud.wav"), 48000.0, 48000, 0.9f);
+    model::addRegion (model::addTrack (f.project, "A", nullptr), wav, 0.0, 1.0, nullptr);
+
+    // The built-in compressor is set up to squash hard...
+    f.project.setProperty (ids::busCompOn, true, nullptr);
+    f.project.setProperty (ids::busCompThreshold, -30.0, nullptr);
+    f.project.setProperty (ids::busCompRatio, 2, nullptr);
+
+    // ...but a "plugin" (a gain change standing in for UA's) sits in its place.
+    juce::UndoManager um;
+    auto insert = model::setBusCompPlugin (f.project, "<PLUGIN name=\"UADx SSL G Bus Compressor\"/>", &um);
+    REQUIRE (model::busCompPlugin (f.project) == insert);
+
+    auto standIn = BuiltInEffect::create ("eq");   // a flat EQ (every band at 0 dB) passes the sound unchanged
+    for (int p = 0; p < (int) standIn->getInfo().params.size(); ++p)
+        if (standIn->getInfo().params[(size_t) p].id.containsIgnoreCase ("gain"))
+            standIn->setParameter (p, 0.0f);
+    standIn->prepare (48000.0, AudioEngine::maxChunkSize);
+    effects.injectForTesting (insert, std::move (standIn), 48000.0);
+
+    player.setProject (f.project);
+    player.rebuildNow();
+    f.engine.play();
+    const auto out = renderLeft (f.engine, 24000);
+
+    // Only the plugin ran: the level is untouched (0.9 * 0.8), not compressed.
+    CHECK_THAT (out[20000], WithinAbs (0.72, 0.01));
+    const auto [in, outLevel] = f.engine.takeBusPluginLevels();
+    CHECK (in > 0.5f);
+    CHECK_THAT (outLevel, WithinAbs (in, 0.01));
+
+    // Bypassing the plugin brings the built-in compressor back.
+    insert.setProperty (ids::bypass, true, nullptr);
+    player.rebuildNow();
+    const auto squashed = renderLeft (f.engine, 24000);
+    CHECK (std::abs (squashed[20000]) < 0.4f);
+
+    // Swapping in another plugin keeps only one in the place.
+    um.beginNewTransaction();
+    model::setBusCompPlugin (f.project, "<PLUGIN name=\"UAD SSL G Bus Compressor\"/>", &um);
+    CHECK (model::insertsOf (model::findChain (f.project, model::busCompOwner)).size() == 1);
+    um.undo();
+    CHECK (model::busCompPlugin (f.project)[ids::id] == insert[ids::id]);
+}

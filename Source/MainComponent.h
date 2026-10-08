@@ -181,7 +181,7 @@ private:
     juce::ScrollBar hScroll { false }, vScroll { true };
     LevelMeter inputMeter { "IN" }, outputMeter { "OUT" };
     PianoRoll pianoRoll { undoManager, engine };
-    MixerPanel mixer { undoManager, engine, player };
+    MixerPanel mixer { undoManager, engine, player, effectRack };
 
     juce::TooltipWindow tooltips { this, 600 };
     std::unique_ptr<juce::FileChooser> fileChooser;

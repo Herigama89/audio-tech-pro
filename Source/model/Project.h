@@ -123,6 +123,15 @@ namespace riff::model
 
     // --- Mixer ----------------------------------------------------------------
     inline const juce::String masterOwner { "master" };
+
+    /** Console mode: the chain holding the user's own bus compressor plugin for the master. */
+    inline const juce::String busCompOwner { "busComp" };
+
+    /** The bus compressor plugin on the master, or an invalid tree. */
+    juce::ValueTree busCompPlugin (const juce::ValueTree& project);
+
+    /** Puts a plugin in the master's bus compressor place, replacing any there. */
+    juce::ValueTree setBusCompPlugin (juce::ValueTree project, const juce::String& descriptionXml, juce::UndoManager* um);
     inline const juce::String builtinKind { "builtin" }, pluginKind { "plugin" };
 
     /** The MIXER node, created (unundoably) if the project doesn't have one yet. */

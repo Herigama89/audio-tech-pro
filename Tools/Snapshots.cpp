@@ -49,6 +49,23 @@ public:
         pump (main, 200);
         save (main, "mixer.png");
 
+        // Console mode, as it looks on a computer with UA's bus compressor installed.
+        {
+            juce::PluginDescription d;
+            d.name = "UADx SSL G Bus Compressor";
+            d.manufacturerName = "Universal Audio";
+            d.pluginFormatName = "AudioUnit";
+            auto& console = main.mixer.getConsolePanel();
+            console.setCandidates ({ d });
+            main.mixer.resized();
+            console.showPreview ({ 0.62f, 1.0f, 0.4f, 0.75f, 0.0f, 0.5f, 0.35f }, 4.0f, 0.7f, true);
+            pump (main, 200);
+            save (main, "mixer-console.png");
+            save (console, "console-panel.png", 2.0f);
+            console.setCandidates ({});
+            main.mixer.resized();
+        }
+
         main.closeMixer();
         for (const auto& track : main.project)
             for (const auto& region : track)
@@ -85,9 +102,9 @@ private:
         }
     }
 
-    void save (juce::Component& c, const juce::String& name)
+    void save (juce::Component& c, const juce::String& name, float scale = 1.0f)
     {
-        const auto image = c.createComponentSnapshot (c.getLocalBounds(), true, 1.0f);
+        const auto image = c.createComponentSnapshot (c.getLocalBounds(), true, scale);
         auto file = out.getChildFile (name);
         file.deleteFile();
         juce::FileOutputStream stream (file);

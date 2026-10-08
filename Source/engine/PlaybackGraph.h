@@ -120,6 +120,7 @@ struct PlaybackGraph
     std::vector<std::shared_ptr<Effect>> masterInserts;
     Curve masterVolumeAutomation;
     MasterBusCompressor::Settings busComp;
+    std::vector<std::shared_ptr<Effect>> busCompPlugins;   // console mode: the user's own bus compressor, instead of busComp
 
     int directDelay = 0;        // extra delay for tracks heard directly, matching the slowest bus
     int playbackLatency = 0;    // how late everything is heard because of plugin latency

@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "LevelMeter.h"
 #include "ConsoleLook.h"
+#include "BusCompConsolePanel.h"
 #include "../engine/AudioEngine.h"
 #include "../engine/ProjectPlayer.h"
 
@@ -107,7 +108,7 @@ class MixerPanel final : public juce::Component,
                          private juce::Timer
 {
 public:
-    MixerPanel (juce::UndoManager& um, AudioEngine& engine, ProjectPlayer& player);
+    MixerPanel (juce::UndoManager& um, AudioEngine& engine, ProjectPlayer& player, EffectRack& effects);
     ~MixerPanel() override;
 
     void setProject (juce::ValueTree newProject);
@@ -125,6 +126,9 @@ public:
 
     void paint (juce::Graphics& g) override;
     void resized() override;
+
+    /** Console mode's bus compressor face (shown instead of the built-in one when a UA plugin is available). */
+    BusCompConsolePanel& getConsolePanel() noexcept { return consolePanel; }
 
     static constexpr int headerHeight = 28;
 
@@ -151,6 +155,7 @@ private:
     juce::OwnedArray<ChannelStrip> strips;
     std::unique_ptr<ChannelStrip> masterStrip;
     MasterBusCompressorPanel busComp;
+    BusCompConsolePanel consolePanel;
     bool needsRebuild = false;
 };
 

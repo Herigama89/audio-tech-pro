@@ -121,6 +121,7 @@ Edit, Track, Navigate, Record, Mix, View.
 | Mixer | **Mixer** key or **X**. Each strip, top to bottom: the console section, 6 effect slots, 2 sends, the fader and meter, M and S, and the name plate. The Master Bus Compressor and the master strip are on the right. |
 | Console EQ and Dynamics | On every strip: HF (8 kHz shelf), HMF (2.5 kHz), LMF (400 Hz), LF (100 Hz shelf), each +/-15 dB, and DYN, a one-knob compressor (turn it up for more). **IN** switches the section in or out. Double-click a knob to reset it. It runs before the effect slots. |
 | Master Bus Compressor | Next to the master strip. Click **IN** to switch it on. Threshold, Make-up, Attack (0.1 to 30 ms), Release (0.1 to 1.2 s, or Auto), Ratio (2, 4 or 10:1) and Mix (for parallel compression). The meter shows how much it's turning the mix down. It sits after the master effect slots and before the master fader, and is included when you bounce. |
+| Console mode (UA bus compressor) | If Universal Audio's SSL G Bus Compressor is installed (UADx or UAD, Audio Unit or VST3, found by a plugin scan), the mixer shows a hardware-style face for it instead of the built-in compressor. Press **IN** once to load your plugin onto the master; after that **IN** switches it in and out. The knobs turn the plugin's own controls, the needle shows its gain reduction, the left LEDs show gain reduction and the right LEDs the output level. Right-click the face to open the plugin's window, choose which plugin to use, reassign any knob to a different parameter, or go back to the built-in compressor. Nothing is unlocked or included: it only works with a copy you own and have authorised. |
 | Add an effect | Click an empty slot in the mixer, then pick a built-in effect (EQ, Compressor, Delay, Reverb, Limiter) or one of your plugins under **Plugins**. Effects run top to bottom, before the fader. |
 | Change an effect | Click a filled slot to open its window. Right-click it to **Bypass**, **Replace...** or **Remove**. |
 | Aux bus | **+ Track > Aux bus**, or **New aux bus** from a send's menu. Put an effect (e.g. Reverb at 100% mix) on the bus. |
@@ -174,11 +175,13 @@ Source/
     AudioFileCache.*      decodes and resamples audio files into memory
     ConsoleChannel.*      each strip's EQ and Dynamics
     MasterBusCompressor.* the compressor on the master
+    ConsolePlugins.*      console mode: finding UA plugins and matching their parameters
   ui/
     ConsoleLook.*         the look: knobs, fader caps, keys, transport icons, the VU meter
     Commands.*            every command and the key presets (Logic Pro)
     KeyCommands.*         the Key Commands window
     Mixer.*               channel strips, the Master Bus Compressor panel
+    BusCompConsolePanel.* console mode's face for the UA bus compressor
     ArrangeCanvas.*       ruler, lanes, regions, waveforms, mouse editing, file drops
     TrackHeaders.*        per-track name / mute / solo / volume / pan
     TimelineState.h       zoom, scroll and selection shared by the views
@@ -188,6 +191,7 @@ Source/
   AppInfo.h               the app's name, in one place
 Tests/                    Catch2 unit tests
 Tools/Snapshots.cpp       renders the main views to PNG files (cmake -DRIFF_BUILD_SNAPSHOTS=ON)
+Tools/make_bus_comp_panel.py  builds Resources/MasterBusCompressorPanel.png from the design mockup
 ```
 
 ### How an edit reaches your speakers
@@ -239,7 +243,8 @@ Tools/Snapshots.cpp       renders the main views to PNG files (cmake -DRIFF_BUIL
 - [x] Master Bus Compressor with a VU meter; console EQ and Dynamics on every strip
 - [ ] Key presets for other DAWs (Pro Tools, Ableton Live, FL Studio, Cubase)
 - [ ] MIDI genre generator, with a built-in drum kit
-- [ ] Console mode for Universal Audio owners: your UAD channel strip and bus compressor plugins driven from the strips and the Master Bus Compressor panel
+- [x] Console mode for the master: your UA SSL G Bus Compressor plugin, with a hardware-style face
+- [ ] Console mode for the strips: your UA 4K channel strip plugin driven from each strip's console section
 - [ ] Claude AI assistant (with your own API key)
 - [ ] Screen recording of the app with its audio, up to 4K (Mac)
 - [ ] Several audio interfaces at once (aggregate device)

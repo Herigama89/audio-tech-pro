@@ -646,6 +646,20 @@ juce::ValueTree laneFor (juce::ValueTree project, const juce::String& owner, con
     return lane;
 }
 
+juce::ValueTree busCompPlugin (const juce::ValueTree& project)
+{
+    const auto inserts = insertsOf (findChain (project, busCompOwner));
+    return inserts.isEmpty() ? juce::ValueTree() : inserts.getFirst();
+}
+
+juce::ValueTree setBusCompPlugin (juce::ValueTree project, const juce::String& descriptionXml, juce::UndoManager* um)
+{
+    auto chain = chainFor (project, busCompOwner);
+    for (const auto& old : insertsOf (chain))
+        removeInsert (old, um);
+    return addPluginInsert (chain, descriptionXml, 0, um);
+}
+
 bool clearAutomation (juce::ValueTree project, const juce::String& owner, const juce::String& param, juce::UndoManager* um)
 {
     auto lane = laneFor (project, owner, param, false);

@@ -283,6 +283,22 @@ juce::String AudioEngine::renderOffline (const juce::File& file, double startSec
     return error;
 }
 
+float AudioEngine::rmsOf (const float* left, const float* right, int n) noexcept
+{
+    if (n <= 0)
+        return 0.0f;
+
+    double sum = 0.0;
+    for (int i = 0; i < n; ++i)
+        sum += (double) left[i] * left[i] + (double) right[i] * right[i];
+    return (float) std::sqrt (sum / (2.0 * n));
+}
+
+std::pair<float, float> AudioEngine::takeBusPluginLevels() noexcept
+{
+    return { busPluginIn.exchange (0.0f), busPluginOut.exchange (0.0f) };
+}
+
 void AudioEngine::storeMax (std::atomic<float>& target, float value) noexcept
 {
     auto current = target.load (std::memory_order_relaxed);
@@ -694,9 +710,20 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
             for (const auto& effect : graph->masterInserts)
                 effect->process (mixL, mixR, n);
 
-            // Then the Master Bus Compressor, before the master fader.
-            busComp.setSettings (graph->busComp);
-            busComp.process (mixL, mixR, n);
+            // Then the Master Bus Compressor, before the master fader: the user's
+            // own plugin in console mode, or the built-in one.
+            if (! graph->busCompPlugins.empty())
+            {
+                storeMax (busPluginIn, rmsOf (mixL, mixR, n));
+                for (const auto& effect : graph->busCompPlugins)
+                    effect->process (mixL, mixR, n);
+                storeMax (busPluginOut, rmsOf (mixL, mixR, n));
+            }
+            else
+            {
+                busComp.setSettings (graph->busComp);
+                busComp.process (mixL, mixR, n);
+            }
 
             const bool countingIn = isRecordingNow && position < recordStart;
             if (isPlayingNow && (graph->metronome || countingIn) && ! bouncing)

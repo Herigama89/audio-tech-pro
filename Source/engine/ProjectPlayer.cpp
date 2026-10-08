@@ -165,6 +165,7 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
     juce::StringArray insertIds;
     std::map<juce::String, std::shared_ptr<Effect>> effectsById;
     graph->masterInserts = buildChain (model::masterOwner, sampleRate, insertIds, effectsById);
+    graph->busCompPlugins = buildChain (model::busCompOwner, sampleRate, insertIds, effectsById);
     graph->masterVolumeAutomation = curveFor (model::masterOwner, model::volumeParam, sampleRate);
 
     // Buses get numbers so sends can find them.
@@ -322,6 +323,8 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
 
     int masterLatency = 0;
     for (const auto& e : graph->masterInserts)
+        masterLatency += e->getLatencySamples();
+    for (const auto& e : graph->busCompPlugins)
         masterLatency += e->getLatencySamples();
 
     graph->playbackLatency = slowestTrack + slowestBus + masterLatency;

@@ -1,0 +1,90 @@
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include "engine/ConsolePlugins.h"
+
+using namespace riff;
+using Catch::Matchers::WithinAbs;
+
+namespace
+{
+    juce::PluginDescription plugin (const juce::String& name, const juce::String& maker, const juce::String& format)
+    {
+        juce::PluginDescription d;
+        d.name = name;
+        d.manufacturerName = maker;
+        d.pluginFormatName = format;
+        return d;
+    }
+}
+
+TEST_CASE ("Console mode recognises UA's G-series bus compressor", "[console-mode]")
+{
+    CHECK (console::isBusCompressor (plugin ("UADx SSL G Bus Compressor", "Universal Audio (UADx)", "AudioUnit")));
+    CHECK (console::isBusCompressor (plugin ("UAD SSL G Bus Compressor", "Universal Audio (UAD)", "VST3")));
+    CHECK (console::isBusCompressor (plugin ("SSL G-Master Buss Compressor", "Universal Audio", "VST3")));
+
+    // Other UA plugins, and other makers' G-style compressors, are not it.
+    CHECK_FALSE (console::isBusCompressor (plugin ("UADx SSL 4000 E Channel Strip", "Universal Audio (UADx)", "AudioUnit")));
+    CHECK_FALSE (console::isBusCompressor (plugin ("UADx 1176 Classic Limiter", "Universal Audio (UADx)", "AudioUnit")));
+    CHECK_FALSE (console::isBusCompressor (plugin ("Bus Glue G", "Someone Else", "VST3")));
+
+    auto instrument = plugin ("UADx SSL G Bus Compressor", "Universal Audio", "AudioUnit");
+    instrument.isInstrument = true;
+    CHECK_FALSE (console::isBusCompressor (instrument));
+}
+
+TEST_CASE ("Console mode prefers the native Audio Unit version", "[console-mode]")
+{
+    const juce::Array<juce::PluginDescription> scanned {
+        plugin ("Pro-Q 3", "FabFilter", "VST3"),
+        plugin ("UAD SSL G Bus Compressor", "Universal Audio (UAD)", "VST3"),
+        plugin ("UADx SSL G Bus Compressor", "Universal Audio (UADx)", "VST3"),
+        plugin ("UADx SSL G Bus Compressor", "Universal Audio (UADx)", "AudioUnit"),
+    };
+
+    const auto found = console::findBusCompressors (scanned);
+    REQUIRE (found.size() == 3);
+    CHECK (found[0].name.startsWith ("UADx"));
+    CHECK (found[0].pluginFormatName == "AudioUnit");
+    CHECK (found[1].name.startsWith ("UADx"));
+    CHECK (found[2].name.startsWith ("UAD "));
+
+    CHECK (console::findBusCompressors ({ plugin ("Pro-Q 3", "FabFilter", "VST3") }).isEmpty());
+}
+
+TEST_CASE ("Console mode matches the panel's knobs to the plugin's parameters", "[console-mode]")
+{
+    using C = console::Control;
+    const juce::StringArray names { "Power", "Comp In", "Threshold", "Make-Up Gain", "Attack", "Release",
+                                    "Ratio", "Rate S/C", "Mix", "Headroom", "Gain Reduction" };
+
+    CHECK (console::matchParameter (C::threshold, names) == 2);
+    CHECK (console::matchParameter (C::makeup, names) == 3);
+    CHECK (console::matchParameter (C::attack, names) == 4);
+    CHECK (console::matchParameter (C::release, names) == 5);
+    CHECK (console::matchParameter (C::ratio, names) == 6);
+    CHECK (console::matchParameter (C::filter, names) == 7);
+    CHECK (console::matchParameter (C::mix, names) == 8);
+    CHECK (console::matchParameter (C::in, names) == 0);   // the first switch that fits
+    CHECK (console::findGainReductionMeter (names) == 10);
+
+    // Other spellings
+    CHECK (console::matchParameter (C::makeup, { "Thresh", "Output Gain" }) == 1);
+    CHECK (console::matchParameter (C::mix, { "Thresh", "Dry/Wet" }) == 1);
+    CHECK (console::matchParameter (C::filter, { "Sidechain HPF" }) == 0);
+    CHECK (console::matchParameter (C::in, { "Bypass" }) == 0);
+    CHECK (console::isBypassParameter ("Bypass"));
+    CHECK_FALSE (console::isBypassParameter ("Comp In"));
+
+    // Nothing fits: the knob stays unassigned
+    CHECK (console::matchParameter (C::ratio, { "Threshold", "Mix" }) == -1);
+    CHECK (console::findGainReductionMeter ({ "Threshold" }) == -1);
+}
+
+TEST_CASE ("Console mode reads numbers from parameter text", "[console-mode]")
+{
+    CHECK_THAT (console::numberIn ("-12.5 dB"), WithinAbs (-12.5, 1e-6));
+    CHECK_THAT (console::numberIn ("+4 dB"), WithinAbs (4.0, 1e-6));
+    CHECK_THAT (console::numberIn ("GR 3.2"), WithinAbs (3.2, 1e-6));
+    CHECK_THAT (console::numberIn ("Auto"), WithinAbs (0.0, 1e-6));
+}

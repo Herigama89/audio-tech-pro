@@ -661,8 +661,8 @@ void MasterBusCompressorPanel::resized()
 //==============================================================================
 // MixerPanel
 //==============================================================================
-MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p)
-    : undoManager (um), engine (e), player (p), busComp (um, e)
+MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p, EffectRack& fx)
+    : undoManager (um), engine (e), player (p), busComp (um, e), consolePanel (um, e, fx)
 {
     title.setText ("Mixer", juce::dontSendNotification);
     title.setFont (juce::FontOptions (13.0f, juce::Font::bold));
@@ -678,6 +678,7 @@ MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p)
     viewport.setScrollBarsShown (true, true);
     addAndMakeVisible (viewport);
     addAndMakeVisible (busComp);
+    addChildComponent (consolePanel);
 
     startTimerHz (30);
 }
@@ -693,6 +694,7 @@ void MixerPanel::setProject (juce::ValueTree newProject)
     project = newProject;
     project.addListener (this);
     busComp.setProject (project);
+    consolePanel.setProject (project);
     rebuild();
 }
 
@@ -707,6 +709,11 @@ void MixerPanel::changed (const juce::ValueTree& parent)
 void MixerPanel::handleAsyncUpdate()
 {
     busComp.refresh();
+    consolePanel.refresh();
+
+    // The console face appears once a plugin is chosen or found.
+    if (consolePanel.isAvailable() != consolePanel.isVisible())
+        resized();
 
     if (std::exchange (needsRebuild, false))
     {
@@ -744,13 +751,17 @@ void MixerPanel::timerCallback()
         s->pushLevels (l, r);
     }
 
-    busComp.updateMeter();
+    if (consolePanel.isVisible())
+        consolePanel.update();
+    else
+        busComp.updateMeter();
 }
 
 void MixerPanel::setMasterLevels (float left, float right)
 {
     if (masterStrip != nullptr)
         masterStrip->pushLevels (left, right);
+    consolePanel.setOutputLevel (juce::jmax (left, right));
 }
 
 void MixerPanel::paint (juce::Graphics& g)
@@ -778,7 +789,15 @@ void MixerPanel::resized()
     if (masterStrip != nullptr)
         masterStrip->setBounds (area.removeFromRight (ChannelStrip::stripWidth).withHeight (juce::jmin (stripHeight, area.getHeight())));
 
-    busComp.setBounds (area.removeFromRight (MasterBusCompressorPanel::panelWidth));
+    // Console mode shows the user's own bus compressor; otherwise the built-in one.
+    const bool console = consolePanel.isAvailable();
+    consolePanel.setVisible (console);
+    busComp.setVisible (! console);
+
+    if (console)
+        consolePanel.setBounds (area.removeFromRight (consolePanel.widthForHeight (area.getHeight())));
+    else
+        busComp.setBounds (area.removeFromRight (MasterBusCompressorPanel::panelWidth));
 
     viewport.setBounds (area);
 

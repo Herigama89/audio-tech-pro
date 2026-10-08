@@ -144,6 +144,9 @@ public:
     /** Post-fader peak of a track since the last call (by the track's slot in the graph). */
     std::pair<float, float> takeTrackLevel (int slot) noexcept;
 
+    /** Console mode: the loudest RMS going into and coming out of the bus compressor plugin since the last call. */
+    std::pair<float, float> takeBusPluginLevels() noexcept;
+
     /** The Master Bus Compressor's largest gain reduction (dB) since the last call. */
     float takeBusCompGainReduction() noexcept
     {
@@ -281,6 +284,8 @@ private:
     float clickAmplitude = 0.0f;
 
     std::atomic<float> peakOutL { 0 }, peakOutR { 0 }, peakInL { 0 }, peakInR { 0 };
+    std::atomic<float> busPluginIn { 0 }, busPluginOut { 0 };
+    static float rmsOf (const float* left, const float* right, int n) noexcept;
     std::array<std::atomic<float>, PlaybackGraph::maxTracks * 2> trackPeaks {};
     std::atomic<bool> bouncing { false };
     bool offlineWasAttached = false, offlineSavedPlaying = false;
