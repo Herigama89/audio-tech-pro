@@ -182,3 +182,40 @@ TEST_CASE ("Bad project files are rejected with a message", "[model][file]")
     CHECK_FALSE (model::fromJson (R"({"riffVersion": 999, "project": {"type": "PROJECT"}})", f, error).isValid());
     CHECK (error.contains ("newer version"));
 }
+
+TEST_CASE ("Recorded regions are shifted earlier by the latency", "[model][record]")
+{
+    juce::UndoManager um;
+    auto p = model::createProject();
+    auto t = model::addTrack (p, "Vox", nullptr);
+    CHECK_FALSE ((bool) t[ids::armed]);
+    CHECK ((int) t[ids::input] == 0);
+
+    um.beginNewTransaction ("Record");
+    auto r = model::addRecordedRegion (t, juce::File ("/tmp/Vox#01.wav"), 4.0, 10.0, 0.012, &um);
+
+    REQUIRE (r.isValid());
+    CHECK (num (r, ids::start) == 4.0);
+    CHECK_THAT (num (r, ids::offset), WithinAbs (0.012, 1e-12));
+    CHECK_THAT (num (r, ids::length), WithinAbs (9.988, 1e-12));
+
+    // Too short to keep after removing the latency
+    CHECK_FALSE (model::addRecordedRegion (t, juce::File ("/tmp/x.wav"), 0.0, 0.01, 0.012, &um).isValid());
+
+    um.undo();
+    CHECK (t.getNumChildren() == 0);
+}
+
+TEST_CASE ("Input names for the track's input setting", "[model][record]")
+{
+    auto p = model::createProject();
+    auto t = model::addTrack (p, "A", nullptr);
+    const juce::StringArray names { "Mic 1", "Mic 2", "Line 3" };
+
+    CHECK (model::inputName (t, names) == "Mic 1");
+    t.setProperty (ids::input, 1, nullptr);
+    t.setProperty (ids::inputStereo, true, nullptr);
+    CHECK (model::inputName (t, names) == "Mic 2 + Line 3");
+    t.setProperty (ids::input, 7, nullptr);
+    CHECK (model::inputName (t, names) == "In 8 + In 9");
+}

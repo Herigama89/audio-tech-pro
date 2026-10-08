@@ -7,6 +7,11 @@ AudioEngine::AudioEngine()
 {
     formatManager.registerBasicFormats(); // WAV, AIFF, FLAC, Ogg (+ MP3/CoreAudio formats on macOS)
     currentGraph.store (new PlaybackGraph());
+
+    for (auto& slot : takeSlots)
+        slot.store (nullptr);
+
+    diskThread.startThread (juce::Thread::Priority::high);
     prepare (44100.0, 2048);
     startTimer (250);
 }
@@ -14,8 +19,13 @@ AudioEngine::AudioEngine()
 AudioEngine::~AudioEngine()
 {
     stopTimer();
+
+    if (isRecording())
+        stopRecording();
+
     deviceManager.removeAudioCallback (this);
     deviceManager.closeAudioDevice();
+    diskThread.stopThread (2000);
     retired.clear();
     delete currentGraph.exchange (nullptr);
 }
@@ -66,6 +76,21 @@ void AudioEngine::collectGarbage()
     std::erase_if (retired, [now] (const Retired& r) { return now > r.retiredAt + 1; });
 }
 
+void AudioEngine::waitForAudioThread()
+{
+    // Blocks the message thread until any callback that might still be using
+    // old state has finished (at most a couple of buffer lengths).
+    if (! deviceRunning.load())
+        return;
+
+    const auto start = callbackCounter.load();
+    const auto deadline = juce::Time::getMillisecondCounter() + 500;
+
+    while (callbackCounter.load() < start + 2 && deviceRunning.load()
+           && juce::Time::getMillisecondCounter() < deadline)
+        juce::Thread::sleep (1);
+}
+
 //==============================================================================
 // Transport
 //==============================================================================
@@ -90,6 +115,155 @@ void AudioEngine::storeMax (std::atomic<float>& target, float value) noexcept
     auto current = target.load (std::memory_order_relaxed);
     while (value > current && ! target.compare_exchange_weak (current, value, std::memory_order_relaxed))
     {}
+}
+
+//==============================================================================
+// Recording
+//==============================================================================
+bool AudioEngine::startRecording (const std::vector<RecordRequest>& requests, juce::String& error)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    if (isRecording())
+        return true;
+
+    if (requests.empty() || (int) requests.size() > maxTakes)
+    {
+        error = "Nothing to record.";
+        return false;
+    }
+
+    const auto rate = sampleRate.load();
+    std::vector<std::unique_ptr<Take>> newTakes;
+
+    auto fail = [&newTakes, &error] (const juce::String& message)
+    {
+        for (auto& t : newTakes)
+        {
+            t->writer.reset();
+            t->file.deleteFile();
+        }
+        error = message;
+        return false;
+    };
+
+    for (const auto& request : requests)
+    {
+        if (! request.file.getParentDirectory().createDirectory())
+            return fail ("Couldn't create the folder " + request.file.getParentDirectory().getFullPathName());
+
+        auto fileStream = std::make_unique<juce::FileOutputStream> (request.file);
+
+        if (fileStream->failedToOpen())
+            return fail ("Couldn't write " + request.file.getFullPathName());
+
+        std::unique_ptr<juce::OutputStream> stream = std::move (fileStream);
+
+        juce::WavAudioFormat wav;
+        auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}
+                                                       .withSampleRate (rate)
+                                                       .withNumChannels (request.numChannels)
+                                                       .withBitsPerSample (24));
+        if (writer == nullptr)
+            return fail ("Couldn't create a WAV writer for " + request.file.getFileName());
+
+        auto take = std::make_unique<Take>();
+        take->trackId = request.trackId;
+        take->file = request.file;
+        take->firstChannel = request.firstChannel;
+        take->numChannels = request.numChannels;
+
+        // Four seconds of FIFO between the audio thread and the disk thread.
+        take->writer = std::make_unique<juce::AudioFormatWriter::ThreadedWriter> (writer.release(), diskThread,
+                                                                                  (int) (rate * 4.0));
+        newTakes.push_back (std::move (take));
+    }
+
+    takes = std::move (newTakes);
+
+    for (size_t i = 0; i < takes.size(); ++i)
+        takeSlots[i].store (takes[i].get(), std::memory_order_release);
+
+    recording.store (true, std::memory_order_release);
+    return true;
+}
+
+std::vector<AudioEngine::FinishedTake> AudioEngine::stopRecording()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    std::vector<FinishedTake> finished;
+
+    if (! recording.exchange (false))
+        return finished;
+
+    waitForAudioThread(); // the audio thread may still be inside recordChunk()
+
+    for (auto& slot : takeSlots)
+        slot.store (nullptr, std::memory_order_release);
+
+    for (auto& take : takes)
+    {
+        take->writer.reset(); // flushes the remaining FIFO contents and closes the file
+
+        const auto written = take->samplesWritten.load();
+        const auto start = take->startSample.load();
+
+        if (written > 0 && start >= 0)
+            finished.push_back ({ take->trackId, take->file, start, written });
+        else
+            take->file.deleteFile(); // nothing was captured
+    }
+
+    takes.clear();
+    return finished;
+}
+
+std::vector<AudioEngine::LiveTake> AudioEngine::getLiveTakes() const
+{
+    std::vector<LiveTake> live;
+    const auto rate = sampleRate.load();
+
+    for (const auto& take : takes)
+    {
+        const auto start = take->startSample.load();
+        live.push_back ({ take->trackId,
+                          start >= 0 ? (double) start / rate : -1.0,
+                          (double) take->samplesWritten.load() / rate });
+    }
+
+    return live;
+}
+
+int AudioEngine::getRoundTripLatencySamples()
+{
+    if (auto* device = deviceManager.getCurrentAudioDevice())
+        return device->getInputLatencyInSamples() + device->getOutputLatencyInSamples();
+    return 0;
+}
+
+int AudioEngine::getNumActiveInputChannels()
+{
+    if (auto* device = deviceManager.getCurrentAudioDevice())
+        return device->getActiveInputChannels().countNumberOfSetBits();
+    return 0;
+}
+
+juce::StringArray AudioEngine::getActiveInputChannelNames()
+{
+    juce::StringArray names;
+
+    if (auto* device = deviceManager.getCurrentAudioDevice())
+    {
+        const auto all = device->getInputChannelNames();
+        const auto active = device->getActiveInputChannels();
+
+        for (int i = 0; i < all.size(); ++i)
+            if (active[i])
+                names.add (all[i].isNotEmpty() ? all[i] : "Input " + juce::String (i + 1));
+    }
+
+    return names;
 }
 
 //==============================================================================
@@ -129,6 +303,8 @@ void AudioEngine::prepare (double newSampleRate, int maxBlockSize)
 
     trackBuffer.setSize (2, maxBlockSize);
     mixBuffer.setSize (2, maxBlockSize);
+    silence.setSize (2, maxBlockSize);
+    silence.clear();
 
     for (auto& state : trackStates)
     {
@@ -139,6 +315,9 @@ void AudioEngine::prepare (double newSampleRate, int maxBlockSize)
 
     masterGain.reset (newSampleRate, 0.03);
     masterGain.setCurrentAndTargetValue (currentGraph.load()->masterGain);
+
+    clickLength = (int) (newSampleRate * 0.035);
+    clickSamplesLeft = 0;
 }
 
 void AudioEngine::render (const float* const* inputs, int numInputs,
@@ -146,7 +325,10 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
 {
     juce::ScopedNoDenormals noDenormals;
 
-    // Input metering (recording arrives in Phase 1).
+    if (inputs == nullptr)
+        numInputs = 0;
+
+    // Input metering
     for (int ch = 0; ch < juce::jmin (numInputs, 2); ++ch)
     {
         if (inputs[ch] == nullptr)
@@ -162,6 +344,7 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
     // Pick up the latest graph once per block.
     const auto* graph = currentGraph.load (std::memory_order_acquire);
     const bool isPlayingNow = playing.load();
+    const bool isRecordingNow = recording.load (std::memory_order_acquire);
 
     if (graph != nullptr)
         masterGain.setTargetValue (graph->masterGain);
@@ -176,11 +359,19 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
         juce::FloatVectorOperations::clear (mixL, n);
         juce::FloatVectorOperations::clear (mixR, n);
 
-        if (graph != nullptr && isPlayingNow)
+        if (isRecordingNow && isPlayingNow)
+            recordChunk (inputs, numInputs, offset, n);
+
+        if (graph != nullptr)
         {
-            renderChunk (*graph, mixL, mixR, n);
-            playheadSample.fetch_add (n);
+            renderChunk (*graph, inputs, numInputs, offset, mixL, mixR, n, isPlayingNow);
+
+            if (isPlayingNow && graph->metronome)
+                renderClick (*graph, mixL, mixR, n);
         }
+
+        if (isPlayingNow)
+            playheadSample.fetch_add (n);
 
         for (int i = 0; i < n; ++i)
         {
@@ -210,7 +401,36 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
     callbackCounter.fetch_add (1, std::memory_order_release);
 }
 
-void AudioEngine::renderChunk (const PlaybackGraph& graph, float* mixL, float* mixR, int n) noexcept
+void AudioEngine::recordChunk (const float* const* inputs, int numInputs, int inputOffset, int n) noexcept
+{
+    const auto blockStart = playheadSample.load();
+
+    for (auto& slot : takeSlots)
+    {
+        auto* take = slot.load (std::memory_order_acquire);
+        if (take == nullptr || take->writer == nullptr)
+            continue;
+
+        const float* channels[2];
+        for (int c = 0; c < take->numChannels; ++c)
+        {
+            const auto source = take->firstChannel + c;
+            channels[c] = (source < numInputs && inputs[source] != nullptr) ? inputs[source] + inputOffset
+                                                                             : silence.getReadPointer (c);
+        }
+
+        juce::int64 expected = -1;
+        take->startSample.compare_exchange_strong (expected, blockStart);
+
+        if (take->writer->write (channels, n))
+            take->samplesWritten.fetch_add (n);
+        else
+            recordOverflow.store (true); // disk too slow: this block is lost
+    }
+}
+
+void AudioEngine::renderChunk (const PlaybackGraph& graph, const float* const* inputs, int numInputs, int inputOffset,
+                               float* mixL, float* mixR, int n, bool playingNow) noexcept
 {
     const auto blockStart = playheadSample.load();
     const auto blockEnd = blockStart + n;
@@ -250,29 +470,43 @@ void AudioEngine::renderChunk (const PlaybackGraph& graph, float* mixL, float* m
         juce::FloatVectorOperations::clear (tR, n);
         bool anyAudio = false;
 
-        for (const auto& region : track.regions)
+        if (playingNow)
         {
-            if (region.audio == nullptr)
-                continue;
+            for (const auto& region : track.regions)
+            {
+                if (region.audio == nullptr)
+                    continue;
 
-            const auto regionEnd = region.start + region.length;
-            const auto from = juce::jmax (blockStart, region.start);
-            const auto to   = juce::jmin (blockEnd, regionEnd);
+                const auto from = juce::jmax (blockStart, region.start);
+                const auto to   = juce::jmin (blockEnd, region.start + region.length);
 
-            if (from >= to)
-                continue;
+                if (from >= to)
+                    continue;
 
-            const auto sourceStart = region.sourceOffset + (from - region.start);
-            const auto available = (juce::int64) region.audio->getNumSamples() - sourceStart;
+                const auto sourceStart = region.sourceOffset + (from - region.start);
+                const auto available = (juce::int64) region.audio->getNumSamples() - sourceStart;
 
-            if (sourceStart < 0 || available <= 0)
-                continue;
+                if (sourceStart < 0 || available <= 0)
+                    continue;
 
-            const auto count = (int) juce::jmin (to - from, available);
-            const auto destOffset = (int) (from - blockStart);
+                const auto count = (int) juce::jmin (to - from, available);
+                const auto destOffset = (int) (from - blockStart);
 
-            juce::FloatVectorOperations::addWithMultiply (tL + destOffset, region.audio->getReadPointer (0, (int) sourceStart), region.gain, count);
-            juce::FloatVectorOperations::addWithMultiply (tR + destOffset, region.audio->getReadPointer (1, (int) sourceStart), region.gain, count);
+                juce::FloatVectorOperations::addWithMultiply (tL + destOffset, region.audio->getReadPointer (0, (int) sourceStart), region.gain, count);
+                juce::FloatVectorOperations::addWithMultiply (tR + destOffset, region.audio->getReadPointer (1, (int) sourceStart), region.gain, count);
+                anyAudio = true;
+            }
+        }
+
+        // Input monitoring: hear what's coming in, through this track's volume and pan.
+        if (track.monitorInput && track.inputChannel < numInputs && inputs[track.inputChannel] != nullptr)
+        {
+            const auto* inL = inputs[track.inputChannel] + inputOffset;
+            const auto rightIndex = track.inputStereo ? track.inputChannel + 1 : track.inputChannel;
+            const auto* inR = (rightIndex < numInputs && inputs[rightIndex] != nullptr) ? inputs[rightIndex] + inputOffset : inL;
+
+            juce::FloatVectorOperations::add (tL, inL, n);
+            juce::FloatVectorOperations::add (tR, inR, n);
             anyAudio = true;
         }
 
@@ -288,6 +522,47 @@ void AudioEngine::renderChunk (const PlaybackGraph& graph, float* mixL, float* m
         {
             mixL[i] += tL[i] * state.gainL.getNextValue();
             mixR[i] += tR[i] * state.gainR.getNextValue();
+        }
+    }
+}
+
+void AudioEngine::renderClick (const PlaybackGraph& graph, float* mixL, float* mixR, int n) noexcept
+{
+    const auto rate = sampleRate.load();
+    const auto samplesPerBeat = graph.secondsPerBeat * rate;
+
+    if (samplesPerBeat < 1.0)
+        return;
+
+    const auto blockStart = playheadSample.load();
+
+    // The first beat at or after the start of this chunk.
+    auto beat = (juce::int64) std::ceil ((double) blockStart / samplesPerBeat - 1e-9);
+    auto nextBeatSample = (juce::int64) std::llround ((double) beat * samplesPerBeat);
+
+    for (int i = 0; i < n; ++i)
+    {
+        if (blockStart + i == nextBeatSample)
+        {
+            const bool downbeat = graph.beatsPerBar > 0 && beat % graph.beatsPerBar == 0;
+            clickPhaseInc = juce::MathConstants<double>::twoPi * (downbeat ? 1600.0 : 1100.0) / rate;
+            clickAmplitude = downbeat ? 0.5f : 0.32f;
+            clickPhase = 0.0;
+            clickSamplesLeft = clickLength;
+
+            ++beat;
+            nextBeatSample = (juce::int64) std::llround ((double) beat * samplesPerBeat);
+        }
+
+        if (clickSamplesLeft > 0)
+        {
+            // A short sine "tick" with an exponential decay.
+            const auto t = 1.0f - (float) clickSamplesLeft / (float) clickLength;
+            const auto s = clickAmplitude * std::exp (-6.0f * t) * (float) std::sin (clickPhase);
+            mixL[i] += s;
+            mixR[i] += s;
+            clickPhase += clickPhaseInc;
+            --clickSamplesLeft;
         }
     }
 }

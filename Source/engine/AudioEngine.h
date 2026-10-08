@@ -16,6 +16,9 @@ namespace riff
     pointer. Old graphs are freed on the message thread only after the audio
     thread can no longer be using them.
 
+    Recording: the audio thread pushes input samples into a lock-free FIFO per
+    take; a separate disk thread drains them into WAV files.
+
     Audio-thread rules (see the architecture doc): no locks, no allocation,
     no file I/O, no logging inside render().
 */
@@ -44,6 +47,49 @@ public:
 
     double getSampleRate() const noexcept     { return sampleRate.load(); }
 
+    // --- Recording (message thread) -------------------------------------------
+    struct RecordRequest
+    {
+        juce::String trackId;
+        juce::File file;
+        int firstChannel = 0;   // index among the device's active inputs
+        int numChannels = 1;    // 1 or 2
+    };
+
+    struct FinishedTake
+    {
+        juce::String trackId;
+        juce::File file;
+        juce::int64 startSample = 0;
+        juce::int64 numSamples = 0;
+    };
+
+    struct LiveTake
+    {
+        juce::String trackId;
+        double startSeconds = -1.0; // -1 until the first samples arrive
+        double lengthSeconds = 0.0;
+    };
+
+    static constexpr int maxTakes = 64;
+
+    /** Opens a WAV file per request and starts capturing input while the transport plays. */
+    bool startRecording (const std::vector<RecordRequest>& requests, juce::String& error);
+
+    /** Stops capturing, finishes the files and returns what was recorded. */
+    std::vector<FinishedTake> stopRecording();
+
+    bool isRecording() const noexcept         { return recording.load(); }
+    std::vector<LiveTake> getLiveTakes() const;
+
+    /** True (once) if the disk couldn't keep up and some input was lost. */
+    bool takeRecordingOverflow() noexcept     { return recordOverflow.exchange (false); }
+
+    /** Input + output latency reported by the device, in samples. */
+    int getRoundTripLatencySamples();
+    int getNumActiveInputChannels();
+    juce::StringArray getActiveInputChannelNames();
+
     // --- Meters (UI thread reads; audio thread writes peak-hold values) ----
     struct Levels { float outL = 0, outR = 0, inL = 0, inR = 0; };
     Levels takeLevels() noexcept;
@@ -63,8 +109,22 @@ private:
 
     void timerCallback() override;          // frees retired graphs
     void collectGarbage();
+    void waitForAudioThread();
 
-    void renderChunk (const PlaybackGraph& graph, float* outL, float* outR, int numSamples) noexcept;
+    struct Take
+    {
+        juce::String trackId;
+        juce::File file;
+        int firstChannel = 0, numChannels = 1;
+        std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> writer;
+        std::atomic<juce::int64> startSample { -1 };
+        std::atomic<juce::int64> samplesWritten { 0 };
+    };
+
+    void renderChunk (const PlaybackGraph& graph, const float* const* inputs, int numInputs, int inputOffset,
+                      float* mixL, float* mixR, int numSamples, bool playingNow) noexcept;
+    void recordChunk (const float* const* inputs, int numInputs, int inputOffset, int numSamples) noexcept;
+    void renderClick (const PlaybackGraph& graph, float* mixL, float* mixR, int numSamples) noexcept;
     static void storeMax (std::atomic<float>& target, float value) noexcept;
 
     juce::AudioDeviceManager deviceManager;
@@ -83,11 +143,23 @@ private:
     std::atomic<juce::int64> playheadSample { 0 };
     std::atomic<double> sampleRate { 44100.0 };
 
+    // --- Recording ---------------------------------------------------------------
+    juce::TimeSliceThread diskThread { "Riff recorder" };
+    std::vector<std::unique_ptr<Take>> takes;                   // owned by the message thread
+    std::array<std::atomic<Take*>, maxTakes> takeSlots {};      // what the audio thread sees
+    std::atomic<bool> recording { false };
+    std::atomic<bool> recordOverflow { false };
+
     // --- Audio-thread state (sized in prepare) --------------------------------
-    juce::AudioBuffer<float> trackBuffer, mixBuffer;
+    juce::AudioBuffer<float> trackBuffer, mixBuffer, silence;
     struct TrackState { juce::SmoothedValue<float> gainL, gainR; bool initialised = false; };
     std::array<TrackState, PlaybackGraph::maxTracks> trackStates;
     juce::SmoothedValue<float> masterGain;
+
+    // Metronome click
+    int clickSamplesLeft = 0, clickLength = 0;
+    double clickPhase = 0.0, clickPhaseInc = 0.0;
+    float clickAmplitude = 0.0f;
 
     std::atomic<float> peakOutL { 0 }, peakOutR { 0 }, peakInL { 0 }, peakInR { 0 };
 

@@ -11,7 +11,9 @@ class TrackHeader final : public juce::Component,
                           private juce::ValueTree::Listener
 {
 public:
-    TrackHeader (juce::ValueTree track, juce::UndoManager& um, TimelineState& timeline);
+    using InputNamesFn = std::function<juce::StringArray()>;
+
+    TrackHeader (juce::ValueTree track, juce::UndoManager& um, TimelineState& timeline, InputNamesFn inputNames);
     ~TrackHeader() override;
 
     juce::ValueTree getTrack() const { return track; }
@@ -25,13 +27,15 @@ private:
     void refresh();
     void select();
     void showMenu();
+    void showInputMenu();
 
     juce::ValueTree track;
     juce::UndoManager& undoManager;
     TimelineState& timeline;
 
     juce::Label nameLabel;
-    juce::TextButton muteButton { "M" }, soloButton { "S" };
+    InputNamesFn inputNames;
+    juce::TextButton muteButton { "M" }, soloButton { "S" }, armButton { "R" }, monitorButton { "I" };
     juce::Slider volumeSlider, panKnob;
 };
 
@@ -45,6 +49,9 @@ public:
     ~TrackHeaderList() override;
 
     void setProject (juce::ValueTree newProject);
+
+    /** Supplies the names of the device's active inputs, for the input menu. */
+    TrackHeader::InputNamesFn inputNames;
 
     void paint (juce::Graphics& g) override;
     void resized() override;

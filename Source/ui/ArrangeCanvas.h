@@ -63,6 +63,7 @@ private:
     void paintRuler (juce::Graphics& g);
     void paintGrid (juce::Graphics& g);
     void paintRegion (juce::Graphics& g, const juce::ValueTree& region, int trackIndex);
+    void paintLiveTakes (juce::Graphics& g);
     void setPlayheadFromX (float x);
     void zoomAround (float x, double factor);
 

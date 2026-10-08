@@ -56,6 +56,12 @@ private:
     // Transport
     void togglePlay();
     void returnToStart();
+    void toggleRecord();
+    void beginRecording();
+    void finishRecording();
+    void toggleMetronome();
+    juce::File recordingFolder() const;
+    juce::File nextTakeFile (const juce::ValueTree& track) const;
 
     // View
     void updateScrollBars();
@@ -91,7 +97,7 @@ private:
 
     juce::TextButton newButton { "New" }, openButton { "Open" }, saveButton { "Save" };
     juce::TextButton undoButton { "Undo" }, redoButton { "Redo" };
-    juce::TextButton rewindButton { "|<" }, playButton { "Play" };
+    juce::TextButton rewindButton { "|<" }, playButton { "Play" }, recordButton { "Rec" }, clickButton { "Click" };
     juce::TextButton addTrackButton { "+ Track" }, importButton { "Import" }, settingsButton { "Audio" };
     juce::Label positionLabel, tempoLabel, tempoCaption { {}, "BPM" }, masterCaption { {}, "Master" }, statusLabel;
     juce::Slider masterSlider;

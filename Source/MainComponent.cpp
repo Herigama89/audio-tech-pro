@@ -20,7 +20,8 @@ MainComponent::MainComponent()
 
     // --- Toolbar ----------------------------------------------------------------
     for (auto* b : { &newButton, &openButton, &saveButton, &undoButton, &redoButton,
-                     &rewindButton, &playButton, &addTrackButton, &importButton, &settingsButton })
+                     &rewindButton, &playButton, &recordButton, &clickButton,
+                     &addTrackButton, &importButton, &settingsButton })
     {
         b->setWantsKeyboardFocus (false); // keep Space for play/stop
         addAndMakeVisible (b);
@@ -33,6 +34,11 @@ MainComponent::MainComponent()
     redoButton.onClick     = [this] { redo(); };
     rewindButton.onClick   = [this] { returnToStart(); };
     playButton.onClick     = [this] { togglePlay(); };
+    recordButton.onClick   = [this] { toggleRecord(); };
+    clickButton.onClick    = [this] { toggleMetronome(); };
+    recordButton.setColour (juce::TextButton::buttonOnColourId, theme::danger);
+    recordButton.setColour (juce::TextButton::textColourOffId, theme::danger.brighter (0.3f));
+    clickButton.setColour (juce::TextButton::buttonOnColourId, theme::accent);
     addTrackButton.onClick = [this] { addTrack(); };
     importButton.onClick   = [this] { importAudio(); };
     settingsButton.onClick = [this] { showAudioSettings(); };
@@ -44,6 +50,8 @@ MainComponent::MainComponent()
     redoButton.setTooltip ("Redo (Cmd+Shift+Z)");
     rewindButton.setTooltip ("Go to start (Return)");
     playButton.setTooltip ("Play / stop (Space)");
+    recordButton.setTooltip ("Record on armed tracks (R). Arms the selected track if none are armed.");
+    clickButton.setTooltip ("Metronome (K)");
     addTrackButton.setTooltip ("New audio track");
     importButton.setTooltip ("Import audio files at the playhead (Cmd+I)");
     settingsButton.setTooltip ("Audio device settings");
@@ -108,6 +116,7 @@ MainComponent::MainComponent()
         canvas.mouseWheelMove (e.getEventRelativeTo (&canvas), w);
     };
     canvas.onViewChanged = [this] { updateScrollBars(); };
+    headers.inputNames = [this] { return engine.getActiveInputChannelNames(); };
     waveforms.onChange = [this] { canvas.repaint(); };
 
     timeline.addChangeListener (this);
@@ -173,10 +182,12 @@ void MainComponent::resized()
     place (undoButton, 52);
     place (redoButton, 52, 16);
     place (rewindButton, 36);
-    place (playButton, 60, 10);
-    place (positionLabel, 210, 10);
-    place (tempoLabel, 54, 2);
-    place (tempoCaption, 34, 16);
+    place (playButton, 56);
+    place (recordButton, 44, 10);
+    place (positionLabel, 196, 10);
+    place (tempoLabel, 50, 2);
+    place (tempoCaption, 32, 8);
+    place (clickButton, 50, 16);
 
     auto placeRight = [&bar] (juce::Component& c, int width, int gapBefore = 4)
     {
@@ -241,6 +252,8 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     const auto shiftCmd = cmd | juce::ModifierKeys::shiftModifier;
 
     if (key == juce::KeyPress::spaceKey)                               { togglePlay(); return true; }
+    if (key == juce::KeyPress ('r', 0, 0) || key == juce::KeyPress ('R', 0, 0)) { toggleRecord(); return true; }
+    if (key == juce::KeyPress ('k', 0, 0) || key == juce::KeyPress ('K', 0, 0)) { toggleMetronome(); return true; }
     if (key == juce::KeyPress::returnKey)                              { returnToStart(); return true; }
     if (key == juce::KeyPress ('z', cmd, 0))                           { undo(); return true; }
     if (key == juce::KeyPress ('z', shiftCmd, 0)
@@ -274,6 +287,9 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
 //==============================================================================
 void MainComponent::setProject (juce::ValueTree newProject, const juce::File& file)
 {
+    if (engine.isRecording())
+        finishRecording();
+
     engine.stop();
     engine.setPlayheadSeconds (0.0);
 
@@ -519,10 +535,148 @@ void MainComponent::redo() { undoManager.redo(); }
 //==============================================================================
 void MainComponent::togglePlay()
 {
+    if (engine.isRecording())
+        finishRecording();
+
     if (engine.isPlaying())
         engine.stop();
     else
         engine.play();
+}
+
+void MainComponent::toggleMetronome()
+{
+    // A live setting rather than an edit, so it isn't undoable.
+    project.setProperty (ids::metronome, ! (bool) project[ids::metronome], nullptr);
+}
+
+void MainComponent::toggleRecord()
+{
+    if (engine.isRecording())
+        finishRecording(); // punch out; playback carries on
+    else
+        beginRecording();
+}
+
+void MainComponent::beginRecording()
+{
+    const auto numInputs = engine.getNumActiveInputChannels();
+
+    if (numInputs == 0)
+    {
+        showError ("No audio input",
+                   "Riff can't hear any inputs. Click Audio to choose an input device.\n\n"
+                   "On a Mac, also check System Settings > Privacy & Security > Microphone and allow Riff.");
+        return;
+    }
+
+    juce::Array<juce::ValueTree> armed;
+    for (const auto& track : project)
+        if ((bool) track[ids::armed])
+            armed.add (track);
+
+    // Nothing armed: arm the selected track, or make a new one.
+    if (armed.isEmpty())
+    {
+        auto track = model::findById (project, timeline.selectedTrackId);
+
+        if (! track.isValid())
+        {
+            undoManager.beginNewTransaction ("New track");
+            track = model::addTrack (project, "Audio " + juce::String (project.getNumChildren() + 1), &undoManager);
+            timeline.selectedTrackId = track[ids::id].toString();
+            timeline.changed();
+        }
+
+        track.setProperty (ids::armed, true, nullptr);
+        armed.add (track);
+    }
+
+    std::vector<AudioEngine::RecordRequest> requests;
+
+    for (const auto& track : armed)
+    {
+        const int first = track.getProperty (ids::input, 0);
+        const int channels = (bool) track.getProperty (ids::inputStereo, false) ? 2 : 1;
+
+        if (first + channels > numInputs)
+        {
+            showError ("Input not available",
+                       "\"" + track[ids::name].toString() + "\" is set to record from an input that isn't active. "
+                       "Right-click its R button to pick another input, or enable more inputs under Audio.");
+            return;
+        }
+
+        requests.push_back ({ track[ids::id].toString(), nextTakeFile (track), first, channels });
+    }
+
+    juce::String error;
+    if (! engine.startRecording (requests, error))
+    {
+        showError ("Couldn't start recording", error);
+        return;
+    }
+
+    if (! engine.isPlaying())
+        engine.play();
+}
+
+void MainComponent::finishRecording()
+{
+    const auto takes = engine.stopRecording();
+    if (takes.empty())
+        return;
+
+    const auto rate = engine.getSampleRate();
+    const auto latency = engine.getRoundTripLatencySamples() / rate;
+
+    undoManager.beginNewTransaction ("Record");
+    juce::ValueTree last;
+
+    for (const auto& take : takes)
+    {
+        auto track = model::findById (project, take.trackId);
+        if (! track.isValid())
+            continue; // the track was deleted while recording; the file stays on disk
+
+        auto region = model::addRecordedRegion (track, take.file, (double) take.startSample / rate,
+                                                (double) take.numSamples / rate, latency, &undoManager);
+        if (region.isValid())
+            last = region;
+    }
+
+    if (last.isValid())
+    {
+        timeline.selectedRegionId = last[ids::id].toString();
+        timeline.changed();
+    }
+}
+
+juce::File MainComponent::recordingFolder() const
+{
+    // Saved projects record next to the project file; unsaved ones go to Music/Riff/Recordings.
+    if (projectFile != juce::File())
+        return projectFile.getParentDirectory().getChildFile ("Audio Files");
+
+    return juce::File::getSpecialLocation (juce::File::userMusicDirectory)
+               .getChildFile ("Riff").getChildFile ("Recordings")
+               .getChildFile (juce::File::createLegalFileName (project[ids::name].toString()));
+}
+
+juce::File MainComponent::nextTakeFile (const juce::ValueTree& track) const
+{
+    // Logic-style names: "Vocals#01.wav", "Vocals#02.wav", ...
+    const auto folder = recordingFolder();
+    const auto base = juce::File::createLegalFileName (track[ids::name].toString());
+
+    for (int n = 1; n < 10000; ++n)
+    {
+        auto f = folder.getChildFile (base + "#" + juce::String (n).paddedLeft ('0', 2) + ".wav");
+        if (! f.exists())
+            return f;
+    }
+
+    return folder.getNonexistentChildFile (base, ".wav");
 }
 
 void MainComponent::returnToStart()
@@ -574,6 +728,12 @@ void MainComponent::timerCallback()
     const bool playing = engine.isPlaying();
     playButton.setButtonText (playing ? "Stop" : "Play");
     playButton.setToggleState (playing, juce::dontSendNotification);
+    recordButton.setToggleState (engine.isRecording(), juce::dontSendNotification);
+    clickButton.setToggleState ((bool) project[ids::metronome], juce::dontSendNotification);
+
+    if (engine.takeRecordingOverflow())
+        showError ("Recording glitch", "The disk couldn't keep up, so a moment of audio was lost. "
+                                       "Try a larger buffer size under Audio, or record to a faster drive.");
 
     // Follow the playhead: page forward when it reaches the right edge.
     if (playing)

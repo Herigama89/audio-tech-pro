@@ -41,7 +41,7 @@ private:
             setUsingNativeTitleBar (true);
             setContentOwned (new riff::MainComponent(), true);
             setResizable (true, true);
-            setResizeLimits (1000, 480, 10000, 10000);
+            setResizeLimits (1200, 480, 10000, 10000);
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
         }

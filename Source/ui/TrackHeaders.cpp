@@ -14,8 +14,8 @@ namespace
 }
 
 //==============================================================================
-TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineState& tl)
-    : track (t), undoManager (um), timeline (tl)
+TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineState& tl, InputNamesFn names)
+    : track (t), undoManager (um), timeline (tl), inputNames (std::move (names))
 {
     nameLabel.setEditable (false, true, false);
     nameLabel.setFont (juce::FontOptions (13.0f, juce::Font::bold));
@@ -27,16 +27,26 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
     nameLabel.addMouseListener (this, false);
     addAndMakeVisible (nameLabel);
 
-    for (auto* b : { &muteButton, &soloButton })
+    for (auto* b : { &muteButton, &soloButton, &armButton, &monitorButton })
     {
         b->setClickingTogglesState (false);
+        b->setWantsKeyboardFocus (false);
         addAndMakeVisible (b);
     }
 
     muteButton.setColour (juce::TextButton::buttonOnColourId, theme::mute);
     soloButton.setColour (juce::TextButton::buttonOnColourId, theme::solo);
+    armButton.setColour (juce::TextButton::buttonOnColourId, theme::danger);
+    monitorButton.setColour (juce::TextButton::buttonOnColourId, theme::meterAmber);
     muteButton.setTooltip ("Mute");
     soloButton.setTooltip ("Solo");
+    monitorButton.setTooltip ("Input monitoring: hear the input through this track while it's armed.\n"
+                              "Use headphones, or a mic near speakers will feed back.");
+
+    // Arming and monitoring are live settings, not edits, so they skip undo.
+    armButton.onClick = [this] { track.setProperty (ids::armed, ! (bool) track[ids::armed], nullptr); };
+    monitorButton.onClick = [this] { track.setProperty (ids::monitor, ! (bool) track[ids::monitor], nullptr); };
+    armButton.addMouseListener (this, false);
 
     muteButton.onClick = [this]
     {
@@ -90,6 +100,10 @@ void TrackHeader::refresh()
     nameLabel.setText (track[ids::name].toString(), juce::dontSendNotification);
     muteButton.setToggleState ((bool) track[ids::mute], juce::dontSendNotification);
     soloButton.setToggleState ((bool) track[ids::solo], juce::dontSendNotification);
+    armButton.setToggleState ((bool) track[ids::armed], juce::dontSendNotification);
+    monitorButton.setToggleState ((bool) track[ids::monitor], juce::dontSendNotification);
+    armButton.setTooltip ("Record enable. Input: " + model::inputName (track, inputNames ? inputNames() : juce::StringArray())
+                          + "\nRight-click to choose the input.");
     volumeSlider.setValue (gainToDb (track.getProperty (ids::volume, 1.0)), juce::dontSendNotification);
     panKnob.setValue (track.getProperty (ids::pan, 0.0), juce::dontSendNotification);
     repaint();
@@ -113,10 +127,12 @@ void TrackHeader::resized()
     auto area = getLocalBounds().withTrimmedLeft (12).withTrimmedRight (8).withTrimmedBottom (1);
 
     auto top = area.removeFromTop (38).withTrimmedTop (8).withHeight (22);
-    soloButton.setBounds (top.removeFromRight (24));
-    top.removeFromRight (4);
-    muteButton.setBounds (top.removeFromRight (24));
-    top.removeFromRight (6);
+    for (auto* b : { &monitorButton, &armButton, &soloButton, &muteButton })
+    {
+        b->setBounds (top.removeFromRight (22));
+        top.removeFromRight (3);
+    }
+    top.removeFromRight (3);
     nameLabel.setBounds (top);
 
     auto bottom = area.withHeight (30);
@@ -130,7 +146,12 @@ void TrackHeader::mouseDown (const juce::MouseEvent& e)
     select();
 
     if (e.mods.isPopupMenu())
-        showMenu();
+    {
+        if (e.eventComponent == &armButton)
+            showInputMenu();
+        else
+            showMenu();
+    }
 }
 
 void TrackHeader::select()
@@ -139,9 +160,42 @@ void TrackHeader::select()
     timeline.changed();
 }
 
+void TrackHeader::showInputMenu()
+{
+    const auto names = inputNames ? inputNames() : juce::StringArray();
+    const int current = track.getProperty (ids::input, 0);
+    const bool stereo = track.getProperty (ids::inputStereo, false);
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Record from");
+
+    if (names.isEmpty())
+        menu.addItem ("No inputs. Check Audio settings.", false, false, [] {});
+
+    auto setInput = [t = track] (int channel, bool isStereo) mutable
+    {
+        t.setProperty (ids::input, channel, nullptr);
+        t.setProperty (ids::inputStereo, isStereo, nullptr);
+    };
+
+    for (int i = 0; i < names.size(); ++i)
+        menu.addItem (names[i], true, ! stereo && current == i, [setInput, i]() mutable { setInput (i, false); });
+
+    if (names.size() >= 2)
+    {
+        menu.addSeparator();
+        for (int i = 0; i + 1 < names.size(); i += 2)
+            menu.addItem (names[i] + " + " + names[i + 1] + " (stereo)", true, stereo && current == i,
+                          [setInput, i]() mutable { setInput (i, true); });
+    }
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&armButton));
+}
+
 void TrackHeader::showMenu()
 {
     juce::PopupMenu menu;
+    menu.addItem ("Choose input...", [this] { showInputMenu(); });
     menu.addItem ("Rename", [this] { nameLabel.showEditor(); });
     menu.addSeparator();
     menu.addItem ("Delete track", [t = track, &um = undoManager]
@@ -179,7 +233,7 @@ void TrackHeaderList::rebuild()
     headers.clear();
 
     for (const auto& track : project)
-        content.addAndMakeVisible (headers.add (new TrackHeader (track, undoManager, timeline)));
+        content.addAndMakeVisible (headers.add (new TrackHeader (track, undoManager, timeline, inputNames)));
 
     resized();
     repaint();

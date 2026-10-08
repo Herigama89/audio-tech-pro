@@ -31,12 +31,20 @@ struct PlaybackGraph
         float pan = 0.0f;           // -1 .. +1
         bool audible = true;        // already accounts for mute and solo
         std::vector<Region> regions;
+
+        bool monitorInput = false;  // armed + monitor: pass the input through this track
+        int inputChannel = 0;       // index among the device's active inputs
+        bool inputStereo = false;
     };
 
     static constexpr int maxTracks = 256;
 
     double sampleRate = 44100.0;
     float masterGain = 0.8f;
+
+    bool metronome = false;
+    double secondsPerBeat = 0.5;
+    int beatsPerBar = 4;
     std::vector<Track> tracks;
 };
 

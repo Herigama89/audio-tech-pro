@@ -39,6 +39,16 @@ namespace riff::model
     /** Splits at a project time. Returns the new right-hand region, or an invalid tree if `time` isn't inside the region. */
     juce::ValueTree splitRegion (juce::ValueTree region, double time, juce::UndoManager* um);
 
+    /**
+        Adds a region for a finished recording.
+
+        `latencySeconds` is the round-trip latency: the recorded audio is shifted
+        earlier by this much (via the region's offset) so it lines up with what
+        the performer heard.
+    */
+    juce::ValueTree addRecordedRegion (juce::ValueTree track, const juce::File& file, double start,
+                                       double recordedLength, double latencySeconds, juce::UndoManager* um);
+
     void deleteRegion (juce::ValueTree region, juce::UndoManager* um);
     void deleteTrack (juce::ValueTree track, juce::UndoManager* um);
 
@@ -49,6 +59,7 @@ namespace riff::model
     double projectEnd (const juce::ValueTree& project);
     juce::Colour trackColour (const juce::ValueTree& track);
     double secondsPerBeat (const juce::ValueTree& project);
+    juce::String inputName (const juce::ValueTree& track, const juce::StringArray& activeInputNames);
 
     // --- Files ------------------------------------------------------------
     /** Serialises to JSON. Region file paths are stored relative to `projectFile`'s folder when possible. */

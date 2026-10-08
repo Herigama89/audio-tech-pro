@@ -1,8 +1,10 @@
 # Riff: a Logic-style DAW
 
-A native DAW in C++20 + JUCE 8. Phase 0 is complete. It has a multitrack
-arrange view, an undoable project model, saving and opening projects, and a
-real-time engine that never blocks the audio thread.
+A native DAW in C++20 + JUCE 8. Phase 0 is complete and Phase 1 is under way.
+Riff has a multitrack arrange view, an undoable project model, saving and
+opening projects, audio recording with latency compensation, a metronome, and
+input monitoring. All of it runs on a real-time engine that never blocks the
+audio thread.
 
 ## Build and run
 
@@ -52,11 +54,16 @@ The tests cover:
 
 - **Model:** tracks and regions, undo and redo, move, split, trim, and the JSON round trip.
 - **Engine:** sample-accurate region placement, source offsets, mute, solo, volume, pan, resampling alignment, and swapping graphs mid-playback.
+- **Recording:** WAV output, punch-in position, input monitoring, the metronome, and latency compensation.
 
 ## Using it
 
 | Action | How |
 | --- | --- |
+| Record | Press **R** or click **Rec**. It records on every armed track, or arms the selected track (or a new one) if none are armed. Press **R** again to punch out, or **Space** to stop. |
+| Arm a track | Click its **R** button. Right-click **R** to choose the input: mono, or a stereo pair. |
+| Monitor the input | **I** on an armed track. Use headphones, or a mic near speakers will feed back. |
+| Metronome | **K** or the **Click** button |
 | Add audio | Drag files from Finder onto a track, or onto empty space for a new track. Or use **Import** (Cmd+I) to place them at the playhead. |
 | Play / stop | Space |
 | Go to start | Return |
@@ -71,6 +78,13 @@ The tests cover:
 | Track controls | Name (double-click to rename), **M**ute, **S**olo, volume, pan. Right-click a track for Delete. |
 | Tempo | Double-click the BPM value. The ruler and grid follow it. |
 | Save / open | Cmd+S, Cmd+Shift+S, Cmd+O. Projects are `.riff` files. |
+
+Recordings go to an `Audio Files` folder next to a saved project. For a
+project you haven't saved yet, they go to `Music/Riff/Recordings/<project name>`.
+Each take is named after its track, for example `Vocals#01.wav`.
+
+Recordings are shifted earlier by the round-trip latency your interface
+reports, so they line up with what you heard while playing.
 
 Projects store audio paths relative to the `.riff` file. If you keep the audio
 next to the project, you can move the folder and it still opens.
@@ -104,10 +118,20 @@ Tests/                    Catch2 unit tests
 4. `AudioEngine::setGraph` swaps it in with one atomic pointer exchange. The audio thread picks it up at its next block.
 5. The old graph is freed on the message thread once the audio thread has finished with it.
 
-## Next: Phase 1, record and arrange
+## Phase 1: record and arrange
 
-- [ ] Record-arm on tracks, and record from the interface into new regions
-- [ ] Disk streaming for long files, instead of loading whole files into memory
-- [ ] Recording latency compensation and a loopback calibration test
+- [x] Record-arm on tracks, and record from the interface into new regions (lock-free FIFO to a disk thread)
+- [x] Input selection per track (mono or stereo pair) and input monitoring
+- [x] Metronome
+- [x] Latency compensation from the device's reported latency
+- [x] `Audio Files/` folder next to saved projects
 - [ ] Cycle (loop) region in the ruler, and cycle recording into take lanes
-- [ ] Project folder with an `Audio Files/` subfolder for recordings
+- [ ] Count-in before recording
+- [ ] Loopback calibration test, for interfaces that misreport their latency
+- [ ] Disk streaming for long files, instead of loading whole files into memory
+
+## Later phases
+
+- **Phase 2:** MIDI and instruments. Piano roll, a built-in synth and sampler, and VST3 / AU / CLAP instrument hosting.
+- **Phase 3:** Mixer and effects. Channel strips with plugin inserts (VST3 / AU / CLAP), sends, buses, automation, and delay compensation.
+- **Phase 4:** Drums and loops. Step sequencer and a tempo-synced loop browser.

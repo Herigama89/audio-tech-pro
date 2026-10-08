@@ -90,6 +90,8 @@ void ArrangeCanvas::paint (juce::Graphics& g)
             paintRegion (g, region, i);
     }
 
+    paintLiveTakes (g);
+
     // File-drop target highlight
     if (dropHighlightTrack != -2)
     {
@@ -197,6 +199,29 @@ void ArrangeCanvas::paintRuler (juce::Graphics& g)
 
     g.setColour (theme::outline);
     g.fillRect (0.0f, rh - 1.0f, (float) getWidth(), 1.0f);
+}
+
+void ArrangeCanvas::paintLiveTakes (juce::Graphics& g)
+{
+    for (const auto& take : engine.getLiveTakes())
+    {
+        const auto track = model::findById (project, take.trackId);
+        if (! track.isValid())
+            continue;
+
+        const auto index = project.indexOf (track);
+        const auto start = take.startSeconds >= 0.0 ? take.startSeconds : engine.getPlayheadSeconds();
+        const auto x = timeline.timeToX (start);
+        const auto w = juce::jmax (2.0f, (float) (take.lengthSeconds * timeline.pixelsPerSecond));
+        const juce::Rectangle<float> r (x, (float) timeline.trackTop (index) + 3.0f, w, (float) TimelineState::trackHeight - 6.0f);
+
+        g.setColour (theme::danger.withAlpha (0.3f));
+        g.fillRoundedRectangle (r, 4.0f);
+        g.setColour (theme::danger);
+        g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.5f);
+        g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+        g.drawText ("Recording", r.withHeight (16.0f).reduced (5.0f, 0.0f), juce::Justification::centredLeft, true);
+    }
 }
 
 juce::Rectangle<float> ArrangeCanvas::regionBounds (const juce::ValueTree& region, int trackIndex) const

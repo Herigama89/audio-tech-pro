@@ -67,6 +67,9 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
     auto graph = std::make_unique<PlaybackGraph>();
     graph->sampleRate = sampleRate;
     graph->masterGain = (float) (double) project.getProperty (ids::masterGain, 0.8);
+    graph->metronome = project.getProperty (ids::metronome, false);
+    graph->secondsPerBeat = model::secondsPerBeat (project);
+    graph->beatsPerBar = juce::jlimit (1, 16, (int) project.getProperty (ids::timeSigNumerator, 4));
 
     bool anySolo = false;
     for (const auto& track : project)
@@ -84,6 +87,10 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         t.volume  = (float) (double) track.getProperty (ids::volume, 1.0);
         t.pan     = (float) juce::jlimit (-1.0, 1.0, (double) track.getProperty (ids::pan, 0.0));
         t.audible = ! (bool) track[ids::mute] && (! anySolo || (bool) track[ids::solo]);
+
+        t.monitorInput = (bool) track[ids::armed] && (bool) track[ids::monitor];
+        t.inputChannel = juce::jmax (0, (int) track.getProperty (ids::input, 0));
+        t.inputStereo  = track.getProperty (ids::inputStereo, false);
 
         if (t.slot < 0)
             continue;

@@ -106,6 +106,7 @@ juce::ValueTree createProject (const juce::String& name)
     project.setProperty (ids::tempo, 120.0, nullptr);
     project.setProperty (ids::timeSigNumerator, 4, nullptr);
     project.setProperty (ids::masterGain, 0.8, nullptr);
+    project.setProperty (ids::metronome, false, nullptr);
     return project;
 }
 
@@ -123,6 +124,10 @@ juce::ValueTree addTrack (juce::ValueTree project, const juce::String& name, juc
     track.setProperty (ids::pan, 0.0, nullptr);
     track.setProperty (ids::mute, false, nullptr);
     track.setProperty (ids::solo, false, nullptr);
+    track.setProperty (ids::armed, false, nullptr);
+    track.setProperty (ids::monitor, false, nullptr);
+    track.setProperty (ids::input, 0, nullptr);
+    track.setProperty (ids::inputStereo, false, nullptr);
 
     project.addChild (track, index, um);
     return track;
@@ -210,6 +215,19 @@ juce::ValueTree splitRegion (juce::ValueTree region, double time, juce::UndoMana
     return right;
 }
 
+juce::ValueTree addRecordedRegion (juce::ValueTree track, const juce::File& file, double start,
+                                   double recordedLength, double latencySeconds, juce::UndoManager* um)
+{
+    latencySeconds = juce::jmax (0.0, latencySeconds);
+
+    if (recordedLength - latencySeconds < minRegionLength)
+        return {};
+
+    auto region = addRegion (track, file, start, recordedLength - latencySeconds, um);
+    region.setProperty (ids::offset, latencySeconds, um);
+    return region;
+}
+
 void deleteRegion (juce::ValueTree region, juce::UndoManager* um)
 {
     if (auto parent = region.getParent(); parent.isValid())
@@ -269,6 +287,15 @@ double secondsPerBeat (const juce::ValueTree& project)
 {
     const double tempo = project.getProperty (ids::tempo, 120.0);
     return 60.0 / juce::jlimit (20.0, 400.0, tempo);
+}
+
+juce::String inputName (const juce::ValueTree& track, const juce::StringArray& names)
+{
+    const int first = track.getProperty (ids::input, 0);
+    const bool stereo = track.getProperty (ids::inputStereo, false);
+
+    auto nameOf = [&names] (int i) { return juce::isPositiveAndBelow (i, names.size()) ? names[i] : "In " + juce::String (i + 1); };
+    return stereo ? nameOf (first) + " + " + nameOf (first + 1) : nameOf (first);
 }
 
 //==============================================================================
