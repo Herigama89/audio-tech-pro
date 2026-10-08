@@ -5,22 +5,25 @@ namespace riff
 
 AudioEngine::AudioEngine()
 {
-    formatManager.registerBasicFormats(); // WAV, AIFF, FLAC, Ogg (+ MP3/CoreAudio formats where available)
-    readAheadThread.startThread (juce::Thread::Priority::high);
+    formatManager.registerBasicFormats(); // WAV, AIFF, FLAC, Ogg (+ MP3/CoreAudio formats on macOS)
+    currentGraph.store (new PlaybackGraph());
+    prepare (44100.0, 2048);
+    startTimer (250);
 }
 
 AudioEngine::~AudioEngine()
 {
+    stopTimer();
     deviceManager.removeAudioCallback (this);
-    transport.setSource (nullptr);
-    readerSource.reset();
-    readAheadThread.stopThread (2000);
+    deviceManager.closeAudioDevice();
+    retired.clear();
+    delete currentGraph.exchange (nullptr);
 }
 
 juce::String AudioEngine::initialise()
 {
-    // Ask for stereo in + stereo out. If input can't be opened (no device or
-    // permission denied) fall back to output only so playback still works.
+    // Stereo in + stereo out; fall back to output only if input can't open
+    // (no input device, or microphone permission denied).
     auto error = deviceManager.initialiseWithDefaultDevices (2, 2);
 
     if (error.isNotEmpty())
@@ -31,35 +34,50 @@ juce::String AudioEngine::initialise()
 }
 
 //==============================================================================
-bool AudioEngine::loadFile (const juce::File& file)
+// Graph hand-over
+//==============================================================================
+void AudioEngine::setGraph (std::unique_ptr<PlaybackGraph> newGraph)
 {
-    std::unique_ptr<juce::AudioFormatReader> reader (formatManager.createReaderFor (file));
+    JUCE_ASSERT_MESSAGE_THREAD
 
-    if (reader == nullptr)
-        return false;
+    jassert (newGraph != nullptr);
+    auto* old = currentGraph.exchange (newGraph.release(), std::memory_order_acq_rel);
 
-    const auto fileSampleRate = reader->sampleRate;
-
-    transport.stop();
-    transport.setSource (nullptr);
-
-    readerSource = std::make_unique<juce::AudioFormatReaderSource> (reader.release(), true);
-
-    // 32k samples of read-ahead are buffered on readAheadThread, so the audio
-    // thread never touches the disk. The transport also resamples if the file's
-    // rate differs from the device's.
-    transport.setSource (readerSource.get(), 32768, &readAheadThread, fileSampleRate, 2);
-    loadedFile = file;
-    return true;
+    // The audio thread may be mid-block with `old`. It is safe to free once at
+    // least one complete callback has started after this point.
+    retired.push_back ({ std::unique_ptr<PlaybackGraph> (old), callbackCounter.load() });
+    collectGarbage();
 }
 
-void AudioEngine::play()                              { if (readerSource != nullptr) transport.start(); }
-void AudioEngine::stop()                              { transport.stop(); }
-void AudioEngine::rewind()                            { transport.setPosition (0.0); }
-bool AudioEngine::isPlaying() const                   { return transport.isPlaying(); }
-double AudioEngine::getPositionSeconds() const        { return transport.getCurrentPosition(); }
-double AudioEngine::getLengthSeconds() const          { return transport.getLengthInSeconds(); }
-void AudioEngine::setPositionSeconds (double seconds) { transport.setPosition (juce::jmax (0.0, seconds)); }
+void AudioEngine::timerCallback()
+{
+    collectGarbage();
+}
+
+void AudioEngine::collectGarbage()
+{
+    if (! deviceRunning.load())
+    {
+        retired.clear(); // no callback can be running
+        return;
+    }
+
+    const auto now = callbackCounter.load();
+    std::erase_if (retired, [now] (const Retired& r) { return now > r.retiredAt + 1; });
+}
+
+//==============================================================================
+// Transport
+//==============================================================================
+double AudioEngine::getPlayheadSeconds() const noexcept
+{
+    return (double) playheadSample.load() / sampleRate.load();
+}
+
+void AudioEngine::setPlayheadSeconds (double seconds) noexcept
+{
+    playheadSample.store ((juce::int64) std::llround (juce::jmax (0.0, seconds) * sampleRate.load()));
+}
 
 AudioEngine::Levels AudioEngine::takeLevels() noexcept
 {
@@ -75,119 +93,202 @@ void AudioEngine::storeMax (std::atomic<float>& target, float value) noexcept
 }
 
 //==============================================================================
+// Device callbacks
+//==============================================================================
 void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
-    const auto sr = device->getCurrentSampleRate();
-    const auto bs = device->getCurrentBufferSizeSamples();
-
-    sampleRate.store (sr);
-    blockSize.store (bs);
-
-    // Allocate here (not in the callback). Some drivers occasionally deliver
-    // larger blocks than advertised, so the callback also processes in chunks.
-    scratch.setSize (2, juce::jmax (bs, 4096));
-
-    transport.prepareToPlay (bs, sr);
-
-    smoothedGain.reset (sr, 0.02);
-    smoothedGain.setCurrentAndTargetValue (masterGain.load());
-    smoothedToneLevel.reset (sr, 0.01);
-    smoothedToneLevel.setCurrentAndTargetValue (toneEnabled.load() ? 1.0f : 0.0f);
-    tonePhase = 0.0;
+    // Some drivers deliver blocks larger than advertised, so allocate generously;
+    // render() also processes in chunks if a block is bigger still.
+    prepare (device->getCurrentSampleRate(), juce::jmax (device->getCurrentBufferSizeSamples(), 2048));
+    deviceRunning.store (true);
 }
 
 void AudioEngine::audioDeviceStopped()
 {
-    transport.releaseResources();
+    deviceRunning.store (false);
 }
 
-void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
-                                                    int numInputChannels,
-                                                    float* const* outputChannelData,
-                                                    int numOutputChannels,
-                                                    int numSamples,
-                                                    const juce::AudioIODeviceCallbackContext&)
+void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputChannelData, int numInputChannels,
+                                                    float* const* outputChannelData, int numOutputChannels,
+                                                    int numSamples, const juce::AudioIODeviceCallbackContext&)
+{
+    render (inputChannelData, numInputChannels, outputChannelData, numOutputChannels, numSamples);
+}
+
+//==============================================================================
+// Rendering
+//==============================================================================
+void AudioEngine::prepare (double newSampleRate, int maxBlockSize)
+{
+    // Keep the playhead at the same time if the sample rate changes.
+    const auto oldRate = sampleRate.load();
+    if (oldRate > 0.0 && std::abs (oldRate - newSampleRate) > 0.5)
+        playheadSample.store ((juce::int64) ((double) playheadSample.load() * newSampleRate / oldRate));
+
+    sampleRate.store (newSampleRate);
+
+    trackBuffer.setSize (2, maxBlockSize);
+    mixBuffer.setSize (2, maxBlockSize);
+
+    for (auto& state : trackStates)
+    {
+        state.gainL.reset (newSampleRate, 0.03);
+        state.gainR.reset (newSampleRate, 0.03);
+        state.initialised = false;
+    }
+
+    masterGain.reset (newSampleRate, 0.03);
+    masterGain.setCurrentAndTargetValue (currentGraph.load()->masterGain);
+}
+
+void AudioEngine::render (const float* const* inputs, int numInputs,
+                          float* const* outputs, int numOutputs, int numSamples) noexcept
 {
     juce::ScopedNoDenormals noDenormals;
 
-    // ---- Input metering (recording comes in Phase 1) ----------------------
-    for (int ch = 0; ch < juce::jmin (numInputChannels, 2); ++ch)
+    // Input metering (recording arrives in Phase 1).
+    for (int ch = 0; ch < juce::jmin (numInputs, 2); ++ch)
     {
-        if (inputChannelData[ch] == nullptr)
+        if (inputs[ch] == nullptr)
             continue;
-
-        const auto range = juce::FloatVectorOperations::findMinAndMax (inputChannelData[ch], numSamples);
+        const auto range = juce::FloatVectorOperations::findMinAndMax (inputs[ch], numSamples);
         storeMax (ch == 0 ? peakInL : peakInR, juce::jmax (std::abs (range.getStart()), std::abs (range.getEnd())));
     }
 
-    // ---- Clear outputs ---------------------------------------------------
-    for (int ch = 0; ch < numOutputChannels; ++ch)
-        if (outputChannelData[ch] != nullptr)
-            juce::FloatVectorOperations::clear (outputChannelData[ch], numSamples);
+    for (int ch = 0; ch < numOutputs; ++ch)
+        if (outputs[ch] != nullptr)
+            juce::FloatVectorOperations::clear (outputs[ch], numSamples);
 
-    if (numOutputChannels == 0)
-        return;
+    // Pick up the latest graph once per block.
+    const auto* graph = currentGraph.load (std::memory_order_acquire);
+    const bool isPlayingNow = playing.load();
 
-    smoothedGain.setTargetValue (masterGain.load (std::memory_order_relaxed));
-    smoothedToneLevel.setTargetValue (toneEnabled.load (std::memory_order_relaxed) ? 1.0f : 0.0f);
-
-    const auto sr = sampleRate.load (std::memory_order_relaxed);
-    const auto phaseInc = juce::MathConstants<double>::twoPi * toneFrequency.load (std::memory_order_relaxed) / sr;
+    if (graph != nullptr)
+        masterGain.setTargetValue (graph->masterGain);
 
     int offset = 0;
 
     while (offset < numSamples)
     {
-        const int n = juce::jmin (numSamples - offset, scratch.getNumSamples());
+        const int n = juce::jmin (numSamples - offset, mixBuffer.getNumSamples());
+        auto* mixL = mixBuffer.getWritePointer (0);
+        auto* mixR = mixBuffer.getWritePointer (1);
+        juce::FloatVectorOperations::clear (mixL, n);
+        juce::FloatVectorOperations::clear (mixR, n);
 
-        // A non-owning view onto the pre-allocated scratch memory: no allocation.
-        juce::AudioBuffer<float> view (scratch.getArrayOfWritePointers(), 2, n);
-        view.clear();
-
-        // 1. File playback (pulls from the read-ahead buffer).
-        juce::AudioSourceChannelInfo info (view);
-        transport.getNextAudioBlock (info);
-
-        auto* left  = view.getWritePointer (0);
-        auto* right = view.getWritePointer (1);
+        if (graph != nullptr && isPlayingNow)
+        {
+            renderChunk (*graph, mixL, mixR, n);
+            playheadSample.fetch_add (n);
+        }
 
         for (int i = 0; i < n; ++i)
         {
-            // 2. Test tone, faded in/out to avoid clicks.
-            const auto toneLevel = smoothedToneLevel.getNextValue();
-            if (toneLevel > 0.0f)
-            {
-                const auto s = 0.2f * toneLevel * (float) std::sin (tonePhase);
-                left[i]  += s;
-                right[i] += s;
-            }
-            tonePhase += phaseInc;
-            if (tonePhase >= juce::MathConstants<double>::twoPi)
-                tonePhase -= juce::MathConstants<double>::twoPi;
-
-            // 3. Master gain, smoothed per sample.
-            const auto g = smoothedGain.getNextValue();
-            left[i]  *= g;
-            right[i] *= g;
+            const auto g = masterGain.getNextValue();
+            mixL[i] *= g;
+            mixR[i] *= g;
         }
 
-        // 4. Write to the device.
-        if (numOutputChannels == 1)
+        if (numOutputs == 1)
         {
-            if (auto* out = outputChannelData[0])
+            if (auto* out = outputs[0])
                 for (int i = 0; i < n; ++i)
-                    out[offset + i] = 0.5f * (left[i] + right[i]);
+                    out[offset + i] = 0.5f * (mixL[i] + mixR[i]);
+        }
+        else if (numOutputs >= 2)
+        {
+            if (auto* outL = outputs[0]) juce::FloatVectorOperations::copy (outL + offset, mixL, n);
+            if (auto* outR = outputs[1]) juce::FloatVectorOperations::copy (outR + offset, mixR, n);
+        }
+
+        storeMax (peakOutL, mixBuffer.getMagnitude (0, 0, n));
+        storeMax (peakOutR, mixBuffer.getMagnitude (1, 0, n));
+
+        offset += n;
+    }
+
+    callbackCounter.fetch_add (1, std::memory_order_release);
+}
+
+void AudioEngine::renderChunk (const PlaybackGraph& graph, float* mixL, float* mixR, int n) noexcept
+{
+    const auto blockStart = playheadSample.load();
+    const auto blockEnd = blockStart + n;
+
+    auto* tL = trackBuffer.getWritePointer (0);
+    auto* tR = trackBuffer.getWritePointer (1);
+
+    for (const auto& track : graph.tracks)
+    {
+        if (track.slot < 0 || track.slot >= PlaybackGraph::maxTracks)
+            continue;
+
+        auto& state = trackStates[(size_t) track.slot];
+
+        // Balance-style pan: unity at centre, the far side fades out.
+        const auto targetL = track.audible ? track.volume * (track.pan <= 0.0f ? 1.0f : 1.0f - track.pan) : 0.0f;
+        const auto targetR = track.audible ? track.volume * (track.pan >= 0.0f ? 1.0f : 1.0f + track.pan) : 0.0f;
+
+        if (! state.initialised)
+        {
+            state.gainL.setCurrentAndTargetValue (targetL);
+            state.gainR.setCurrentAndTargetValue (targetR);
+            state.initialised = true;
         }
         else
         {
-            if (auto* outL = outputChannelData[0]) juce::FloatVectorOperations::copy (outL + offset, left, n);
-            if (auto* outR = outputChannelData[1]) juce::FloatVectorOperations::copy (outR + offset, right, n);
+            state.gainL.setTargetValue (targetL);
+            state.gainR.setTargetValue (targetR);
         }
 
-        storeMax (peakOutL, view.getMagnitude (0, 0, n));
-        storeMax (peakOutR, view.getMagnitude (1, 0, n));
+        // Silent and not fading: nothing to do.
+        if (! state.gainL.isSmoothing() && ! state.gainR.isSmoothing()
+            && state.gainL.getCurrentValue() <= 0.0f && state.gainR.getCurrentValue() <= 0.0f)
+            continue;
 
-        offset += n;
+        juce::FloatVectorOperations::clear (tL, n);
+        juce::FloatVectorOperations::clear (tR, n);
+        bool anyAudio = false;
+
+        for (const auto& region : track.regions)
+        {
+            if (region.audio == nullptr)
+                continue;
+
+            const auto regionEnd = region.start + region.length;
+            const auto from = juce::jmax (blockStart, region.start);
+            const auto to   = juce::jmin (blockEnd, regionEnd);
+
+            if (from >= to)
+                continue;
+
+            const auto sourceStart = region.sourceOffset + (from - region.start);
+            const auto available = (juce::int64) region.audio->getNumSamples() - sourceStart;
+
+            if (sourceStart < 0 || available <= 0)
+                continue;
+
+            const auto count = (int) juce::jmin (to - from, available);
+            const auto destOffset = (int) (from - blockStart);
+
+            juce::FloatVectorOperations::addWithMultiply (tL + destOffset, region.audio->getReadPointer (0, (int) sourceStart), region.gain, count);
+            juce::FloatVectorOperations::addWithMultiply (tR + destOffset, region.audio->getReadPointer (1, (int) sourceStart), region.gain, count);
+            anyAudio = true;
+        }
+
+        if (! anyAudio)
+        {
+            // Still advance the gain ramps so they stay in sync with time.
+            state.gainL.skip (n);
+            state.gainR.skip (n);
+            continue;
+        }
+
+        for (int i = 0; i < n; ++i)
+        {
+            mixL[i] += tL[i] * state.gainL.getNextValue();
+            mixR[i] += tR[i] * state.gainR.getNextValue();
+        }
     }
 }
 

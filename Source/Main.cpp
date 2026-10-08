@@ -20,6 +20,14 @@ public:
 
     void systemRequestedQuit() override
     {
+        // Give the user a chance to save first.
+        if (mainWindow != nullptr)
+            if (auto* main = dynamic_cast<riff::MainComponent*> (mainWindow->getContentComponent()))
+            {
+                main->confirmDiscardChanges ([] { juce::JUCEApplication::quit(); });
+                return;
+            }
+
         quit();
     }
 
@@ -28,14 +36,12 @@ private:
     {
     public:
         explicit MainWindow (const juce::String& name)
-            : DocumentWindow (name,
-                              juce::Colour (0xff1c1d21),
-                              DocumentWindow::allButtons)
+            : DocumentWindow (name, juce::Colour (0xff1c1d21), DocumentWindow::allButtons)
         {
             setUsingNativeTitleBar (true);
             setContentOwned (new riff::MainComponent(), true);
             setResizable (true, true);
-            setResizeLimits (720, 420, 10000, 10000);
+            setResizeLimits (1000, 480, 10000, 10000);
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
         }

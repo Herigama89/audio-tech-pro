@@ -1,0 +1,123 @@
+#include "ProjectPlayer.h"
+#include "../model/Project.h"
+
+namespace riff
+{
+
+ProjectPlayer::ProjectPlayer (AudioEngine& e, AudioFileCache& c)
+    : engine (e), cache (c)
+{
+    engine.getDeviceManager().addChangeListener (this);
+}
+
+ProjectPlayer::~ProjectPlayer()
+{
+    engine.getDeviceManager().removeChangeListener (this);
+    project.removeListener (this);
+    cancelPendingUpdate();
+}
+
+void ProjectPlayer::setProject (juce::ValueTree newProject)
+{
+    project.removeListener (this);
+    project = newProject;
+    project.addListener (this);
+
+    slots.clear();
+    nextSlot = 0;
+    rebuildNow();
+}
+
+void ProjectPlayer::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    // Device settings changed: rebuild if the sample rate is different.
+    if (auto* device = engine.getDeviceManager().getCurrentAudioDevice())
+        if (std::abs (device->getCurrentSampleRate() - builtForRate) > 0.5)
+            rebuildNow();
+}
+
+int ProjectPlayer::slotFor (const juce::String& trackId)
+{
+    if (auto it = slots.find (trackId); it != slots.end())
+        return it->second;
+
+    // Reuse the lowest free slot once we run past the end.
+    int slot = nextSlot < PlaybackGraph::maxTracks ? nextSlot++ : -1;
+
+    if (slot < 0)
+    {
+        std::vector<bool> used (PlaybackGraph::maxTracks, false);
+        for (const auto& track : project)
+            if (auto it = slots.find (track[ids::id].toString()); it != slots.end())
+                used[(size_t) it->second] = true;
+
+        for (int i = 0; i < PlaybackGraph::maxTracks && slot < 0; ++i)
+            if (! used[(size_t) i])
+                slot = i;
+    }
+
+    if (slot >= 0)
+        slots[trackId] = slot;
+
+    return slot;
+}
+
+std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
+{
+    auto graph = std::make_unique<PlaybackGraph>();
+    graph->sampleRate = sampleRate;
+    graph->masterGain = (float) (double) project.getProperty (ids::masterGain, 0.8);
+
+    bool anySolo = false;
+    for (const auto& track : project)
+        anySolo = anySolo || (bool) track[ids::solo];
+
+    auto toSamples = [sampleRate] (double seconds) { return (juce::int64) std::llround (seconds * sampleRate); };
+
+    for (const auto& track : project)
+    {
+        if (! track.hasType (ids::TRACK))
+            continue;
+
+        PlaybackGraph::Track t;
+        t.slot    = slotFor (track[ids::id].toString());
+        t.volume  = (float) (double) track.getProperty (ids::volume, 1.0);
+        t.pan     = (float) juce::jlimit (-1.0, 1.0, (double) track.getProperty (ids::pan, 0.0));
+        t.audible = ! (bool) track[ids::mute] && (! anySolo || (bool) track[ids::solo]);
+
+        if (t.slot < 0)
+            continue;
+
+        for (const auto& region : track)
+        {
+            PlaybackGraph::Region r;
+            r.audio        = cache.get (juce::File (region[ids::file].toString()), sampleRate);
+            r.start        = toSamples (region[ids::start]);
+            r.sourceOffset = toSamples (region[ids::offset]);
+            r.length       = toSamples (region[ids::length]);
+            r.gain         = (float) (double) region.getProperty (ids::gain, 1.0);
+
+            if (r.audio != nullptr && r.length > 0)
+                t.regions.push_back (std::move (r));
+        }
+
+        graph->tracks.push_back (std::move (t));
+    }
+
+    return graph;
+}
+
+void ProjectPlayer::rebuildNow()
+{
+    cancelPendingUpdate();
+
+    const auto rate = engine.getSampleRate();
+    engine.setGraph (buildGraph (rate));
+
+    if (std::abs (rate - builtForRate) > 0.5)
+        cache.purge (rate);
+
+    builtForRate = rate;
+}
+
+} // namespace riff
