@@ -58,7 +58,12 @@ public:
             auto& console = main.mixer.getConsolePanel();
             console.setCandidates ({ d });
             main.mixer.resized();
-            console.showPreview ({ 0.62f, 1.0f, 0.4f, 0.75f, 0.0f, 0.5f, 0.35f }, 4.0f, 0.7f, true);
+            // Names and ranges as UA's plugin reports them
+            console.showPreview ({ 0.62f, 1.0f, 0.4f, 0.75f, 0.0f, 0.5f, 0.35f }, 4.0f, 0.7f, true,
+                                 { juce::StringArray { "Thresh", "-15.0", "15.0" }, juce::StringArray { "Mix", "0%", "100%" },
+                                   juce::StringArray { "Attack", "0.1", "30" }, juce::StringArray { "Release", "0.1", "Auto" },
+                                   juce::StringArray { "SC Filter", "Off", "500" }, juce::StringArray { "Ratio", "2:1", "10:1" },
+                                   juce::StringArray { "Make Up", "0.0", "15.0" } });
             pump (main, 200);
             save (main, "mixer-console.png");
             save (console, "console-panel.png", 2.0f);

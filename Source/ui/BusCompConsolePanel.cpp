@@ -337,9 +337,11 @@ void BusCompConsolePanel::setOutputLevel (float peak)
         outputDb = juce::jmax (juce::Decibels::gainToDecibels (peak, -100.0f), outputDb - 1.5f);   // LEDs fall back gently
 }
 
-void BusCompConsolePanel::showPreview (const std::array<float, 7>& knobValues, float reduction, float outputLevel, bool in)
+void BusCompConsolePanel::showPreview (const std::array<float, 7>& knobValues, float reduction, float outputLevel, bool in,
+                                       const std::array<juce::StringArray, 7>& texts)
 {
     previewing = true;
+    previewTexts = texts;
     previewIn = in;
     for (size_t i = 0; i < numKnobs; ++i)
     {
@@ -392,6 +394,36 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
     g.drawText ("Master Bus", juce::Rectangle<float> (60.0f, 386.0f, 516.0f, 44.0f), juce::Justification::centred, false);
     g.drawText ("Compressor", juce::Rectangle<float> (60.0f, 427.0f, 516.0f, 44.0f), juce::Justification::centred, false);
 
+    // --- The control box, its title, and the line from Threshold to the meters
+    {
+        const juce::Rectangle<float> box { 45.0f, 498.0f, 545.0f, 636.0f };
+        const juce::Rectangle<float> titleGap { 190.0f, 480.0f, 256.0f, 40.0f };
+
+        juce::Path frame;
+        frame.addRoundedRectangle (box, 22.0f);
+        juce::Graphics::ScopedSaveState frameState (g);
+        g.excludeClipRegion (titleGap.toNearestInt());
+        g.setColour (juce::Colours::white.withAlpha (0.45f));
+        g.strokePath (frame, juce::PathStrokeType (2.0f), juce::AffineTransform::translation (1.5f, 2.0f));
+        g.setColour (juce::Colour (0xff3c3b37));
+        g.strokePath (frame, juce::PathStrokeType (3.5f));
+    }
+
+    g.setColour (ink);
+    g.setFont (juce::FontOptions (32.0f, juce::Font::bold));
+    g.drawText ("Gain Reduction", juce::Rectangle<float> (190.0f, 480.0f, 256.0f, 38.0f), juce::Justification::centred, false);
+
+    {
+        juce::Path link;
+        link.startNewSubPath (226.0f, 569.0f);
+        link.lineTo (314.0f, 569.0f);
+        link.lineTo (314.0f, 606.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.4f));
+        g.strokePath (link, juce::PathStrokeType (2.0f), juce::AffineTransform::translation (1.0f, 1.5f));
+        g.setColour (juce::Colour (0xff6c6a63));
+        g.strokePath (link, juce::PathStrokeType (2.5f));
+    }
+
     // --- Knob scales and captions ---------------------------------------------
     for (size_t i = 0; i < numKnobs; ++i)
     {
@@ -407,27 +439,40 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
         }
 
         auto* param = parameterFor (s.control);
-        const auto caption = param != nullptr ? param->getName (20) : console::controlName (s.control);
-
-        g.setColour (ink);
-        g.setFont (juce::FontOptions (s.radius > 60.0f ? 34.0f : 32.0f));
-        g.drawText (caption, juce::Rectangle<float> (s.x - 140.0f, s.y + s.radius + 22.0f, 280.0f, 40.0f),
-                    juce::Justification::centred, false);
-
+        auto caption = param != nullptr ? param->getName (20) : console::controlName (s.control);
+        juce::String lowText, highText;
         if (param != nullptr)
         {
-            g.setFont (juce::FontOptions (22.0f));
-            const auto low  = polar (c, dotRadius + 26.0f, juce::degreesToRadians (-135.0f));
-            const auto high = polar (c, dotRadius + 26.0f, juce::degreesToRadians (135.0f));
-            const auto mid  = polar (c, dotRadius + 22.0f, 0.0f);
-            g.drawText (shortText (param->getText (0.0f, 16)), juce::Rectangle<float> (70.0f, 24.0f).withCentre (low), juce::Justification::centred, false);
-            g.drawText (shortText (param->getText (1.0f, 16)), juce::Rectangle<float> (70.0f, 24.0f).withCentre (high), juce::Justification::centred, false);
-            g.drawText (shortText (param->getText (0.5f, 16)), juce::Rectangle<float> (70.0f, 24.0f).withCentre (mid.translated (0.0f, -2.0f)), juce::Justification::centred, false);
+            lowText = shortText (param->getText (0.0f, 16));
+            highText = shortText (param->getText (1.0f, 16));
+        }
+        else if (previewing && previewTexts[i].size() == 3)
+        {
+            caption = previewTexts[i][0];
+            lowText = previewTexts[i][1];
+            highText = previewTexts[i][2];
+        }
+
+        // Caption under the knob, clear of its dots
+        g.setColour (ink);
+        g.setFont (juce::FontOptions (s.radius > 60.0f ? 32.0f : 30.0f));
+        g.drawText (caption, juce::Rectangle<float> (s.x - 110.0f, s.y + s.radius + 34.0f, 220.0f, 34.0f),
+                    juce::Justification::centred, true);
+
+        // The two ends of the scale, beside the first and last dots
+        if (lowText.isNotEmpty() || highText.isNotEmpty())
+        {
+            g.setColour (ink.withAlpha (0.85f));
+            g.setFont (juce::FontOptions (21.0f));
+            const auto low  = polar (c, dotRadius + 8.0f, juce::degreesToRadians (-135.0f)).translated (-14.0f, 18.0f);
+            const auto high = polar (c, dotRadius + 8.0f, juce::degreesToRadians (135.0f)).translated (14.0f, 18.0f);
+            g.drawText (lowText, juce::Rectangle<float> (72.0f, 24.0f).withCentre (low), juce::Justification::centred, false);
+            g.drawText (highText, juce::Rectangle<float> (72.0f, 24.0f).withCentre (high), juce::Justification::centred, false);
         }
     }
 
-    g.setFont (juce::FontOptions (32.0f));
-    g.drawText ("Bypass/In", juce::Rectangle<float> (inKey.getCentreX() - 120.0f, inKey.getBottom() + 22.0f, 240.0f, 40.0f),
+    g.setFont (juce::FontOptions (30.0f));
+    g.drawText ("Bypass/In", juce::Rectangle<float> (inKey.getCentreX() - 120.0f, inKey.getBottom() + 22.0f, 240.0f, 36.0f),
                 juce::Justification::centred, false);
 
     // --- The meter -------------------------------------------------------------

@@ -53,7 +53,8 @@ public:
     std::function<void (juce::ValueTree insert)> onOpenPluginWindow;
 
     /** For the snapshot tool: shows the panel as if a plugin were running. */
-    void showPreview (const std::array<float, 7>& knobValues, float reductionDb, float outputLevel, bool in);
+    void showPreview (const std::array<float, 7>& knobValues, float reductionDb, float outputLevel, bool in,
+                      const std::array<juce::StringArray, 7>& texts = {});
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -93,6 +94,7 @@ private:
 
     float needleDb = 0.0f, reductionDb = 0.0f, outputDb = -100.0f;
     bool previewing = false, previewIn = false;
+    std::array<juce::StringArray, 7> previewTexts;
 };
 
 } // namespace riff
