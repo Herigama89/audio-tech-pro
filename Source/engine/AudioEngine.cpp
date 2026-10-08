@@ -103,6 +103,14 @@ void AudioEngine::setGraph (std::unique_ptr<PlaybackGraph> newGraph)
     JUCE_ASSERT_MESSAGE_THREAD
 
     jassert (newGraph != nullptr);
+
+    // Delay lines are made here, on the message thread, before the audio thread
+    // can see a graph that needs them. They live as long as the engine.
+    for (const auto& track : newGraph->tracks)
+        if ((track.preDelay > 0 || track.postDelay > 0) && juce::isPositiveAndBelow (track.slot, PlaybackGraph::maxTracks))
+            if (trackDelays[(size_t) track.slot] == nullptr)
+                trackDelays[(size_t) track.slot] = std::make_unique<DelayLine>();
+
     auto* old = currentGraph.exchange (newGraph.release(), std::memory_order_acq_rel);
 
     // The audio thread may be mid-block with `old`. It is safe to free once at
@@ -163,6 +171,12 @@ AudioEngine::Levels AudioEngine::takeLevels() noexcept
 {
     return { peakOutL.exchange (0.0f), peakOutR.exchange (0.0f),
              peakInL.exchange (0.0f),  peakInR.exchange (0.0f) };
+}
+
+int AudioEngine::getPlaybackLatencySamples() const noexcept
+{
+    const auto* graph = currentGraph.load();
+    return graph != nullptr ? graph->playbackLatency : 0;
 }
 
 std::pair<float, float> AudioEngine::takeTrackLevel (int slot) noexcept
@@ -532,6 +546,16 @@ void AudioEngine::prepare (double newSampleRate, int)
 
     trackBuffer.setSize (2, maxBlockSize);
     mixBuffer.setSize (2, maxBlockSize);
+    directBuffer.setSize (2, maxBlockSize);
+    busBuffer.setSize (PlaybackGraph::maxBuses * 2, maxBlockSize);
+
+    if (directDelayLine == nullptr)
+        directDelayLine = std::make_unique<DelayLine>();
+    directDelayLine->clear();
+
+    for (auto& line : trackDelays)
+        if (line != nullptr)
+            line->clear();
     silence.setSize (2, maxBlockSize);
     silence.clear();
 
@@ -590,7 +614,9 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
     const bool cycling = graph != nullptr && graph->cycleEnabled && graph->cycleEnd > graph->cycleStart;
 
     if (graph != nullptr)
-        masterGain.setTargetValue (graph->masterGain);
+        masterGain.setTargetValue ((isPlayingNow && ! graph->masterVolumeAutomation.empty())
+                                       ? graph->masterVolumeAutomation.valueAt (playheadSample.load())
+                                       : graph->masterGain);
 
     // Live MIDI that arrived since the last block lands at its start.
     liveMidi.clear();
@@ -781,76 +807,126 @@ void AudioEngine::renderChunk (const PlaybackGraph& graph, const float* const* i
                                float* mixL, float* mixR, int n, bool playingNow,
                                bool resetNotes, bool withLiveMidi) noexcept
 {
-    const auto blockStart = playheadSample.load();
-    const auto blockEnd = blockStart + n;
-
-    auto* tL = trackBuffer.getWritePointer (0);
-    auto* tR = trackBuffer.getWritePointer (1);
+    // Routing: ordinary tracks sum into `direct` and feed the bus buffers through
+    // their sends; then each bus processes what it received; both reach the mix.
+    auto* dL = directBuffer.getWritePointer (0);
+    auto* dR = directBuffer.getWritePointer (1);
+    juce::FloatVectorOperations::clear (dL, n);
+    juce::FloatVectorOperations::clear (dR, n);
 
     for (const auto& track : graph.tracks)
     {
-        if (track.slot < 0 || track.slot >= PlaybackGraph::maxTracks)
-            continue;
-
-        auto& state = trackStates[(size_t) track.slot];
-
-        // Balance-style pan: unity at centre, the far side fades out.
-        const auto targetL = track.audible ? track.volume * (track.pan <= 0.0f ? 1.0f : 1.0f - track.pan) : 0.0f;
-        const auto targetR = track.audible ? track.volume * (track.pan >= 0.0f ? 1.0f : 1.0f + track.pan) : 0.0f;
-
-        if (! state.initialised)
+        if (track.isBus && juce::isPositiveAndBelow (track.busIndex, PlaybackGraph::maxBuses))
         {
-            state.gainL.setCurrentAndTargetValue (targetL);
-            state.gainR.setCurrentAndTargetValue (targetR);
-            state.initialised = true;
+            juce::FloatVectorOperations::clear (busBuffer.getWritePointer (track.busIndex * 2), n);
+            juce::FloatVectorOperations::clear (busBuffer.getWritePointer (track.busIndex * 2 + 1), n);
         }
-        else
+    }
+
+    for (const auto& track : graph.tracks)
+        if (! track.isBus)
+            renderTrack (track, inputs, numInputs, inputOffset, dL, dR, n, playingNow, resetNotes, withLiveMidi);
+
+    // Tracks heard directly wait for the slowest bus (delay compensation).
+    if (graph.directDelay > 0)
+        directDelayLine->process (dL, dR, n, graph.directDelay);
+
+    juce::FloatVectorOperations::add (mixL, dL, n);
+    juce::FloatVectorOperations::add (mixR, dR, n);
+
+    for (const auto& track : graph.tracks)
+        if (track.isBus)
+            renderTrack (track, inputs, numInputs, inputOffset, mixL, mixR, n, playingNow, resetNotes, withLiveMidi);
+}
+
+void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* const* inputs, int numInputs, int inputOffset,
+                               float* outL, float* outR, int n, bool playingNow,
+                               bool resetNotes, bool withLiveMidi) noexcept
+{
+    if (track.slot < 0 || track.slot >= PlaybackGraph::maxTracks)
+        return;
+
+    const auto blockStart = playheadSample.load();
+    const auto blockEnd = blockStart + n;
+    auto* tL = trackBuffer.getWritePointer (0);
+    auto* tR = trackBuffer.getWritePointer (1);
+    auto& state = trackStates[(size_t) track.slot];
+
+    // Automation (read once per chunk; the gain smoothing below hides the steps).
+    const auto volume = (playingNow && ! track.volumeAutomation.empty()) ? track.volumeAutomation.valueAt (blockStart) : track.volume;
+    const auto pan = (playingNow && ! track.panAutomation.empty()) ? track.panAutomation.valueAt (blockStart) : track.pan;
+
+    if (playingNow)
+        for (const auto& automation : track.paramAutomation)
+            automation.effect->setParameter (automation.paramIndex, automation.curve.valueAt (blockStart));
+
+    // Balance-style pan: unity at centre, the far side fades out.
+    const auto targetL = track.audible ? volume * (pan <= 0.0f ? 1.0f : 1.0f - pan) : 0.0f;
+    const auto targetR = track.audible ? volume * (pan >= 0.0f ? 1.0f : 1.0f + pan) : 0.0f;
+
+    if (! state.initialised)
+    {
+        state.gainL.setCurrentAndTargetValue (targetL);
+        state.gainR.setCurrentAndTargetValue (targetR);
+        state.initialised = true;
+    }
+    else
+    {
+        state.gainL.setTargetValue (targetL);
+        state.gainR.setTargetValue (targetR);
+    }
+
+    const bool hasInserts = ! track.inserts.empty();
+    bool anyAudio = false;
+
+    juce::FloatVectorOperations::clear (tL, n);
+    juce::FloatVectorOperations::clear (tR, n);
+
+    if (track.isBus)
+    {
+        // A bus plays whatever the sends gave it.
+        if (juce::isPositiveAndBelow (track.busIndex, PlaybackGraph::maxBuses))
         {
-            state.gainL.setTargetValue (targetL);
-            state.gainR.setTargetValue (targetR);
+            juce::FloatVectorOperations::copy (tL, busBuffer.getReadPointer (track.busIndex * 2), n);
+            juce::FloatVectorOperations::copy (tR, busBuffer.getReadPointer (track.busIndex * 2 + 1), n);
+            anyAudio = true;
         }
-
-        juce::FloatVectorOperations::clear (tL, n);
-        juce::FloatVectorOperations::clear (tR, n);
-        bool anyAudio = false;
-
-        const bool hasInserts = ! track.inserts.empty();
-
+    }
+    else if (track.isInstrument)
+    {
         // Instruments always run, even when muted, so their notes start and stop on time.
-        if (track.isInstrument)
+        if (track.instrument != nullptr)
         {
-            if (track.instrument != nullptr)
+            trackMidi.clear();
+
+            if (resetNotes)
             {
-                trackMidi.clear();
-
-                if (resetNotes)
-                {
-                    const juce::uint8 allOff[3] = { 0xb0, 123, 0 };
-                    trackMidi.addEvent (allOff, 3, 0);
-                }
-
-                if (playingNow)
-                    collectNotes (track, blockStart, blockEnd);
-
-                if (withLiveMidi && track.receivesLiveMidi)
-                    trackMidi.addEvents (liveMidi, 0, -1, 0);
-
-                track.instrument->render (tL, tR, n, trackMidi);
-                anyAudio = true;
+                const juce::uint8 allOff[3] = { 0xb0, 123, 0 };
+                trackMidi.addEvent (allOff, 3, 0);
             }
+
+            if (playingNow)
+                collectNotes (track, blockStart, blockEnd);
+
+            if (withLiveMidi && track.receivesLiveMidi)
+                trackMidi.addEvents (liveMidi, 0, -1, 0);
+
+            track.instrument->render (tL, tR, n, trackMidi);
+            anyAudio = true;
         }
-        // Silent and not fading, with no effect tails to keep running: nothing to do.
-        else if (! hasInserts && ! state.gainL.isSmoothing() && ! state.gainR.isSmoothing()
-                 && state.gainL.getCurrentValue() <= 0.0f && state.gainR.getCurrentValue() <= 0.0f)
-        {
-            continue;
-        }
+    }
+    else
+    {
+        // Silent and not fading, with no effect tails or sends to keep running: nothing to do.
+        if (! hasInserts && track.sends.empty() && ! state.gainL.isSmoothing() && ! state.gainR.isSmoothing()
+            && state.gainL.getCurrentValue() <= 0.0f && state.gainR.getCurrentValue() <= 0.0f)
+            return;
 
         if (playingNow)
         {
             for (const auto& region : track.regions)
             {
-                if (region.audio == nullptr || track.isInstrument)
+                if (region.audio == nullptr)
                     continue;
 
                 const auto from = juce::jmax (blockStart, region.start);
@@ -885,35 +961,63 @@ void AudioEngine::renderChunk (const PlaybackGraph& graph, const float* const* i
             juce::FloatVectorOperations::add (tR, inR, n);
             anyAudio = true;
         }
-
-        // Insert effects, before the fader (as on a console). They run even on
-        // silence so delays and reverbs ring out.
-        for (const auto& effect : track.inserts)
-            effect->process (tL, tR, n);
-
-        if (! anyAudio && ! hasInserts)
-        {
-            // Still advance the gain ramps so they stay in sync with time.
-            state.gainL.skip (n);
-            state.gainR.skip (n);
-            continue;
-        }
-
-        float peakL = 0.0f, peakR = 0.0f;
-
-        for (int i = 0; i < n; ++i)
-        {
-            const auto l = tL[i] * state.gainL.getNextValue();
-            const auto r = tR[i] * state.gainR.getNextValue();
-            mixL[i] += l;
-            mixR[i] += r;
-            peakL = juce::jmax (peakL, std::abs (l));
-            peakR = juce::jmax (peakR, std::abs (r));
-        }
-
-        storeMax (trackPeaks[(size_t) track.slot * 2], peakL);
-        storeMax (trackPeaks[(size_t) track.slot * 2 + 1], peakR);
     }
+
+    // Insert effects, before the fader (as on a console). They run even on
+    // silence so delays and reverbs ring out.
+    for (const auto& effect : track.inserts)
+        effect->process (tL, tR, n);
+
+    // Delay compensation: line this track up with the slowest one.
+    const auto compensation = track.isBus ? track.postDelay : track.preDelay;
+    if (compensation > 0)
+        if (auto* line = trackDelays[(size_t) track.slot].get())
+            line->process (tL, tR, n, compensation);
+
+    if (! anyAudio && ! hasInserts && track.sends.empty())
+    {
+        // Still advance the gain ramps so they stay in sync with time.
+        state.gainL.skip (n);
+        state.gainR.skip (n);
+        return;
+    }
+
+    // Pre-fader sends (silenced with the track when it's muted).
+    for (const auto& send : track.sends)
+    {
+        if (! send.preFader || ! track.audible || ! juce::isPositiveAndBelow (send.busIndex, PlaybackGraph::maxBuses))
+            continue;
+
+        juce::FloatVectorOperations::addWithMultiply (busBuffer.getWritePointer (send.busIndex * 2), tL, send.level, n);
+        juce::FloatVectorOperations::addWithMultiply (busBuffer.getWritePointer (send.busIndex * 2 + 1), tR, send.level, n);
+    }
+
+    // Fader and pan.
+    float peakL = 0.0f, peakR = 0.0f;
+
+    for (int i = 0; i < n; ++i)
+    {
+        tL[i] *= state.gainL.getNextValue();
+        tR[i] *= state.gainR.getNextValue();
+        peakL = juce::jmax (peakL, std::abs (tL[i]));
+        peakR = juce::jmax (peakR, std::abs (tR[i]));
+    }
+
+    // Post-fader sends.
+    for (const auto& send : track.sends)
+    {
+        if (send.preFader || ! juce::isPositiveAndBelow (send.busIndex, PlaybackGraph::maxBuses))
+            continue;
+
+        juce::FloatVectorOperations::addWithMultiply (busBuffer.getWritePointer (send.busIndex * 2), tL, send.level, n);
+        juce::FloatVectorOperations::addWithMultiply (busBuffer.getWritePointer (send.busIndex * 2 + 1), tR, send.level, n);
+    }
+
+    juce::FloatVectorOperations::add (outL, tL, n);
+    juce::FloatVectorOperations::add (outR, tR, n);
+
+    storeMax (trackPeaks[(size_t) track.slot * 2], peakL);
+    storeMax (trackPeaks[(size_t) track.slot * 2 + 1], peakR);
 }
 
 void AudioEngine::renderClick (const PlaybackGraph& graph, float* mixL, float* mixR, int n) noexcept

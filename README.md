@@ -11,6 +11,9 @@ instruments) is well under way. Riff has:
 - instrument tracks with a built-in synth or a VST3 / Audio Unit instrument plugin
 - MIDI regions, a piano roll, and MIDI keyboard playing and recording
 - a mixer with insert effects (built-in, VST3 and Audio Unit) on every track and the master
+- aux buses with pre- and post-fader sends
+- automation of volume, pan and built-in effect knobs
+- plugin delay compensation
 - export of the song to WAV
 
 All of it runs on a real-time engine that never blocks the audio thread.
@@ -64,6 +67,7 @@ The tests cover:
 - **Model:** tracks and regions, undo and redo, move, split, trim, and the JSON round trip.
 - **Engine:** sample-accurate region placement, source offsets, mute, solo, volume, pan, resampling alignment, and swapping graphs mid-playback.
 - **Recording:** WAV output, punch-in position, input monitoring, the metronome, and latency compensation.
+- **Routing and automation:** sends before and after the fader, mute silencing sends, bus effects, solo-safe buses, volume fades and effect knobs following their lanes, and delay compensation lining up tracks and buses to the sample.
 - **Mixer:** insert chains in the project (order, undo, save, older files), every built-in effect's behaviour, track and master chains in the engine, bypass, track meters, and exporting (length, contents, no click, cancel).
 - **MIDI:** notes, splitting, quantize, the JSON round trip, turning recorded events into notes, synth timing and release, sample-accurate note playback, stop releasing notes, live MIDI routing, and MIDI recording positions.
 - **Cycle:** sample-exact wrap, count-in clicks, splitting loop recordings into passes, take folders (switch, split, flatten, save), and the latency estimator, including a full loopback through a simulated cable.
@@ -84,6 +88,9 @@ The tests cover:
 | Mixer | **Mixer** button or **X**. Each strip has a name, 6 effect slots, pan, fader, meter, M and S; the master strip is on the right. |
 | Add an effect | Click an empty slot in the mixer, then pick a Riff effect (EQ, Compressor, Delay, Reverb, Limiter) or one of your plugins under **Plugins**. Effects run top to bottom, before the fader. |
 | Change an effect | Click a filled slot to open its window. Right-click it to **Bypass**, **Replace...** or **Remove**. |
+| Aux bus | **+ Track > Aux bus**, or **New aux bus** from a send's menu. Put an effect (e.g. Reverb at 100% mix) on the bus. |
+| Send | On a mixer strip, click **Send** under the effect slots and choose a bus; the small knob is the send level. In the same menu: **Pre-fader** and **Remove send**. |
+| Automation | Click **A** on a track to show its automation line over the lane. Click to add points, drag to move them (they snap to the grid; hold Cmd to move freely), double-click a point to remove it. Right-click **A** to pick what to automate: Volume, Pan, or any knob of a Riff effect on that track. |
 | Export | **File > Export Song as WAV...** exports the whole song plus 2 seconds for reverb tails, or just the cycle range when Cycle is on. The file is 24-bit at your interface's sample rate; the metronome is never included. |
 | New instrument track | **+ Track > Instrument track (MIDI)**. It starts with Riff Synth. |
 | Choose an instrument | Click the instrument button on the track (it shows "Riff Synth" at first). Pick **Riff Synth**, or a plugin under **Plugins**. **Show plugin window** / **Show synth controls** opens its window. |
@@ -175,10 +182,11 @@ Tests/                    Catch2 unit tests
 - [x] Built-in effects: EQ (low shelf, mid peak, high shelf), compressor, delay, reverb, limiter
 - [x] VST3 and Audio Unit effects in any slot, with their windows and saved settings
 - [x] Export the song (or the cycle range) to a 24-bit WAV, faster than real time, with progress and cancel
-- [ ] CLAP instruments and effects
-- [ ] Aux buses and sends
-- [ ] Automation of volume, pan and effect parameters
-- [ ] Plugin delay compensation
+- [x] Aux buses and sends (pre/post fader); buses are solo-safe
+- [x] Automation of volume, pan and built-in effect parameters
+- [x] Plugin delay compensation across tracks and buses; recordings account for it too
+- [ ] CLAP instruments and effects (next)
+- [ ] Automation of plugin parameters, and moving faders that follow automation
 
 ## Later phases
 

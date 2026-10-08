@@ -27,17 +27,23 @@ public:
     void mouseUp (const juce::MouseEvent& e) override;
 
     static constexpr int numSlots = 6;
+    static constexpr int numSends = 2;
     static constexpr int stripWidth = 98;
 
 private:
     bool isMaster() const { return ! track.isValid(); }
+    bool hasSends() const;
     juce::ValueTree insertAt (int slot) const;
+    juce::ValueTree sendAt (int index) const;
+    void showSendMenu (int index);
 
     MixerPanel& owner;
     juce::ValueTree project, track;
 
     juce::Label nameLabel;
     juce::OwnedArray<juce::TextButton> slots;
+    juce::OwnedArray<juce::TextButton> sendButtons;
+    juce::OwnedArray<juce::Slider> sendLevels;
     juce::Slider panKnob, fader;
     LevelMeter meter { "" };
     juce::TextButton muteButton { "M" }, soloButton { "S" };

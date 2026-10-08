@@ -52,25 +52,72 @@ int ProjectPlayer::slotOf (const juce::String& trackId) const
 }
 
 std::vector<std::shared_ptr<Effect>> ProjectPlayer::buildChain (const juce::String& owner, double sampleRate,
-                                                                juce::StringArray& insertIds)
+                                                                juce::StringArray& insertIds,
+                                                                std::map<juce::String, std::shared_ptr<Effect>>& effectsById)
 {
     std::vector<std::shared_ptr<Effect>> chain;
 
     if (effects == nullptr)
         return chain;
 
-    for (const auto& insert : model::findChain (project, owner))
+    for (const auto& insert : model::insertsOf (model::findChain (project, owner)))
     {
-        insertIds.add (insert[ids::id].toString());
+        const auto id = insert[ids::id].toString();
+        insertIds.add (id);
 
         if ((bool) insert[ids::bypass])
             continue;
 
         if (auto effect = effects->effectFor (insert, sampleRate, AudioEngine::maxChunkSize))
+        {
+            effectsById[id] = effect;
             chain.push_back (std::move (effect));
+        }
     }
 
     return chain;
+}
+
+PlaybackGraph::Curve ProjectPlayer::curveFor (const juce::String& owner, const juce::String& param, double sampleRate, bool)
+{
+    PlaybackGraph::Curve curve;
+    const auto lane = model::laneFor (project, owner, param, false);
+
+    for (const auto& point : lane)
+    {
+        curve.times.push_back ((juce::int64) std::llround ((double) point[ids::time] * sampleRate));
+        curve.values.push_back ((float) (double) point[ids::value]);
+    }
+
+    return curve;
+}
+
+void ProjectPlayer::addParamAutomation (PlaybackGraph::Track& t, const juce::String& owner, double sampleRate,
+                                        const std::map<juce::String, std::shared_ptr<Effect>>& effectsById)
+{
+    // Lanes named "insert:<insert id>:<parameter id>" drive built-in effect knobs.
+    for (const auto& lane : model::mixerOf (project))
+    {
+        if (! lane.hasType (ids::LANE) || lane[ids::owner].toString() != owner || lane.getNumChildren() == 0)
+            continue;
+
+        const auto parts = juce::StringArray::fromTokens (lane[ids::param].toString(), ":", {});
+        if (parts.size() != 3 || parts[0] != "insert")
+            continue;
+
+        auto it = effectsById.find (parts[1]);
+        if (it == effectsById.end())
+            continue;
+
+        auto* builtIn = dynamic_cast<BuiltInEffect*> (it->second.get());
+        if (builtIn == nullptr)
+            continue;
+
+        const auto& params = builtIn->getInfo().params;
+        for (size_t p = 0; p < params.size(); ++p)
+            if (params[p].id == parts[2])
+                t.paramAutomation.push_back ({ builtIn, (int) p, curveFor (owner, lane[ids::param].toString(), sampleRate) });
+    }
 }
 
 int ProjectPlayer::slotFor (const juce::String& trackId)
@@ -115,7 +162,17 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
     graph->cycleEnd = toSamples (project.getProperty (ids::cycleEnd, 0.0));
 
     juce::StringArray insertIds;
-    graph->masterInserts = buildChain (model::masterOwner, sampleRate, insertIds);
+    std::map<juce::String, std::shared_ptr<Effect>> effectsById;
+    graph->masterInserts = buildChain (model::masterOwner, sampleRate, insertIds, effectsById);
+    graph->masterVolumeAutomation = curveFor (model::masterOwner, model::volumeParam, sampleRate);
+
+    // Buses get numbers so sends can find them.
+    std::map<juce::String, int> busIndex;
+    for (const auto& track : project)
+        if (track.hasType (ids::TRACK) && model::isBusTrack (track) && (int) busIndex.size() < PlaybackGraph::maxBuses)
+            busIndex[track[ids::id].toString()] = (int) busIndex.size();
+
+    std::vector<int> latencies; // per graph track, for delay compensation
 
     bool anySolo = false;
     for (const auto& track : project)
@@ -139,14 +196,46 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         if (t.slot < 0)
             continue;
 
-        t.inserts = buildChain (track[ids::id].toString(), sampleRate, insertIds);
+        const auto trackId = track[ids::id].toString();
+        t.inserts = buildChain (trackId, sampleRate, insertIds, effectsById);
         t.isInstrument = model::isInstrumentTrack (track);
+        t.isBus = model::isBusTrack (track);
+
+        // Automation
+        t.volumeAutomation = curveFor (trackId, model::volumeParam, sampleRate);
+        t.panAutomation = curveFor (trackId, model::panParam, sampleRate);
+        addParamAutomation (t, trackId, sampleRate, effectsById);
+
+        int latency = 0;
+        for (const auto& e : t.inserts)
+            latency += e->getLatencySamples();
+
+        if (t.isBus)
+        {
+            // Buses are solo-safe: soloing a track keeps its reverb bus audible.
+            t.audible = ! (bool) track[ids::mute];
+            auto it = busIndex.find (trackId);
+            t.busIndex = it != busIndex.end() ? it->second : -1;
+            graph->tracks.push_back (std::move (t));
+            latencies.push_back (latency);
+            continue;
+        }
+
+        for (const auto& send : model::sendsOf (model::findChain (project, trackId)))
+        {
+            auto it = busIndex.find (send[ids::target].toString());
+            if (it != busIndex.end())
+                t.sends.push_back ({ it->second, (float) (double) send.getProperty (ids::level, 1.0), (bool) send[ids::pre] });
+        }
         t.receivesLiveMidi = t.isInstrument && track[ids::id].toString() == liveMidiTrackId;
 
         if (t.isInstrument)
         {
             if (rack != nullptr)
                 t.instrument = rack->instrumentFor (track, sampleRate, AudioEngine::maxChunkSize);
+
+            if (t.instrument != nullptr)
+                latency += t.instrument->getLatencySamples();
 
             for (const auto& region : track)
             {
@@ -187,6 +276,7 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
             }
 
             graph->tracks.push_back (std::move (t));
+            latencies.push_back (latency);
             continue;
         }
 
@@ -204,7 +294,35 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         }
 
         graph->tracks.push_back (std::move (t));
+        latencies.push_back (latency);
     }
+
+    // Delay compensation. Every ordinary track is delayed to match the slowest
+    // one (D); buses add their own latency on top, so the direct sum and each
+    // bus are delayed again to line up with the slowest bus (M).
+    int slowestTrack = 0, slowestBus = 0;
+    for (size_t i = 0; i < graph->tracks.size(); ++i)
+        (graph->tracks[i].isBus ? slowestBus : slowestTrack) = juce::jmax (graph->tracks[i].isBus ? slowestBus : slowestTrack, latencies[i]);
+
+    slowestTrack = juce::jmin (slowestTrack, DelayLine::maxDelay);
+    slowestBus = juce::jmin (slowestBus, DelayLine::maxDelay - slowestTrack);
+
+    for (size_t i = 0; i < graph->tracks.size(); ++i)
+    {
+        auto& t = graph->tracks[i];
+        if (t.isBus)
+            t.postDelay = juce::jmax (0, slowestBus - latencies[i]);
+        else
+            t.preDelay = juce::jmax (0, slowestTrack - latencies[i]);
+    }
+
+    graph->directDelay = slowestBus;
+
+    int masterLatency = 0;
+    for (const auto& e : graph->masterInserts)
+        masterLatency += e->getLatencySamples();
+
+    graph->playbackLatency = slowestTrack + slowestBus + masterLatency;
 
     if (effects != nullptr)
         effects->removeAllExcept (insertIds);

@@ -8,7 +8,7 @@
     PROJECT  { name, tempo, timeSigNumerator, masterGain, metronome,
                cycleEnabled, cycleStart, cycleEnd, countIn }
       TRACK  { id, name, colour, volume, pan, mute, solo, armed, monitor, input, inputStereo,
-               kind ("audio" | "instrument"),
+               kind ("audio" | "instrument" | "bus"), showAutomation, automationParam,
                instrument ("synth" | "plugin"), pluginDescription (XML), pluginState (base64),
                synthWave, synthCutoff, synthResonance, synthAttack, synthDecay, synthSustain,
                synthRelease, synthGain }
@@ -20,6 +20,9 @@
         CHAIN { owner }                         (owner = a track id, or "master")
           INSERT { id, kind ("builtin" | "plugin"), effect, pluginDescription,
                    pluginState, bypass, <effect parameters by name> }
+          SEND { id, target (a bus track id), level (linear), pre (pre-fader) }
+        LANE { owner, param }                   (automation; param is "volume", "pan",
+          POINT { time, value }                  or "insert:<insert id>:<parameter id>")
 
     Tracks are the PROJECT's children before MIXER; use model::numTracks().
     Insert chains live apart from tracks so that a track's children stay
@@ -46,6 +49,9 @@ namespace riff::ids
     RIFF_DECLARE_ID (MIXER)
     RIFF_DECLARE_ID (CHAIN)
     RIFF_DECLARE_ID (INSERT)
+    RIFF_DECLARE_ID (SEND)
+    RIFF_DECLARE_ID (LANE)
+    RIFF_DECLARE_ID (POINT)
 
     // Properties
     RIFF_DECLARE_ID (id)
@@ -95,6 +101,14 @@ namespace riff::ids
     RIFF_DECLARE_ID (owner)
     RIFF_DECLARE_ID (effect)          // built-in effect type: "eq", "compressor", "delay", "reverb", "limiter"
     RIFF_DECLARE_ID (bypass)
+    RIFF_DECLARE_ID (target)
+    RIFF_DECLARE_ID (level)
+    RIFF_DECLARE_ID (pre)
+    RIFF_DECLARE_ID (param)
+    RIFF_DECLARE_ID (time)
+    RIFF_DECLARE_ID (value)
+    RIFF_DECLARE_ID (showAutomation)
+    RIFF_DECLARE_ID (automationParam)
 
     #undef RIFF_DECLARE_ID
 }

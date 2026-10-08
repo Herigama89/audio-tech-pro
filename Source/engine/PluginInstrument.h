@@ -15,6 +15,7 @@ public:
     void prepare (double sampleRate, int maxBlockSize) override;
     void render (float* left, float* right, int numSamples, const juce::MidiBuffer& midi) noexcept override;
     juce::String getName() const override;
+    int getLatencySamples() const override { return plugin->getLatencySamples(); }
 
     juce::AudioPluginInstance& getPlugin() noexcept { return *plugin; }
 

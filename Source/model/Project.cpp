@@ -1,4 +1,5 @@
 #include "Project.h"
+#include "../engine/BuiltInEffects.h"
 #include <array>
 
 namespace riff::model
@@ -534,8 +535,12 @@ juce::ValueTree mixerOf (juce::ValueTree project)
 
 juce::ValueTree findChain (const juce::ValueTree& project, const juce::String& owner)
 {
-    const auto mixer = project.getChildWithName (ids::MIXER);
-    return mixer.getChildWithProperty (ids::owner, owner);
+    // Only CHAIN nodes: automation lanes have an owner too.
+    for (const auto& child : project.getChildWithName (ids::MIXER))
+        if (child.hasType (ids::CHAIN) && child[ids::owner].toString() == owner)
+            return child;
+
+    return {};
 }
 
 juce::ValueTree chainFor (juce::ValueTree project, const juce::String& owner)
@@ -578,6 +583,148 @@ void removeInsert (juce::ValueTree insert, juce::UndoManager* um)
 {
     if (auto parent = insert.getParent(); parent.isValid())
         parent.removeChild (insert, um);
+}
+
+//==============================================================================
+bool isBusTrack (const juce::ValueTree& track)
+{
+    return track[ids::kind].toString() == busKind;
+}
+
+juce::ValueTree addSend (juce::ValueTree chain, const juce::String& busId, double level, juce::UndoManager* um)
+{
+    juce::ValueTree send { ids::SEND };
+    send.setProperty (ids::id, newId(), nullptr);
+    send.setProperty (ids::target, busId, nullptr);
+    send.setProperty (ids::level, level, nullptr);
+    send.setProperty (ids::pre, false, nullptr);
+    chain.appendChild (send, um);
+    return send;
+}
+
+juce::Array<juce::ValueTree> sendsOf (const juce::ValueTree& chain)
+{
+    juce::Array<juce::ValueTree> result;
+    for (const auto& c : chain)
+        if (c.hasType (ids::SEND))
+            result.add (c);
+    return result;
+}
+
+juce::Array<juce::ValueTree> insertsOf (const juce::ValueTree& chain)
+{
+    juce::Array<juce::ValueTree> result;
+    for (const auto& c : chain)
+        if (c.hasType (ids::INSERT))
+            result.add (c);
+    return result;
+}
+
+//==============================================================================
+juce::String insertParam (const juce::String& insertId, const juce::String& paramId)
+{
+    return "insert:" + insertId + ":" + paramId;
+}
+
+juce::ValueTree laneFor (juce::ValueTree project, const juce::String& owner, const juce::String& param, bool create)
+{
+    auto mixer = mixerOf (project);
+
+    for (const auto& lane : mixer)
+        if (lane.hasType (ids::LANE) && lane[ids::owner].toString() == owner && lane[ids::param].toString() == param)
+            return lane;
+
+    if (! create)
+        return {};
+
+    juce::ValueTree lane { ids::LANE };
+    lane.setProperty (ids::owner, owner, nullptr);
+    lane.setProperty (ids::param, param, nullptr);
+    mixer.appendChild (lane, nullptr);
+    return lane;
+}
+
+juce::ValueTree addPoint (juce::ValueTree lane, double time, double value, juce::UndoManager* um)
+{
+    juce::ValueTree point { ids::POINT };
+    point.setProperty (ids::time, juce::jmax (0.0, time), nullptr);
+    point.setProperty (ids::value, value, nullptr);
+
+    int index = 0;
+    while (index < lane.getNumChildren() && (double) lane.getChild (index)[ids::time] <= time)
+        ++index;
+
+    lane.addChild (point, index, um);
+    return point;
+}
+
+void movePoint (juce::ValueTree point, double time, double value, juce::UndoManager* um)
+{
+    auto lane = point.getParent();
+    time = juce::jmax (0.0, time);
+    point.setProperty (ids::time, time, um);
+    point.setProperty (ids::value, value, um);
+
+    // Keep time order.
+    auto index = lane.indexOf (point);
+    while (index > 0 && (double) lane.getChild (index - 1)[ids::time] > time)
+        lane.moveChild (index, index - 1, um), --index;
+    while (index < lane.getNumChildren() - 1 && (double) lane.getChild (index + 1)[ids::time] < time)
+        lane.moveChild (index, index + 1, um), ++index;
+}
+
+void removePoint (juce::ValueTree point, juce::UndoManager* um)
+{
+    if (auto lane = point.getParent(); lane.isValid())
+        lane.removeChild (point, um);
+}
+
+double valueAt (const juce::ValueTree& lane, double time, double fallback)
+{
+    const auto n = lane.getNumChildren();
+    if (n == 0)
+        return fallback;
+
+    const auto first = lane.getChild (0);
+    if (time <= (double) first[ids::time])
+        return first[ids::value];
+
+    for (int i = 1; i < n; ++i)
+    {
+        const auto b = lane.getChild (i);
+        const double tb = b[ids::time];
+        if (time <= tb)
+        {
+            const auto a = lane.getChild (i - 1);
+            const double ta = a[ids::time], va = a[ids::value], vb = b[ids::value];
+            return tb > ta ? va + (vb - va) * (time - ta) / (tb - ta) : vb;
+        }
+    }
+
+    return lane.getChild (n - 1)[ids::value];
+}
+
+ParamRange rangeOf (const juce::ValueTree& project, const juce::String& param)
+{
+    if (param == volumeParam) return { 0.0, juce::Decibels::decibelsToGain (6.0), 1.0, true, "Volume" };
+    if (param == panParam)    return { -1.0, 1.0, 0.0, false, "Pan" };
+
+    // "insert:<id>:<param>" on a built-in effect: the range comes from the effect catalogue.
+    const auto parts = juce::StringArray::fromTokens (param, ":", {});
+    if (parts.size() == 3 && parts[0] == "insert")
+    {
+        const auto mixer = project.getChildWithName (ids::MIXER);
+        for (const auto& chain : mixer)
+            for (const auto& insert : chain)
+                if (insert[ids::id].toString() == parts[1])
+                    if (const auto* info = findBuiltInEffect (insert[ids::effect].toString()))
+                        for (const auto& p : info->params)
+                            if (p.id == parts[2])
+                                return { p.min, p.max, (double) insert.getProperty (p.id, p.defaultValue), false,
+                                         info->name + " " + p.name };
+    }
+
+    return { 0.0, 1.0, 0.5, false, param };
 }
 
 juce::ValueTree findById (const juce::ValueTree& project, const juce::String& id)

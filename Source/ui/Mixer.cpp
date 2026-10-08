@@ -48,6 +48,34 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         addAndMakeVisible (b);
     }
 
+    for (int i = 0; i < numSends; ++i)
+    {
+        auto* b = sendButtons.add (new juce::TextButton());
+        b->setWantsKeyboardFocus (false);
+        b->setTooltip ("Send to an aux bus (e.g. a shared reverb). Click to choose the bus.");
+        b->onClick = [this, i] { showSendMenu (i); };
+        addAndMakeVisible (b);
+        b->setVisible (hasSends());
+
+        auto* s = sendLevels.add (new juce::Slider());
+        s->setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+        s->setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+        s->setRange (minDb, 6.0, 0.1);
+        s->setSkewFactorFromMidPoint (-12.0);
+        s->setDoubleClickReturnValue (true, 0.0);
+        s->setScrollWheelEnabled (false);
+        s->setPopupDisplayEnabled (true, true, nullptr);
+        s->textFromValueFunction = [] (double db) { return db <= minDb + 0.01 ? juce::String ("-inf dB") : juce::String (db, 1) + " dB"; };
+        s->onDragStart = [this] { owner.getUndoManager().beginNewTransaction ("Send level"); };
+        s->onValueChange = [this, i, s]
+        {
+            if (auto send = sendAt (i); send.isValid())
+                send.setProperty (ids::level, dbToGain (s->getValue()), &owner.getUndoManager());
+        };
+        addAndMakeVisible (s);
+        s->setVisible (hasSends());
+    }
+
     panKnob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
     panKnob.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
     panKnob.setRange (-1.0, 1.0, 0.01);
@@ -108,10 +136,78 @@ juce::String ChannelStrip::getOwnerId() const
     return isMaster() ? model::masterOwner : track[ids::id].toString();
 }
 
+bool ChannelStrip::hasSends() const
+{
+    return ! isMaster() && ! model::isBusTrack (track);
+}
+
 juce::ValueTree ChannelStrip::insertAt (int slot) const
 {
-    const auto chain = model::findChain (project, getOwnerId());
-    return chain.isValid() ? chain.getChild (slot) : juce::ValueTree();
+    const auto inserts = model::insertsOf (model::findChain (project, getOwnerId()));
+    return juce::isPositiveAndBelow (slot, inserts.size()) ? inserts[slot] : juce::ValueTree();
+}
+
+juce::ValueTree ChannelStrip::sendAt (int index) const
+{
+    const auto sends = model::sendsOf (model::findChain (project, getOwnerId()));
+    return juce::isPositiveAndBelow (index, sends.size()) ? sends[index] : juce::ValueTree();
+}
+
+void ChannelStrip::showSendMenu (int index)
+{
+    auto& um = owner.getUndoManager();
+    auto send = sendAt (index);
+    const auto current = send[ids::target].toString();
+    const auto ownerId = getOwnerId();
+    auto proj = project;
+
+    // Point the send at a bus (creating the send if this slot is empty).
+    auto setTarget = [&um, proj, ownerId, send] (const juce::String& busId) mutable
+    {
+        um.beginNewTransaction ("Send");
+        if (send.isValid())
+            send.setProperty (ids::target, busId, &um);
+        else
+            model::addSend (model::chainFor (proj, ownerId), busId, juce::Decibels::decibelsToGain (-6.0), &um);
+    };
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Send to");
+
+    for (const auto& t : project)
+        if (t.hasType (ids::TRACK) && model::isBusTrack (t))
+        {
+            const auto busId = t[ids::id].toString();
+            menu.addItem (t[ids::name].toString(), true, busId == current, [setTarget, busId]() mutable { setTarget (busId); });
+        }
+
+    menu.addItem ("New aux bus", [&um, proj, setTarget]() mutable
+    {
+        um.beginNewTransaction ("New aux bus");
+        int buses = 0;
+        for (const auto& t : proj)
+            buses += (t.hasType (ids::TRACK) && model::isBusTrack (t)) ? 1 : 0;
+        const auto bus = model::addTrack (proj, "Bus " + juce::String (buses + 1), &um, -1, model::busKind);
+        setTarget (bus[ids::id].toString());
+    });
+
+    if (send.isValid())
+    {
+        menu.addSeparator();
+        menu.addItem ("Pre-fader", true, (bool) send[ids::pre], [&um, send]() mutable
+        {
+            um.beginNewTransaction ("Pre-fader send");
+            send.setProperty (ids::pre, ! (bool) send[ids::pre], &um);
+        });
+        menu.addItem ("Remove send", [&um, send]() mutable
+        {
+            um.beginNewTransaction ("Remove send");
+            if (auto parent = send.getParent(); parent.isValid())
+                parent.removeChild (send, &um);
+        });
+    }
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (sendButtons[index]));
 }
 
 void ChannelStrip::refresh()
@@ -129,6 +225,17 @@ void ChannelStrip::refresh()
         panKnob.setValue (track.getProperty (ids::pan, 0.0), juce::dontSendNotification);
         muteButton.setToggleState ((bool) track[ids::mute], juce::dontSendNotification);
         soloButton.setToggleState ((bool) track[ids::solo], juce::dontSendNotification);
+    }
+
+    for (int i = 0; i < numSends && hasSends(); ++i)
+    {
+        const auto send = sendAt (i);
+        const auto bus = model::findById (project, send[ids::target].toString());
+        sendButtons[i]->setButtonText (bus.isValid() ? (bus[ids::name].toString() + ((bool) send[ids::pre] ? " (pre)" : ""))
+                                                     : juce::String ("Send"));
+        sendButtons[i]->setColour (juce::TextButton::textColourOffId, bus.isValid() ? theme::text : theme::dimText);
+        sendLevels[i]->setEnabled (bus.isValid());
+        sendLevels[i]->setValue (gainToDb (send.getProperty (ids::level, 0.0)), juce::dontSendNotification);
     }
 
     for (int i = 0; i < numSlots; ++i)
@@ -227,7 +334,21 @@ void ChannelStrip::resized()
         area.removeFromTop (2);
     }
 
-    area.removeFromTop (4);
+    area.removeFromTop (2);
+
+    if (hasSends())
+    {
+        for (int i = 0; i < numSends; ++i)
+        {
+            auto row = area.removeFromTop (22);
+            sendLevels[i]->setBounds (row.removeFromRight (22));
+            row.removeFromRight (2);
+            sendButtons[i]->setBounds (row);
+            area.removeFromTop (2);
+        }
+    }
+
+    area.removeFromTop (2);
 
     if (! isMaster())
     {

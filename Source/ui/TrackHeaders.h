@@ -30,6 +30,7 @@ private:
     void select();
     void showMenu();
     void showInputMenu();
+    void showAutomationMenu();
 
     juce::ValueTree track;
     juce::UndoManager& undoManager;
@@ -38,8 +39,9 @@ private:
     juce::Label nameLabel;
     InputNamesFn inputNames;
     InstrumentMenuFn instrumentMenu;
-    bool isInstrument = false;
-    juce::TextButton muteButton { "M" }, soloButton { "S" }, armButton { "R" }, monitorButton { "I" };
+    bool isInstrument = false, isBus = false;
+    bool lastClickWasPopup = false; // buttons also "click" on right-click; those open menus instead
+    juce::TextButton muteButton { "M" }, soloButton { "S" }, armButton { "R" }, monitorButton { "I" }, automationButton { "A" };
     juce::TextButton instrumentButton;
     juce::Slider volumeSlider, panKnob;
 };

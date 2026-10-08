@@ -21,6 +21,9 @@ public:
     virtual void process (float* left, float* right, int numSamples) noexcept = 0;
     virtual juce::String getName() const = 0;
 
+    /** How many samples late this effect's output is (for delay compensation). */
+    virtual int getLatencySamples() const { return 0; }
+
     double getPreparedSampleRate() const noexcept { return preparedRate; }
 
 protected:

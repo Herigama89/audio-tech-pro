@@ -21,7 +21,7 @@ namespace riff::model
     // --- Creation ---------------------------------------------------------
     juce::ValueTree createProject (const juce::String& name = "Untitled");
 
-    inline const juce::String audioKind { "audio" }, instrumentKind { "instrument" };
+    inline const juce::String audioKind { "audio" }, instrumentKind { "instrument" }, busKind { "bus" };
 
     juce::ValueTree addTrack (juce::ValueTree project, const juce::String& name, juce::UndoManager* um,
                               int index = -1, const juce::String& kind = audioKind);
@@ -137,6 +137,33 @@ namespace riff::model
     juce::ValueTree addBuiltinInsert (juce::ValueTree chain, const juce::String& effectType, int index, juce::UndoManager* um);
     juce::ValueTree addPluginInsert (juce::ValueTree chain, const juce::String& descriptionXml, int index, juce::UndoManager* um);
     void removeInsert (juce::ValueTree insert, juce::UndoManager* um);
+
+    // --- Buses and sends --------------------------------------------------------
+    bool isBusTrack (const juce::ValueTree& track);
+    juce::ValueTree addSend (juce::ValueTree chain, const juce::String& busId, double level, juce::UndoManager* um);
+    juce::Array<juce::ValueTree> sendsOf (const juce::ValueTree& chain);
+    juce::Array<juce::ValueTree> insertsOf (const juce::ValueTree& chain);
+
+    // --- Automation -------------------------------------------------------------
+    inline const juce::String volumeParam { "volume" }, panParam { "pan" };
+
+    juce::String insertParam (const juce::String& insertId, const juce::String& paramId);
+
+    /** The lane for an owner's parameter: found, or created when `create` is true. */
+    juce::ValueTree laneFor (juce::ValueTree project, const juce::String& owner, const juce::String& param, bool create);
+
+    /** Adds a point, keeping the lane's points in time order. */
+    juce::ValueTree addPoint (juce::ValueTree lane, double time, double value, juce::UndoManager* um);
+    void movePoint (juce::ValueTree point, double time, double value, juce::UndoManager* um);
+    void removePoint (juce::ValueTree point, juce::UndoManager* um);
+
+    /** The lane's value at a time: linear between points, held before the first and after the last. */
+    double valueAt (const juce::ValueTree& lane, double time, double fallback);
+
+    struct ParamRange { double min, max, defaultValue; bool decibels; juce::String name; };
+
+    /** What a parameter can be set to (volume is drawn in dB but stored as gain). */
+    ParamRange rangeOf (const juce::ValueTree& project, const juce::String& param);
 
     // --- Queries ----------------------------------------------------------
     /** Tracks are the first children of the project; the MIXER node comes after them. */

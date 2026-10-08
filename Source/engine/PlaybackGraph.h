@@ -8,6 +8,8 @@
 namespace riff
 {
 
+class BuiltInEffect;
+
 /**
     An immutable snapshot of everything the audio thread needs to render the
     project, in samples at the device rate.
@@ -17,6 +19,45 @@ namespace riff
 */
 struct PlaybackGraph
 {
+    /** An automation curve in samples, evaluated once per processing chunk. */
+    struct Curve
+    {
+        std::vector<juce::int64> times;
+        std::vector<float> values;
+
+        bool empty() const noexcept { return times.empty(); }
+
+        float valueAt (juce::int64 t) const noexcept
+        {
+            if (t <= times.front())
+                return values.front();
+
+            const auto it = std::upper_bound (times.begin(), times.end(), t);
+            if (it == times.end())
+                return values.back();
+
+            const auto i = (size_t) (it - times.begin());
+            const auto t0 = times[i - 1], t1 = times[i];
+            const auto f = t1 > t0 ? (float) ((double) (t - t0) / (double) (t1 - t0)) : 1.0f;
+            return values[i - 1] + (values[i] - values[i - 1]) * f;
+        }
+    };
+
+    struct Send
+    {
+        int busIndex = 0;
+        float level = 1.0f;
+        bool preFader = false;
+    };
+
+    /** Automation of one parameter of a built-in effect (kept alive by the track's inserts). */
+    struct ParamAutomation
+    {
+        BuiltInEffect* effect = nullptr;
+        int paramIndex = 0;
+        Curve curve;
+    };
+
     /** A MIDI note at absolute timeline positions, already clipped to its region. */
     struct Note
     {
@@ -48,12 +89,21 @@ struct PlaybackGraph
 
         std::vector<std::shared_ptr<Effect>> inserts;   // in order, bypassed ones left out
 
+        bool isBus = false;
+        int busIndex = -1;                // for buses: which bus buffer they read
+        std::vector<Send> sends;          // for ordinary tracks
+        int preDelay = 0, postDelay = 0;  // delay compensation, in samples
+
+        Curve volumeAutomation, panAutomation;
+        std::vector<ParamAutomation> paramAutomation;
+
         bool monitorInput = false;  // armed + monitor: pass the input through this track
         int inputChannel = 0;       // index among the device's active inputs
         bool inputStereo = false;
     };
 
     static constexpr int maxTracks = 256;
+    static constexpr int maxBuses = 32;
 
     double sampleRate = 44100.0;
     float masterGain = 0.8f;
@@ -65,6 +115,10 @@ struct PlaybackGraph
     int beatsPerBar = 4;
     std::vector<Track> tracks;
     std::vector<std::shared_ptr<Effect>> masterInserts;
+    Curve masterVolumeAutomation;
+
+    int directDelay = 0;        // extra delay for tracks heard directly, matching the slowest bus
+    int playbackLatency = 0;    // how late everything is heard because of plugin latency
 };
 
 } // namespace riff

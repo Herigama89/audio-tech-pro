@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include <map>
 #include "BuiltInEffects.h"
+#include "../model/Identifiers.h"
 
 namespace riff
 {
@@ -17,6 +18,7 @@ public:
     void prepare (double sampleRate, int maxBlockSize) override;
     void process (float* left, float* right, int numSamples) noexcept override;
     juce::String getName() const override { return plugin->getName(); }
+    int getLatencySamples() const override { return plugin->getLatencySamples(); }
 
     juce::AudioPluginInstance& getPlugin() noexcept { return *plugin; }
     juce::String getStateBase64() const;
@@ -46,6 +48,12 @@ public:
     void storePluginStates (juce::ValueTree mixer);
 
     juce::AudioPluginInstance* getPlugin (const juce::String& insertId);
+
+    /** Tests: makes a plugin insert use the given effect, as if it had loaded. */
+    void injectForTesting (const juce::ValueTree& insert, std::shared_ptr<Effect> effect, double sampleRate)
+    {
+        entries[insert[ids::id].toString()] = { keyFor (insert), sampleRate, std::move (effect) };
+    }
     BuiltInEffect* getBuiltIn (const juce::String& insertId);
 
     std::function<void()> onEffectReady;

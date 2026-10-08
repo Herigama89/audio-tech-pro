@@ -1,6 +1,7 @@
 #include "TrackHeaders.h"
 #include "Theme.h"
 #include "../model/Project.h"
+#include "../engine/BuiltInEffects.h"
 
 namespace riff
 {
@@ -19,6 +20,7 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
     : track (t), undoManager (um), timeline (tl), inputNames (std::move (names)), instrumentMenu (std::move (menuFn))
 {
     isInstrument = model::isInstrumentTrack (track);
+    isBus = model::isBusTrack (track);
 
     instrumentButton.setWantsKeyboardFocus (false);
     instrumentButton.setTooltip ("Choose the instrument, or open its window");
@@ -36,7 +38,7 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
     nameLabel.addMouseListener (this, false);
     addAndMakeVisible (nameLabel);
 
-    for (auto* b : { &muteButton, &soloButton, &armButton, &monitorButton })
+    for (auto* b : { &muteButton, &soloButton, &armButton, &monitorButton, &automationButton })
     {
         b->setClickingTogglesState (false);
         b->setWantsKeyboardFocus (false);
@@ -52,10 +54,20 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
     monitorButton.setTooltip ("Input monitoring: hear the input through this track while it's armed.\n"
                               "Use headphones, or a mic near speakers will feed back.");
 
-    monitorButton.setVisible (! isInstrument); // instruments are monitored through their sound already
+    monitorButton.setVisible (! isInstrument && ! isBus); // instruments are monitored through their sound already
+    armButton.setVisible (! isBus);                      // buses have nothing to record
+
+    automationButton.setColour (juce::TextButton::buttonOnColourId, theme::meterGreen);
+    automationButton.setTooltip ("Show automation on this track. Right-click to choose what to automate.");
+    automationButton.onClick = [this]
+    {
+        if (! lastClickWasPopup)
+            track.setProperty (ids::showAutomation, ! (bool) track[ids::showAutomation], nullptr);
+    };
+    automationButton.addMouseListener (this, false);
 
     // Arming and monitoring are live settings, not edits, so they skip undo.
-    armButton.onClick = [this] { track.setProperty (ids::armed, ! (bool) track[ids::armed], nullptr); };
+    armButton.onClick = [this] { if (! lastClickWasPopup) track.setProperty (ids::armed, ! (bool) track[ids::armed], nullptr); };
     monitorButton.onClick = [this] { track.setProperty (ids::monitor, ! (bool) track[ids::monitor], nullptr); };
     armButton.addMouseListener (this, false);
 
@@ -112,6 +124,7 @@ void TrackHeader::refresh()
     muteButton.setToggleState ((bool) track[ids::mute], juce::dontSendNotification);
     soloButton.setToggleState ((bool) track[ids::solo], juce::dontSendNotification);
     armButton.setToggleState ((bool) track[ids::armed], juce::dontSendNotification);
+    automationButton.setToggleState ((bool) track[ids::showAutomation], juce::dontSendNotification);
     monitorButton.setToggleState ((bool) track[ids::monitor], juce::dontSendNotification);
     if (isInstrument)
     {
@@ -154,9 +167,9 @@ void TrackHeader::resized()
     auto area = getLocalBounds().withTrimmedLeft (12).withTrimmedRight (8).withTrimmedBottom (1);
 
     auto top = area.removeFromTop (38).withTrimmedTop (8).withHeight (22);
-    for (auto* b : { &monitorButton, &armButton, &soloButton, &muteButton })
+    for (auto* b : { &automationButton, &monitorButton, &armButton, &soloButton, &muteButton })
     {
-        if (! b->isVisible() && b == &monitorButton)
+        if (! b->isVisible())
             continue;
         b->setBounds (top.removeFromRight (22));
         top.removeFromRight (3);
@@ -179,12 +192,15 @@ void TrackHeader::resized()
 
 void TrackHeader::mouseDown (const juce::MouseEvent& e)
 {
+    lastClickWasPopup = e.mods.isPopupMenu();
     select();
 
     if (e.mods.isPopupMenu())
     {
         if (e.eventComponent == &armButton && ! isInstrument)
             showInputMenu();
+        else if (e.eventComponent == &automationButton)
+            showAutomationMenu();
         else
             showMenu();
     }
@@ -226,6 +242,42 @@ void TrackHeader::showInputMenu()
     }
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&armButton));
+}
+
+void TrackHeader::showAutomationMenu()
+{
+    // Volume, pan, and every knob of the built-in effects on this track.
+    const auto project = track.getParent();
+    const auto current = track.getProperty (ids::automationParam, model::volumeParam).toString();
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Automate");
+
+    auto choose = [t = track] (const juce::String& param) mutable
+    {
+        t.setProperty (ids::automationParam, param, nullptr);
+        t.setProperty (ids::showAutomation, true, nullptr);
+    };
+
+    menu.addItem ("Volume", true, current == model::volumeParam, [choose]() mutable { choose (model::volumeParam); });
+    menu.addItem ("Pan", true, current == model::panParam, [choose]() mutable { choose (model::panParam); });
+
+    for (const auto& insert : model::insertsOf (model::findChain (project, track[ids::id].toString())))
+    {
+        const auto* info = findBuiltInEffect (insert[ids::effect].toString());
+        if (info == nullptr)
+            continue;
+
+        juce::PopupMenu params;
+        for (const auto& p : info->params)
+        {
+            const auto param = model::insertParam (insert[ids::id].toString(), p.id);
+            params.addItem (p.name, true, current == param, [choose, param]() mutable { choose (param); });
+        }
+        menu.addSubMenu (info->name, params);
+    }
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&automationButton));
 }
 
 void TrackHeader::showMenu()

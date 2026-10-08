@@ -53,6 +53,7 @@ MainComponent::MainComponent()
         juce::PopupMenu menu;
         menu.addItem ("Audio track", [this] { addTrack (model::audioKind); });
         menu.addItem ("Instrument track (MIDI)", [this] { addTrack (model::instrumentKind); });
+        menu.addItem ("Aux bus (for sends)", [this] { addTrack (model::busKind); });
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addTrackButton));
     };
     settingsButton.onClick = [this] { showAudioMenu(); };
@@ -542,8 +543,8 @@ void MainComponent::addTrack (const juce::String& kind)
 {
     const bool instrument = kind == model::instrumentKind;
     undoManager.beginNewTransaction ("New track");
-    auto track = model::addTrack (project, (instrument ? "Inst " : "Audio ") + juce::String (model::numTracks (project) + 1),
-                                  &undoManager, -1, kind);
+    const auto prefix = instrument ? "Inst " : (kind == model::busKind ? "Bus " : "Audio ");
+    auto track = model::addTrack (project, prefix + juce::String (model::numTracks (project) + 1), &undoManager, -1, kind);
     timeline.selectedTrackId = track[ids::id].toString();
     timeline.changed();
 }
@@ -768,7 +769,8 @@ void MainComponent::finishRecording()
 
     undoManager.beginNewTransaction ("Record");
     juce::ValueTree last;
-    const auto totalLatency = latency + recordingOffsetMs / 1000.0;
+    // Device latency, your calibration offset, and plugin latency (delay compensation).
+    const auto totalLatency = latency + recordingOffsetMs / 1000.0 + engine.getPlaybackLatencySamples() / rate;
     const auto cycleLength = recordCycleEnd - recordCycleStart;
 
     for (const auto& take : takes)

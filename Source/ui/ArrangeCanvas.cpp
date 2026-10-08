@@ -98,6 +98,20 @@ void ArrangeCanvas::paint (juce::Graphics& g)
             paintRegion (g, region, i);
     }
 
+    for (int i = 0; i < numTracks; ++i)
+    {
+        const auto track = project.getChild (i);
+        if ((bool) track[ids::showAutomation])
+            paintAutomation (g, track, i);
+        else if (model::isBusTrack (track))
+        {
+            g.setColour (theme::dimText.withAlpha (0.6f));
+            g.setFont (juce::FontOptions (12.0f));
+            g.drawText ("Aux bus: tracks reach it through sends in the mixer", 12, timeline.trackTop (i),
+                        getWidth() - 24, TimelineState::trackHeight, juce::Justification::centredLeft);
+        }
+    }
+
     paintLiveTakes (g);
 
     // File-drop target highlight
@@ -294,6 +308,147 @@ void ArrangeCanvas::paintLiveTakes (juce::Graphics& g)
     }
 }
 
+//==============================================================================
+// Automation
+//==============================================================================
+juce::String ArrangeCanvas::automationParamOf (const juce::ValueTree& track)
+{
+    return track.getProperty (ids::automationParam, model::volumeParam).toString();
+}
+
+double ArrangeCanvas::staticValueOf (const juce::ValueTree& track, const juce::String& param) const
+{
+    if (param == model::volumeParam) return track.getProperty (ids::volume, 1.0);
+    if (param == model::panParam)    return track.getProperty (ids::pan, 0.0);
+    return model::rangeOf (project, param).defaultValue; // the insert's current knob value
+}
+
+float ArrangeCanvas::valueToY (double value, const model::ParamRange& range, int trackIndex) const
+{
+    double norm;
+    if (range.decibels)
+        norm = (juce::jlimit (-60.0, 6.0, value <= 0.0 ? -60.0 : juce::Decibels::gainToDecibels (value)) + 60.0) / 66.0;
+    else
+        norm = range.max > range.min ? (value - range.min) / (range.max - range.min) : 0.5;
+
+    const auto top = (float) timeline.trackTop (trackIndex) + 6.0f;
+    const auto height = (float) TimelineState::trackHeight - 12.0f;
+    return top + (1.0f - (float) juce::jlimit (0.0, 1.0, norm)) * height;
+}
+
+double ArrangeCanvas::yToValue (float y, const model::ParamRange& range, int trackIndex) const
+{
+    const auto top = (float) timeline.trackTop (trackIndex) + 6.0f;
+    const auto height = (float) TimelineState::trackHeight - 12.0f;
+    const auto norm = juce::jlimit (0.0, 1.0, 1.0 - (double) ((y - top) / height));
+
+    if (range.decibels)
+    {
+        const auto db = norm * 66.0 - 60.0;
+        return db <= -59.9 ? 0.0 : juce::Decibels::decibelsToGain (db);
+    }
+
+    return range.min + norm * (range.max - range.min);
+}
+
+void ArrangeCanvas::paintAutomation (juce::Graphics& g, const juce::ValueTree& track, int trackIndex)
+{
+    const auto top = (float) timeline.trackTop (trackIndex);
+    const auto lane = juce::Rectangle<float> (0.0f, top, (float) getWidth(), (float) TimelineState::trackHeight);
+    if (lane.getBottom() < (float) TimelineState::rulerHeight)
+        return;
+
+    // Dim the regions so the line stands out.
+    g.setColour (theme::background.withAlpha (0.6f));
+    g.fillRect (lane);
+
+    const auto param = automationParamOf (track);
+    const auto range = model::rangeOf (project, param);
+    const auto points = model::laneFor (project, track[ids::id].toString(), param, false);
+    const auto colour = theme::meterGreen;
+
+    g.setFont (juce::FontOptions (11.0f));
+    g.setColour (colour.withAlpha (0.8f));
+    g.drawText (range.name + (points.getNumChildren() == 0 ? "  (click to add points)" : "  (double-click a point to remove it)"),
+                lane.reduced (8.0f, 2.0f).withHeight (14.0f).toNearestInt(), juce::Justification::topLeft);
+
+    if (points.getNumChildren() == 0)
+    {
+        // No automation: a dashed line at the fader's value.
+        const auto y = valueToY (staticValueOf (track, param), range, trackIndex);
+        const float dashes[] = { 4.0f, 4.0f };
+        g.setColour (colour.withAlpha (0.5f));
+        g.drawDashedLine (juce::Line<float> (0.0f, y, (float) getWidth(), y), dashes, 2, 1.25f);
+        return;
+    }
+
+    juce::Path line;
+    const auto firstY = valueToY (points.getChild (0)[ids::value], range, trackIndex);
+    line.startNewSubPath (0.0f, firstY);
+
+    for (const auto& p : points)
+        line.lineTo (timeline.timeToX (p[ids::time]), valueToY (p[ids::value], range, trackIndex));
+
+    line.lineTo ((float) getWidth(), valueToY (points.getChild (points.getNumChildren() - 1)[ids::value], range, trackIndex));
+
+    g.setColour (colour);
+    g.strokePath (line, juce::PathStrokeType (1.75f));
+
+    for (const auto& p : points)
+    {
+        const auto x = timeline.timeToX (p[ids::time]);
+        const auto y = valueToY (p[ids::value], range, trackIndex);
+        g.setColour (p == dragPoint ? juce::Colours::white : colour);
+        g.fillEllipse (x - 4.0f, y - 4.0f, 8.0f, 8.0f);
+    }
+}
+
+juce::ValueTree ArrangeCanvas::automationPointAt (const juce::ValueTree& track, int trackIndex, juce::Point<float> pos) const
+{
+    const auto param = automationParamOf (track);
+    const auto range = model::rangeOf (project, param);
+
+    for (const auto& p : model::laneFor (const_cast<juce::ValueTree&> (project), track[ids::id].toString(), param, false))
+        if (juce::Point<float> (timeline.timeToX (p[ids::time]), valueToY (p[ids::value], range, trackIndex)).getDistanceFrom (pos) < 7.0f)
+            return p;
+
+    return {};
+}
+
+bool ArrangeCanvas::handleAutomationMouseDown (const juce::MouseEvent& e, int trackIndex)
+{
+    const auto track = project.getChild (trackIndex);
+    if (! (bool) track[ids::showAutomation])
+        return false;
+
+    timeline.selectedTrackId = track[ids::id].toString();
+    timeline.changed();
+
+    auto point = automationPointAt (track, trackIndex, e.position);
+
+    if (! point.isValid())
+    {
+        // A new point where you clicked.
+        const auto param = automationParamOf (track);
+        const auto range = model::rangeOf (project, param);
+        auto lane = model::laneFor (project, track[ids::id].toString(), param, true);
+        const auto time = e.mods.isCommandDown() ? timeline.xToTime ((float) e.x) : snap (timeline.xToTime ((float) e.x));
+
+        undoManager.beginNewTransaction ("Add automation point");
+        point = model::addPoint (lane, time, yToValue ((float) e.y, range, trackIndex), &undoManager);
+    }
+    else
+    {
+        undoManager.beginNewTransaction ("Move automation point");
+    }
+
+    dragPoint = point;
+    dragPointTrack = trackIndex;
+    dragMode = DragMode::automationPoint;
+    repaint();
+    return true;
+}
+
 juce::Rectangle<float> ArrangeCanvas::regionBounds (const juce::ValueTree& region, int trackIndex) const
 {
     const auto x = timeline.timeToX (region[ids::start]);
@@ -420,6 +575,10 @@ void ArrangeCanvas::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    if (const auto laneIndex = timeline.trackIndexAt (e.y);
+        laneIndex >= 0 && laneIndex < model::numTracks (project) && handleAutomationMouseDown (e, laneIndex))
+        return;
+
     int trackIndex = -1;
     auto region = regionAt (e.position, trackIndex);
 
@@ -510,7 +669,7 @@ void ArrangeCanvas::mouseDrag (const juce::MouseEvent& e)
             auto target = project.getChild (targetIndex);
 
             // MIDI belongs on instrument tracks and audio on audio tracks.
-            if (model::isMidiRegion (dragRegion) != model::isInstrumentTrack (target))
+            if (model::isMidiRegion (dragRegion) != model::isInstrumentTrack (target) || model::isBusTrack (target))
                 target = dragRegion.getParent();
 
             model::moveRegion (dragRegion, target, newStart, &undoManager);
@@ -549,6 +708,18 @@ void ArrangeCanvas::mouseDrag (const juce::MouseEvent& e)
             break;
         }
 
+        case DragMode::automationPoint:
+        {
+            if (! dragPoint.isValid() || ! dragPoint.getParent().isValid())
+                break;
+
+            const auto track = project.getChild (dragPointTrack);
+            const auto range = model::rangeOf (project, automationParamOf (track));
+            const auto time = useSnap ? snap (timeline.xToTime ((float) e.x)) : juce::jmax (0.0, timeline.xToTime ((float) e.x));
+            model::movePoint (dragPoint, time, yToValue ((float) e.y, range, dragPointTrack), &undoManager);
+            break;
+        }
+
         case DragMode::none:
             break;
     }
@@ -568,6 +739,8 @@ void ArrangeCanvas::mouseUp (const juce::MouseEvent& e)
     clickedTakeHeader = false;
     dragMode = DragMode::none;
     dragRegion = {};
+    dragPoint = {};
+    repaint();
 }
 
 void ArrangeCanvas::addTakeItems (juce::PopupMenu& menu, juce::ValueTree region)
@@ -607,6 +780,21 @@ void ArrangeCanvas::mouseDoubleClick (const juce::MouseEvent& e)
 {
     if (e.y < TimelineState::rulerHeight)
         return;
+
+    // Double-clicking an automation point removes it.
+    if (const auto laneIndex = timeline.trackIndexAt (e.y); laneIndex >= 0 && laneIndex < model::numTracks (project))
+    {
+        const auto track = project.getChild (laneIndex);
+        if ((bool) track[ids::showAutomation])
+        {
+            if (auto point = automationPointAt (track, laneIndex, e.position); point.isValid())
+            {
+                undoManager.beginNewTransaction ("Remove automation point");
+                model::removePoint (point, &undoManager);
+            }
+            return;
+        }
+    }
 
     int trackIndex = -1;
     auto region = regionAt (e.position, trackIndex);
@@ -746,7 +934,8 @@ void ArrangeCanvas::importFiles (const juce::StringArray& files, int trackIndex,
 
         // The first file goes on the track under the drop; the rest each get a new track.
         if (! usedExistingTrack && trackIndex >= 0 && trackIndex < model::numTracks (project)
-            && ! model::isInstrumentTrack (project.getChild (trackIndex)))
+            && ! model::isInstrumentTrack (project.getChild (trackIndex))
+            && ! model::isBusTrack (project.getChild (trackIndex)))
         {
             track = project.getChild (trackIndex);
             usedExistingTrack = true;

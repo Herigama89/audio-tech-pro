@@ -463,3 +463,79 @@ TEST_CASE ("Older project files get a mixer after their tracks", "[model][mixer]
     CHECK (model::numTracks (p) == 2);
     CHECK (p.getChild (2).hasType (ids::MIXER));
 }
+
+TEST_CASE ("Buses and sends", "[model][routing]")
+{
+    juce::UndoManager um;
+    auto p = model::createProject();
+    auto t = model::addTrack (p, "Vox", nullptr);
+    auto bus = model::addTrack (p, "Verb", nullptr, -1, model::busKind);
+    CHECK (model::isBusTrack (bus));
+    CHECK_FALSE (model::isBusTrack (t));
+
+    auto chain = model::chainFor (p, t[ids::id]);
+    model::addBuiltinInsert (chain, "eq", 0, nullptr);
+    um.beginNewTransaction();
+    auto send = model::addSend (chain, bus[ids::id], 0.5, &um);
+
+    CHECK (model::sendsOf (chain).size() == 1);
+    CHECK (model::insertsOf (chain).size() == 1);   // sends and inserts kept apart
+    CHECK (send[ids::target].toString() == bus[ids::id].toString());
+    CHECK_FALSE ((bool) send[ids::pre]);
+
+    um.undo();
+    CHECK (model::sendsOf (chain).isEmpty());
+}
+
+TEST_CASE ("Automation lanes", "[model][automation]")
+{
+    juce::UndoManager um;
+    auto p = model::createProject();
+    auto t = model::addTrack (p, "A", nullptr);
+    const auto id = t[ids::id].toString();
+
+    CHECK_FALSE (model::laneFor (p, id, model::volumeParam, false).isValid());
+    auto lane = model::laneFor (p, id, model::volumeParam, true);
+    CHECK (model::laneFor (p, id, model::volumeParam, false) == lane);
+
+    CHECK (model::valueAt (lane, 1.0, 0.7) == 0.7);  // no points: the fader's value
+
+    um.beginNewTransaction();
+    auto b = model::addPoint (lane, 2.0, 0.0, &um);
+    auto a = model::addPoint (lane, 0.0, 1.0, &um);  // added out of order...
+    CHECK (lane.getChild (0) == a);                   // ...but kept in time order
+    CHECK (lane.getChild (1) == b);
+
+    CHECK (model::valueAt (lane, -1.0, 0.7) == 1.0); // held before the first point
+    CHECK (model::valueAt (lane, 0.5, 0.7) == 0.75); // linear between
+    CHECK (model::valueAt (lane, 9.0, 0.7) == 0.0);  // held after the last
+
+    um.beginNewTransaction();
+    model::movePoint (a, 3.0, 0.5, &um);              // moves past b
+    CHECK (lane.getChild (0) == b);
+    CHECK (lane.getChild (1) == a);
+    um.undo();
+    CHECK (lane.getChild (0) == a);
+
+    um.beginNewTransaction();
+    model::removePoint (b, &um);
+    CHECK (lane.getNumChildren() == 1);
+
+    // Ranges
+    const auto vol = model::rangeOf (p, model::volumeParam);
+    CHECK (vol.decibels);
+    CHECK (model::rangeOf (p, model::panParam).min == -1.0);
+
+    auto insert = model::addBuiltinInsert (model::chainFor (p, id), "delay", 0, nullptr);
+    const auto mix = model::rangeOf (p, model::insertParam (insert[ids::id], "mix"));
+    CHECK (mix.max == 1.0f);
+    CHECK (mix.name == "Delay Mix");
+
+    // Saved with the project.
+    juce::String error;
+    const juce::File f ("/tmp/riff-auto/Song.riff");
+    auto loaded = model::fromJson (model::toJson (p, f), f, error);
+    REQUIRE (loaded.isValid());
+    CHECK (model::laneFor (loaded, id, model::volumeParam, false).getNumChildren() == 1);
+    CHECK (model::insertsOf (model::findChain (loaded, id)).size() == 1); // the insert went in its chain, not the lane
+}

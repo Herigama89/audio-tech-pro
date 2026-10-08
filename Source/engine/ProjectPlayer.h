@@ -62,7 +62,11 @@ private:
     InstrumentRack* rack;
     EffectRack* effects;
 
-    std::vector<std::shared_ptr<Effect>> buildChain (const juce::String& owner, double sampleRate, juce::StringArray& insertIds);
+    std::vector<std::shared_ptr<Effect>> buildChain (const juce::String& owner, double sampleRate, juce::StringArray& insertIds,
+                                                     std::map<juce::String, std::shared_ptr<Effect>>& effectsById);
+    PlaybackGraph::Curve curveFor (const juce::String& owner, const juce::String& param, double sampleRate, bool decibelsToGain = false);
+    void addParamAutomation (PlaybackGraph::Track& t, const juce::String& owner, double sampleRate,
+                             const std::map<juce::String, std::shared_ptr<Effect>>& effectsById);
     juce::String liveMidiTrackId;
     juce::ValueTree project;
     double builtForRate = 0.0;

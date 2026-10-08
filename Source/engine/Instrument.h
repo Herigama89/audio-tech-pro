@@ -24,6 +24,9 @@ public:
 
     virtual juce::String getName() const = 0;
 
+    /** How many samples late this instrument's output is (for delay compensation). */
+    virtual int getLatencySamples() const { return 0; }
+
     double getPreparedSampleRate() const noexcept { return preparedRate; }
 
 protected:

@@ -5,6 +5,7 @@
 #include "WaveformCache.h"
 #include "../engine/AudioEngine.h"
 #include "../engine/AudioFileCache.h"
+#include "../model/Project.h"
 
 namespace riff
 {
@@ -54,7 +55,7 @@ public:
     std::function<void (juce::ValueTree region)> onOpenPianoRoll;
 
 private:
-    enum class DragMode { none, scrub, move, trimStart, trimEnd, cycleNew, cycleMove };
+    enum class DragMode { none, scrub, move, trimStart, trimEnd, cycleNew, cycleMove, automationPoint };
 
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { repaint(); }
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override             { repaint(); }
@@ -73,6 +74,15 @@ private:
     void showTakeMenu (juce::ValueTree region);
     void addTakeItems (juce::PopupMenu& menu, juce::ValueTree region);
     juce::Rectangle<float> cycleBounds() const;
+
+    // Automation lanes (drawn over a track when its A button is on)
+    static juce::String automationParamOf (const juce::ValueTree& track);
+    double staticValueOf (const juce::ValueTree& track, const juce::String& param) const;
+    float valueToY (double value, const model::ParamRange& range, int trackIndex) const;
+    double yToValue (float y, const model::ParamRange& range, int trackIndex) const;
+    void paintAutomation (juce::Graphics& g, const juce::ValueTree& track, int trackIndex);
+    juce::ValueTree automationPointAt (const juce::ValueTree& track, int trackIndex, juce::Point<float> pos) const;
+    bool handleAutomationMouseDown (const juce::MouseEvent& e, int trackIndex);
     void setPlayheadFromX (float x);
     void zoomAround (float x, double factor);
 
@@ -88,6 +98,8 @@ private:
     double dragOriginalStart = 0.0, dragMouseDownTime = 0.0, dragSourceLength = 0.0;
     double dragCycleStart = 0.0, dragCycleEnd = 0.0;
     bool clickedTakeHeader = false;
+    juce::ValueTree dragPoint;
+    int dragPointTrack = -1;
     int dropHighlightTrack = -2; // -2: none, -1 / out of range: "new track" zone
 };
 

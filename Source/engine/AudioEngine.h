@@ -5,6 +5,8 @@
 #include <array>
 #include "PlaybackGraph.h"
 #include "LatencyMeasure.h"
+#include "DelayLine.h"
+#include "BuiltInEffects.h"
 #include <optional>
 
 namespace riff
@@ -126,6 +128,9 @@ public:
     /** The result once the measurement has finished; empty while it's still running. */
     std::optional<latency::Result> takeLatencyMeasurement();
 
+    /** How late playback is heard because of plugin latency (add it when placing recordings). */
+    int getPlaybackLatencySamples() const noexcept;
+
     /** Input + output latency reported by the device, in samples. */
     int getRoundTripLatencySamples();
     int getNumActiveInputChannels();
@@ -190,6 +195,9 @@ private:
                       float* mixL, float* mixR, int numSamples, bool playingNow,
                       bool resetNotes, bool withLiveMidi) noexcept;
     void collectNotes (const PlaybackGraph::Track& track, juce::int64 from, juce::int64 to) noexcept;
+    void renderTrack (const PlaybackGraph::Track& track, const float* const* inputs, int numInputs, int inputOffset,
+                      float* outL, float* outR, int numSamples, bool playingNow,
+                      bool resetNotes, bool withLiveMidi) noexcept;
     void recordChunk (const float* const* inputs, int numInputs, int inputOffset, int numSamples) noexcept;
     void renderClick (const PlaybackGraph& graph, float* mixL, float* mixR, int numSamples) noexcept;
     void renderMeasurement (const float* const* inputs, int numInputs,
@@ -249,7 +257,9 @@ private:
     int measurePos = 0, measureInput = 0;
 
     // --- Audio-thread state (sized in prepare) --------------------------------
-    juce::AudioBuffer<float> trackBuffer, mixBuffer, silence;
+    juce::AudioBuffer<float> trackBuffer, mixBuffer, silence, directBuffer, busBuffer;
+    std::array<std::unique_ptr<DelayLine>, PlaybackGraph::maxTracks> trackDelays;
+    std::unique_ptr<DelayLine> directDelayLine;
     struct TrackState { juce::SmoothedValue<float> gainL, gainR; bool initialised = false; };
     std::array<TrackState, PlaybackGraph::maxTracks> trackStates;
     juce::SmoothedValue<float> masterGain;

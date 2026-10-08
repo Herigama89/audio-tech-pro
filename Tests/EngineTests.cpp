@@ -863,3 +863,174 @@ TEST_CASE ("Exporting renders the song to a WAV file", "[engine][export]")
     CHECK (f.engine.bounce (cancelled, 0.0, 2.0, 24, [] (double) { return false; }) == "cancelled");
     CHECK_FALSE (cancelled.exists());
 }
+
+namespace
+{
+    /** A plain delay that reports its latency, like a look-ahead plugin. */
+    struct LatencyEffect final : public Effect
+    {
+        explicit LatencyEffect (int samples) : latency (samples) {}
+        void prepare (double rate, int) override { preparedRate = rate; line.clear(); }
+        void process (float* l, float* r, int n) noexcept override { line.process (l, r, n, latency); }
+        juce::String getName() const override { return "Latency"; }
+        int getLatencySamples() const override { return latency; }
+
+        int latency;
+        DelayLine line;
+    };
+
+    juce::File writeImpulseWav (const juce::File& file, int position)
+    {
+        juce::AudioBuffer<float> b (1, 48000);
+        b.clear();
+        b.setSample (0, position, 0.5f);
+        file.deleteFile();
+        std::unique_ptr<juce::OutputStream> out = std::make_unique<juce::FileOutputStream> (file);
+        juce::WavAudioFormat wav;
+        auto writer = wav.createWriterFor (out, juce::AudioFormatWriterOptions{}.withSampleRate (48000.0).withNumChannels (1).withBitsPerSample (24));
+        writer->writeFromAudioSampleBuffer (b, 0, 48000);
+        return file;
+    }
+
+    struct RoutingFixture : Fixture
+    {
+        EffectRack effects { rack.getFormatManager() };
+        ProjectPlayer router { engine, cache, &rack, &effects };
+        juce::File loud = writeConstantWav (temp.dir.getChildFile ("half.wav"), 48000.0, 96000, 0.5f);
+
+        juce::ValueTree audioTrack (const juce::String& name, const juce::File& file)
+        {
+            auto t = model::addTrack (project, name, nullptr);
+            model::addRegion (t, file, 0.0, 2.0, nullptr);
+            return t;
+        }
+    };
+}
+
+TEST_CASE ("Sends feed aux buses, before or after the fader", "[engine][routing]")
+{
+    RoutingFixture f;
+    auto track = f.audioTrack ("A", f.loud);
+    auto bus = model::addTrack (f.project, "Bus", nullptr, -1, model::busKind);
+    auto send = model::addSend (model::chainFor (f.project, track[ids::id]), bus[ids::id], 0.5, nullptr);
+    f.router.setProject (f.project);
+    f.engine.play();
+
+    // Direct 0.5 + bus 0.25, through the 0.8 master.
+    CHECK_THAT (renderLeft (f.engine, 4800)[2000], WithinAbs ((0.5f + 0.25f) * 0.8f, 1e-4));
+
+    // Fader down: a post-fader send goes quiet too...
+    track.setProperty (ids::volume, 0.0, nullptr);
+    f.router.rebuildNow();
+    renderLeft (f.engine, 4800);
+    CHECK_THAT (renderLeft (f.engine, 4800)[2000], WithinAbs (0.0f, 1e-4));
+
+    // ...but a pre-fader send keeps going.
+    send.setProperty (ids::pre, true, nullptr);
+    f.router.rebuildNow();
+    CHECK_THAT (renderLeft (f.engine, 4800)[2000], WithinAbs (0.25f * 0.8f, 1e-4));
+
+    // Muting the track silences its sends, pre-fader or not.
+    track.setProperty (ids::mute, true, nullptr);
+    f.router.rebuildNow();
+    CHECK_THAT (renderLeft (f.engine, 4800)[2000], WithinAbs (0.0f, 1e-4));
+}
+
+TEST_CASE ("Buses have their own effects and stay up when another track is soloed", "[engine][routing]")
+{
+    RoutingFixture f;
+    auto track = f.audioTrack ("A", f.loud);
+    auto other = f.audioTrack ("B", f.loud);
+    auto bus = model::addTrack (f.project, "Bus", nullptr, -1, model::busKind);
+    model::addSend (model::chainFor (f.project, track[ids::id]), bus[ids::id], 1.0, nullptr);
+    track.setProperty (ids::volume, 0.0, nullptr);   // only the bus is heard from A
+    other.setProperty (ids::mute, true, nullptr);
+
+    auto limiter = model::addBuiltinInsert (model::chainFor (f.project, bus[ids::id]), "limiter", 0, nullptr);
+    limiter.setProperty ("ceiling", -12.0, nullptr);
+    f.project.setProperty (ids::masterGain, 1.0, nullptr);
+
+    // A pre-fader send so the bus hears A even with its fader down.
+    model::sendsOf (model::findChain (f.project, track[ids::id]))[0].setProperty (ids::pre, true, nullptr);
+
+    track.setProperty (ids::solo, true, nullptr);
+    f.router.setProject (f.project);
+    f.engine.play();
+
+    CHECK_THAT (renderLeft (f.engine, 4800)[2000], WithinAbs (juce::Decibels::decibelsToGain (-12.0f), 1e-3));
+}
+
+TEST_CASE ("Volume and effect automation play back", "[engine][automation]")
+{
+    RoutingFixture f;
+    auto track = f.audioTrack ("A", f.loud);
+    const auto id = track[ids::id].toString();
+    f.project.setProperty (ids::masterGain, 1.0, nullptr);
+
+    auto lane = model::laneFor (f.project, id, model::volumeParam, true);
+    model::addPoint (lane, 0.0, 1.0, nullptr);
+    model::addPoint (lane, 1.0, 0.0, nullptr);     // fade out over the first second
+    f.router.setProject (f.project);
+    renderLeft (f.engine, 4800);                    // let the master volume settle at 1.0
+    f.engine.play();
+
+    const auto out = renderLeft (f.engine, 48000);
+    CHECK_THAT (out[100], WithinAbs (0.5f, 0.02));
+    CHECK_THAT (out[24000], WithinAbs (0.25f, 0.02));   // halfway
+    CHECK_THAT (out[47000], WithinAbs (0.0f, 0.03)); // read once per block, then smoothed: a few ms behind
+
+    // Stopped: the fader's own value again.
+    f.engine.stop();
+    f.engine.setPlayheadSeconds (0.0);
+
+    // An effect knob following its lane: the limiter's ceiling.
+    lane.removeAllChildren (nullptr);
+    auto limiter = model::addBuiltinInsert (model::chainFor (f.project, id), "limiter", 0, nullptr);
+    auto ceiling = model::laneFor (f.project, id, model::insertParam (limiter[ids::id], "ceiling"), true);
+    model::addPoint (ceiling, 0.0, -12.0, nullptr);
+    f.router.rebuildNow();
+    f.engine.play();
+
+    CHECK_THAT (renderLeft (f.engine, 4800)[2000], WithinAbs (juce::Decibels::decibelsToGain (-12.0f), 1e-3));
+}
+
+TEST_CASE ("Delay compensation lines tracks up", "[engine][pdc]")
+{
+    RoutingFixture f;
+    const auto impulse = writeImpulseWav (f.temp.dir.getChildFile ("click.wav"), 1000);
+    auto slow = f.audioTrack ("Slow", impulse);
+    auto fast = f.audioTrack ("Fast", impulse);
+    f.project.setProperty (ids::masterGain, 1.0, nullptr);
+
+    // A 100-sample plugin on the slow track.
+    auto insert = model::addPluginInsert (model::chainFor (f.project, slow[ids::id]), "test-plugin", 0, nullptr);
+    f.effects.injectForTesting (insert, std::make_shared<LatencyEffect> (100), 48000.0);
+    f.router.setProject (f.project);
+    renderLeft (f.engine, 4800);                    // let the master volume settle at 1.0
+    f.engine.play();
+
+    auto out = renderLeft (f.engine, 4800);
+    CHECK (f.engine.getPlaybackLatencySamples() == 100);
+    CHECK_THAT (out[1100], WithinAbs (1.0f, 1e-4));          // both clicks together, 100 samples late
+    CHECK (peakIn (out, 0, 1100) == 0.0f);
+    CHECK (peakIn (out, 1101, 4800) == 0.0f);
+
+    // A bus with 50 samples of latency: everything waits for it.
+    auto bus = model::addTrack (f.project, "Bus", nullptr, -1, model::busKind);
+    auto busInsert = model::addPluginInsert (model::chainFor (f.project, bus[ids::id]), "test-plugin-2", 0, nullptr);
+    f.effects.injectForTesting (busInsert, std::make_shared<LatencyEffect> (50), 48000.0);
+    model::addSend (model::chainFor (f.project, fast[ids::id]), bus[ids::id], 1.0, nullptr);
+    f.router.rebuildNow();
+
+    f.engine.stop();
+    f.engine.setPlayheadSeconds (0.0);
+    f.engine.play();
+    renderLeft (f.engine, 9600);       // flush the delay lines
+    f.engine.setPlayheadSeconds (0.0);
+    out = renderLeft (f.engine, 4800);
+
+    CHECK (f.engine.getPlaybackLatencySamples() == 150);
+    CHECK_THAT (out[1150], WithinAbs (1.5f, 1e-4));           // slow + fast + fast's send, all at once
+    CHECK (peakIn (out, 0, 1150) == 0.0f);
+    CHECK (peakIn (out, 1151, 4800) == 0.0f);
+}
