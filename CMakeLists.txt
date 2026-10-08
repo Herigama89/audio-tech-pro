@@ -139,3 +139,11 @@ if(RIFF_BUILD_TESTS)
             juce::juce_recommended_warning_flags
     )
 endif()
+
+# Hosting Audio Units needs CoreAudioKit (for the generic plugin view).
+if(APPLE)
+    target_link_libraries(Riff PRIVATE "-framework CoreAudioKit")
+    if(TARGET RiffTests)
+        target_link_libraries(RiffTests PRIVATE "-framework CoreAudioKit")
+    endif()
+endif()
