@@ -5,6 +5,7 @@
 #include "model/Project.h"
 #include "ui/Commands.h"
 #include "ui/KeyCommands.h"
+#include "ui/GeneratorPanel.h"
 #include "ui/Theme.h"
 #include "AppInfo.h"
 
@@ -43,6 +44,7 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::quantize:        info.setActive (region.isValid() && model::isMidiRegion (region)); break;
         case commands::setLocatorsBySelection: info.setActive (region.isValid() && ! recording); break;
         case commands::exportSong:      info.setActive (! recording); break;
+        case commands::generateMidi:    info.setActive (! recording); break;
 
         case commands::deleteTrack:     info.setActive (track.isValid() && ! recording); break;
         case commands::muteTrack:       info.setActive (track.isValid()); info.setTicked ((bool) track[ids::mute]); break;
@@ -104,6 +106,7 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::zoomIn:                 zoomHorizontally (1.5); break;
         case commands::zoomOut:                zoomHorizontally (1.0 / 1.5); break;
         case commands::keyCommands:            showKeyCommands(); break;
+        case commands::generateMidi:           showGenerator(); break;
         case commands::audioSettings:          showAudioSettings(); break;
         case commands::calibrateLatency:       showLatencyCalibration(); break;
         case commands::scanPlugins:            showPluginScanner(); break;
@@ -148,6 +151,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
 
         case 2:
             add ({ commands::newAudioTrack, commands::newInstrumentTrack, commands::newAuxBus });
+            menu.addSeparator();
+            add ({ commands::generateMidi });
             menu.addSeparator();
             add ({ commands::muteTrack, commands::soloTrack, commands::armTrack, commands::showAutomation });
             menu.addSeparator();
@@ -216,6 +221,82 @@ void MainComponent::showKeyCommands()
                 safe->keyCommandsWindow.reset();
         });
     });
+}
+
+//==============================================================================
+// MIDI generator
+//==============================================================================
+void MainComponent::showGenerator()
+{
+    if (generatorWindow != nullptr)
+    {
+        generatorWindow->toFront (true);
+        return;
+    }
+
+    auto* panel = new GeneratorPanel (generatorSettings, generatorUsesTempo,
+                                      [this] (const GeneratorPanel::Request& request) { generateMidi (request); });
+
+    generatorWindow = std::make_unique<EditorWindow> ("MIDI Generator", panel, false, [this]
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this)]
+        {
+            if (safe != nullptr)
+                safe->generatorWindow.reset();
+        });
+    });
+}
+
+void MainComponent::generateMidi (const GeneratorPanel::Request& request)
+{
+    if (engine.isRecording())
+        return;
+
+    const auto& s = request.settings;
+    if (! (s.drums || s.bass || s.chords || s.melody))
+    {
+        statusLabel.setText ("Turn on at least one part to generate", juce::dontSendNotification);
+        return;
+    }
+
+    generatorSettings = s;
+    generatorUsesTempo = request.useGenreTempo;
+    const juce::String undoName ("Generate MIDI");
+
+    // "Try another": take back the last take, if it's still the last thing done.
+    if (request.replaceLast && ! lastGenerated.isEmpty() && undoManager.canUndo()
+        && undoManager.getUndoDescription() == undoName)
+    {
+        bool allThere = true;
+        for (const auto& t : lastGenerated)
+            allThere = allThere && t.getParent().isValid();
+        if (allThere)
+            undoManager.undo();
+    }
+
+    // Start at the bar the playhead is in (measured before any tempo change).
+    const auto oldBeatsPerBar = (int) project.getProperty (ids::timeSigNumerator, 4);
+    const auto oldBar = std::floor (engine.getPlayheadSeconds() / (model::secondsPerBeat (project) * oldBeatsPerBar) + 1.0e-6);
+
+    const auto result = generator::generate (s);
+
+    undoManager.beginNewTransaction (undoName);
+    if (request.useGenreTempo)
+        project.setProperty (ids::tempo, result.tempo, &undoManager);
+    const auto start = juce::jmax (0.0, oldBar) * model::secondsPerBeat (project) * oldBeatsPerBar;
+    lastGenerated = generator::apply (project, result, s, start, false, &undoManager);
+    undoManager.beginNewTransaction();
+
+    if (! lastGenerated.isEmpty())
+    {
+        timeline.selectedTrackId = lastGenerated.getFirst()[ids::id].toString();
+        timeline.changed();
+    }
+
+    const auto& genre = generator::genres()[(size_t) s.genre];
+    statusLabel.setText ("Generated " + juce::String (genre.name) + " in " + generator::keyName (s.root, s.minor) + ", "
+                         + juce::String (s.bars) + " bars at " + juce::String (juce::roundToInt ((double) project[ids::tempo])) + " BPM",
+                         juce::dontSendNotification);
 }
 
 void MainComponent::applyKeyPreset (const juce::String& preset)

@@ -27,7 +27,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     for (auto* b : std::initializer_list<juce::Button*> { &fileButton, &undoButton, &redoButton, &addTrackButton, &settingsButton,
                                                           &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
                                                           &recordButton, &cycleButton, &countInButton, &clickButton,
-                                                          &mixerButton, &editorButton, &keysButton })
+                                                          &mixerButton, &editorButton, &keysButton, &generateButton })
     {
         b->setWantsKeyboardFocus (false); // keep Space for play/stop
         addAndMakeVisible (b);
@@ -49,6 +49,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     bind (mixerButton, commands::showMixer);
     bind (editorButton, commands::showPianoRoll);
     bind (keysButton, commands::keyCommands);
+    bind (generateButton, commands::generateMidi);
     bind (undoButton, commands::undo);
     bind (redoButton, commands::redo);
     stopButton.onClick = [this]
@@ -87,6 +88,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     mixerButton.setTooltip ("Mixer (X)");
     editorButton.setTooltip ("Piano roll for the selected MIDI region (P)");
     keysButton.setTooltip ("Key commands (Option+K)");
+    generateButton.setTooltip ("MIDI Generator: drums, bass, chords and a melody in a genre's style");
     addTrackButton.setTooltip ("New audio track, instrument track or aux bus");
     settingsButton.setTooltip ("Audio device settings, latency calibration, key commands");
 
@@ -315,6 +317,7 @@ MainComponent::~MainComponent()
     juce::MenuBarModel::setMacMainMenu (nullptr);
    #endif
     keyCommandsWindow.reset();
+    generatorWindow.reset();
     commandManager.getKeyMappings()->removeChangeListener (this);
     removeKeyListener (commandManager.getKeyMappings());
 
@@ -389,7 +392,7 @@ void MainComponent::paint (juce::Graphics& g)
     g.setFont (juce::FontOptions (11.0f));
     for (auto* b : std::initializer_list<juce::Button*> { &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
                                                           &recordButton, &cycleButton, &countInButton, &clickButton,
-                                                          &mixerButton, &editorButton, &keysButton })
+                                                          &mixerButton, &editorButton, &keysButton, &generateButton })
     {
         g.setColour (b->getToggleState() ? theme::cream : theme::text.withAlpha (0.78f));
         g.drawText (b->getName(), b->getBounds().translated (0, b->getHeight() + 1).withHeight (13).expanded (8, 0),
@@ -441,6 +444,8 @@ void MainComponent::resized()
             c->setBounds (x, row.getY(), keyWidth, keyHeight);
             x += keyWidth + gap + (c == &recordButton ? 14 : 0);
         }
+
+        generateButton.setBounds (18, row.getY(), keyWidth, keyHeight);
 
         x = getWidth() - 12 - 3 * keyWidth - 2 * gap;
         for (auto* c : { (juce::Component*) &mixerButton, (juce::Component*) &editorButton, (juce::Component*) &keysButton })

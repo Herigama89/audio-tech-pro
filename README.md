@@ -132,6 +132,7 @@ Edit, Track, Navigate, Record, Mix, View.
 | Monitor the input | **I** on an armed track. Use headphones, or a mic near speakers will feed back. |
 | Metronome | **K** or the **Click** button |
 | Cycle (loop) | Drag in the **top half of the ruler** to set the range. Click the bar, press **C**, or use **Cycle** to turn it on or off. |
+| Generate MIDI | Click **Generate** (top left) or choose **Track > Generate MIDI...**. Pick a genre, key, length and parts, then **Generate**. New instrument tracks appear at the playhead's bar. **Try another** replaces the last take with a new one. Drums use General MIDI notes (kick 36, snare 38, hats 42/46), so load any drum plugin on the Drums track. |
 | Loop recording | Turn Cycle on and record. Each pass becomes a take. Click a take folder's name bar (or right-click it, then **Takes**) to switch takes, or choose **Keep only this take**. |
 | Count-in | **Count** gives one bar of click before recording starts. |
 | Latency calibration | **Audio > Calibrate recording latency...** Connect a cable from output 1 to an input and click **Measure**. The app stores the difference from the driver's reported latency and applies it to every recording. |
@@ -187,6 +188,7 @@ Source/
   model/
     Identifiers.h         names used in the project tree
     Project.*             the project tree: edits (all undoable), queries, JSON save/load
+    Generator.*           the MIDI genre generator (pure, repeatable per seed)
   engine/
     AudioEngine.*         device I/O, real-time render, lock-free graph hand-over
     PlaybackGraph.h       immutable snapshot the audio thread renders
@@ -263,7 +265,8 @@ Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderC
 - [x] New name, console skin, Logic Pro key commands and menus, Key Commands window
 - [x] Master Bus Compressor with a VU meter; console EQ and Dynamics on every strip
 - [x] Key presets for other DAWs (Pro Tools, Ableton Live, FL Studio, Cubase), with each one's stop workflow
-- [ ] MIDI genre generator, with a built-in drum kit
+- [x] MIDI genre generator: drums, bass, chords and melody in 11 genres (MIDI only; you play it with your own instruments)
+- [ ] Built-in instruments (drum kit, sampler), at the end
 - [x] Console mode for the master: your UA SSL G Bus Compressor plugin, with a hardware-style face
 - [x] Console mode for the strips: your UA SSL 4000 E channel strip plugin driven from each strip's console section
 - [ ] Console strips, part 2: an IN key on every strip (bypasses the whole channel strip plugin, keeps it loaded), and every 4000 E control in a separate strip window that opens from the strip (as in LUNA): filters, EQ frequencies, Q and bell switches, compressor, gate/expander, input and output

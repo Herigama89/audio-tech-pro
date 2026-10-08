@@ -31,6 +31,7 @@ const std::vector<Info>& all()
         { showAutomation,         "Show Automation",            "Track",     "Show or hide automation on the selected track" },
         { selectPreviousTrack,    "Select Previous Track",      "Track",     "Select the track above" },
         { selectNextTrack,        "Select Next Track",          "Track",     "Select the track below" },
+        { generateMidi,           "Generate MIDI...",           "Track",     "Write drums, bass, chords and a melody in a genre's style" },
 
         { play,                   "Play or Stop",               "Transport", "Start or stop playback" },
         { record,                 "Record",                     "Transport", "Record on armed tracks, or punch out" },

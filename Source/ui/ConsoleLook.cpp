@@ -496,6 +496,27 @@ void IconButton::drawIcon (juce::Graphics& g, Icon icon, juce::Rectangle<float> 
             return;
         }
 
+        case Icon::generate:
+        {
+            // A four-pointed spark and a small one: "make something".
+            auto spark = [&p] (juce::Point<float> c, float radius)
+            {
+                juce::Path s;
+                for (int i = 0; i < 8; ++i)
+                {
+                    const auto angle = juce::MathConstants<float>::pi * 0.25f * (float) i;
+                    const auto rr = i % 2 == 0 ? radius : radius * 0.28f;
+                    const juce::Point<float> pt (c.x + rr * std::sin (angle), c.y - rr * std::cos (angle));
+                    if (i == 0) s.startNewSubPath (pt); else s.lineTo (pt);
+                }
+                s.closeSubPath();
+                p.addPath (s);
+            };
+            spark ({ r.getX() + r.getWidth() * 0.42f, r.getY() + r.getHeight() * 0.56f }, r.getHeight() * 0.44f);
+            spark ({ r.getRight() - r.getWidth() * 0.14f, r.getY() + r.getHeight() * 0.16f }, r.getHeight() * 0.2f);
+            break;
+        }
+
         case Icon::plus:
         {
             const auto t = r.getWidth() * 0.16f;

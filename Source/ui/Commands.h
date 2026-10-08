@@ -19,7 +19,7 @@ namespace riff::commands
         undo = 0x2101, redo, deleteSelection, splitAtPlayhead, quantize, setLocatorsBySelection,
         // Track
         newAudioTrack = 0x2201, newInstrumentTrack, newAuxBus, deleteTrack,
-        muteTrack, soloTrack, armTrack, showAutomation, selectPreviousTrack, selectNextTrack,
+        muteTrack, soloTrack, armTrack, showAutomation, selectPreviousTrack, selectNextTrack, generateMidi,
         // Transport (Logic calls this menu "Record" and "Navigate")
         play = 0x2301, record, goToStart, rewindBar, forwardBar, toggleCycle, toggleMetronome, toggleCountIn,
         // View / window

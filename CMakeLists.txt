@@ -31,6 +31,7 @@ endif()
 # ---------------------------------------------------------------------------
 set(RIFF_CORE_SOURCES
     Source/model/Project.cpp
+    Source/model/Generator.cpp
     Source/engine/AudioEngine.cpp
     Source/engine/AudioFileCache.cpp
     Source/engine/ProjectPlayer.cpp
@@ -94,6 +95,7 @@ set(RIFF_UI_SOURCES
     Source/ui/ConsoleLook.cpp
     Source/ui/Commands.cpp
     Source/ui/KeyCommands.cpp
+    Source/ui/GeneratorPanel.cpp
     Source/ui/TrackHeaders.cpp
     Source/ui/ArrangeCanvas.cpp
     Source/ui/LatencyCalibrator.cpp
@@ -152,6 +154,7 @@ if(RIFF_BUILD_TESTS)
         Tests/EngineTests.cpp
         Tests/CommandTests.cpp
         Tests/ConsoleTests.cpp
+        Tests/GeneratorTests.cpp
     )
 
     target_include_directories(AudioTechProTests PRIVATE Source)
@@ -159,7 +162,7 @@ if(RIFF_BUILD_TESTS)
 
     # Tests compare exact silence (0.0f) on purpose.
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        set_source_files_properties(Tests/ModelTests.cpp Tests/EngineTests.cpp
+        set_source_files_properties(Tests/ModelTests.cpp Tests/EngineTests.cpp Tests/GeneratorTests.cpp
             PROPERTIES COMPILE_OPTIONS -Wno-float-equal)
     endif()
 

@@ -7,6 +7,7 @@
 #include "model/Project.h"
 #include "engine/MasterBusCompressor.h"
 #include "ui/KeyCommands.h"
+#include "ui/GeneratorPanel.h"
 #include "ui/ConsoleLook.h"
 
 namespace riff
@@ -128,6 +129,54 @@ public:
             panel.setSize (620, 640);
             pump (main, 100);
             save (panel, "keycommands.png");
+        }
+
+        // The MIDI generator: its window, and a Hip-Hop take in a fresh project.
+        {
+            GeneratorPanel panel (main.generatorSettings, true, {});
+            pump (main, 100);
+            save (panel, "generator.png");
+
+            main.engine.stop();
+            main.setProject (model::createProject(), {});
+            pump (main, 200);
+            GeneratorPanel::Request request;
+            request.settings.genre = 0;
+            request.settings.root = 9;
+            request.settings.seed = 11;
+            main.generateMidi (request);
+            main.player.rebuildNow();
+            main.engine.setPlayheadSeconds (0.0);
+            main.engine.play();
+            juce::AudioBuffer<float> buffer (2, 512);
+            float peak = 0.0f;
+            for (int i = 0; i < 200; ++i)
+            {
+                main.engine.render (nullptr, 0, buffer.getArrayOfWritePointers(), 2, 512);
+                peak = juce::jmax (peak, buffer.getMagnitude (0, 512));
+            }
+            std::cout << "generated playback peak " << peak << std::endl;
+            main.engine.stop();
+            pump (main, 300);
+            save (main, "generated.png");
+
+            for (const auto& track : main.project)
+                if (track[ids::name].toString().endsWith ("Drums"))
+                    for (const auto& region : track)
+                        if (model::isMidiRegion (region))
+                            main.openPianoRoll (region);
+            pump (main, 200);
+            save (main, "generated-drums.png");
+            main.closePianoRoll();
+
+            for (const auto& track : main.project)
+                if (track[ids::name].toString().endsWith ("Melody"))
+                    for (const auto& region : track)
+                        if (model::isMidiRegion (region))
+                            main.openPianoRoll (region);
+            pump (main, 200);
+            save (main, "generated-melody.png");
+            main.closePianoRoll();
         }
 
         main.engine.stop();

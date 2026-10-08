@@ -15,6 +15,8 @@
 #include "ui/Mixer.h"
 #include "engine/EffectRack.h"
 #include "ui/ConsoleLook.h"
+#include "ui/GeneratorPanel.h"
+#include "model/Generator.h"
 
 namespace riff
 {
@@ -114,6 +116,8 @@ private:
     juce::Rectangle<int> lcdBounds() const;
     void showAudioSettings();
     void showKeyCommands();
+    void showGenerator();
+    void generateMidi (const GeneratorPanel::Request& request);
     void applyKeyPreset (const juce::String& preset);
     void saveKeyMappings();
     void zoomHorizontally (double factor);
@@ -172,6 +176,7 @@ private:
     IconButton mixerButton     { "Mixer",   IconButton::Icon::mixer,  juce::Colour (0xff5a9cff) };
     IconButton editorButton    { "Editor",  IconButton::Icon::pianoRoll, juce::Colour (0xff5a9cff) };
     IconButton keysButton      { "Keys",    IconButton::Icon::keys };
+    IconButton generateButton  { "Generate", IconButton::Icon::generate, juce::Colour (0xffd3ae55) };
 
     juce::Label positionLabel, clockLabel, tempoLabel, tempoCaption { {}, "BPM" },
                 masterCaption { {}, "Master" }, statusLabel;
@@ -198,6 +203,12 @@ private:
     bool stopReturnsToStart = false;   // workflow: jump back to where playback started when stopping
     double playStartedAt = 0.0;
     std::unique_ptr<EditorWindow> keyCommandsWindow;
+
+    // MIDI generator
+    std::unique_ptr<EditorWindow> generatorWindow;
+    generator::Settings generatorSettings;
+    bool generatorUsesTempo = true;
+    juce::Array<juce::ValueTree> lastGenerated;   // the tracks "Try another" replaces
     double recordingOffsetMs = 0.0;
 
     // The cycle as it was when recording started (it can't change while recording).
