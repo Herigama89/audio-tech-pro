@@ -88,3 +88,43 @@ TEST_CASE ("Console mode reads numbers from parameter text", "[console-mode]")
     CHECK_THAT (console::numberIn ("GR 3.2"), WithinAbs (3.2, 1e-6));
     CHECK_THAT (console::numberIn ("Auto"), WithinAbs (0.0, 1e-6));
 }
+
+TEST_CASE ("Console mode recognises UA's E-series channel strip", "[console-mode]")
+{
+    CHECK (console::isChannelStrip (plugin ("UADx SSL 4000 E Channel Strip", "Universal Audio (UADx)", "AudioUnit")));
+    CHECK (console::isChannelStrip (plugin ("UAD SSL E Channel Strip", "Universal Audio (UAD)", "VST3")));
+    CHECK (console::isChannelStrip (plugin ("UAD SSL 4000 E", "Universal Audio", "VST3")));
+
+    CHECK_FALSE (console::isChannelStrip (plugin ("UADx SSL G Bus Compressor", "Universal Audio (UADx)", "AudioUnit")));
+    CHECK_FALSE (console::isChannelStrip (plugin ("UADx API Vision Channel Strip", "Universal Audio (UADx)", "AudioUnit")));
+    CHECK_FALSE (console::isChannelStrip (plugin ("SSL 4000 E", "Someone Else", "VST3")));
+
+    const auto found = console::findChannelStrips ({ plugin ("UAD SSL E Channel Strip", "Universal Audio (UAD)", "VST3"),
+                                                     plugin ("UADx SSL 4000 E Channel Strip", "Universal Audio (UADx)", "AudioUnit"),
+                                                     plugin ("Pro-Q 3", "FabFilter", "VST3") });
+    REQUIRE (found.size() == 2);
+    CHECK (found[0].name.startsWith ("UADx"));
+}
+
+TEST_CASE ("Console mode matches strip knobs to the channel strip's parameters", "[console-mode]")
+{
+    using S = console::StripControl;
+    const juce::StringArray names { "Power", "Input", "HP Filter", "LP Filter", "HF Gain", "HF Freq", "HF Bell",
+                                    "HMF Gain", "HMF Freq", "HMF Q", "LMF Gain", "LMF Freq", "LMF Q",
+                                    "LF Gain", "LF Freq", "LF Bell", "EQ In", "Comp Ratio", "Comp Thresh",
+                                    "Comp Release", "Gate Thresh", "Dyn In", "Output" };
+
+    CHECK (console::matchStripParameter (S::hf, names) == 4);
+    CHECK (console::matchStripParameter (S::hmf, names) == 7);
+    CHECK (console::matchStripParameter (S::lmf, names) == 10);
+    CHECK (console::matchStripParameter (S::lf, names) == 13);
+    CHECK (console::matchStripParameter (S::eqIn, names) == 16);
+    CHECK (console::matchStripParameter (S::dynamics, names) == 18);   // the compressor's, not the gate's
+    CHECK (console::matchStripParameter (S::dynIn, names) == 21);
+
+    // Other spellings
+    CHECK (console::matchStripParameter (S::lf, { "LF Freq", "LF" }) == 1);
+    CHECK (console::matchStripParameter (S::dynamics, { "Gate Threshold", "Threshold" }) == 1);
+    CHECK (console::matchStripParameter (S::eqIn, { "EQ" }) == 0);
+    CHECK (console::matchStripParameter (S::hmf, { "HF Gain", "LMF Gain" }) == -1);
+}

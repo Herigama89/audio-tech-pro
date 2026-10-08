@@ -91,6 +91,11 @@ public:
             d.pluginFormatName = "AudioUnit";
             auto& console = main.mixer.getConsolePanel();
             console.setCandidates ({ d });
+            juce::PluginDescription strip;
+            strip.name = "UADx SSL 4000 E Channel Strip";
+            strip.manufacturerName = "Universal Audio";
+            strip.pluginFormatName = "AudioUnit";
+            main.mixer.setStripCandidates ({ strip });
             main.mixer.resized();
             // Names and ranges as UA's plugin reports them
             console.showPreview ({ 0.62f, 1.0f, 0.4f, 0.75f, 0.0f, 0.5f, 0.35f }, 4.0f, 0.7f, true,
@@ -102,6 +107,7 @@ public:
             save (main, "mixer-console.png");
             save (console, "console-panel.png", 2.0f);
             console.setCandidates ({});
+            main.mixer.setStripCandidates ({});
             main.mixer.resized();
         }
 

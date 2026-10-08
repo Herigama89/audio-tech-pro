@@ -1467,3 +1467,70 @@ TEST_CASE ("Changing the session's sample rate doesn't reload audio", "[engine]"
     const auto out = renderLeft (f.engine, 20000);
     CHECK_THAT (out[10000], WithinAbs (0.5 * 0.8, 0.005));
 }
+
+TEST_CASE ("Console mode puts a channel strip plugin on every track", "[console-mode]")
+{
+    juce::UndoManager um;
+    auto project = model::createProject();
+    auto a = model::addTrack (project, "A", &um);
+    auto b = model::addTrack (project, "B", &um);
+    b.setProperty (ids::builtInStrip, true, nullptr);   // this one keeps the built-in strip
+    const juce::String uad = "<PLUGIN name=\"UADx SSL 4000 E Channel Strip\"/>";
+
+    um.beginNewTransaction();
+    model::setConsolePlugin (project, uad, &um);
+    CHECK (model::stripPlugin (project, a[ids::id].toString()).isValid());
+    CHECK_FALSE (model::stripPlugin (project, b[ids::id].toString()).isValid());
+
+    // New tracks get it too, in the same undo step as the track.
+    um.beginNewTransaction();
+    auto c = model::addTrack (project, "C", &um);
+    CHECK (model::stripPlugin (project, c[ids::id].toString())[ids::pluginDescription].toString() == uad);
+    um.undo();
+    CHECK_FALSE (model::stripPlugin (project, c[ids::id].toString()).isValid());
+
+    // Back to the built-in strip everywhere.
+    um.beginNewTransaction();
+    model::setConsolePlugin (project, {}, &um);
+    CHECK_FALSE (model::stripPlugin (project, a[ids::id].toString()).isValid());
+    CHECK (model::consolePlugin (project).isEmpty());
+    um.undo();
+    CHECK (model::stripPlugin (project, a[ids::id].toString()).isValid());
+
+    // Saved and loaded with the project.
+    TempDir temp;
+    const auto file = temp.dir.getChildFile ("console.atp");
+    juce::String error;
+    REQUIRE (model::save (project, file, error));
+    const auto loaded = model::load (file, error);
+    CHECK (model::consolePlugin (loaded) == uad);
+    CHECK (model::stripPlugin (loaded, a[ids::id].toString()).isValid());
+}
+
+TEST_CASE ("A track's channel strip plugin replaces the built-in strip", "[console-mode]")
+{
+    Fixture f;
+    EffectRack effects { f.rack.getFormatManager() };
+    ProjectPlayer player (f.engine, f.cache, &f.rack, &effects);
+
+    const auto wav = writeConstantWav (f.temp.dir.getChildFile ("dc.wav"), 48000.0, 48000, 0.5f);
+    auto track = model::addTrack (f.project, "A", nullptr);
+    model::addRegion (track, wav, 0.0, 1.0, nullptr);
+    track.setProperty (ids::consoleLF, 12.0, nullptr);   // the built-in strip would lift a constant signal a lot
+
+    auto insert = model::setStripPlugin (f.project, track[ids::id].toString(), "<PLUGIN name=\"UADx SSL 4000 E Channel Strip\"/>", nullptr);
+    auto standIn = BuiltInEffect::create ("eq");          // flat: passes the sound unchanged
+    standIn->prepare (48000.0, AudioEngine::maxChunkSize);
+    effects.injectForTesting (insert, std::move (standIn), 48000.0);
+
+    player.setProject (f.project);
+    f.engine.play();
+    auto out = renderLeft (f.engine, 24000);
+    CHECK_THAT (out[20000], WithinAbs (0.5 * 0.8, 0.005));   // the plugin, not the built-in +12 dB
+
+    // Taking the plugin off brings the built-in strip back.
+    model::setStripPlugin (f.project, track[ids::id].toString(), {}, nullptr);
+    player.rebuildNow();
+    out = renderLeft (f.engine, 24000);
+    CHECK (out[20000] > 0.5f * 0.8f * 2.0f);
+}

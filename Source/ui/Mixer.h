@@ -5,6 +5,8 @@
 #include "ConsoleLook.h"
 #include "BusCompConsolePanel.h"
 #include "StripParts.h"
+#include "../engine/ConsolePlugins.h"
+#include "../engine/EffectRack.h"
 #include "../engine/AudioEngine.h"
 #include "../engine/ProjectPlayer.h"
 
@@ -32,7 +34,11 @@ public:
 
     void paint (juce::Graphics& g) override;
     void resized() override;
+    void mouseDown (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
+
+    /** Console mode: follow knobs turned in the plugin's own window. */
+    void syncFromPlugin();
 
     static constexpr int numSlots = 6;
     static constexpr int numSends = 2;
@@ -48,8 +54,19 @@ private:
     juce::ValueTree insertAt (int slot) const;
     juce::ValueTree sendAt (int index) const;
     void showSendMenu (int index);
-    void setupConsoleKnob (juce::Slider& knob, const juce::Identifier& property,
+    void setupConsoleKnob (juce::Slider& knob, const juce::Identifier& property, console::StripControl control,
                            double min, double max, const juce::String& name, const juce::String& suffix);
+
+    // Console mode: this track's channel strip plugin
+    juce::ValueTree stripInsert() const;
+    juce::AudioPluginInstance* stripInstance() const;
+    juce::AudioProcessorParameter* stripParameter (console::StripControl c) const;
+    int stripParameterIndex (console::StripControl c) const;
+    bool usesPlugin() const { return stripInsert().isValid(); }
+    void applyMode();
+    void toggleStripSwitch (console::StripControl c, const juce::Identifier& builtInProperty, const juce::String& undoName);
+    void showConsoleMenu();
+    juce::Slider* knobFor (console::StripControl c);
     juce::Rectangle<int> fromArt (float x, float y, float w, float h) const;
     juce::Rectangle<int> faderArea() const;
 
@@ -69,6 +86,7 @@ private:
     strip::Fader fader;
     LevelMeter meter { "" };
     juce::Label dbLabel;
+    bool pluginMode = false;
 };
 
 /**
@@ -138,6 +156,19 @@ public:
     /** Console mode's bus compressor face (shown instead of the built-in one when a UA plugin is available). */
     BusCompConsolePanel& getConsolePanel() noexcept { return consolePanel; }
 
+    /** Console mode for the strips: the channel strip plugins found on this computer, best first. */
+    void setStripCandidates (const juce::Array<juce::PluginDescription>& found);
+    const juce::Array<juce::PluginDescription>& getStripCandidates() const noexcept { return stripCandidates; }
+
+    /** The mixer's console was chosen in the header: a plugin, or none for the built-in strip. */
+    std::function<void (const juce::PluginDescription* plugin)> onChooseConsole;
+
+    /** A plugin finished loading: strips switch to it. */
+    void pluginsChanged() { triggerAsyncUpdate(); }
+
+    EffectRack& getEffects() noexcept { return effects; }
+    juce::ValueTree getProject() const { return project; }
+
     static constexpr int headerHeight = 28;
 
 private:
@@ -154,9 +185,14 @@ private:
     juce::UndoManager& undoManager;
     AudioEngine& engine;
     ProjectPlayer& player;
+    EffectRack& effects;
     juce::ValueTree project;
 
-    juce::Label title;
+    juce::Label title, consoleCaption { {}, "Console" };
+    juce::ComboBox consoleBox;
+    juce::Array<juce::PluginDescription> stripCandidates;
+    int syncCounter = 0;
+    void refreshConsoleBox();
     juce::TextButton closeButton { "Close" };
     juce::Viewport outer;          // scrolls everything up and down when the pane is short
     juce::Component body;

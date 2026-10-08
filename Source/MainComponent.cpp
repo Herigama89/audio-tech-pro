@@ -184,6 +184,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     {
         player.requestRebuild();
         mixer.getConsolePanel().refresh();   // a bus compressor plugin may have just loaded
+        mixer.pluginsChanged();              // ...or a channel strip plugin
     };
 
     // Console mode: the user's own bus compressor plugin on the master.
@@ -204,6 +205,18 @@ MainComponent::MainComponent (bool openAudioDevice)
                 model::removeInsert (insert, &undoManager);
         };
         console.onOpenPluginWindow = [this] (juce::ValueTree insert) { openInsertWindow (insert); };
+
+        // ...and on every track: the console chosen in the mixer's header.
+        mixer.onChooseConsole = [this] (const juce::PluginDescription* d)
+        {
+            juce::String xml;
+            if (d != nullptr)
+                if (auto e = d->createXml())
+                    xml = e->toString (juce::XmlElement::TextFormat().singleLine());
+
+            undoManager.beginNewTransaction (d != nullptr ? "Console: " + d->name : juce::String ("Console: built-in"));
+            model::setConsolePlugin (project, xml, &undoManager);
+        };
     }
     effectRack.onLoadError = [this] (const juce::String& error) { showError ("Plugin problem", error); };
     effectRack.onEffectReplaced = [this] (const juce::String& insertId) { editorWindows.erase (insertId); };
@@ -248,6 +261,7 @@ MainComponent::MainComponent (bool openAudioDevice)
         rack.getKnownPlugins().recreateFromXml (*xml);
 
     mixer.getConsolePanel().setCandidates (console::findBusCompressors (rack.getKnownPlugins().getTypes()));
+    mixer.setStripCandidates (console::findChannelStrips (rack.getKnownPlugins().getTypes()));
     rack.getKnownPlugins().addChangeListener (this);   // a new scan may find one
 
     // --- Menus and key commands -------------------------------------------------
@@ -1054,7 +1068,7 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
     else if (source == &rack.getKnownPlugins())
     {
         mixer.getConsolePanel().setCandidates (console::findBusCompressors (rack.getKnownPlugins().getTypes()));
-        mixer.resized();
+        mixer.setStripCandidates (console::findChannelStrips (rack.getKnownPlugins().getTypes()));
     }
     else if (source == commandManager.getKeyMappings())
     {

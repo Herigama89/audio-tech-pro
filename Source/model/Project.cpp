@@ -167,6 +167,11 @@ juce::ValueTree addTrack (juce::ValueTree project, const juce::String& name, juc
     // Tracks always come before the MIXER node.
     const auto count = numTracks (project);
     project.addChild (track, (index < 0 || index > count) ? count : index, um);
+
+    // With a console plugin chosen for the mixer, new tracks get it too.
+    if (const auto console = consolePlugin (project); console.isNotEmpty())
+        setStripPlugin (project, track[ids::id].toString(), console, um);
+
     return track;
 }
 
@@ -658,6 +663,49 @@ juce::ValueTree setBusCompPlugin (juce::ValueTree project, const juce::String& d
     for (const auto& old : insertsOf (chain))
         removeInsert (old, um);
     return addPluginInsert (chain, descriptionXml, 0, um);
+}
+
+juce::ValueTree stripPlugin (const juce::ValueTree& project, const juce::String& trackId)
+{
+    const auto inserts = insertsOf (findChain (project, stripOwner (trackId)));
+    return inserts.isEmpty() ? juce::ValueTree() : inserts.getFirst();
+}
+
+juce::ValueTree setStripPlugin (juce::ValueTree project, const juce::String& trackId, const juce::String& descriptionXml, juce::UndoManager* um)
+{
+    if (auto chain = findChain (project, stripOwner (trackId)); chain.isValid())
+        for (const auto& old : insertsOf (chain))
+            removeInsert (old, um);
+
+    if (descriptionXml.isEmpty())
+        return {};
+
+    return addPluginInsert (chainFor (project, stripOwner (trackId)), descriptionXml, 0, um);
+}
+
+juce::String consolePlugin (const juce::ValueTree& project)
+{
+    return project[ids::consolePlugin].toString();
+}
+
+void setConsolePlugin (juce::ValueTree project, const juce::String& descriptionXml, juce::UndoManager* um)
+{
+    project.setProperty (ids::consolePlugin, descriptionXml, um);
+
+    for (const auto& track : project)
+    {
+        if (! track.hasType (ids::TRACK))
+            continue;
+
+        const auto id = track[ids::id].toString();
+        const bool wanted = descriptionXml.isNotEmpty() && ! (bool) track[ids::builtInStrip];
+        const auto current = stripPlugin (project, id);
+
+        if (! wanted && current.isValid())
+            setStripPlugin (project, id, {}, um);
+        else if (wanted && current[ids::pluginDescription].toString() != descriptionXml)
+            setStripPlugin (project, id, descriptionXml, um);
+    }
 }
 
 bool clearAutomation (juce::ValueTree project, const juce::String& owner, const juce::String& param, juce::UndoManager* um)

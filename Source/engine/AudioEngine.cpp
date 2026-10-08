@@ -915,7 +915,7 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         state.gainR.setTargetValue (targetR);
     }
 
-    const bool hasInserts = ! track.inserts.empty();
+    const bool hasInserts = ! track.inserts.empty() || ! track.stripPlugins.empty();
     bool anyAudio = false;
 
     juce::FloatVectorOperations::clear (tL, n);
@@ -1018,6 +1018,9 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
 
     // The strip's console EQ and Dynamics, then the insert effects, all before
     // the fader. Inserts run even on silence so delays and reverbs ring out.
+    for (const auto& effect : track.stripPlugins)
+        effect->process (tL, tR, n);
+
     if (track.console.isActive())
     {
         auto& console = consoles[(size_t) track.slot];

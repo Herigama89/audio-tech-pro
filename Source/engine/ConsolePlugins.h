@@ -31,6 +31,22 @@ namespace riff::console
     /** For the IN key: true if the matched parameter is a "bypass" (on means out). */
     bool isBypassParameter (const juce::String& parameterName);
 
+    // --- Channel strips --------------------------------------------------------
+
+    /** True if a scanned plugin is UA's E-series (4000 E / 4K E) channel strip, UAD or UADx. */
+    bool isChannelStrip (const juce::PluginDescription& d);
+
+    /** The channel strips among the scanned plugins, best first (UADx, then Audio Unit). */
+    juce::Array<juce::PluginDescription> findChannelStrips (const juce::Array<juce::PluginDescription>& scanned);
+
+    /** The controls on a mixer strip that drive a channel strip plugin. */
+    enum class StripControl { hf, hmf, lmf, lf, dynamics, eqIn, dynIn, numControls };
+
+    juce::String stripControlName (StripControl c);
+
+    /** Which parameter (by index) a strip control should drive, or -1 if none fits. */
+    int matchStripParameter (StripControl c, const juce::StringArray& parameterNames);
+
     /** A plugin's gain-reduction meter output, if it publishes one, or -1. */
     int findGainReductionMeter (const juce::StringArray& parameterNames);
 

@@ -132,6 +132,24 @@ namespace riff::model
 
     /** Puts a plugin in the master's bus compressor place, replacing any there. */
     juce::ValueTree setBusCompPlugin (juce::ValueTree project, const juce::String& descriptionXml, juce::UndoManager* um);
+
+    /** Console mode: the chain holding a track's channel strip plugin (in place of the built-in EQ and Dynamics). */
+    inline juce::String stripOwner (const juce::String& trackId) { return "strip:" + trackId; }
+
+    /** A track's channel strip plugin, or an invalid tree. */
+    juce::ValueTree stripPlugin (const juce::ValueTree& project, const juce::String& trackId);
+
+    /** Puts a channel strip plugin on a track (replacing any), or takes it off with an empty description. */
+    juce::ValueTree setStripPlugin (juce::ValueTree project, const juce::String& trackId, const juce::String& descriptionXml, juce::UndoManager* um);
+
+    /**
+        The console for the whole mixer: a channel strip plugin's description, or
+        empty for the built-in strip. Setting it puts the plugin on every track
+        (except ones switched to the built-in strip by hand), and new tracks get
+        it too.
+    */
+    juce::String consolePlugin (const juce::ValueTree& project);
+    void setConsolePlugin (juce::ValueTree project, const juce::String& descriptionXml, juce::UndoManager* um);
     inline const juce::String builtinKind { "builtin" }, pluginKind { "plugin" };
 
     /** The MIXER node, created (unundoably) if the project doesn't have one yet. */

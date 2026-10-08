@@ -93,6 +93,7 @@ struct PlaybackGraph
         bool receivesLiveMidi = false;            // the track your MIDI keyboard plays
 
         ConsoleChannel::Settings console;               // the strip's EQ and Dynamics, before the inserts
+        std::vector<std::shared_ptr<Effect>> stripPlugins;  // console mode: the user's channel strip plugin, instead of `console`
         std::vector<std::shared_ptr<Effect>> inserts;   // in order, bypassed ones left out
 
         bool isBus = false;

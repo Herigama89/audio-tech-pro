@@ -209,6 +209,9 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
 
         const auto trackId = track[ids::id].toString();
         t.inserts = buildChain (trackId, sampleRate, insertIds, effectsById);
+        t.stripPlugins = buildChain (model::stripOwner (trackId), sampleRate, insertIds, effectsById);
+        if (model::stripPlugin (project, trackId).isValid())
+            t.console.enabled = false;   // the plugin replaces the built-in strip (dry while it loads)
         t.isInstrument = model::isInstrumentTrack (track);
         t.isBus = model::isBusTrack (track);
 
@@ -218,6 +221,8 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         addParamAutomation (t, trackId, sampleRate, effectsById);
 
         int latency = 0;
+        for (const auto& e : t.stripPlugins)
+            latency += e->getLatencySamples();
         for (const auto& e : t.inserts)
             latency += e->getLatencySamples();
 

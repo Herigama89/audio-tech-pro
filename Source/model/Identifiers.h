@@ -89,6 +89,10 @@ namespace riff::ids
     RIFF_DECLARE_ID (consoleDynamics)    // 0..10
     RIFF_DECLARE_ID (consoleDynIn)       // the Dynamics switched in (default true)
 
+    // Console mode (see Project.h: consolePlugin, stripPlugin)
+    RIFF_DECLARE_ID (consolePlugin)      // PROJECT: the channel strip plugin every track uses (XML), or empty
+    RIFF_DECLARE_ID (builtInStrip)       // TRACK: keep the built-in strip on this track
+
     // The Master Bus Compressor (PROJECT properties; see MasterBusCompressor.h)
     RIFF_DECLARE_ID (busCompOn)
     RIFF_DECLARE_ID (busCompThreshold)   // dB

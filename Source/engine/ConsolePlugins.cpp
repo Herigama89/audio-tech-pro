@@ -123,6 +123,117 @@ bool isBypassParameter (const juce::String& name)
     return name.containsIgnoreCase ("bypass");
 }
 
+//==============================================================================
+bool isChannelStrip (const juce::PluginDescription& d)
+{
+    if (d.isInstrument || ! isUniversalAudio (d))
+        return false;
+
+    const auto name = words (d.name);
+    if (name.contains (" bus") || name.contains (" buss"))
+        return false;
+
+    const bool eSeries = name.contains (" 4000 e") || name.contains (" 4000e") || name.contains (" 4k e")
+                      || name.contains (" e channel") || name.contains (" e series") || name.contains (" ssl e ");
+    return eSeries || (name.contains (" ssl") && name.contains (" channel strip"));
+}
+
+juce::Array<juce::PluginDescription> findChannelStrips (const juce::Array<juce::PluginDescription>& scanned)
+{
+    juce::Array<juce::PluginDescription> found;
+    for (const auto& d : scanned)
+        if (isChannelStrip (d))
+            found.add (d);
+
+    auto score = [] (const juce::PluginDescription& d)
+    {
+        int s = 0;
+        if (words (d.name).contains (" uadx ") || d.manufacturerName.containsIgnoreCase ("uadx")) s += 10;
+        if (d.pluginFormatName == "AudioUnit") s += 2;
+        if (d.pluginFormatName == "VST3") s += 1;
+        return s;
+    };
+
+    std::stable_sort (found.begin(), found.end(), [&] (const auto& a, const auto& b) { return score (a) > score (b); });
+    return found;
+}
+
+juce::String stripControlName (StripControl c)
+{
+    switch (c)
+    {
+        case StripControl::hf:       return "HF Gain";
+        case StripControl::hmf:      return "HMF Gain";
+        case StripControl::lmf:      return "LMF Gain";
+        case StripControl::lf:       return "LF Gain";
+        case StripControl::dynamics: return "Compressor Threshold";
+        case StripControl::eqIn:     return "EQ In";
+        case StripControl::dynIn:    return "Dynamics In";
+        case StripControl::numControls: break;
+    }
+    return {};
+}
+
+int matchStripParameter (StripControl c, const juce::StringArray& names)
+{
+    auto find = [&names] (std::function<bool (const juce::String&)> test)
+    {
+        for (int i = 0; i < names.size(); ++i)
+            if (test (words (names[i])))
+                return i;
+        return -1;
+    };
+
+    // A band's gain: names the band, says gain/boost/cut, not its frequency, Q or bell switch.
+    auto bandGain = [&find] (const char* band)
+    {
+        const juce::String b (band);
+        const auto i = find ([b] (const juce::String& w)
+        {
+            return w.contains (b) && (w.contains (" gain") || w.contains (" boost") || w.contains (" cut") || w.contains (" level"));
+        });
+        if (i >= 0)
+            return i;
+        // Some plugins name the gain just by the band ("HF").
+        return find ([b] (const juce::String& w) { return w == b + " "; });
+    };
+
+    auto anyOf = [] (const juce::String& w, std::initializer_list<const char*> keys)
+    {
+        for (auto* k : keys)
+            if (w.contains (k))
+                return true;
+        return false;
+    };
+
+    switch (c)
+    {
+        case StripControl::hf:  return bandGain (" hf");
+        case StripControl::hmf: return bandGain (" hmf");
+        case StripControl::lmf: return bandGain (" lmf");
+        case StripControl::lf:  return bandGain (" lf");
+
+        case StripControl::dynamics:
+        {
+            const auto i = find ([&] (const juce::String& w) { return anyOf (w, { " comp", " cmp" }) && anyOf (w, { " thresh" }); });
+            return i >= 0 ? i : find ([&] (const juce::String& w) { return w.contains (" thresh") && ! anyOf (w, { " gate", " exp" }); });
+        }
+
+        case StripControl::eqIn:
+            return find ([&] (const juce::String& w) { return w == " eq " || anyOf (w, { " eq in", " eq on", " eq bypass", " eq enable" }); });
+
+        case StripControl::dynIn:
+            return find ([&] (const juce::String& w)
+            {
+                return w == " dyn " || w == " dynamics " || anyOf (w, { " dyn in", " dynamics in", " dyn on", " comp in", " dyn bypass" });
+            });
+
+        case StripControl::numControls: break;
+    }
+
+    return -1;
+}
+
 int findGainReductionMeter (const juce::StringArray& names)
 {
     for (int i = 0; i < names.size(); ++i)

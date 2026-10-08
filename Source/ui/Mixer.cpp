@@ -40,24 +40,19 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     if (! isMaster())
     {
         // EQ and Dynamics knobs on the artwork
-        setupConsoleKnob (hfKnob,  ids::consoleHF,  -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "HF 8 kHz", " dB");
-        setupConsoleKnob (hmfKnob, ids::consoleHMF, -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "HMF 2.5 kHz", " dB");
-        setupConsoleKnob (lmfKnob, ids::consoleLMF, -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "LMF 400 Hz", " dB");
-        setupConsoleKnob (lfKnob,  ids::consoleLF,  -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "LF 100 Hz", " dB");
-        setupConsoleKnob (dynKnob, ids::consoleDynamics, 0.0, ConsoleChannel::maxDynamics, "Dynamics", "");
+        using S = console::StripControl;
+        setupConsoleKnob (hfKnob,  ids::consoleHF,  S::hf,  -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "HF 8 kHz", " dB");
+        setupConsoleKnob (hmfKnob, ids::consoleHMF, S::hmf, -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "HMF 2.5 kHz", " dB");
+        setupConsoleKnob (lmfKnob, ids::consoleLMF, S::lmf, -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "LMF 400 Hz", " dB");
+        setupConsoleKnob (lfKnob,  ids::consoleLF,  S::lf,  -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "LF 100 Hz", " dB");
+        setupConsoleKnob (dynKnob, ids::consoleDynamics, S::dynamics, 0.0, ConsoleChannel::maxDynamics, "Dynamics", "");
 
-        consoleInButton.setTooltip ("EQ in: switches the strip's EQ and Dynamics in or out");
-        consoleInButton.onClick = [this]
-        {
-            owner.getUndoManager().beginNewTransaction ("EQ in");
-            track.setProperty (ids::consoleIn, ! (bool) track.getProperty (ids::consoleIn, true), &owner.getUndoManager());
-        };
+        consoleInButton.setTooltip ("EQ in");
+        consoleInButton.onClick = [this] { toggleStripSwitch (console::StripControl::eqIn, ids::consoleIn, "EQ in"); };
         dynInButton.setTooltip ("Dynamics in");
-        dynInButton.onClick = [this]
-        {
-            owner.getUndoManager().beginNewTransaction ("Dynamics in");
-            track.setProperty (ids::consoleDynIn, ! (bool) track.getProperty (ids::consoleDynIn, true), &owner.getUndoManager());
-        };
+        dynInButton.onClick = [this] { toggleStripSwitch (console::StripControl::dynIn, ids::consoleDynIn, "Dynamics in"); };
+        consoleInButton.addMouseListener (this, false);
+        dynInButton.addMouseListener (this, false);
         addAndMakeVisible (consoleInButton);
         addAndMakeVisible (dynInButton);
 
@@ -159,20 +154,285 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     refresh();
 }
 
-void ChannelStrip::setupConsoleKnob (juce::Slider& knob, const juce::Identifier& property,
+void ChannelStrip::setupConsoleKnob (juce::Slider& knob, const juce::Identifier& property, console::StripControl control,
                                      double min, double max, const juce::String& name, const juce::String& suffix)
 {
+    knob.getProperties().set ("min", min);
+    knob.getProperties().set ("max", max);
     knob.setRange (min, max, 0.1);
     knob.setDoubleClickReturnValue (true, 0.0);
     knob.setPopupDisplayEnabled (true, true, nullptr);
     knob.setTooltip (name);
-    knob.textFromValueFunction = [name, suffix] (double v)
+
+    // Built in: the track's own setting. Console mode: the plugin's parameter.
+    knob.textFromValueFunction = [this, control, name, suffix] (double v)
     {
+        if (pluginMode)
+            if (auto* p = stripParameter (control))
+                return (p->getName (32) + "  " + p->getText ((float) v, 24) + " " + p->getLabel()).trim();
         return name + "  " + (v > 0.05 && suffix.isNotEmpty() ? "+" : "") + juce::String (v, 1) + suffix;
     };
-    knob.onDragStart = [this, name] { owner.getUndoManager().beginNewTransaction (name); };
-    knob.onValueChange = [this, &knob, property] { track.setProperty (property, knob.getValue(), &owner.getUndoManager()); };
+    knob.onDragStart = [this, control, name]
+    {
+        if (pluginMode)
+        {
+            if (auto* p = stripParameter (control))
+                p->beginChangeGesture();
+        }
+        else
+        {
+            owner.getUndoManager().beginNewTransaction (name);
+        }
+    };
+    knob.onDragEnd = [this, control]
+    {
+        if (pluginMode)
+            if (auto* p = stripParameter (control))
+                p->endChangeGesture();
+    };
+    knob.onValueChange = [this, &knob, property, control]
+    {
+        if (pluginMode)
+        {
+            if (auto* p = stripParameter (control))
+                p->setValueNotifyingHost ((float) knob.getValue());
+        }
+        else
+        {
+            track.setProperty (property, knob.getValue(), &owner.getUndoManager());
+        }
+    };
+    knob.addMouseListener (this, false);   // right-click: the console menu
     addAndMakeVisible (knob);
+}
+
+//==============================================================================
+// Console mode
+//==============================================================================
+juce::ValueTree ChannelStrip::stripInsert() const
+{
+    return isMaster() ? juce::ValueTree() : model::stripPlugin (project, track[ids::id].toString());
+}
+
+juce::AudioPluginInstance* ChannelStrip::stripInstance() const
+{
+    const auto insert = stripInsert();
+    return insert.isValid() ? owner.getEffects().getPlugin (insert[ids::id].toString()) : nullptr;
+}
+
+int ChannelStrip::stripParameterIndex (console::StripControl c) const
+{
+    auto* p = stripInstance();
+    if (p == nullptr)
+        return -1;
+
+    const auto& params = p->getParameters();
+    const auto insert = stripInsert();
+    const juce::Identifier key ("map" + juce::String ((int) c));
+
+    if (insert.hasProperty (key))
+    {
+        const int index = insert[key];
+        return juce::isPositiveAndBelow (index, params.size()) ? index : -1;
+    }
+
+    juce::StringArray names;
+    for (auto* param : params)
+        names.add (param->getName (64));
+    return console::matchStripParameter (c, names);
+}
+
+juce::AudioProcessorParameter* ChannelStrip::stripParameter (console::StripControl c) const
+{
+    const auto index = stripParameterIndex (c);
+    auto* p = stripInstance();
+    return (p != nullptr && index >= 0) ? p->getParameters()[index] : nullptr;
+}
+
+juce::Slider* ChannelStrip::knobFor (console::StripControl c)
+{
+    // (the two switches are lamp keys, not knobs)
+    switch (c)
+    {
+        case console::StripControl::hf:       return &hfKnob;
+        case console::StripControl::hmf:      return &hmfKnob;
+        case console::StripControl::lmf:      return &lmfKnob;
+        case console::StripControl::lf:       return &lfKnob;
+        case console::StripControl::dynamics: return &dynKnob;
+        case console::StripControl::eqIn:
+        case console::StripControl::dynIn:
+        case console::StripControl::numControls: break;
+    }
+    return nullptr;
+}
+
+void ChannelStrip::applyMode()
+{
+    // Knobs work in the plugin's 0..1 range in console mode, in dB otherwise.
+    for (int c = 0; c <= (int) console::StripControl::dynamics; ++c)
+    {
+        auto* knob = knobFor ((console::StripControl) c);
+        if (knob == nullptr)
+            continue;
+
+        if (pluginMode)
+        {
+            auto* p = stripParameter ((console::StripControl) c);
+            knob->setRange (0.0, 1.0, 0.0);
+            knob->setDoubleClickReturnValue (p != nullptr, p != nullptr ? p->getDefaultValue() : 0.5);
+            knob->setEnabled (p != nullptr || stripInstance() == nullptr);
+            knob->setTooltip (p != nullptr ? p->getName (64) + "  (right-click for the console menu)"
+                                           : juce::String ("Not assigned: right-click to choose a parameter"));
+        }
+        else
+        {
+            knob->setRange (knob->getProperties()["min"], knob->getProperties()["max"], 0.1);
+            knob->setDoubleClickReturnValue (true, 0.0);
+            knob->setEnabled (true);
+        }
+    }
+}
+
+void ChannelStrip::syncFromPlugin()
+{
+    if (! pluginMode || stripInstance() == nullptr)
+        return;
+
+    for (int c = 0; c <= (int) console::StripControl::dynamics; ++c)
+        if (auto* knob = knobFor ((console::StripControl) c))
+            if (auto* p = stripParameter ((console::StripControl) c))
+                if (! knob->isMouseButtonDown() && std::abs (knob->getValue() - p->getValue()) > 1.0e-4)
+                    knob->setValue (p->getValue(), juce::dontSendNotification);
+
+    auto lamp = [this] (console::StripControl c, juce::Button& b)
+    {
+        if (auto* p = stripParameter (c))
+        {
+            const bool on = p->getValue() >= 0.5f;
+            b.setToggleState (console::isBypassParameter (p->getName (64)) ? ! on : on, juce::dontSendNotification);
+        }
+        else
+        {
+            b.setToggleState (! (bool) stripInsert()[ids::bypass], juce::dontSendNotification);
+        }
+    };
+    lamp (console::StripControl::eqIn, consoleInButton);
+    lamp (console::StripControl::dynIn, dynInButton);
+
+    if (auto* p = stripParameter (console::StripControl::dynamics))
+        dynLabel.setText (p->getCurrentValueAsText().upToFirstOccurrenceOf (" ", false, false).substring (0, 6), juce::dontSendNotification);
+}
+
+void ChannelStrip::toggleStripSwitch (console::StripControl c, const juce::Identifier& builtInProperty, const juce::String& undoName)
+{
+    auto& um = owner.getUndoManager();
+
+    if (! pluginMode)
+    {
+        um.beginNewTransaction (undoName);
+        track.setProperty (builtInProperty, ! (bool) track.getProperty (builtInProperty, true), &um);
+        return;
+    }
+
+    if (auto* p = stripParameter (c))
+    {
+        p->beginChangeGesture();
+        p->setValueNotifyingHost (p->getValue() >= 0.5f ? 0.0f : 1.0f);
+        p->endChangeGesture();
+    }
+    else if (c == console::StripControl::eqIn)
+    {
+        // No switch on the plugin: take the whole plugin in or out.
+        auto insert = stripInsert();
+        um.beginNewTransaction (undoName);
+        insert.setProperty (ids::bypass, ! (bool) insert[ids::bypass], &um);
+    }
+
+    syncFromPlugin();
+}
+
+void ChannelStrip::showConsoleMenu()
+{
+    if (isMaster())
+        return;
+
+    auto& um = owner.getUndoManager();
+    juce::ValueTree insert = stripInsert();
+    const auto trackId = track[ids::id].toString();
+    auto proj = project;
+    auto t = track;
+    juce::PopupMenu menu;
+
+    if (insert.isValid())
+        menu.addItem ("Open plugin window", [this, insert] { if (owner.onOpenInsert) owner.onOpenInsert (insert); });
+
+    // This strip: built-in or a plugin
+    const auto& candidates = owner.getStripCandidates();
+    juce::PopupMenu use;
+    use.addItem ("Built-in console strip", true, ! insert.isValid(), [&um, t, proj, trackId]() mutable
+    {
+        um.beginNewTransaction ("Built-in console strip");
+        t.setProperty (ids::builtInStrip, true, &um);
+        model::setStripPlugin (proj, trackId, {}, &um);
+    });
+    for (const auto& d : candidates)
+    {
+        const auto xml = d.createXml()->toString (juce::XmlElement::TextFormat().singleLine());
+        use.addItem (d.name, true, insert[ids::pluginDescription].toString() == xml, [&um, t, proj, trackId, xml]() mutable
+        {
+            um.beginNewTransaction ("Console strip plugin");
+            t.removeProperty (ids::builtInStrip, &um);
+            model::setStripPlugin (proj, trackId, xml, &um);
+        });
+    }
+    menu.addSubMenu ("This strip uses", use);
+
+    if (auto* p = stripInstance())
+    {
+        juce::PopupMenu knobs;
+        const auto& params = p->getParameters();
+        for (int c = 0; c < (int) console::StripControl::numControls; ++c)
+        {
+            const auto control = (console::StripControl) c;
+            const auto chosen = stripParameterIndex (control);
+            juce::PopupMenu list;
+            const juce::Identifier key ("map" + juce::String (c));
+            list.addItem ("Nothing", true, chosen < 0, [&um, insert, key]() mutable
+            {
+                um.beginNewTransaction ("Assign knob");
+                insert.setProperty (key, -1, &um);
+            });
+            for (int i = 0; i < params.size(); ++i)
+                list.addItem (params[i]->getName (64), true, i == chosen, [&um, insert, key, i]() mutable
+                {
+                    um.beginNewTransaction ("Assign knob");
+                    insert.setProperty (key, i, &um);
+                });
+            knobs.addSubMenu (console::stripControlName (control), list);
+        }
+        knobs.addSeparator();
+        knobs.addItem ("Match by name again", [&um, insert]() mutable
+        {
+            um.beginNewTransaction ("Reset knob assignments");
+            for (int c = 0; c < (int) console::StripControl::numControls; ++c)
+                insert.removeProperty (juce::Identifier ("map" + juce::String (c)), &um);
+        });
+        menu.addSubMenu ("Knob assignments", knobs);
+    }
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+}
+
+void ChannelStrip::mouseDown (const juce::MouseEvent& e)
+{
+    // Right-click anywhere in the console section (knobs, lamps, the metal around them).
+    if (! e.mods.isPopupMenu() || isMaster())
+        return;
+
+    const auto inConsole = e.eventComponent == this ? e.y < topHeight
+                                                    : e.eventComponent->getY() < topHeight && e.eventComponent->getParentComponent() == this;
+    if (inConsole)
+        showConsoleMenu();
 }
 
 juce::Rectangle<int> ChannelStrip::fromArt (float x, float y, float w, float h) const
@@ -261,7 +521,34 @@ void ChannelStrip::showSendMenu (int index)
 
 void ChannelStrip::refresh()
 {
+    // Console mode or the built-in strip?
     if (! isMaster())
+    {
+        const bool plugin = usesPlugin();
+        if (plugin != pluginMode)
+        {
+            pluginMode = plugin;
+            applyMode();
+        }
+        else if (pluginMode)
+        {
+            applyMode();   // the plugin may have just loaded
+        }
+    }
+
+    if (! isMaster() && pluginMode)
+    {
+        for (int c = 0; c <= (int) console::StripControl::dynamics; ++c)
+            if (auto* knob = knobFor ((console::StripControl) c))
+            {
+                auto* p = stripParameter ((console::StripControl) c);
+                knob->setValue (p != nullptr ? p->getValue() : 0.5, juce::dontSendNotification);
+            }
+        syncFromPlugin();
+        if (stripInstance() == nullptr)
+            dynLabel.setText ("...", juce::dontSendNotification);
+    }
+    else if (! isMaster())
     {
         hfKnob.setValue (track.getProperty (ids::consoleHF, 0.0), juce::dontSendNotification);
         hmfKnob.setValue (track.getProperty (ids::consoleHMF, 0.0), juce::dontSendNotification);
@@ -429,6 +716,15 @@ void ChannelStrip::paint (juce::Graphics& g)
                     g.setFont (juce::FontOptions (20.0f));
                     g.drawText (spot.freq, juce::Rectangle<float> (131.0f, c.y + 2.0f, 62.0f, 22.0f), juce::Justification::centredLeft, false);
                 }
+            }
+
+            // Console mode: which strip this is, engraved top left
+            if (pluginMode)
+            {
+                g.setColour (ink.withAlpha (0.85f));
+                g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
+                g.drawText (stripInstance() != nullptr ? "UAD" : "UAD...", juce::Rectangle<float> (14.0f, 30.0f, 80.0f, 24.0f),
+                            juce::Justification::centredLeft, false);
             }
 
             g.setColour (ink);
@@ -717,8 +1013,22 @@ void MasterBusCompressorPanel::resized()
 // MixerPanel
 //==============================================================================
 MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p, EffectRack& fx)
-    : undoManager (um), engine (e), player (p), busComp (um, e), consolePanel (um, e, fx)
+    : undoManager (um), engine (e), player (p), effects (fx), busComp (um, e), consolePanel (um, e, fx)
 {
+    // Console mode for the strips: the built-in strip, or a channel strip plugin you own
+    consoleCaption.setFont (juce::FontOptions (12.0f));
+    consoleCaption.setColour (juce::Label::textColourId, theme::dimText);
+    consoleCaption.setJustificationType (juce::Justification::centredRight);
+    addChildComponent (consoleCaption);
+    consoleBox.setTooltip ("The channel strip every track uses: the built-in one, or your own UA channel strip plugin");
+    consoleBox.onChange = [this]
+    {
+        const auto index = consoleBox.getSelectedItemIndex();
+        if (onChooseConsole)
+            onChooseConsole (index > 0 && index - 1 < stripCandidates.size() ? &stripCandidates.getReference (index - 1) : nullptr);
+    };
+    addChildComponent (consoleBox);
+
     title.setText ("Mixer", juce::dontSendNotification);
     title.setFont (juce::FontOptions (13.0f, juce::Font::bold));
     title.setColour (juce::Label::textColourId, theme::text);
@@ -754,6 +1064,7 @@ void MixerPanel::setProject (juce::ValueTree newProject)
     project.addListener (this);
     busComp.setProject (project);
     consolePanel.setProject (project);
+    refreshConsoleBox();
     rebuild();
 }
 
@@ -765,10 +1076,47 @@ void MixerPanel::changed (const juce::ValueTree& parent)
     triggerAsyncUpdate();
 }
 
+void MixerPanel::setStripCandidates (const juce::Array<juce::PluginDescription>& found)
+{
+    stripCandidates = found;
+    refreshConsoleBox();
+    resized();
+}
+
+void MixerPanel::refreshConsoleBox()
+{
+    consoleBox.clear (juce::dontSendNotification);
+    consoleBox.addItem ("Built-in", 1);
+
+    const auto current = model::consolePlugin (project);
+    int selected = 1;
+    for (int i = 0; i < stripCandidates.size(); ++i)
+    {
+        consoleBox.addItem (stripCandidates[i].name, i + 2);
+        if (auto xml = stripCandidates[i].createXml(); xml != nullptr && xml->toString (juce::XmlElement::TextFormat().singleLine()) == current)
+            selected = i + 2;
+    }
+
+    if (current.isNotEmpty() && selected == 1)
+    {
+        // The project uses a plugin this computer doesn't have.
+        juce::PluginDescription d;
+        if (auto xml = juce::parseXML (current); xml != nullptr && d.loadFromXml (*xml))
+            consoleBox.addItem (d.name + " (not installed)", 99);
+        selected = 99;
+    }
+
+    consoleBox.setSelectedId (selected, juce::dontSendNotification);
+    const bool show = ! stripCandidates.isEmpty() || current.isNotEmpty();
+    consoleBox.setVisible (show);
+    consoleCaption.setVisible (show);
+}
+
 void MixerPanel::handleAsyncUpdate()
 {
     busComp.refresh();
     consolePanel.refresh();
+    refreshConsoleBox();
 
     // The console face appears once a plugin is chosen or found.
     if (consolePanel.isAvailable() != consolePanel.isVisible())
@@ -818,6 +1166,11 @@ void MixerPanel::timerCallback()
         consolePanel.update();
     else
         busComp.updateMeter();
+
+    // Console mode: follow knobs turned in the plugins' own windows (10 times a second).
+    if (++syncCounter % 3 == 0)
+        for (auto* s : strips)
+            s->syncFromPlugin();
 }
 
 void MixerPanel::setMasterLevels (float left, float right)
@@ -844,6 +1197,9 @@ void MixerPanel::resized()
     auto area = getLocalBounds();
     auto header = area.removeFromTop (headerHeight).reduced (8, 3);
     closeButton.setBounds (header.removeFromRight (60));
+    header.removeFromRight (16);
+    consoleBox.setBounds (header.removeFromRight (240));
+    consoleCaption.setBounds (header.removeFromRight (60));
     title.setBounds (header);
 
     // Everything scrolls up and down together if the pane is shorter than a strip.
