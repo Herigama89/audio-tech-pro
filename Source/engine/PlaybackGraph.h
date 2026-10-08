@@ -70,10 +70,13 @@ struct PlaybackGraph
     struct Region
     {
         std::vector<Note> notes;    // MIDI regions only, sorted by start
-        SharedAudio audio;          // stereo, at `sampleRate`
-        juce::int64 start = 0;      // timeline position
-        juce::int64 sourceOffset = 0;
-        juce::int64 length = 0;
+        SharedAudio audio;          // stereo, at the file's own rate
+        juce::int64 start = 0;      // timeline position (engine samples)
+        juce::int64 sourceOffset = 0;   // where the region starts in the file (file samples), when no conversion is needed
+        double sourcePosition = 0.0;    // the same, exactly, for files at another rate
+        double step = 1.0;              // file samples per engine sample (file rate / engine rate)
+        bool resample = false;          // the file's rate differs from the engine's
+        juce::int64 length = 0;     // engine samples
         float gain = 1.0f;
     };
 

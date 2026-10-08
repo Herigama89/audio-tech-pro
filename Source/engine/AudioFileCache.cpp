@@ -1,4 +1,5 @@
 #include "AudioFileCache.h"
+#include "Resampler.h"
 
 namespace riff
 {
@@ -25,11 +26,11 @@ public:
                 {
                     key = cache.queue.front();
                     cache.queue.pop_front();
-                    cache.loadingName = juce::File (key.path).getFileName();
+                    cache.loadingName = juce::File (key).getFileName();
                 }
             }
 
-            if (key.path.isEmpty())
+            if (key.isEmpty())
             {
                 wait (-1);   // until notify()
                 continue;
@@ -55,6 +56,8 @@ private:
 AudioFileCache::AudioFileCache (juce::AudioFormatManager& formats, bool loadInBackground)
     : formatManager (formats)
 {
+    resampler::initialise();
+
     if (loadInBackground)
     {
         worker = std::make_unique<Worker> (*this);
@@ -73,9 +76,9 @@ AudioFileCache::~AudioFileCache()
     cancelPendingUpdate();
 }
 
-SharedAudio AudioFileCache::get (const juce::File& file, double targetSampleRate)
+SharedAudio AudioFileCache::get (const juce::File& file)
 {
-    const Key key { file.getFullPathName(), targetSampleRate };
+    const Key key = file.getFullPathName();
 
     if (auto it = entries.find (key); it != entries.end())
         return it->second;
@@ -92,7 +95,7 @@ SharedAudio AudioFileCache::get (const juce::File& file, double targetSampleRate
             failed.insert (key);
             return nullptr;
         }
-        lengths[key.path] = result.lengthSeconds;
+        lengths[key] = result.lengthSeconds;
         entries[key] = result.audio;
         return result.audio;
     }
@@ -118,12 +121,8 @@ bool AudioFileCache::isLoading() const
 
 bool AudioFileCache::isPending (const juce::File& file) const
 {
-    const auto path = file.getFullPathName();
     const juce::ScopedLock sl (lock);
-    for (const auto& key : pending)
-        if (key.path == path)
-            return true;
-    return false;
+    return pending.count (file.getFullPathName()) > 0;
 }
 
 juce::String AudioFileCache::currentlyLoading() const
@@ -165,7 +164,7 @@ void AudioFileCache::collectFinished()
         if (r.audio != nullptr)
         {
             entries[r.key] = r.audio;
-            lengths[r.key.path] = r.lengthSeconds;
+            lengths[r.key] = r.lengthSeconds;
         }
         else
         {
@@ -193,87 +192,34 @@ double AudioFileCache::getLengthSeconds (const juce::File& file)
     return seconds;
 }
 
-void AudioFileCache::purge (double keepSampleRate)
+void AudioFileCache::forget (const juce::File& file)
 {
-    for (auto it = entries.begin(); it != entries.end();)
-    {
-        if (std::abs (it->first.sampleRate - keepSampleRate) > 0.5)
-            it = entries.erase (it);
-        else
-            ++it;
-    }
-
-    for (auto it = failed.begin(); it != failed.end();)
-    {
-        if (std::abs (it->sampleRate - keepSampleRate) > 0.5)
-            it = failed.erase (it);
-        else
-            ++it;
-    }
+    const auto key = file.getFullPathName();
+    entries.erase (key);
+    failed.erase (key);
+    lengths.erase (key);
 }
 
 AudioFileCache::Result AudioFileCache::decode (juce::AudioFormatManager& formats, const Key& key)
 {
     Result result { key, nullptr, 0.0 };
-    const juce::File file (key.path);
-    const auto targetSampleRate = key.sampleRate;
-
-    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (juce::File (key)));
 
     if (reader == nullptr || reader->sampleRate <= 0 || reader->lengthInSamples <= 0)
         return result;
 
-    const auto numSourceSamples = (int) std::min (reader->lengthInSamples, (juce::int64) (std::numeric_limits<int>::max() / 4));
-    const auto numSourceChannels = (int) juce::jlimit (1u, 2u, reader->numChannels);
+    const auto numSamples = (int) std::min (reader->lengthInSamples, (juce::int64) (std::numeric_limits<int>::max() / 4));
+    const auto numChannels = (int) juce::jlimit (1u, 2u, reader->numChannels);
 
-    juce::AudioBuffer<float> source (numSourceChannels, numSourceSamples);
-    reader->read (&source, 0, numSourceSamples, 0, true, numSourceChannels > 1);
+    auto audio = std::make_shared<DecodedAudio>();
+    audio->sampleRate = reader->sampleRate;
+    audio->buffer.setSize (2, numSamples);
+    reader->read (&audio->buffer, 0, numSamples, 0, true, numChannels > 1);
+
+    if (numChannels == 1)
+        audio->buffer.copyFrom (1, 0, audio->buffer, 0, 0, numSamples);   // mono plays in both sides
 
     result.lengthSeconds = (double) reader->lengthInSamples / reader->sampleRate;
-
-    // Same rate: just make it stereo.
-    if (std::abs (reader->sampleRate - targetSampleRate) < 0.5)
-    {
-        auto audio = std::make_shared<juce::AudioBuffer<float>> (2, numSourceSamples);
-        audio->copyFrom (0, 0, source, 0, 0, numSourceSamples);
-        audio->copyFrom (1, 0, source, numSourceChannels > 1 ? 1 : 0, 0, numSourceSamples);
-        result.audio = audio;
-        return result;
-    }
-
-    // Different rate: resample once here, so the audio thread never has to.
-    const auto ratio = reader->sampleRate / targetSampleRate; // input samples per output sample
-    const auto numOut = (int) std::ceil (numSourceSamples / ratio);
-
-    // The interpolator delays its output; produce extra samples and drop the
-    // start so audio lands at exactly the same time as the original.
-    const auto latencyOut = (int) std::round (juce::WindowedSincInterpolator::getBaseLatency() / ratio);
-
-    auto audio = std::make_shared<juce::AudioBuffer<float>> (2, numOut);
-    const bool mono = numSourceChannels == 1;
-
-    // Each channel on its own thread (a mono file is resampled once and copied).
-    auto resample = [&] (int ch, float* dest)
-    {
-        juce::HeapBlock<float> temp ((size_t) (numOut + latencyOut));
-        juce::WindowedSincInterpolator interpolator;
-        interpolator.process (ratio, source.getReadPointer (juce::jmin (ch, numSourceChannels - 1)), temp.get(),
-                              numOut + latencyOut, numSourceSamples, 0);
-        juce::FloatVectorOperations::copy (dest, temp.get() + latencyOut, numOut);
-    };
-
-    if (mono)
-    {
-        resample (0, audio->getWritePointer (0));
-        audio->copyFrom (1, 0, *audio, 0, 0, numOut);
-    }
-    else
-    {
-        std::thread right ([&] { resample (1, audio->getWritePointer (1)); });
-        resample (0, audio->getWritePointer (0));
-        right.join();
-    }
-
     result.audio = audio;
     return result;
 }

@@ -30,11 +30,11 @@ public:
 
         stamp ("start");
         main.canvas.importFiles ({ file.getFullPathName() }, main.selectedTrackIndex(), 0.0);
-        stamp ("imported");
-        pump (main, 1500);
-        stamp ("after 1.5 s of events (the screen keeps updating)");
+        stamp ("imported (region on screen)");
+        main.player.rebuildNow();   // asks for the audio
         main.fileCache.waitUntilIdle (120000);
-        stamp ("audio loaded");
+        stamp ("audio loaded and playable");
+        pump (main, 500);
         main.createComponentSnapshot (main.getLocalBounds());
         stamp ("painted");
         main.showMixer();

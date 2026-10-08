@@ -9,19 +9,25 @@
 namespace riff
 {
 
-/** Decoded audio held in memory, already at the engine's sample rate, always stereo. */
-using SharedAudio = std::shared_ptr<const juce::AudioBuffer<float>>;
+/** A decoded file in memory, at the file's own sample rate, always stereo. */
+struct DecodedAudio
+{
+    juce::AudioBuffer<float> buffer;
+    double sampleRate = 44100.0;
+};
+
+using SharedAudio = std::shared_ptr<const DecodedAudio>;
 
 /**
-    Loads audio files into memory, converted to stereo at a target sample rate.
+    Loads audio files into memory as they are: no sample-rate conversion here.
+    A file at another rate than the session is converted while it plays (see
+    Resampler.h), as other DAWs do, so importing is as quick as reading the
+    file, and changing the interface's sample rate reloads nothing.
 
-    Files are kept whole in RAM, which is simple and fine for songs made of a
-    few dozen files.
-
-    In the app, files decode on a background thread (converting a song's
-    sample rate takes a while), so the screen never freezes: get() returns
-    nullptr until the file is ready, and a change message goes out when it
-    is. Tests use the synchronous mode, where get() decodes on the spot.
+    In the app, files are read on a background thread so the screen never
+    waits: get() returns nullptr until the file is ready, and a change message
+    goes out when it is. Tests use the synchronous mode, where get() reads on
+    the spot.
 
     Message thread only (the worker thread is internal).
 */
@@ -33,7 +39,7 @@ public:
     ~AudioFileCache() override;
 
     /** The decoded audio, or nullptr if it's still loading (background mode) or can't be read. */
-    SharedAudio get (const juce::File& file, double targetSampleRate);
+    SharedAudio get (const juce::File& file);
 
     /** True while any file is waiting to be decoded or being decoded. */
     bool isLoading() const;
@@ -50,19 +56,11 @@ public:
     /** Length of the file in seconds (reads only the header); 0 if unreadable. */
     double getLengthSeconds (const juce::File& file);
 
-    /** Drops entries decoded at other sample rates. */
-    void purge (double keepSampleRate);
+    /** Forgets a file (so it's read again next time), e.g. after it was re-recorded. */
+    void forget (const juce::File& file);
 
 private:
-    struct Key
-    {
-        juce::String path;
-        double sampleRate;
-        bool operator< (const Key& other) const
-        {
-            return path != other.path ? path < other.path : sampleRate < other.sampleRate;
-        }
-    };
+    using Key = juce::String;   // the file's full path
 
     struct Result { Key key; SharedAudio audio; double lengthSeconds = 0.0; };
 

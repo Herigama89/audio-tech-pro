@@ -1391,25 +1391,79 @@ TEST_CASE ("Audio files load in the background without blocking", "[cache]")
     AudioFileCache cache (formats, true);
 
     // The first request only queues the file.
-    CHECK (cache.get (wav, 48000.0) == nullptr);
+    CHECK (cache.get (wav) == nullptr);
     CHECK (cache.isLoading());
     CHECK (cache.isPending (wav));
 
     REQUIRE (cache.waitUntilIdle (30000));
     CHECK_FALSE (cache.isLoading());
 
-    // Now it's there, converted to 48 kHz (4 s = 192000 samples), level unchanged.
-    const auto audio = cache.get (wav, 48000.0);
+    // Now it's there, as it is in the file: 44.1 kHz, both sides.
+    const auto audio = cache.get (wav);
     REQUIRE (audio != nullptr);
-    CHECK (std::abs (audio->getNumSamples() - 192000) <= 2);
-    CHECK_THAT (audio->getSample (0, 96000), WithinAbs (0.5, 0.01));
-    CHECK_THAT (audio->getSample (1, 96000), WithinAbs (0.5, 0.01));
+    CHECK (audio->sampleRate == 44100.0);
+    CHECK (audio->buffer.getNumSamples() == 44100 * 4);
+    CHECK_THAT (audio->buffer.getSample (0, 1000), WithinAbs (0.5, 1e-4));
+    CHECK_THAT (audio->buffer.getSample (1, 1000), WithinAbs (0.5, 1e-4));
 
     // A file that can't be read doesn't keep retrying.
     const auto junk = temp.dir.getChildFile ("junk.wav");
     junk.replaceWithText ("not audio");
-    CHECK (cache.get (junk, 48000.0) == nullptr);
+    CHECK (cache.get (junk) == nullptr);
     REQUIRE (cache.waitUntilIdle (30000));
-    CHECK (cache.get (junk, 48000.0) == nullptr);
+    CHECK (cache.get (junk) == nullptr);
     CHECK_FALSE (cache.isLoading());
+}
+
+TEST_CASE ("A file at another sample rate plays at the right pitch and level", "[engine]")
+{
+    // A 1 kHz tone at 44.1 kHz, played in a 48 kHz session.
+    Fixture f;
+    juce::AudioBuffer<float> tone (1, 44100 * 2);
+    for (int i = 0; i < tone.getNumSamples(); ++i)
+        tone.setSample (0, i, 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 1000.0 * i / 44100.0));
+
+    const auto file = f.temp.dir.getChildFile ("tone.wav");
+    {
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::OutputStream> out = std::make_unique<juce::FileOutputStream> (file);
+        auto writer = wav.createWriterFor (out, juce::AudioFormatWriterOptions{}.withSampleRate (44100.0).withNumChannels (1).withBitsPerSample (24));
+        writer->writeFromAudioSampleBuffer (tone, 0, tone.getNumSamples());
+    }
+
+    model::addRegion (model::addTrack (f.project, "A", nullptr), file, 0.0, 2.0, nullptr);
+    f.player.setProject (f.project);
+    f.engine.play();
+    const auto out = renderLeft (f.engine, 48000);
+
+    // Compare with a perfect 1 kHz tone at 48 kHz (same level after the 0.8 master).
+    double error = 0.0, energy = 0.0;
+    for (int i = 4800; i < 43200; ++i)
+    {
+        const auto ideal = 0.5 * 0.8 * std::sin (juce::MathConstants<double>::twoPi * 1000.0 * i / 48000.0);
+        error += (out[(size_t) i] - ideal) * (out[(size_t) i] - ideal);
+        energy += ideal * ideal;
+    }
+
+    const auto snrDb = 10.0 * std::log10 (energy / juce::jmax (error, 1e-20));
+    INFO ("signal to error: " << snrDb << " dB");
+    CHECK (snrDb > 70.0);
+}
+
+TEST_CASE ("Changing the session's sample rate doesn't reload audio", "[engine]")
+{
+    Fixture f;
+    const auto wav = writeConstantWav (f.temp.dir.getChildFile ("a.wav"), 48000.0, 48000, 0.5f);
+    model::addRegion (model::addTrack (f.project, "A", nullptr), wav, 0.0, 1.0, nullptr);
+    f.player.setProject (f.project);
+
+    const auto first = f.cache.get (wav);
+    f.engine.prepare (44100.0, 512);
+    f.player.rebuildNow();
+    CHECK (f.cache.get (wav) == first);
+
+    // ...and it still plays at the right level, converted.
+    f.engine.play();
+    const auto out = renderLeft (f.engine, 20000);
+    CHECK_THAT (out[10000], WithinAbs (0.5 * 0.8, 0.005));
 }

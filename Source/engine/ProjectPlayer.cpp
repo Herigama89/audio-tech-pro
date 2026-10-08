@@ -294,10 +294,19 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         for (const auto& region : track)
         {
             PlaybackGraph::Region r;
-            r.audio        = cache.get (juce::File (region[ids::file].toString()), sampleRate);
+            r.audio        = cache.get (juce::File (region[ids::file].toString()));
             r.start        = toSamples (region[ids::start]);
-            r.sourceOffset = toSamples (region[ids::offset]);
             r.length       = toSamples (region[ids::length]);
+
+            if (r.audio != nullptr)
+            {
+                // A file at another sample rate is converted as it plays.
+                const auto fileRate = r.audio->sampleRate;
+                r.resample = std::abs (fileRate - sampleRate) > 0.5;
+                r.step = r.resample ? fileRate / sampleRate : 1.0;
+                r.sourcePosition = (double) region[ids::offset] * fileRate;
+                r.sourceOffset = (juce::int64) std::llround (r.sourcePosition);
+            }
             r.gain         = (float) (double) region.getProperty (ids::gain, 1.0);
 
             if (r.audio != nullptr && r.length > 0)
@@ -357,9 +366,6 @@ void ProjectPlayer::rebuildNow()
 
     const auto rate = engine.getSampleRate();
     engine.setGraph (buildGraph (rate));
-
-    if (std::abs (rate - builtForRate) > 0.5)
-        cache.purge (rate);
 
     builtForRate = rate;
 }

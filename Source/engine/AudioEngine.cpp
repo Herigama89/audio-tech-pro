@@ -1,4 +1,5 @@
 #include "AudioEngine.h"
+#include "Resampler.h"
 
 namespace riff
 {
@@ -973,17 +974,31 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
                 if (from >= to)
                     continue;
 
+                const auto& source = region.audio->buffer;
+                const auto destOffset = (int) (from - blockStart);
+
+                if (region.resample)
+                {
+                    // Another sample rate: convert on the fly, reading at fractional positions.
+                    const auto position = region.sourcePosition + (double) (from - region.start) * region.step;
+                    if (position >= (double) source.getNumSamples())
+                        continue;
+
+                    resampler::addResampled (source, position, region.step, region.gain, tL + destOffset, tR + destOffset, (int) (to - from));
+                    anyAudio = true;
+                    continue;
+                }
+
                 const auto sourceStart = region.sourceOffset + (from - region.start);
-                const auto available = (juce::int64) region.audio->getNumSamples() - sourceStart;
+                const auto available = (juce::int64) source.getNumSamples() - sourceStart;
 
                 if (sourceStart < 0 || available <= 0)
                     continue;
 
                 const auto count = (int) juce::jmin (to - from, available);
-                const auto destOffset = (int) (from - blockStart);
 
-                juce::FloatVectorOperations::addWithMultiply (tL + destOffset, region.audio->getReadPointer (0, (int) sourceStart), region.gain, count);
-                juce::FloatVectorOperations::addWithMultiply (tR + destOffset, region.audio->getReadPointer (1, (int) sourceStart), region.gain, count);
+                juce::FloatVectorOperations::addWithMultiply (tL + destOffset, source.getReadPointer (0, (int) sourceStart), region.gain, count);
+                juce::FloatVectorOperations::addWithMultiply (tR + destOffset, source.getReadPointer (1, (int) sourceStart), region.gain, count);
                 anyAudio = true;
             }
         }

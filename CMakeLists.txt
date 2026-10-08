@@ -43,6 +43,7 @@ set(RIFF_CORE_SOURCES
     Source/engine/MasterBusCompressor.cpp
     Source/engine/ConsoleChannel.cpp
     Source/engine/ConsolePlugins.cpp
+    Source/engine/Resampler.cpp
 )
 
 set(RIFF_DEFINITIONS
@@ -52,10 +53,10 @@ set(RIFF_DEFINITIONS
     JUCE_PLUGINHOST_VST3=1
 )
 
-# Converting a song's sample rate is heavy maths: optimise it even in Debug builds,
-# or loading a 44.1 kHz song into a 48 kHz session takes a very long time.
+# Converting sample rates while playing is heavy maths: optimise it even in Debug
+# builds, so a 44.1 kHz song plays smoothly in a 48 kHz session.
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    set_source_files_properties(Source/engine/AudioFileCache.cpp PROPERTIES COMPILE_OPTIONS "-O2")
+    set_source_files_properties(Source/engine/Resampler.cpp PROPERTIES COMPILE_OPTIONS "-O2")
 endif()
 
 # Audio Units exist only on macOS.
