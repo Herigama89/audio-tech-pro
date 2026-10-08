@@ -4,6 +4,7 @@
 #include "LevelMeter.h"
 #include "ConsoleLook.h"
 #include "BusCompConsolePanel.h"
+#include "StripParts.h"
 #include "../engine/AudioEngine.h"
 #include "../engine/ProjectPlayer.h"
 
@@ -13,9 +14,10 @@ namespace riff
 class MixerPanel;
 
 /**
-    One console channel strip, top to bottom: the console section (four-band
-    EQ, Dynamics, pan), insert slots, sends, the fader with its meter, mute
-    and solo, and a name plate in the track's colour.
+    One console channel strip, built on the strip artwork, top to bottom: the
+    EQ (HF, HMF, LMF, LF) with its IN lamp, mute and solo keys, Dynamics with
+    its IN lamp, the Dynamics and pan displays, insert slots, sends, the fader
+    with its meter and level display, and a name plate in the track's colour.
 */
 class ChannelStrip final : public juce::Component
 {
@@ -34,9 +36,11 @@ public:
 
     static constexpr int numSlots = 6;
     static constexpr int numSends = 2;
-    static constexpr int stripWidth = 100;
-    static constexpr int consoleHeight = 150;   // the EQ / Dynamics / pan section
-    static constexpr int minimumHeight = 470;
+    static constexpr int stripWidth = 74;
+    static constexpr float artScale = (float) stripWidth / strip::artWidth;
+    static constexpr int topHeight = (int) (strip::artHeight * artScale);   // the artwork's part
+    static constexpr int nameHeight = 26;
+    static constexpr int minimumHeight = topHeight + 6 + numSlots * 17 + 6 + numSends * 18 + 100 + 20 + nameHeight;
 
 private:
     bool isMaster() const { return ! track.isValid(); }
@@ -44,22 +48,26 @@ private:
     juce::ValueTree insertAt (int slot) const;
     juce::ValueTree sendAt (int index) const;
     void showSendMenu (int index);
-    void setupConsoleKnob (juce::Slider& knob, const juce::Identifier& property, look::Knob cap,
+    void setupConsoleKnob (juce::Slider& knob, const juce::Identifier& property,
                            double min, double max, const juce::String& name, const juce::String& suffix);
+    juce::Rectangle<int> fromArt (float x, float y, float w, float h) const;
+    juce::Rectangle<int> faderArea() const;
 
     MixerPanel& owner;
     juce::ValueTree project, track;
 
-    // Console section
-    juce::Slider hfKnob, hmfKnob, lmfKnob, lfKnob, dynKnob;
-    juce::TextButton consoleInButton { "IN" };
+    // On the artwork: cream, blue, cream and red EQ knobs, the grey Dynamics knob
+    strip::PointerKnob hfKnob { theme::ink }, hmfKnob, lmfKnob { theme::ink }, lfKnob, dynKnob;
+    strip::LampKey consoleInButton { "EQ in", juce::Colour (0xffff3b2a) }, dynInButton { "Dynamics in", juce::Colour (0xffff3b2a) };
+    strip::CreamKey muteButton { "M", theme::mute }, soloButton { "S", theme::solo };
+    strip::DisplaySlider panKnob;
+    juce::Label dynLabel;
 
     juce::OwnedArray<juce::TextButton> slots;
     juce::OwnedArray<juce::TextButton> sendButtons;
     juce::OwnedArray<juce::Slider> sendLevels;
-    juce::Slider panKnob, fader;
+    strip::Fader fader;
     LevelMeter meter { "" };
-    juce::TextButton muteButton { "M" }, soloButton { "S" };
     juce::Label dbLabel;
 };
 
@@ -150,7 +158,9 @@ private:
 
     juce::Label title;
     juce::TextButton closeButton { "Close" };
-    juce::Viewport viewport;
+    juce::Viewport outer;          // scrolls everything up and down when the pane is short
+    juce::Component body;
+    juce::Viewport viewport;       // scrolls the strips sideways
     juce::Component stripHolder;
     juce::OwnedArray<ChannelStrip> strips;
     std::unique_ptr<ChannelStrip> masterStrip;

@@ -23,7 +23,8 @@ public:
 
     struct Settings
     {
-        bool enabled = true;
+        bool enabled = true;            // the EQ (and the whole section) in
+        bool dynEnabled = true;         // the Dynamics in
         float hf = 0.0f, hmf = 0.0f, lmf = 0.0f, lf = 0.0f;   // dB
         float dynamics = 0.0f;                               // 0 (off) .. 10
 
@@ -33,7 +34,7 @@ public:
         bool isActive() const noexcept
         {
             return enabled && (std::abs (hf) > 0.01f || std::abs (hmf) > 0.01f || std::abs (lmf) > 0.01f
-                                || std::abs (lf) > 0.01f || dynamics > 0.01f);
+                                || std::abs (lf) > 0.01f || (dynEnabled && dynamics > 0.01f));
         }
     };
 

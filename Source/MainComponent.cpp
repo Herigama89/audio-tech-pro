@@ -282,7 +282,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     statusLabel.setText (deviceStatusText(), juce::dontSendNotification);
 
     setWantsKeyboardFocus (true);
-    setSize (1280, 760);
+    setSize (1440, 920);
     startTimerHz (30);
 
     juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<ArrangeCanvas> (&canvas)]
@@ -441,9 +441,9 @@ void MainComponent::resized()
     if (pianoRoll.isVisible())
         pianoRoll.setBounds (area.removeFromBottom (juce::jlimit (200, 360, getHeight() / 3)));
     else if (mixer.isVisible())
-        mixer.setBounds (area.removeFromBottom (juce::jmin (area.getHeight() - 120,
-                                                            juce::jlimit (ChannelStrip::minimumHeight + MixerPanel::headerHeight, 660,
-                                                                          (int) (getHeight() * 0.68)))));
+        mixer.setBounds (area.removeFromBottom (juce::jmax (200, juce::jmin (area.getHeight() - 100,
+                                                                             ChannelStrip::minimumHeight + MixerPanel::headerHeight + 40,
+                                                                             (int) (getHeight() * 0.8)))));
 
     // Meters on the right
     auto meters = area.removeFromRight (meterWidth).reduced (8, 10);

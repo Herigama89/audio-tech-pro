@@ -46,6 +46,14 @@ private:
             setContentOwned (new riff::MainComponent(), true);
             setResizable (true, true);
             setResizeLimits (1240, 480, 10000, 10000);
+
+            // Fit the screen we open on.
+            if (const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+            {
+                const auto room = display->userBounds.toNearestInt().reduced (20);
+                setSize (juce::jmin (getWidth(), room.getWidth()), juce::jmin (getHeight(), room.getHeight()));
+            }
+
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
         }

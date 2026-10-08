@@ -74,7 +74,10 @@ juce_generate_juce_header(AudioTechPro)
 juce_add_binary_data(AudioTechProData
     HEADER_NAME BinaryData.h
     NAMESPACE   BinaryData
-    SOURCES     Resources/MasterBusCompressorPanel.png)
+    SOURCES     Resources/MasterBusCompressorPanel.png
+                Resources/StripTop.png
+                Resources/StripPlate.png
+                Resources/FaderCap.png)
 
 # Everything on screen except the app's entry point (the snapshot tool reuses it).
 set(RIFF_UI_SOURCES
@@ -91,6 +94,7 @@ set(RIFF_UI_SOURCES
     Source/ui/InstrumentWindows.cpp
     Source/ui/Mixer.cpp
     Source/ui/BusCompConsolePanel.cpp
+    Source/ui/StripParts.cpp
 )
 
 target_sources(AudioTechPro PRIVATE

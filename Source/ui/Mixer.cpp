@@ -37,25 +37,62 @@ namespace
 ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     : owner (o), project (p), track (t)
 {
-    // Console section: EQ (cream, blue, cream, red caps as on the classic desks), Dynamics, IN
     if (! isMaster())
     {
-        setupConsoleKnob (hfKnob,  ids::consoleHF,  look::Knob::cream, -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "HF 8 kHz", " dB");
-        setupConsoleKnob (hmfKnob, ids::consoleHMF, look::Knob::blue,  -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "HMF 2.5 kHz", " dB");
-        setupConsoleKnob (lmfKnob, ids::consoleLMF, look::Knob::cream, -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "LMF 400 Hz", " dB");
-        setupConsoleKnob (lfKnob,  ids::consoleLF,  look::Knob::red,   -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "LF 100 Hz", " dB");
-        setupConsoleKnob (dynKnob, ids::consoleDynamics, look::Knob::black, 0.0, ConsoleChannel::maxDynamics, "Dynamics", "");
+        // EQ and Dynamics knobs on the artwork
+        setupConsoleKnob (hfKnob,  ids::consoleHF,  -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "HF 8 kHz", " dB");
+        setupConsoleKnob (hmfKnob, ids::consoleHMF, -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "HMF 2.5 kHz", " dB");
+        setupConsoleKnob (lmfKnob, ids::consoleLMF, -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "LMF 400 Hz", " dB");
+        setupConsoleKnob (lfKnob,  ids::consoleLF,  -ConsoleChannel::maxGainDb, ConsoleChannel::maxGainDb, "LF 100 Hz", " dB");
+        setupConsoleKnob (dynKnob, ids::consoleDynamics, 0.0, ConsoleChannel::maxDynamics, "Dynamics", "");
 
-        look::key (consoleInButton, look::Key::console);
-        consoleInButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xfff0b43c));
-        consoleInButton.setWantsKeyboardFocus (false);
-        consoleInButton.setTooltip ("Switch the strip's EQ and Dynamics in or out");
+        consoleInButton.setTooltip ("EQ in: switches the strip's EQ and Dynamics in or out");
         consoleInButton.onClick = [this]
         {
-            owner.getUndoManager().beginNewTransaction ("Console in");
+            owner.getUndoManager().beginNewTransaction ("EQ in");
             track.setProperty (ids::consoleIn, ! (bool) track.getProperty (ids::consoleIn, true), &owner.getUndoManager());
         };
+        dynInButton.setTooltip ("Dynamics in");
+        dynInButton.onClick = [this]
+        {
+            owner.getUndoManager().beginNewTransaction ("Dynamics in");
+            track.setProperty (ids::consoleDynIn, ! (bool) track.getProperty (ids::consoleDynIn, true), &owner.getUndoManager());
+        };
         addAndMakeVisible (consoleInButton);
+        addAndMakeVisible (dynInButton);
+
+        muteButton.setTooltip ("Mute");
+        soloButton.setTooltip ("Solo");
+        muteButton.onClick = [this]
+        {
+            owner.getUndoManager().beginNewTransaction ("Mute");
+            track.setProperty (ids::mute, ! (bool) track[ids::mute], &owner.getUndoManager());
+        };
+        soloButton.onClick = [this]
+        {
+            owner.getUndoManager().beginNewTransaction ("Solo");
+            track.setProperty (ids::solo, ! (bool) track[ids::solo], &owner.getUndoManager());
+        };
+        addAndMakeVisible (muteButton);
+        addAndMakeVisible (soloButton);
+
+        // The two displays under Dynamics: its amount, and pan (drag sideways)
+        dynLabel.setJustificationType (juce::Justification::centred);
+        dynLabel.setColour (juce::Label::textColourId, juce::Colour (0xffe9e6dc));
+        dynLabel.setInterceptsMouseClicks (false, false);
+        addAndMakeVisible (dynLabel);
+
+        panKnob.setRange (-1.0, 1.0, 0.01);
+        panKnob.textFromValueFunction = [] (double value)
+        {
+            const auto amount = juce::roundToInt (std::abs (value) * 64.0);
+            return amount == 0 ? juce::String ("C") : (value < 0 ? "L" : "R") + juce::String (amount);
+        };
+        panKnob.setDoubleClickReturnValue (true, 0.0);
+        panKnob.setTooltip ("Pan: drag left or right; double-click to centre");
+        panKnob.onDragStart = [this] { owner.getUndoManager().beginNewTransaction ("Pan"); };
+        panKnob.onValueChange = [this] { track.setProperty (ids::pan, panKnob.getValue(), &owner.getUndoManager()); };
+        addAndMakeVisible (panKnob);
     }
 
     for (int i = 0; i < numSlots; ++i)
@@ -96,29 +133,11 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         s->setVisible (hasSends());
     }
 
-    look::knob (panKnob, look::Knob::cream);
-    look::onLight (panKnob);
-    panKnob.setRange (-1.0, 1.0, 0.01);
-    panKnob.setPopupDisplayEnabled (true, true, nullptr);
-    panKnob.textFromValueFunction = [] (double value)
-    {
-        const auto amount = juce::roundToInt (std::abs (value) * 64.0);
-        return amount == 0 ? juce::String ("C") : (value < 0 ? "L" : "R") + juce::String (amount);
-    };
-    panKnob.setDoubleClickReturnValue (true, 0.0);
-    panKnob.setScrollWheelEnabled (false);
-    panKnob.onDragStart = [this] { owner.getUndoManager().beginNewTransaction ("Pan"); };
-    panKnob.onValueChange = [this] { track.setProperty (ids::pan, panKnob.getValue(), &owner.getUndoManager()); };
-    addAndMakeVisible (panKnob);
-    panKnob.setVisible (! isMaster());
-
-    fader.setSliderStyle (juce::Slider::LinearVertical);
-    look::fader (fader);
-    look::onLight (fader);
     fader.setRange (minDb, 6.0, 0.1);
     fader.setSkewFactorFromMidPoint (-12.0);
     fader.setDoubleClickReturnValue (true, 0.0);
-    fader.setScrollWheelEnabled (false);
+    fader.setPopupDisplayEnabled (true, true, nullptr);
+    fader.textFromValueFunction = [] (double db) { return db <= minDb + 0.01 ? juce::String ("-inf dB") : juce::String (db, 1) + " dB"; };
     fader.onDragStart = [this] { owner.getUndoManager().beginNewTransaction (isMaster() ? "Master volume" : "Volume"); };
     fader.onValueChange = [this]
     {
@@ -132,43 +151,19 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     addAndMakeVisible (meter);
 
     dbLabel.setJustificationType (juce::Justification::centred);
-    dbLabel.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 11.0f, juce::Font::plain));
-    dbLabel.setColour (juce::Label::textColourId, theme::lcdText);
-    dbLabel.setColour (juce::Label::backgroundColourId, theme::lcd);
-    dbLabel.setColour (juce::Label::outlineColourId, juce::Colours::black);
+    dbLabel.setFont (juce::FontOptions (11.0f));
+    dbLabel.setColour (juce::Label::textColourId, juce::Colour (0xffe9e6dc));
+    dbLabel.setInterceptsMouseClicks (false, false);
     addAndMakeVisible (dbLabel);
-
-    for (auto* b : { &muteButton, &soloButton })
-    {
-        look::key (*b, look::Key::console);
-        b->setWantsKeyboardFocus (false);
-        addAndMakeVisible (b);
-        b->setVisible (! isMaster());
-    }
-    muteButton.setColour (juce::TextButton::buttonOnColourId, theme::mute);
-    soloButton.setColour (juce::TextButton::buttonOnColourId, theme::solo);
-    muteButton.onClick = [this]
-    {
-        owner.getUndoManager().beginNewTransaction ("Mute");
-        track.setProperty (ids::mute, ! (bool) track[ids::mute], &owner.getUndoManager());
-    };
-    soloButton.onClick = [this]
-    {
-        owner.getUndoManager().beginNewTransaction ("Solo");
-        track.setProperty (ids::solo, ! (bool) track[ids::solo], &owner.getUndoManager());
-    };
 
     refresh();
 }
 
-void ChannelStrip::setupConsoleKnob (juce::Slider& knob, const juce::Identifier& property, look::Knob cap,
+void ChannelStrip::setupConsoleKnob (juce::Slider& knob, const juce::Identifier& property,
                                      double min, double max, const juce::String& name, const juce::String& suffix)
 {
-    look::knob (knob, cap);
-    look::onLight (knob);
     knob.setRange (min, max, 0.1);
     knob.setDoubleClickReturnValue (true, 0.0);
-    knob.setScrollWheelEnabled (false);
     knob.setPopupDisplayEnabled (true, true, nullptr);
     knob.setTooltip (name);
     knob.textFromValueFunction = [name, suffix] (double v)
@@ -178,6 +173,11 @@ void ChannelStrip::setupConsoleKnob (juce::Slider& knob, const juce::Identifier&
     knob.onDragStart = [this, name] { owner.getUndoManager().beginNewTransaction (name); };
     knob.onValueChange = [this, &knob, property] { track.setProperty (property, knob.getValue(), &owner.getUndoManager()); };
     addAndMakeVisible (knob);
+}
+
+juce::Rectangle<int> ChannelStrip::fromArt (float x, float y, float w, float h) const
+{
+    return juce::Rectangle<float> (x, y, w, h).transformedBy (juce::AffineTransform::scale (artScale)).getSmallestIntegerContainer();
 }
 
 juce::String ChannelStrip::getOwnerId() const
@@ -269,6 +269,8 @@ void ChannelStrip::refresh()
         lfKnob.setValue (track.getProperty (ids::consoleLF, 0.0), juce::dontSendNotification);
         dynKnob.setValue (track.getProperty (ids::consoleDynamics, 0.0), juce::dontSendNotification);
         consoleInButton.setToggleState ((bool) track.getProperty (ids::consoleIn, true), juce::dontSendNotification);
+        dynInButton.setToggleState ((bool) track.getProperty (ids::consoleDynIn, true), juce::dontSendNotification);
+        dynLabel.setText (juce::String ((double) track.getProperty (ids::consoleDynamics, 0.0), 1), juce::dontSendNotification);
     }
 
     const auto gain = isMaster() ? (double) project.getProperty (ids::masterGain, 0.8)
@@ -367,130 +369,183 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (button));
 }
 
+juce::Rectangle<int> ChannelStrip::faderArea() const
+{
+    // Below the sends, above the level display and the name plate.
+    const auto top = topHeight + 6 + numSlots * 17 + 6 + numSends * 18 + 4;
+    return { 0, top, getWidth(), getHeight() - nameHeight - 22 - top };
+}
+
 void ChannelStrip::paint (juce::Graphics& g)
 {
     const auto bounds = getLocalBounds();
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
 
-    // Console metal: light grey with a soft vertical sheen
-    g.setGradientFill (juce::ColourGradient (theme::console.brighter (0.06f), 0.0f, 0.0f,
-                                             theme::consoleShade, (float) getWidth(), 0.0f, false));
-    g.fillRect (bounds);
+    // Metal plate the whole way down, the artwork on top
+    g.setOpacity (1.0f);
+    g.drawImage (strip::plateArt(), bounds.toFloat(), juce::RectanglePlacement::stretchToFit);
+    if (! isMaster())
+        g.drawImage (strip::topArt(), juce::Rectangle<float> (0.0f, 0.0f, (float) getWidth(), (float) topHeight),
+                     juce::RectanglePlacement::stretchToFit);
 
-    // Section dividers and edges
-    g.setColour (theme::consoleDark.withAlpha (0.6f));
-    g.fillRect (0, consoleHeight + 4, getWidth(), 1);
-    g.setColour (juce::Colours::white.withAlpha (0.5f));
-    g.fillRect (0, consoleHeight + 5, getWidth(), 1);
-    g.fillRect (0, 0, 1, getHeight());
-    g.setColour (theme::consoleDark);
-    g.fillRect (getWidth() - 1, 0, 1, getHeight());
-
-    g.setColour (theme::ink);
-    if (isMaster())
+    const auto ink = theme::ink;
     {
-        g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
-        g.drawText ("STEREO", juce::Rectangle<int> (0, 40, getWidth(), 20), juce::Justification::centred, false);
-        g.drawText ("OUT", juce::Rectangle<int> (0, 60, getWidth(), 20), juce::Justification::centred, false);
-    }
-    else
-    {
-        // Engraved captions under the console knobs
-        g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
-        auto caption = [&g] (const juce::Component& knob, const juce::String& text)
+        juce::Graphics::ScopedSaveState state (g);
+        g.addTransform (juce::AffineTransform::scale (artScale));
+
+        if (isMaster())
         {
-            g.drawText (text, knob.getBounds().translated (0, knob.getHeight() - 3).withHeight (11).expanded (6, 0),
-                        juce::Justification::centred, false);
-        };
-        caption (hfKnob, "HF");
-        caption (hmfKnob, "HMF");
-        caption (lmfKnob, "LMF");
-        caption (lfKnob, "LF");
-        caption (dynKnob, "DYN");
-        caption (panKnob, "PAN");
+            g.setColour (ink);
+            g.setFont (juce::FontOptions (44.0f, juce::Font::bold));
+            g.drawText ("MASTER", juce::Rectangle<float> (0.0f, 90.0f, strip::artWidth, 50.0f), juce::Justification::centred, false);
+            g.setFont (juce::FontOptions (30.0f));
+            g.drawText ("Stereo Out", juce::Rectangle<float> (0.0f, 140.0f, strip::artWidth, 40.0f), juce::Justification::centred, false);
+        }
+        else
+        {
+            // Dots around the knobs, band names beside them, lamp captions
+            struct Spot { juce::Slider* knob; const char* band; const char* freq; };
+            const Spot spots[] = { { &hfKnob, "HF", "8k" }, { &hmfKnob, "HMF", "2.5k" }, { &lmfKnob, "LMF", "400" }, { &lfKnob, "LF", "100" },
+                                   { &dynKnob, nullptr, nullptr } };
 
-        g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
-        g.drawText ("EQ", juce::Rectangle<int> (8, 4, 30, 14), juce::Justification::centredLeft, false);
+            for (const auto& spot : spots)
+            {
+                const auto r = spot.knob->getBounds().toFloat().transformedBy (juce::AffineTransform::scale (1.0f / artScale));
+                const auto c = r.getCentre();
+                const auto dots = r.getWidth() * 0.5f + 9.0f;
+                g.setColour (ink.withAlpha (0.8f));
+                for (int d = 0; d <= 10; ++d)
+                {
+                    const auto a = juce::degreesToRadians (-140.0f + 28.0f * (float) d);
+                    g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (c + juce::Point<float> (dots * std::sin (a), -dots * std::cos (a))));
+                }
+
+                if (spot.band != nullptr)
+                {
+                    g.setColour (ink);
+                    g.setFont (juce::FontOptions (26.0f, juce::Font::bold));
+                    g.drawText (spot.band, juce::Rectangle<float> (131.0f, c.y - 22.0f, 62.0f, 26.0f), juce::Justification::centredLeft, false);
+                    g.setColour (ink.withAlpha (0.75f));
+                    g.setFont (juce::FontOptions (20.0f));
+                    g.drawText (spot.freq, juce::Rectangle<float> (131.0f, c.y + 2.0f, 62.0f, 22.0f), juce::Justification::centredLeft, false);
+                }
+            }
+
+            g.setColour (ink);
+            g.setFont (juce::FontOptions (19.0f, juce::Font::bold));
+            g.drawText ("EQ", juce::Rectangle<float> (100.0f, 38.0f, 42.0f, 24.0f), juce::Justification::centredRight, false);
+            g.drawText ("DYN", juce::Rectangle<float> (92.0f, 445.0f, 50.0f, 24.0f), juce::Justification::centredRight, false);
+
+            // Section divider and title
+            g.setColour (juce::Colours::black.withAlpha (0.55f));
+            g.fillRect (4.0f, 659.0f, strip::artWidth - 8.0f, 2.5f);
+            g.setColour (juce::Colours::white.withAlpha (0.45f));
+            g.fillRect (4.0f, 661.5f, strip::artWidth - 8.0f, 1.5f);
+            g.setColour (ink);
+            g.setFont (juce::FontOptions (34.0f));
+            g.drawText ("Dynamics", juce::Rectangle<float> (0.0f, 672.0f, strip::artWidth, 40.0f), juce::Justification::centred, false);
+        }
     }
 
-    // Name plate in the track's colour
-    const auto plate = bounds.withTop (bounds.getBottom() - 24).reduced (3, 2).toFloat();
-    const auto plateColour = isMaster() ? theme::toolbar : model::trackColour (track).withMultipliedSaturation (0.85f);
-    g.setColour (plateColour);
-    g.fillRoundedRectangle (plate, 2.0f);
-    g.setColour (juce::Colours::black.withAlpha (0.4f));
-    g.drawRoundedRectangle (plate, 2.0f, 1.0f);
+    // Fader scale between the slot and the meter
+    {
+        const auto area = faderArea();
+        g.setFont (juce::FontOptions (9.5f));
+        const bool roomy = fader.getHeight() > 170;
+        for (const auto db : { 6, 0, -5, -10, -15, -20, -30, -40, -60 })
+        {
+            if (! roomy && (db == -5 || db == -15 || db == -30))
+                continue;   // short fader: fewer numbers
+            const auto y = (float) fader.getY() + fader.yForValue (db);
+            if (y < (float) area.getY() || y > (float) area.getBottom())
+                continue;
+            g.setColour (ink.withAlpha (0.75f));
+            g.fillRect ((float) fader.getRight() - 6.0f, y - 0.5f, 5.0f, 1.0f);
+            g.drawText (juce::String (std::abs (db)),
+                        juce::Rectangle<float> ((float) fader.getRight() - 1.0f, y - 6.0f, 18.0f, 12.0f), juce::Justification::centred, false);
+        }
+    }
+
+    // Dark display boxes for the level and (on the master) where the console section would be
+    auto darkBox = [&g] (juce::Rectangle<float> r)
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.fillRoundedRectangle (r.translated (0.0f, 1.0f), 3.0f);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff48474a), r.getX(), r.getY(), juce::Colour (0xff2c2b2e), r.getX(), r.getBottom(), false));
+        g.fillRoundedRectangle (r, 3.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.6f));
+        g.drawRoundedRectangle (r.reduced (0.5f), 3.0f, 1.0f);
+    };
+    darkBox (dbLabel.getBounds().toFloat());
+
+    // Name plate in the track's colour, like a strip of console tape
+    const auto plate = bounds.toFloat().withTop ((float) (getHeight() - nameHeight)).reduced (2.0f, 2.0f);
+    const auto base = isMaster() ? juce::Colour (0xff2c3150) : model::trackColour (track);
+    const auto plateColour = base.interpolatedWith (juce::Colour (0xffd8cf8a), isMaster() ? 0.0f : 0.25f);
+    g.setGradientFill (juce::ColourGradient (plateColour.brighter (0.15f), 0.0f, plate.getY(), plateColour.darker (0.15f), 0.0f, plate.getBottom(), false));
+    g.fillRect (plate);
+    g.setColour (juce::Colours::black.withAlpha (0.45f));
+    g.drawRect (plate, 1.0f);
 
     const auto name = isMaster() ? juce::String ("Master") : track[ids::name].toString();
-    g.setColour (plateColour.getPerceivedBrightness() > 0.55f ? theme::ink : juce::Colours::white);
-    g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
-    g.drawFittedText (name, plate.reduced (3.0f, 0.0f).toNearestInt(), juce::Justification::centred, 1, 0.8f);
+    g.setColour (plateColour.getPerceivedBrightness() > 0.55f ? ink : juce::Colours::white);
+    g.setFont (juce::FontOptions (14.0f));
+    g.drawFittedText (name, plate.reduced (3.0f, 0.0f).toNearestInt(), juce::Justification::centred, 1, 0.75f);
+
+    // Edges between strips
+    g.setColour (juce::Colours::white.withAlpha (0.35f));
+    g.fillRect (0, 0, 1, getHeight());
+    g.setColour (juce::Colour (0xff1e1d1b));
+    g.fillRect (getWidth() - 2, 0, 2, getHeight());
 }
 
 void ChannelStrip::resized()
 {
-    auto area = getLocalBounds().reduced (5, 0);
-
-    // Console section
-    auto console = area.removeFromTop (consoleHeight).withTrimmedTop (4);
     if (! isMaster())
     {
-        consoleInButton.setBounds (console.getRight() - 30, console.getY(), 30, 15);
-        console.removeFromTop (16);
+        auto knobAt = [this] (juce::Slider& k, float x, float y, float r) { k.setBounds (fromArt (x - r, y - r, r * 2.0f, r * 2.0f)); };
+        knobAt (hfKnob, 79.0f, 146.0f, 41.0f);
+        knobAt (hmfKnob, 76.0f, 276.0f, 41.0f);
+        knobAt (lmfKnob, 77.0f, 391.0f, 41.0f);
+        knobAt (lfKnob, 76.0f, 529.0f, 41.0f);
+        knobAt (dynKnob, 98.0f, 762.0f, 43.0f);
 
-        auto grid = console.removeFromTop (88);
-        auto top = grid.removeFromTop (44), bottom = grid;
-        const auto knobSize = 36;
-        hfKnob.setBounds (top.removeFromLeft (top.getWidth() / 2).withSizeKeepingCentre (knobSize, knobSize).translated (0, -4));
-        hmfKnob.setBounds (top.withSizeKeepingCentre (knobSize, knobSize).translated (0, -4));
-        lmfKnob.setBounds (bottom.removeFromLeft (bottom.getWidth() / 2).withSizeKeepingCentre (knobSize, knobSize).translated (0, -4));
-        lfKnob.setBounds (bottom.withSizeKeepingCentre (knobSize, knobSize).translated (0, -4));
-
-        auto row = console.removeFromTop (44);
-        dynKnob.setBounds (row.removeFromLeft (row.getWidth() / 2).withSizeKeepingCentre (knobSize, knobSize).translated (0, -4));
-        panKnob.setBounds (row.withSizeKeepingCentre (knobSize, knobSize).translated (0, -4));
+        consoleInButton.setBounds (fromArt (145.0f, 33.0f, 34.0f, 34.0f));
+        dynInButton.setBounds (fromArt (145.0f, 440.0f, 34.0f, 34.0f));
+        muteButton.setBounds (fromArt (32.0f, 610.0f, 61.0f, 40.0f));
+        soloButton.setBounds (fromArt (101.0f, 610.0f, 60.0f, 40.0f));
+        dynLabel.setBounds (fromArt (24.0f, 816.0f, 71.0f, 44.0f));
+        dynLabel.setFont (juce::FontOptions ((float) dynLabel.getHeight() * 0.56f));
+        panKnob.setBounds (fromArt (107.0f, 816.0f, 66.0f, 44.0f));
     }
 
-    area.removeFromTop (8);
+    auto area = getLocalBounds().reduced (4, 0).withTrimmedTop (topHeight + 6);
 
     for (auto* b : slots)
     {
-        b->setBounds (area.removeFromTop (16));
+        b->setBounds (area.removeFromTop (15));
         area.removeFromTop (2);
     }
 
-    area.removeFromTop (3);
+    area.removeFromTop (4);
 
     for (int i = 0; i < numSends; ++i)
     {
-        auto row = area.removeFromTop (18);
+        auto row = area.removeFromTop (16);
         if (hasSends())
         {
-            sendLevels[i]->setBounds (row.removeFromRight (20));
-            row.removeFromRight (3);
+            sendLevels[i]->setBounds (row.removeFromRight (16));
+            row.removeFromRight (2);
             sendButtons[i]->setBounds (row);
         }
         area.removeFromTop (2);
     }
 
-    area.removeFromBottom (26);   // name plate
-
-    if (! isMaster())
-    {
-        auto buttons = area.removeFromBottom (20);
-        muteButton.setBounds (buttons.removeFromLeft (buttons.getWidth() / 2 - 2));
-        buttons.removeFromLeft (4);
-        soloButton.setBounds (buttons);
-        area.removeFromBottom (5);
-    }
-
-    area.removeFromTop (3);
-    dbLabel.setBounds (area.removeFromTop (16).withSizeKeepingCentre (52, 16));
-    area.removeFromTop (6);
-
-    auto faderArea = area.withSizeKeepingCentre (juce::jmin (area.getWidth(), 72), area.getHeight() - 4);
-    meter.setBounds (faderArea.removeFromRight (14).withTrimmedBottom (2));
-    faderArea.removeFromRight (4);
-    fader.setBounds (faderArea);
+    // Fader on the left half, meter on the right, the level display under the meter
+    const auto fa = faderArea();
+    fader.setBounds (juce::Rectangle<int> (4, fa.getY(), (int) (getWidth() * 0.5f), fa.getHeight()));
+    meter.setBounds (juce::Rectangle<int> ((int) (getWidth() * 0.73f), fa.getY() + 6, 12, fa.getHeight() - 12));
+    dbLabel.setBounds (juce::Rectangle<int> (getWidth() - 46, fa.getBottom() + 2, 40, 17));
 }
 
 //==============================================================================
@@ -675,10 +730,14 @@ MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p,
     addAndMakeVisible (closeButton);
 
     viewport.setViewedComponent (&stripHolder, false);
-    viewport.setScrollBarsShown (true, true);
-    addAndMakeVisible (viewport);
-    addAndMakeVisible (busComp);
-    addChildComponent (consolePanel);
+    viewport.setScrollBarsShown (false, true);
+    body.addAndMakeVisible (viewport);
+    body.addAndMakeVisible (busComp);
+    body.addChildComponent (consolePanel);
+
+    outer.setViewedComponent (&body, false);
+    outer.setScrollBarsShown (true, false);
+    addAndMakeVisible (outer);
 
     startTimerHz (30);
 }
@@ -733,10 +792,14 @@ void MixerPanel::rebuild()
 
     for (const auto& track : project)
         if (track.hasType (ids::TRACK))
-            stripHolder.addAndMakeVisible (strips.add (new ChannelStrip (*this, project, track)));
+        {
+            auto* strip = strips.add (new ChannelStrip (*this, project, track));
+            strip->setComponentID ("strip" + juce::String (strips.size() - 1));
+            stripHolder.addAndMakeVisible (strip);
+        }
 
     masterStrip = std::make_unique<ChannelStrip> (*this, project, juce::ValueTree());
-    addAndMakeVisible (*masterStrip);
+    body.addAndMakeVisible (*masterStrip);
     resized();
 }
 
@@ -766,7 +829,7 @@ void MixerPanel::setMasterLevels (float left, float right)
 
 void MixerPanel::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::consoleDark);
+    g.fillAll (juce::Colour (0xff2b2a2d));   // the console's frame, behind the strips
 
     const auto header = getLocalBounds().removeFromTop (headerHeight).toFloat();
     g.setGradientFill (juce::ColourGradient (theme::toolbar.brighter (0.1f), 0.0f, 0.0f, theme::toolbarDark, 0.0f, header.getBottom(), false));
@@ -783,11 +846,16 @@ void MixerPanel::resized()
     closeButton.setBounds (header.removeFromRight (60));
     title.setBounds (header);
 
-    // The master section is as tall as the strips need, and scrolls with them if the pane is short.
-    const auto stripHeight = juce::jmax (ChannelStrip::minimumHeight, area.getHeight());
+    // Everything scrolls up and down together if the pane is shorter than a strip.
+    outer.setBounds (area);
+    const auto tall = area.getHeight() < ChannelStrip::minimumHeight;
+    const auto width = area.getWidth() - (tall ? outer.getScrollBarThickness() : 0);
+    body.setSize (width, juce::jmax (area.getHeight(), ChannelStrip::minimumHeight));
+
+    auto content = body.getLocalBounds();
 
     if (masterStrip != nullptr)
-        masterStrip->setBounds (area.removeFromRight (ChannelStrip::stripWidth).withHeight (juce::jmin (stripHeight, area.getHeight())));
+        masterStrip->setBounds (content.removeFromRight (ChannelStrip::stripWidth));
 
     // Console mode shows the user's own bus compressor; otherwise the built-in one.
     const bool console = consolePanel.isAvailable();
@@ -795,15 +863,15 @@ void MixerPanel::resized()
     busComp.setVisible (! console);
 
     if (console)
-        consolePanel.setBounds (area.removeFromRight (consolePanel.widthForHeight (area.getHeight())));
+        consolePanel.setBounds (content.removeFromRight (consolePanel.widthForHeight (content.getHeight())));
     else
-        busComp.setBounds (area.removeFromRight (MasterBusCompressorPanel::panelWidth));
+        busComp.setBounds (content.removeFromRight (MasterBusCompressorPanel::panelWidth));
 
-    viewport.setBounds (area);
+    viewport.setBounds (content);
 
-    const auto wide = strips.size() * ChannelStrip::stripWidth > area.getWidth();
-    const auto height = juce::jmax (ChannelStrip::minimumHeight, area.getHeight() - (wide ? viewport.getScrollBarThickness() : 0));
-    stripHolder.setSize (juce::jmax (area.getWidth(), strips.size() * ChannelStrip::stripWidth), height);
+    const auto wide = strips.size() * ChannelStrip::stripWidth > content.getWidth();
+    const auto height = content.getHeight() - (wide ? viewport.getScrollBarThickness() : 0);
+    stripHolder.setSize (juce::jmax (content.getWidth(), strips.size() * ChannelStrip::stripWidth), height);
 
     for (int i = 0; i < strips.size(); ++i)
         strips[i]->setBounds (i * ChannelStrip::stripWidth, 0, ChannelStrip::stripWidth, stripHolder.getHeight());

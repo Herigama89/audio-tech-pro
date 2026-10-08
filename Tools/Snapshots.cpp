@@ -24,7 +24,7 @@ public:
         audioFolder.createDirectory();
 
         MainComponent main (false);
-        main.setSize (1440, 860);
+        main.setSize (1440, 920);
         buildDemoProject (main);
         main.player.rebuildNow();
 
@@ -48,6 +48,8 @@ public:
         main.showMixer();
         pump (main, 200);
         save (main, "mixer.png");
+        if (auto* firstStrip = findById (main.mixer, "strip0"))
+            save (*firstStrip, "strip.png", 3.0f);
 
         // Console mode, as it looks on a computer with UA's bus compressor installed.
         {
@@ -96,6 +98,18 @@ public:
 
 private:
     juce::File out, audioFolder;
+
+    static juce::Component* findById (juce::Component& parent, const juce::String& id)
+    {
+        for (auto* child : parent.getChildren())
+        {
+            if (child->getComponentID() == id)
+                return child;
+            if (auto* found = findById (*child, id))
+                return found;
+        }
+        return nullptr;
+    }
 
     static void pump (MainComponent& main, int ms)
     {

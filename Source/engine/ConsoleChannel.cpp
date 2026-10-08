@@ -13,6 +13,7 @@ ConsoleChannel::Settings ConsoleChannel::fromTrack (const juce::ValueTree& track
 
     Settings s;
     s.enabled  = track.getProperty (ids::consoleIn, true);
+    s.dynEnabled = track.getProperty (ids::consoleDynIn, true);
     s.hf       = gain (ids::consoleHF);
     s.hmf      = gain (ids::consoleHMF);
     s.lmf      = gain (ids::consoleLMF);
@@ -79,7 +80,7 @@ void ConsoleChannel::process (float* left, float* right, int numSamples) noexcep
     band (hfFilter, settings.hf);
 
     // Dynamics: one knob sets threshold, ratio and make-up together.
-    const auto amount = settings.dynamics;
+    const auto amount = settings.dynEnabled ? settings.dynamics : 0.0f;
     if (amount <= 0.01f)
     {
         envelopeDb = 0.0f;

@@ -87,6 +87,7 @@ namespace riff::ids
     RIFF_DECLARE_ID (consoleLMF)
     RIFF_DECLARE_ID (consoleLF)
     RIFF_DECLARE_ID (consoleDynamics)    // 0..10
+    RIFF_DECLARE_ID (consoleDynIn)       // the Dynamics switched in (default true)
 
     // The Master Bus Compressor (PROJECT properties; see MasterBusCompressor.h)
     RIFF_DECLARE_ID (busCompOn)

@@ -1362,3 +1362,21 @@ TEST_CASE ("A bus compressor plugin on the master replaces the built-in one", "[
     um.undo();
     CHECK (model::busCompPlugin (f.project)[ids::id] == insert[ids::id]);
 }
+
+TEST_CASE ("The console Dynamics has its own IN switch", "[console]")
+{
+    auto project = model::createProject();
+    auto track = model::addTrack (project, "A", nullptr);
+    track.setProperty (ids::consoleDynamics, 10.0, nullptr);
+    CHECK (ConsoleChannel::fromTrack (track).isActive());
+
+    track.setProperty (ids::consoleDynIn, false, nullptr);
+    const auto s = ConsoleChannel::fromTrack (track);
+    CHECK_FALSE (s.dynEnabled);
+    CHECK_FALSE (s.isActive());          // nothing else is turned, so the section does nothing
+
+    ConsoleChannel c;
+    c.prepare (48000.0);
+    c.setSettings (s);
+    CHECK (sinePeakThrough (c, 1000.0, 1.0f) == 1.0f);
+}

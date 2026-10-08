@@ -119,7 +119,7 @@ Edit, Track, Navigate, Record, Mix, View.
 | Latency calibration | **Audio > Calibrate recording latency...** Connect a cable from output 1 to an input and click **Measure**. The app stores the difference from the driver's reported latency and applies it to every recording. |
 | File | **File** menu: New, Open, Save, Save As, Import Audio (Cmd+I), Export Song as WAV (Cmd+E). The old shortcuts still work. |
 | Mixer | **Mixer** key or **X**. Each strip, top to bottom: the console section, 6 effect slots, 2 sends, the fader and meter, M and S, and the name plate. The Master Bus Compressor and the master strip are on the right. |
-| Console EQ and Dynamics | On every strip: HF (8 kHz shelf), HMF (2.5 kHz), LMF (400 Hz), LF (100 Hz shelf), each +/-15 dB, and DYN, a one-knob compressor (turn it up for more). **IN** switches the section in or out. Double-click a knob to reset it. It runs before the effect slots. |
+| Console strips | Each strip is built from the console artwork. Top to bottom: the EQ (HF 8 kHz shelf, HMF 2.5 kHz, LMF 400 Hz, LF 100 Hz shelf, each +/-15 dB) with its red **EQ** lamp key (switches EQ and Dynamics in or out), the **M** and **S** keys, **Dynamics** (a one-knob compressor) with its red **DYN** lamp key, then two displays: the Dynamics amount, and pan (drag it left or right; double-click to centre). Under those: 6 effect slots, 2 sends, the fader with its meter and level display, and the name plate. Double-click any knob or the fader to reset it. If the mixer is taller than its pane, scroll it up and down. |
 | Master Bus Compressor | Next to the master strip. Click **IN** to switch it on. Threshold, Make-up, Attack (0.1 to 30 ms), Release (0.1 to 1.2 s, or Auto), Ratio (2, 4 or 10:1) and Mix (for parallel compression). The meter shows how much it's turning the mix down. It sits after the master effect slots and before the master fader, and is included when you bounce. |
 | Console mode (UA bus compressor) | If Universal Audio's SSL G Bus Compressor is installed (UADx or UAD, Audio Unit or VST3, found by a plugin scan), the mixer shows a hardware-style face for it instead of the built-in compressor. Press **IN** once to load your plugin onto the master; after that **IN** switches it in and out. The knobs turn the plugin's own controls, the needle shows its gain reduction, the left LEDs show gain reduction and the right LEDs the output level. Right-click the face to open the plugin's window, choose which plugin to use, reassign any knob to a different parameter, or go back to the built-in compressor. Nothing is unlocked or included: it only works with a copy you own and have authorised. |
 | Add an effect | Click an empty slot in the mixer, then pick a built-in effect (EQ, Compressor, Delay, Reverb, Limiter) or one of your plugins under **Plugins**. Effects run top to bottom, before the fader. |
@@ -182,6 +182,7 @@ Source/
     KeyCommands.*         the Key Commands window
     Mixer.*               channel strips, the Master Bus Compressor panel
     BusCompConsolePanel.* console mode's face for the UA bus compressor
+    StripParts.*          the moving parts on the strip artwork: pointers, lamp keys, fader
     ArrangeCanvas.*       ruler, lanes, regions, waveforms, mouse editing, file drops
     TrackHeaders.*        per-track name / mute / solo / volume / pan
     TimelineState.h       zoom, scroll and selection shared by the views
@@ -192,6 +193,7 @@ Source/
 Tests/                    Catch2 unit tests
 Tools/Snapshots.cpp       renders the main views to PNG files (cmake -DRIFF_BUILD_SNAPSHOTS=ON)
 Tools/make_bus_comp_panel.py  builds Resources/MasterBusCompressorPanel.png from the design mockup
+Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderCap) from the design mockup
 ```
 
 ### How an edit reaches your speakers
