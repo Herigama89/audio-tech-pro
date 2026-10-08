@@ -41,6 +41,9 @@ namespace riff::commands
     /** The key presets the Key Commands window offers. The first is the default. */
     juce::StringArray presetNames();
 
+    /** Workflow: true if, in this DAW, stopping jumps back to where playback started. */
+    bool stopReturnsToStart (const juce::String& preset);
+
     /** The keys a preset assigns to a command (often one, sometimes none or two). */
     juce::Array<juce::KeyPress> keysFor (const juce::String& preset, juce::CommandID id);
 

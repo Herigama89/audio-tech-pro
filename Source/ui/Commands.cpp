@@ -65,7 +65,13 @@ const Info* find (juce::CommandID id)
 
 juce::StringArray presetNames()
 {
-    return { "Logic Pro" };
+    return { "Logic Pro", "Pro Tools", "Ableton Live", "FL Studio", "Cubase" };
+}
+
+bool stopReturnsToStart (const juce::String& preset)
+{
+    // Pro Tools, Live and FL Studio jump back to where playback started; Logic and Cubase stay put.
+    return preset == "Pro Tools" || preset == "Ableton Live" || preset == "FL Studio";
 }
 
 namespace
@@ -79,6 +85,9 @@ namespace
     constexpr int opt   = ModifierKeys::altModifier;
    #if JUCE_MAC
     constexpr int ctrl  = ModifierKeys::ctrlModifier;
+    constexpr int macCtrl = ModifierKeys::ctrlModifier;   // the Mac's Control key
+   #else
+    constexpr int macCtrl = ModifierKeys::altModifier;    // off the Mac, Ctrl is the command key, so Alt stands in
    #endif
 
     KeyPress key (int code, int mods = none) { return KeyPress (code, ModifierKeys (mods), 0); }
@@ -144,11 +153,172 @@ namespace
             default:                     return {};
         }
     }
+
+    // Keys every preset shares: this app's own windows.
+    juce::Array<KeyPress> appKeys (juce::CommandID id)
+    {
+        switch (id)
+        {
+            case keyCommands:   return { key ('k', opt) };
+            case audioSettings: return { key (',', cmd) };
+            default:            return {};
+        }
+    }
+
+    /** Pro Tools' default shortcuts (Mac), for the commands this app has. */
+    juce::Array<KeyPress> proToolsKeys (juce::CommandID id)
+    {
+        switch (id)
+        {
+            case newProject:             return { key ('n', cmd) };
+            case openProject:            return { key ('o', cmd) };
+            case saveProject:            return { key ('s', cmd) };
+            case saveProjectAs:          return { key ('s', shift | cmd) };
+            case importAudio:            return { key ('i', shift | cmd) };
+            case exportSong:             return { key ('b', opt | cmd) };          // Bounce Mix
+
+            case undo:                   return { key ('z', cmd) };
+            case redo:                   return { key ('z', shift | cmd) };
+            case deleteSelection:        return { key (KeyPress::backspaceKey), key (KeyPress::deleteKey) };
+            case splitAtPlayhead:        return { key ('e', cmd) };                // Separate Clip
+            case quantize:               return { key ('0', opt) };                // Quantize (Event Operations)
+
+            case newAudioTrack:          return { key ('n', shift | cmd) };        // New Tracks
+            case muteTrack:              return { key ('m', shift) };
+            case soloTrack:              return { key ('s', shift) };
+            case armTrack:               return { key ('r', shift) };
+            case selectPreviousTrack:    return { key ('p', macCtrl) };
+            case selectNextTrack:        return { key (';', macCtrl) };
+
+            case play:                   return { key (KeyPress::spaceKey) };
+            case record:                 return { key (KeyPress::F12Key), key (KeyPress::numberPad3) };
+            case goToStart:              return { key (KeyPress::returnKey) };
+            case toggleCycle:            return { key ('l', shift | cmd) };        // Loop Playback
+            case toggleMetronome:        return { key (KeyPress::numberPad7) };
+            case toggleCountIn:          return { key (KeyPress::numberPad8) };
+
+            case showMixer:              return { key ('=', cmd) };                // Mix / Edit window
+            case showPianoRoll:          return { key ('=', macCtrl) };            // MIDI Editor
+            case zoomIn:                 return { key (']', cmd) };
+            case zoomOut:                return { key ('[', cmd) };
+            default:                     return appKeys (id);
+        }
+    }
+
+    /** Ableton Live's default shortcuts (Mac). */
+    juce::Array<KeyPress> abletonKeys (juce::CommandID id)
+    {
+        switch (id)
+        {
+            case newProject:             return { key ('n', cmd) };
+            case openProject:            return { key ('o', cmd) };
+            case saveProject:            return { key ('s', cmd) };
+            case saveProjectAs:          return { key ('s', shift | cmd) };
+            case exportSong:             return { key ('r', shift | cmd) };        // Export Audio/Video
+
+            case undo:                   return { key ('z', cmd) };
+            case redo:                   return { key ('z', shift | cmd), key ('y', cmd) };
+            case deleteSelection:        return { key (KeyPress::backspaceKey), key (KeyPress::deleteKey) };
+            case splitAtPlayhead:        return { key ('e', cmd) };                // Split
+            case quantize:               return { key ('u', cmd) };
+            case setLocatorsBySelection: return { key ('l', cmd) };                // Loop Selection
+
+            case newAudioTrack:          return { key ('t', cmd) };
+            case newInstrumentTrack:     return { key ('t', shift | cmd) };        // MIDI track
+            case newAuxBus:              return { key ('t', opt | cmd) };          // Return track
+            case showAutomation:         return { key ('a') };                     // Automation Mode
+            case selectPreviousTrack:    return { key (KeyPress::upKey) };
+            case selectNextTrack:        return { key (KeyPress::downKey) };
+
+            case play:                   return { key (KeyPress::spaceKey) };
+            case record:                 return { key (KeyPress::F9Key) };         // Arrangement Record
+            case goToStart:              return { key (KeyPress::homeKey) };
+
+            case showMixer:              return { key ('m', opt | cmd) };
+            case showPianoRoll:          return { key ('l', opt | cmd) };          // Detail View
+            case zoomIn:                 return { key ('=') };
+            case zoomOut:                return { key ('-') };
+            default:                     return appKeys (id);
+        }
+    }
+
+    /** FL Studio's default shortcuts (Mac, where Ctrl is Cmd). */
+    juce::Array<KeyPress> flStudioKeys (juce::CommandID id)
+    {
+        switch (id)
+        {
+            case newProject:             return { key ('n', cmd) };
+            case openProject:            return { key ('o', cmd) };
+            case saveProject:            return { key ('s', cmd) };
+            case saveProjectAs:          return { key ('s', shift | cmd) };
+            case importAudio:            return { key ('i', cmd) };
+            case exportSong:             return { key ('r', cmd) };                // Export WAV
+
+            case undo:                   return { key ('z', cmd) };
+            case redo:                   return { key ('z', shift | cmd) };
+            case deleteSelection:        return { key (KeyPress::backspaceKey), key (KeyPress::deleteKey) };
+            case splitAtPlayhead:        return { key ('c') };                     // Slice
+            case quantize:               return { key ('q', opt) };                // Quick quantize (Cmd+Q quits on a Mac)
+            case selectPreviousTrack:    return { key (KeyPress::upKey) };
+            case selectNextTrack:        return { key (KeyPress::downKey) };
+
+            case play:                   return { key (KeyPress::spaceKey) };
+            case record:                 return { key ('r') };
+            case toggleMetronome:        return { key ('m', cmd) };
+            case toggleCountIn:          return { key ('p', cmd) };                // Countdown before recording
+
+            case showMixer:              return { key (KeyPress::F9Key) };
+            case showPianoRoll:          return { key (KeyPress::F7Key) };
+            default:                     return appKeys (id);
+        }
+    }
+
+    /** Cubase's default key commands (Mac). */
+    juce::Array<KeyPress> cubaseKeys (juce::CommandID id)
+    {
+        switch (id)
+        {
+            case newProject:             return { key ('n', cmd) };
+            case openProject:            return { key ('o', cmd) };
+            case saveProject:            return { key ('s', cmd) };
+            case saveProjectAs:          return { key ('s', shift | cmd) };
+
+            case undo:                   return { key ('z', cmd) };
+            case redo:                   return { key ('z', shift | cmd) };
+            case deleteSelection:        return { key (KeyPress::backspaceKey), key (KeyPress::deleteKey) };
+            case splitAtPlayhead:        return { key ('x', opt) };                // Split at Cursor
+            case quantize:               return { key ('q') };
+            case setLocatorsBySelection: return { key ('p') };                     // Locators to Selection
+
+            case muteTrack:              return { key ('m') };
+            case soloTrack:              return { key ('s') };
+            case armTrack:               return { key ('r') };
+            case selectPreviousTrack:    return { key (KeyPress::upKey) };
+            case selectNextTrack:        return { key (KeyPress::downKey) };
+
+            case play:                   return { key (KeyPress::spaceKey) };
+            case record:                 return { key (KeyPress::numberPadMultiply) };
+            case goToStart:              return { key (KeyPress::homeKey), key (KeyPress::numberPadDecimalPoint) };
+            case rewindBar:              return { key (KeyPress::numberPadSubtract) };
+            case forwardBar:             return { key (KeyPress::numberPadAdd) };
+            case toggleCycle:            return { key (KeyPress::numberPadDivide) };
+            case toggleMetronome:        return { key ('c') };
+
+            case showMixer:              return { key (KeyPress::F3Key) };
+            case showPianoRoll:          return { key (KeyPress::returnKey) };     // Open/Close Editor
+            case zoomIn:                 return { key ('h') };
+            case zoomOut:                return { key ('g') };
+            default:                     return appKeys (id);
+        }
+    }
 }
 
 juce::Array<juce::KeyPress> keysFor (const juce::String& preset, juce::CommandID id)
 {
-    juce::ignoreUnused (preset); // only one preset so far
+    if (preset == "Pro Tools")    return proToolsKeys (id);
+    if (preset == "Ableton Live") return abletonKeys (id);
+    if (preset == "FL Studio")    return flStudioKeys (id);
+    if (preset == "Cubase")       return cubaseKeys (id);
     return logicKeys (id);
 }
 

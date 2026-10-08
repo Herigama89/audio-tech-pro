@@ -22,12 +22,15 @@ TEST_CASE ("Every command has a name, a menu and a unique id", "[commands]")
     CHECK (commands::find (0) == nullptr);
 }
 
-TEST_CASE ("The Logic Pro preset never gives one key to two commands", "[commands]")
+TEST_CASE ("No preset gives one key to two commands", "[commands]")
 {
-    const auto preset = commands::presetNames()[0];
-    REQUIRE (preset == "Logic Pro");
+    REQUIRE (commands::presetNames() == juce::StringArray { "Logic Pro", "Pro Tools", "Ableton Live", "FL Studio", "Cubase" });
 
+    for (const auto& preset : commands::presetNames())
+    {
+    INFO (preset);
     std::map<juce::String, juce::String> owner;
+    int assigned = 0;
 
     for (const auto& c : commands::all())
         for (const auto& key : commands::keysFor (preset, c.id))
@@ -37,7 +40,55 @@ TEST_CASE ("The Logic Pro preset never gives one key to two commands", "[command
             INFO (description << " is on " << (existing != owner.end() ? existing->second : juce::String()) << " and " << c.name);
             CHECK (existing == owner.end());
             owner[description] = c.name;
+            ++assigned;
         }
+
+    CHECK (assigned >= 20);   // every preset covers the everyday commands
+    CHECK (commands::keysFor (preset, commands::play).contains (juce::KeyPress (juce::KeyPress::spaceKey)));
+    CHECK (commands::keysFor (preset, commands::keyCommands).size() == 1);   // the Key Commands window is always one key away
+    }
+}
+
+TEST_CASE ("Each preset has its DAW's signature keys and stop behaviour", "[commands]")
+{
+    const auto cmd = juce::ModifierKeys::commandModifier;
+    const auto shift = juce::ModifierKeys::shiftModifier;
+    const auto opt = juce::ModifierKeys::altModifier;
+    auto has = [] (const char* preset, juce::CommandID id, juce::KeyPress key) { return commands::keysFor (preset, id).contains (key); };
+
+    // Pro Tools
+    CHECK (has ("Pro Tools", commands::splitAtPlayhead, juce::KeyPress ('e', cmd, 0)));
+    CHECK (has ("Pro Tools", commands::showMixer, juce::KeyPress ('=', cmd, 0)));
+    CHECK (has ("Pro Tools", commands::toggleCycle, juce::KeyPress ('l', shift | cmd, 0)));
+    CHECK (has ("Pro Tools", commands::exportSong, juce::KeyPress ('b', opt | cmd, 0)));
+    CHECK (has ("Pro Tools", commands::record, juce::KeyPress (juce::KeyPress::F12Key)));
+
+    // Ableton Live
+    CHECK (has ("Ableton Live", commands::newAudioTrack, juce::KeyPress ('t', cmd, 0)));
+    CHECK (has ("Ableton Live", commands::newInstrumentTrack, juce::KeyPress ('t', shift | cmd, 0)));
+    CHECK (has ("Ableton Live", commands::record, juce::KeyPress (juce::KeyPress::F9Key)));
+    CHECK (has ("Ableton Live", commands::quantize, juce::KeyPress ('u', cmd, 0)));
+    CHECK (has ("Ableton Live", commands::exportSong, juce::KeyPress ('r', shift | cmd, 0)));
+
+    // FL Studio
+    CHECK (has ("FL Studio", commands::showMixer, juce::KeyPress (juce::KeyPress::F9Key)));
+    CHECK (has ("FL Studio", commands::showPianoRoll, juce::KeyPress (juce::KeyPress::F7Key)));
+    CHECK (has ("FL Studio", commands::record, juce::KeyPress ('r')));
+    CHECK (has ("FL Studio", commands::exportSong, juce::KeyPress ('r', cmd, 0)));
+
+    // Cubase
+    CHECK (has ("Cubase", commands::showMixer, juce::KeyPress (juce::KeyPress::F3Key)));
+    CHECK (has ("Cubase", commands::splitAtPlayhead, juce::KeyPress ('x', opt, 0)));
+    CHECK (has ("Cubase", commands::toggleMetronome, juce::KeyPress ('c')));
+    CHECK (has ("Cubase", commands::setLocatorsBySelection, juce::KeyPress ('p')));
+    CHECK (has ("Cubase", commands::record, juce::KeyPress (juce::KeyPress::numberPadMultiply)));
+
+    // Stop behaviour
+    CHECK_FALSE (commands::stopReturnsToStart ("Logic Pro"));
+    CHECK_FALSE (commands::stopReturnsToStart ("Cubase"));
+    CHECK (commands::stopReturnsToStart ("Pro Tools"));
+    CHECK (commands::stopReturnsToStart ("Ableton Live"));
+    CHECK (commands::stopReturnsToStart ("FL Studio"));
 }
 
 TEST_CASE ("The Logic Pro preset has Logic's main keys", "[commands]")

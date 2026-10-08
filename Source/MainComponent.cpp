@@ -54,10 +54,8 @@ MainComponent::MainComponent (bool openAudioDevice)
     stopButton.onClick = [this]
     {
         // Stop; pressed while stopped, go back to the start (as on a tape machine).
-        if (engine.isRecording())
-            finishRecording();
         if (engine.isPlaying())
-            engine.stop();
+            togglePlay();   // stops (and follows the stop workflow)
         else
             returnToStart();
     };
@@ -268,6 +266,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     keyPreset = appProperties.getUserSettings()->getValue ("keyPreset", commands::presetNames()[0]);
     if (! commands::presetNames().contains (keyPreset))
         keyPreset = commands::presetNames()[0];
+    stopReturnsToStart = appProperties.getUserSettings()->getBoolValue ("stopReturnsToStart", commands::stopReturnsToStart (keyPreset));
 
     commandManager.registerAllCommandsForTarget (this);
     commandManager.setFirstCommandTarget (this);
@@ -790,6 +789,13 @@ void MainComponent::togglePlay()
     if (engine.isPlaying())
     {
         engine.stop();
+
+        // Pro Tools / Live / FL Studio workflow: back to where playback started.
+        if (stopReturnsToStart)
+        {
+            engine.setPlayheadSeconds (playStartedAt);
+            canvas.repaint();
+        }
         return;
     }
 
@@ -802,6 +808,7 @@ void MainComponent::togglePlay()
             engine.setPlayheadSeconds (start);
     }
 
+    playStartedAt = engine.getPlayheadSeconds();
     engine.play();
 }
 

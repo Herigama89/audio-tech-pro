@@ -195,6 +195,8 @@ private:
     // Menus and key commands
     juce::ApplicationCommandManager commandManager;
     juce::String keyPreset;
+    bool stopReturnsToStart = false;   // workflow: jump back to where playback started when stopping
+    double playStartedAt = 0.0;
     std::unique_ptr<EditorWindow> keyCommandsWindow;
     double recordingOffsetMs = 0.0;
 

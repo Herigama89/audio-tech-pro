@@ -101,6 +101,24 @@ go back to the preset.
 | Shift+Cmd+I | Import audio | Cmd+B | Bounce (export) |
 | Option+K | Key Commands | Cmd+, | Audio settings |
 
+### Other DAWs
+
+Open **Key Commands** (Option+K), pick **Pro Tools**, **Ableton Live**, **FL Studio** or **Cubase**, and click **Use this preset**. Each gives that DAW's default keys for every command this app has, for example:
+
+| | Pro Tools | Ableton Live | FL Studio | Cubase |
+| --- | --- | --- | --- | --- |
+| Play / stop | Space | Space | Space | Space |
+| Record | F12, keypad 3 | F9 | R | keypad * |
+| Split | Cmd+E | Cmd+E | C | Option+X |
+| Mixer | Cmd+= | Option+Cmd+M | F9 | F3 |
+| Piano roll | Ctrl+= | Option+Cmd+L | F7 | Return |
+| Loop / cycle | Shift+Cmd+L | Cmd+L (to selection) | | keypad / |
+| Metronome | keypad 7 | | Cmd+M | C |
+| Bounce | Option+Cmd+B | Shift+Cmd+R | Cmd+R | |
+| Zoom in / out | Cmd+] / Cmd+[ | = / - | | H / G |
+
+A preset also sets the stop workflow: with Pro Tools, Live and FL Studio, stopping jumps back to where you pressed play; with Logic and Cubase the playhead stays where you stopped. Change it any time with **Stop returns to where playback started** in the Key Commands window. Option+K and Cmd+, open Key Commands and Audio settings in every preset.
+
 In Logic, M and S mute and solo regions; this app doesn't have region mute yet,
 so they act on the selected track. The menu bar uses Logic's menu names: File,
 Edit, Track, Navigate, Record, Mix, View.
@@ -244,7 +262,7 @@ Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderC
 
 - [x] New name, console skin, Logic Pro key commands and menus, Key Commands window
 - [x] Master Bus Compressor with a VU meter; console EQ and Dynamics on every strip
-- [ ] Key presets for other DAWs (Pro Tools, Ableton Live, FL Studio, Cubase)
+- [x] Key presets for other DAWs (Pro Tools, Ableton Live, FL Studio, Cubase), with each one's stop workflow
 - [ ] MIDI genre generator, with a built-in drum kit
 - [x] Console mode for the master: your UA SSL G Bus Compressor plugin, with a hardware-style face
 - [x] Console mode for the strips: your UA SSL 4000 E channel strip plugin driven from each strip's console section
