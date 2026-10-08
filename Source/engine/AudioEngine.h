@@ -221,7 +221,7 @@ private:
     std::atomic<double> sampleRate { 44100.0 };
 
     // --- Recording ---------------------------------------------------------------
-    juce::TimeSliceThread diskThread { "Riff recorder" };
+    juce::TimeSliceThread diskThread { "Recorder" };
     std::vector<std::unique_ptr<Take>> takes;                   // owned by the message thread
     std::array<std::atomic<Take*>, maxTakes> takeSlots {};      // what the audio thread sees
     std::atomic<bool> recording { false };

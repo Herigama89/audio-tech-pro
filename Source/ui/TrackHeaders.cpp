@@ -2,6 +2,7 @@
 #include "Theme.h"
 #include "../model/Project.h"
 #include "../engine/BuiltInEffects.h"
+#include "../AppInfo.h"
 
 namespace riff
 {
@@ -130,7 +131,7 @@ void TrackHeader::refresh()
     {
         armButton.setTooltip ("Record enable: records your MIDI keyboard");
 
-        juce::String name = "Riff Synth";
+        juce::String name = app::synthName;
         if (track[ids::instrument].toString() == "plugin")
         {
             juce::PluginDescription d;
@@ -277,7 +278,45 @@ void TrackHeader::showAutomationMenu()
         menu.addSubMenu (info->name, params);
     }
 
+    // Clearing
+    const auto owner = track[ids::id].toString();
+    const auto currentLane = model::laneFor (project, owner, current, false);
+    bool anyLanes = false;
+    for (const auto& lane : model::mixerOf (project))
+        if (lane.hasType (ids::LANE) && lane[ids::owner].toString() == owner && lane.getNumChildren() > 0)
+            anyLanes = true;
+
+    menu.addSeparator();
+    menu.addItem ("Clear " + automationParamName (project, current) + " automation",
+                  currentLane.isValid() && currentLane.getNumChildren() > 0,
+                  false,
+                  [project, owner, current, &um = undoManager]
+                  {
+                      um.beginNewTransaction ("Clear automation");
+                      model::clearAutomation (project, owner, current, &um);
+                  });
+    menu.addItem ("Clear all automation on this track", anyLanes, false,
+                  [project, owner, &um = undoManager]
+                  {
+                      um.beginNewTransaction ("Clear all automation");
+                      model::clearAllAutomation (project, owner, &um);
+                  });
+
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&automationButton));
+}
+
+juce::String TrackHeader::automationParamName (const juce::ValueTree& project, const juce::String& param)
+{
+    if (param == model::volumeParam) return "Volume";
+    if (param == model::panParam)    return "Pan";
+
+    for (const auto& insert : model::insertsOf (model::findChain (project, track[ids::id].toString())))
+        if (const auto* info = findBuiltInEffect (insert[ids::effect].toString()))
+            for (const auto& p : info->params)
+                if (model::insertParam (insert[ids::id].toString(), p.id) == param)
+                    return info->name + " " + p.name;
+
+    return "this";
 }
 
 void TrackHeader::showMenu()

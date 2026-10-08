@@ -157,6 +157,12 @@ namespace riff::model
     void movePoint (juce::ValueTree point, double time, double value, juce::UndoManager* um);
     void removePoint (juce::ValueTree point, juce::UndoManager* um);
 
+    /** Removes every point of one lane (the lane itself goes too). Returns false if there was nothing to clear. */
+    bool clearAutomation (juce::ValueTree project, const juce::String& owner, const juce::String& param, juce::UndoManager* um);
+
+    /** Removes every automation lane that belongs to `owner` (a track id). Returns the number removed. */
+    int clearAllAutomation (juce::ValueTree project, const juce::String& owner, juce::UndoManager* um);
+
     /** The lane's value at a time: linear between points, held before the first and after the last. */
     double valueAt (const juce::ValueTree& lane, double time, double fallback);
 
@@ -186,5 +192,5 @@ namespace riff::model
     bool save (const juce::ValueTree& project, const juce::File& file, juce::String& error);
     juce::ValueTree load (const juce::File& file, juce::String& error);
 
-    inline const juce::String fileExtension { ".riff" };
+    inline const juce::String fileExtension { ".atp" };      // see AppInfo.h; ".riff" files still open
 }

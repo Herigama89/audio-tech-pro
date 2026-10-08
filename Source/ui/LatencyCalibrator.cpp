@@ -1,5 +1,6 @@
 #include "LatencyCalibrator.h"
 #include "Theme.h"
+#include "../AppInfo.h"
 
 namespace riff
 {
@@ -7,7 +8,7 @@ namespace riff
 LatencyCalibrator::LatencyCalibrator (AudioEngine& e, double currentOffsetMs, std::function<void (double)> onChange)
     : engine (e), onOffsetChanged (std::move (onChange))
 {
-    intro.setText ("Riff shifts every recording earlier by the latency your audio interface reports. "
+    intro.setText (app::name + " shifts every recording earlier by the latency your audio interface reports. "
                    "Some interfaces report it slightly wrong, which makes takes land a little early or late.\n\n"
                    "To measure the real latency, connect a cable from output 1 to the input below "
                    "(or point a mic at a speaker). Turn down anything plugged into your speakers if you use a cable, "

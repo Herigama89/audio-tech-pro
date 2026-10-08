@@ -1,0 +1,160 @@
+#include "Commands.h"
+
+namespace riff::commands
+{
+
+const std::vector<Info>& all()
+{
+    static const std::vector<Info> list
+    {
+        { newProject,             "New",                        "File",      "Start a new, empty project" },
+        { openProject,            "Open...",                    "File",      "Open a saved project" },
+        { saveProject,            "Save",                       "File",      "Save the project" },
+        { saveProjectAs,          "Save As...",                 "File",      "Save the project under a new name" },
+        { importAudio,            "Import Audio File...",       "File",      "Put audio files on the selected track at the playhead" },
+        { exportSong,             "Bounce Song to WAV...",      "File",      "Export the song, or the cycle range, to a WAV file" },
+
+        { undo,                   "Undo",                       "Edit",      "Undo the last edit" },
+        { redo,                   "Redo",                       "Edit",      "Redo the edit you undid" },
+        { deleteSelection,        "Delete",                     "Edit",      "Delete the selected region" },
+        { splitAtPlayhead,        "Split at Playhead",          "Edit",      "Split regions at the playhead" },
+        { quantize,               "Quantize",                   "Edit",      "Quantize the selected MIDI region to 16th notes" },
+        { setLocatorsBySelection, "Set Locators by Selection",  "Edit",      "Set the cycle to the selected region and turn Cycle on" },
+
+        { newAudioTrack,          "New Audio Track",            "Track",     "Add an audio track" },
+        { newInstrumentTrack,     "New Software Instrument Track", "Track",  "Add an instrument (MIDI) track" },
+        { newAuxBus,              "New Aux Bus",                "Track",     "Add an aux bus for sends" },
+        { deleteTrack,            "Delete Track",               "Track",     "Delete the selected track" },
+        { muteTrack,              "Mute Track",                 "Track",     "Mute or unmute the selected track" },
+        { soloTrack,              "Solo Track",                 "Track",     "Solo or unsolo the selected track" },
+        { armTrack,               "Record Enable Track",        "Track",     "Arm or disarm the selected track for recording" },
+        { showAutomation,         "Show Automation",            "Track",     "Show or hide automation on the selected track" },
+        { selectPreviousTrack,    "Select Previous Track",      "Track",     "Select the track above" },
+        { selectNextTrack,        "Select Next Track",          "Track",     "Select the track below" },
+
+        { play,                   "Play or Stop",               "Transport", "Start or stop playback" },
+        { record,                 "Record",                     "Transport", "Record on armed tracks, or punch out" },
+        { goToStart,              "Go to Beginning",            "Transport", "Move the playhead to the start" },
+        { rewindBar,              "Rewind One Bar",             "Transport", "Move the playhead back one bar" },
+        { forwardBar,             "Forward One Bar",            "Transport", "Move the playhead forward one bar" },
+        { toggleCycle,            "Cycle",                      "Transport", "Turn Cycle (loop) on or off" },
+        { toggleMetronome,        "Metronome",                  "Transport", "Turn the click on or off" },
+        { toggleCountIn,          "Count-in",                   "Transport", "One bar of click before recording" },
+
+        { showMixer,              "Mixer",                      "View",      "Show or hide the mixer" },
+        { showPianoRoll,          "Piano Roll",                 "View",      "Open the selected MIDI region in the piano roll, or close it" },
+        { zoomIn,                 "Zoom In",                    "View",      "Zoom in horizontally" },
+        { zoomOut,                "Zoom Out",                   "View",      "Zoom out horizontally" },
+        { keyCommands,            "Key Commands...",            "View",      "Show and edit the key commands" },
+        { audioSettings,          "Audio Settings...",          "View",      "Choose the audio interface, sample rate and buffer size" },
+        { calibrateLatency,       "Calibrate Recording Latency...", "View",  "Measure the round trip of your interface" },
+        { scanPlugins,            "Plug-in Manager...",         "View",      "Scan for VST3 and Audio Unit plugins" },
+    };
+
+    return list;
+}
+
+const Info* find (juce::CommandID id)
+{
+    for (const auto& info : all())
+        if (info.id == id)
+            return &info;
+
+    return nullptr;
+}
+
+juce::StringArray presetNames()
+{
+    return { "Logic Pro" };
+}
+
+namespace
+{
+    using juce::KeyPress;
+    using juce::ModifierKeys;
+
+    constexpr int none  = 0;
+    constexpr int cmd   = ModifierKeys::commandModifier;
+    constexpr int shift = ModifierKeys::shiftModifier;
+    constexpr int opt   = ModifierKeys::altModifier;
+   #if JUCE_MAC
+    constexpr int ctrl  = ModifierKeys::ctrlModifier;
+   #endif
+
+    KeyPress key (int code, int mods = none) { return KeyPress (code, ModifierKeys (mods), 0); }
+
+    /**
+        Logic Pro's default key commands (the "U.S. English" set), for the
+        commands this app has. Where Logic uses a key for something this app
+        doesn't do yet (M and S mute and solo regions in Logic), the closest
+        command gets it.
+    */
+    juce::Array<KeyPress> logicKeys (juce::CommandID id)
+    {
+        switch (id)
+        {
+            case newProject:             return { key ('n', cmd) };
+            case openProject:            return { key ('o', cmd) };
+            case saveProject:            return { key ('s', cmd) };
+            case saveProjectAs:          return { key ('s', shift | cmd) };
+            case importAudio:            return { key ('i', shift | cmd), key ('i', cmd) };
+            case exportSong:             return { key ('b', cmd), key ('e', cmd) };
+
+            case undo:                   return { key ('z', cmd) };
+            case redo:                   return { key ('z', shift | cmd), key ('y', cmd) };
+            case deleteSelection:        return { key (KeyPress::backspaceKey), key (KeyPress::deleteKey) };
+            case splitAtPlayhead:        return { key ('t', cmd) };
+            case quantize:               return { key ('q') };
+            case setLocatorsBySelection: return { key ('u', cmd) };
+
+            case newAudioTrack:          return { key ('a', opt | cmd) };
+            case newInstrumentTrack:     return { key ('s', opt | cmd) };
+            case newAuxBus:              return {};
+            case deleteTrack:            return { key (KeyPress::backspaceKey, cmd) };
+           #if JUCE_MAC
+            case muteTrack:              return { key ('m', ctrl), key ('m') };
+            case soloTrack:              return { key ('s', ctrl), key ('s') };
+           #else
+            // Off the Mac, Ctrl is the command key (Ctrl+S saves), so only the plain keys.
+            case muteTrack:              return { key ('m') };
+            case soloTrack:              return { key ('s') };
+           #endif
+            case armTrack:               return {};
+            case showAutomation:         return { key ('a') };
+            case selectPreviousTrack:    return { key (KeyPress::upKey) };
+            case selectNextTrack:        return { key (KeyPress::downKey) };
+
+            case play:                   return { key (KeyPress::spaceKey) };
+            case record:                 return { key ('r') };
+            case goToStart:              return { key (KeyPress::returnKey) };
+            case rewindBar:              return { key (',') };
+            case forwardBar:             return { key ('.') };
+            case toggleCycle:            return { key ('c') };
+            case toggleMetronome:        return { key ('k') };
+            case toggleCountIn:          return { key ('k', shift) };
+
+            case showMixer:              return { key ('x') };
+            case showPianoRoll:          return { key ('p'), key ('e') };
+            case zoomIn:                 return { key (KeyPress::rightKey, cmd) };
+            case zoomOut:                return { key (KeyPress::leftKey, cmd) };
+            case keyCommands:            return { key ('k', opt) };
+            case audioSettings:          return { key (',', cmd) };
+            case calibrateLatency:       return {};
+            case scanPlugins:            return {};
+            default:                     return {};
+        }
+    }
+}
+
+juce::Array<juce::KeyPress> keysFor (const juce::String& preset, juce::CommandID id)
+{
+    juce::ignoreUnused (preset); // only one preset so far
+    return logicKeys (id);
+}
+
+juce::String describe (const juce::KeyPress& key)
+{
+    return key.getTextDescriptionWithIcons();
+}
+
+} // namespace riff::commands

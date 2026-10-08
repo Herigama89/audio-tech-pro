@@ -1,8 +1,11 @@
 #include "MainComponent.h"
 #include "model/Project.h"
 #include "ui/Theme.h"
+#include "AppInfo.h"
 #include "ui/LatencyCalibrator.h"
 #include "engine/BuiltInEffects.h"
+#include "ui/Commands.h"
+#include "ui/KeyCommands.h"
 
 namespace riff
 {
@@ -165,15 +168,52 @@ MainComponent::MainComponent()
 
     // --- Settings ---------------------------------------------------------------
     juce::PropertiesFile::Options settingsOptions;
-    settingsOptions.applicationName = "Riff";
+    settingsOptions.applicationName = app::name;
     settingsOptions.filenameSuffix = "settings";
     settingsOptions.osxLibrarySubFolder = "Application Support";
+    // Settings saved by the app before it was renamed come along once.
+    {
+        auto oldOptions = settingsOptions;
+        oldOptions.applicationName = "Riff";
+        const auto oldFile = oldOptions.getDefaultFile();
+        const auto newFile = settingsOptions.getDefaultFile();
+        if (! newFile.exists() && oldFile.existsAsFile())
+        {
+            newFile.getParentDirectory().createDirectory();
+            oldFile.copyFileTo (newFile);
+        }
+    }
+
     appProperties.setStorageParameters (settingsOptions);
     recordingOffsetMs = appProperties.getUserSettings()->getDoubleValue ("recordingOffsetMs", 0.0);
 
     // The list of plugins found by earlier scans.
     if (auto xml = appProperties.getUserSettings()->getXmlValue ("knownPlugins"))
         rack.getKnownPlugins().recreateFromXml (*xml);
+
+    // --- Menus and key commands -------------------------------------------------
+    keyPreset = appProperties.getUserSettings()->getValue ("keyPreset", commands::presetNames()[0]);
+    if (! commands::presetNames().contains (keyPreset))
+        keyPreset = commands::presetNames()[0];
+
+    commandManager.registerAllCommandsForTarget (this);
+    commandManager.setFirstCommandTarget (this);
+
+    if (auto xml = appProperties.getUserSettings()->getXmlValue ("keyMappings"))
+        commandManager.getKeyMappings()->restoreFromXml (*xml);
+
+    addKeyListener (commandManager.getKeyMappings());
+    commandManager.getKeyMappings()->addChangeListener (this);
+    setApplicationCommandManagerToWatch (&commandManager);
+
+   #if JUCE_MAC
+    {
+        juce::PopupMenu appMenu;
+        appMenu.addCommandItem (&commandManager, commands::audioSettings, "Settings...");
+        appMenu.addCommandItem (&commandManager, commands::keyCommands);
+        juce::MenuBarModel::setMacMainMenu (this, &appMenu);
+    }
+   #endif
 
     // --- Start ------------------------------------------------------------------
     startupError = engine.initialise();
@@ -196,6 +236,13 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+   #if JUCE_MAC
+    juce::MenuBarModel::setMacMainMenu (nullptr);
+   #endif
+    keyCommandsWindow.reset();
+    commandManager.getKeyMappings()->removeChangeListener (this);
+    removeKeyListener (commandManager.getKeyMappings());
+
     editorWindows.clear();
     scannerWindow.reset();
 
@@ -313,45 +360,17 @@ void MainComponent::scrollBarMoved (juce::ScrollBar* bar, double newRangeStart)
 }
 
 //==============================================================================
-// Keyboard
+// Zoom
 //==============================================================================
-bool MainComponent::keyPressed (const juce::KeyPress& key)
+void MainComponent::zoomHorizontally (double factor)
 {
-    const auto cmd = juce::ModifierKeys::commandModifier;
-    const auto shiftCmd = cmd | juce::ModifierKeys::shiftModifier;
-
-    if (key == juce::KeyPress::spaceKey)                               { togglePlay(); return true; }
-    if (key == juce::KeyPress ('r', 0, 0) || key == juce::KeyPress ('R', 0, 0)) { toggleRecord(); return true; }
-    if (key == juce::KeyPress ('k', 0, 0) || key == juce::KeyPress ('K', 0, 0)) { toggleMetronome(); return true; }
-    if (key == juce::KeyPress ('c', 0, 0) || key == juce::KeyPress ('C', 0, 0)) { toggleCycle(); return true; }
-    if (key == juce::KeyPress ('x', 0, 0) || key == juce::KeyPress ('X', 0, 0)) { toggleMixer(); return true; }
-    if (key == juce::KeyPress ('e', cmd, 0))                           { exportSong(); return true; }
-    if (key == juce::KeyPress::returnKey)                              { returnToStart(); return true; }
-    if (key == juce::KeyPress ('z', cmd, 0))                           { undo(); return true; }
-    if (key == juce::KeyPress ('z', shiftCmd, 0)
-        || key == juce::KeyPress ('y', cmd, 0))                        { redo(); return true; }
-    if (key == juce::KeyPress ('s', cmd, 0))                           { saveProject(); return true; }
-    if (key == juce::KeyPress ('s', shiftCmd, 0))                      { saveProjectAs(); return true; }
-    if (key == juce::KeyPress ('o', cmd, 0))                           { openProject(); return true; }
-    if (key == juce::KeyPress ('n', cmd, 0))                           { newProject(); return true; }
-    if (key == juce::KeyPress ('i', cmd, 0))                           { importAudio(); return true; }
-    if (key == juce::KeyPress ('t', cmd, 0))                           { splitAtPlayhead(); return true; }
-    if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey) { deleteSelection(); return true; }
-
-    // Cmd+Left / Cmd+Right zoom, as in Logic.
-    if (key == juce::KeyPress (juce::KeyPress::rightKey, cmd, 0) || key == juce::KeyPress (juce::KeyPress::leftKey, cmd, 0))
-    {
-        const auto factor = key.getKeyCode() == juce::KeyPress::rightKey ? 1.5 : 1.0 / 1.5;
-        const auto x = juce::jlimit (0.0f, (float) canvas.getWidth(), timeline.timeToX (engine.getPlayheadSeconds()));
-        const auto timeAtX = timeline.xToTime (x);
-        timeline.pixelsPerSecond = juce::jlimit (TimelineState::minPixelsPerSecond, TimelineState::maxPixelsPerSecond,
-                                                 timeline.pixelsPerSecond * factor);
-        timeline.scrollSeconds = juce::jmax (0.0, timeAtX - (double) x / timeline.pixelsPerSecond);
-        timeline.changed();
-        return true;
-    }
-
-    return false;
+    // Keeps the playhead (or the left edge, if it's off screen) where it is, as in Logic.
+    const auto x = juce::jlimit (0.0f, (float) canvas.getWidth(), timeline.timeToX (engine.getPlayheadSeconds()));
+    const auto timeAtX = timeline.xToTime (x);
+    timeline.pixelsPerSecond = juce::jlimit (TimelineState::minPixelsPerSecond, TimelineState::maxPixelsPerSecond,
+                                             timeline.pixelsPerSecond * factor);
+    timeline.scrollSeconds = juce::jmax (0.0, timeAtX - (double) x / timeline.pixelsPerSecond);
+    timeline.changed();
 }
 
 //==============================================================================
@@ -420,9 +439,9 @@ void MainComponent::openProject()
 {
     confirmDiscardChanges ([this]
     {
-        fileChooser = std::make_unique<juce::FileChooser> ("Open a Riff project",
+        fileChooser = std::make_unique<juce::FileChooser> ("Open a project",
                                                            juce::File::getSpecialLocation (juce::File::userMusicDirectory),
-                                                           "*" + model::fileExtension);
+                                                           "*" + app::projectExtension + ";*" + app::oldProjectExtension);
 
         fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                                   [this] (const juce::FileChooser& chooser)
@@ -478,7 +497,7 @@ void MainComponent::saveProjectAs (std::function<void()> then)
                                                         : juce::File::getSpecialLocation (juce::File::userMusicDirectory))
                                .getChildFile (project[ids::name].toString() + model::fileExtension);
 
-    fileChooser = std::make_unique<juce::FileChooser> ("Save Riff project", suggested, "*" + model::fileExtension);
+    fileChooser = std::make_unique<juce::FileChooser> ("Save project", suggested, "*" + model::fileExtension);
 
     fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
                               [this, then] (const juce::FileChooser& chooser)
@@ -518,7 +537,7 @@ void MainComponent::markDirty()
 void MainComponent::updateTitle()
 {
     if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
-        window->setName (project[ids::name].toString() + (dirty ? " (edited)" : "") + " - Riff");
+        window->setName (project[ids::name].toString() + (dirty ? " (edited)" : "") + " - " + app::name);
 }
 
 void MainComponent::refreshProjectControls()
@@ -710,8 +729,8 @@ void MainComponent::beginRecording()
         if (numInputs == 0)
         {
             showError ("No audio input",
-                       "Riff can't hear any inputs. Click Audio to choose an input device.\n\n"
-                       "On a Mac, also check System Settings > Privacy & Security > Microphone and allow Riff.");
+                       app::name + " can't hear any inputs. Click Audio to choose an input device.\n\n"
+                       "On a Mac, also check System Settings > Privacy & Security > Microphone and allow " + app::name + ".");
             return;
         }
 
@@ -851,7 +870,7 @@ juce::File MainComponent::recordingFolder() const
         return projectFile.getParentDirectory().getChildFile ("Audio Files");
 
     return juce::File::getSpecialLocation (juce::File::userMusicDirectory)
-               .getChildFile ("Riff").getChildFile ("Recordings")
+               .getChildFile (app::name).getChildFile ("Recordings")
                .getChildFile (juce::File::createLegalFileName (project[ids::name].toString()));
 }
 
@@ -886,6 +905,11 @@ void MainComponent::valueTreePropertyChanged (juce::ValueTree& tree, const juce:
     if (tree == project && (property == ids::tempo || property == ids::masterGain))
         refreshProjectControls();
 
+    // Menu ticks follow these.
+    if (property == ids::cycleEnabled || property == ids::metronome || property == ids::countIn
+        || property == ids::mute || property == ids::solo || property == ids::armed || property == ids::showAutomation)
+        commandManager.commandStatusChanged();
+
     markDirty();
 }
 
@@ -894,6 +918,11 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
     if (source == &timeline)
     {
         updateScrollBars();
+        commandManager.commandStatusChanged(); // the selection changed what the Track commands act on
+    }
+    else if (source == commandManager.getKeyMappings())
+    {
+        saveKeyMappings();
     }
     else if (source == &undoManager)
     {
@@ -901,6 +930,7 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
         redoButton.setEnabled (undoManager.canRedo());
         undoButton.setTooltip (undoManager.canUndo() ? "Undo " + undoManager.getUndoDescription() : "Nothing to undo");
         redoButton.setTooltip (undoManager.canRedo() ? "Redo " + undoManager.getRedoDescription() : "Nothing to redo");
+        commandManager.commandStatusChanged();
     }
     else
     {
@@ -1055,6 +1085,7 @@ void MainComponent::openPianoRoll (juce::ValueTree region)
     resized();
     pianoRoll.setRegion (region);
     pianoRoll.grabKeyboardFocus();
+    commandManager.commandStatusChanged();
 }
 
 void MainComponent::closePianoRoll()
@@ -1066,6 +1097,7 @@ void MainComponent::closePianoRoll()
     pianoRoll.setVisible (false);
     resized();
     canvas.grabKeyboardFocus();
+    commandManager.commandStatusChanged();
 }
 
 void MainComponent::showInstrumentMenu (juce::ValueTree track, juce::Component& target)
@@ -1077,7 +1109,7 @@ void MainComponent::showInstrumentMenu (juce::ValueTree track, juce::Component& 
     menu.addItem (isPlugin ? "Show plugin window" : "Show synth controls", [this, track] { openInstrumentWindow (track); });
     menu.addSeparator();
 
-    menu.addItem ("Riff Synth", true, ! isPlugin, [this, track]() mutable
+    menu.addItem (app::synthName, true, ! isPlugin, [this, track]() mutable
     {
         undoManager.beginNewTransaction ("Choose instrument");
         track.setProperty (ids::instrument, "synth", &undoManager);
@@ -1168,7 +1200,7 @@ void MainComponent::openInstrumentWindow (const juce::ValueTree& track)
         return;
     }
 
-    editorWindows[id] = std::make_unique<EditorWindow> (title + ": Riff Synth", new SynthPanel (track, undoManager), false, closer);
+    editorWindows[id] = std::make_unique<EditorWindow> (title + ": " + app::synthName, new SynthPanel (track, undoManager), false, closer);
 }
 
 void MainComponent::showPluginScanner()
@@ -1209,6 +1241,7 @@ void MainComponent::showMixer()
     closePianoRoll();
     mixer.setVisible (true);
     resized();
+    commandManager.commandStatusChanged();
 }
 
 void MainComponent::closeMixer()
@@ -1216,6 +1249,7 @@ void MainComponent::closeMixer()
     mixer.setVisible (false);
     resized();
     canvas.grabKeyboardFocus();
+    commandManager.commandStatusChanged();
 }
 
 void MainComponent::toggleMixer()
@@ -1250,7 +1284,7 @@ void MainComponent::showEffectMenu (const juce::String& owner, int slot, juce::V
     };
 
     juce::PopupMenu menu;
-    menu.addSectionHeader ("Riff effects");
+    menu.addSectionHeader (app::effectsName);
 
     for (const auto& info : builtInEffects())
         menu.addItem (info.name, [this, place, type = info.type]
@@ -1450,6 +1484,8 @@ void MainComponent::showAudioMenu()
     juce::PopupMenu menu;
     menu.addItem ("Audio device settings...", [this] { showAudioSettings(); });
     menu.addItem ("Calibrate recording latency...", [this] { showLatencyCalibration(); });
+    menu.addSeparator();
+    menu.addCommandItem (&commandManager, commands::keyCommands);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&settingsButton));
 }
 

@@ -23,6 +23,8 @@ namespace riff
     and status line. Owns the engine, the project tree and the undo history.
 */
 class MainComponent final : public juce::Component,
+                            public juce::ApplicationCommandTarget,
+                            public juce::MenuBarModel,
                             private juce::ValueTree::Listener,
                             private juce::ChangeListener,
                             private juce::ScrollBar::Listener,
@@ -37,8 +39,20 @@ public:
 
     void paint (juce::Graphics& g) override;
     void resized() override;
-    bool keyPressed (const juce::KeyPress& key) override;
     void parentHierarchyChanged() override { updateTitle(); }
+
+    // Commands (menus and key commands)
+    juce::ApplicationCommandTarget* getNextCommandTarget() override { return nullptr; }
+    void getAllCommands (juce::Array<juce::CommandID>& ids) override;
+    void getCommandInfo (juce::CommandID id, juce::ApplicationCommandInfo& info) override;
+    bool perform (const InvocationInfo& info) override;
+
+    // The menu bar (the Mac's main menu)
+    juce::StringArray getMenuBarNames() override;
+    juce::PopupMenu getMenuForIndex (int index, const juce::String& name) override;
+    void menuItemSelected (int, int) override {}
+
+    juce::ApplicationCommandManager& getCommandManager() { return commandManager; }
 
 private:
     // Project lifecycle
@@ -95,6 +109,20 @@ private:
     juce::String deviceStatusText() const;
     juce::String formatPosition (double seconds) const;
     void showAudioSettings();
+    void showKeyCommands();
+    void applyKeyPreset (const juce::String& preset);
+    void saveKeyMappings();
+    void zoomHorizontally (double factor);
+
+    // Commands that act on the selection
+    juce::ValueTree selectedTrack() const;
+    void toggleTrackFlag (const juce::Identifier& flag, const juce::String& undoName);
+    void selectAdjacentTrack (int delta);
+    void moveByBars (int bars);
+    void quantizeSelection();
+    void setLocatorsBySelection();
+    void togglePianoRoll();
+    void deleteSelectedTrack();
 
     // Listeners
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
@@ -144,6 +172,11 @@ private:
 
     // Settings kept between sessions (not part of any project).
     juce::ApplicationProperties appProperties;
+
+    // Menus and key commands
+    juce::ApplicationCommandManager commandManager;
+    juce::String keyPreset;
+    std::unique_ptr<EditorWindow> keyCommandsWindow;
     double recordingOffsetMs = 0.0;
 
     // The cycle as it was when recording started (it can't change while recording).

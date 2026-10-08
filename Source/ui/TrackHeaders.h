@@ -31,6 +31,7 @@ private:
     void showMenu();
     void showInputMenu();
     void showAutomationMenu();
+    juce::String automationParamName (const juce::ValueTree& project, const juce::String& param);
 
     juce::ValueTree track;
     juce::UndoManager& undoManager;

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Riff VERSION 0.2.0 LANGUAGES C CXX)
+project(AudioTechPro VERSION 0.8.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -57,21 +57,23 @@ endif()
 # ---------------------------------------------------------------------------
 # The app
 # ---------------------------------------------------------------------------
-juce_add_gui_app(Riff
-    PRODUCT_NAME "Riff"
-    COMPANY_NAME "Riff"
-    BUNDLE_ID    "com.riff.daw"
+juce_add_gui_app(AudioTechPro
+    PRODUCT_NAME "Audio Tech Pro"
+    COMPANY_NAME "Audio Tech Pro"
+    BUNDLE_ID    "com.audiotechpro.app"
     MICROPHONE_PERMISSION_ENABLED TRUE
-    MICROPHONE_PERMISSION_TEXT "Riff needs audio input access to record."
+    MICROPHONE_PERMISSION_TEXT "Audio Tech Pro needs audio input access to record."
 )
 
-juce_generate_juce_header(Riff)
+juce_generate_juce_header(AudioTechPro)
 
-target_sources(Riff PRIVATE
-    ${RIFF_CORE_SOURCES}
-    Source/Main.cpp
+# Everything on screen except the app's entry point (the snapshot tool reuses it).
+set(RIFF_UI_SOURCES
     Source/MainComponent.cpp
+    Source/MainCommands.cpp
     Source/ui/Theme.cpp
+    Source/ui/Commands.cpp
+    Source/ui/KeyCommands.cpp
     Source/ui/TrackHeaders.cpp
     Source/ui/ArrangeCanvas.cpp
     Source/ui/LatencyCalibrator.cpp
@@ -80,15 +82,21 @@ target_sources(Riff PRIVATE
     Source/ui/Mixer.cpp
 )
 
-target_include_directories(Riff PRIVATE Source)
-
-target_compile_definitions(Riff PRIVATE
-    ${RIFF_DEFINITIONS}
-    JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:Riff,JUCE_PRODUCT_NAME>"
-    JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:Riff,JUCE_VERSION>"
+target_sources(AudioTechPro PRIVATE
+    ${RIFF_CORE_SOURCES}
+    ${RIFF_UI_SOURCES}
+    Source/Main.cpp
 )
 
-target_link_libraries(Riff
+target_include_directories(AudioTechPro PRIVATE Source)
+
+target_compile_definitions(AudioTechPro PRIVATE
+    ${RIFF_DEFINITIONS}
+    JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:AudioTechPro,JUCE_PRODUCT_NAME>"
+    JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:AudioTechPro,JUCE_VERSION>"
+)
+
+target_link_libraries(AudioTechPro
     PRIVATE
         juce::juce_audio_utils
         juce::juce_audio_devices
@@ -101,7 +109,7 @@ target_link_libraries(Riff
 )
 
 # ---------------------------------------------------------------------------
-# Tests:  cmake --build build --target RiffTests && ./build/RiffTests_artefacts/Debug/RiffTests
+# Tests:  cmake --build build --target AudioTechProTests && ./build/AudioTechProTests_artefacts/Debug/AudioTechProTests
 # ---------------------------------------------------------------------------
 if(RIFF_BUILD_TESTS)
     FetchContent_Declare(Catch2
@@ -110,18 +118,20 @@ if(RIFF_BUILD_TESTS)
         GIT_SHALLOW    TRUE)
     FetchContent_MakeAvailable(Catch2)
 
-    juce_add_console_app(RiffTests PRODUCT_NAME "RiffTests")
-    juce_generate_juce_header(RiffTests)
+    juce_add_console_app(AudioTechProTests PRODUCT_NAME "AudioTechProTests")
+    juce_generate_juce_header(AudioTechProTests)
 
-    target_sources(RiffTests PRIVATE
+    target_sources(AudioTechProTests PRIVATE
         ${RIFF_CORE_SOURCES}
+        Source/ui/Commands.cpp
         Tests/TestMain.cpp
         Tests/ModelTests.cpp
         Tests/EngineTests.cpp
+        Tests/CommandTests.cpp
     )
 
-    target_include_directories(RiffTests PRIVATE Source)
-    target_compile_definitions(RiffTests PRIVATE ${RIFF_DEFINITIONS})
+    target_include_directories(AudioTechProTests PRIVATE Source)
+    target_compile_definitions(AudioTechProTests PRIVATE ${RIFF_DEFINITIONS})
 
     # Tests compare exact silence (0.0f) on purpose.
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
@@ -129,7 +139,7 @@ if(RIFF_BUILD_TESTS)
             PROPERTIES COMPILE_OPTIONS -Wno-float-equal)
     endif()
 
-    target_link_libraries(RiffTests
+    target_link_libraries(AudioTechProTests
         PRIVATE
             juce::juce_audio_devices
             juce::juce_audio_formats
@@ -145,8 +155,23 @@ endif()
 
 # Hosting Audio Units needs CoreAudioKit (for the generic plugin view).
 if(APPLE)
-    target_link_libraries(Riff PRIVATE "-framework CoreAudioKit")
-    if(TARGET RiffTests)
-        target_link_libraries(RiffTests PRIVATE "-framework CoreAudioKit")
+    target_link_libraries(AudioTechPro PRIVATE "-framework CoreAudioKit")
+    if(TARGET AudioTechProTests)
+        target_link_libraries(AudioTechProTests PRIVATE "-framework CoreAudioKit")
     endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# UI snapshots: renders the interface to PNG files without a screen (for
+# checking the look on build machines). Not part of the app.
+# ---------------------------------------------------------------------------
+option(RIFF_BUILD_SNAPSHOTS "Build the UI snapshot tool" OFF)
+
+if(RIFF_BUILD_SNAPSHOTS)
+    juce_add_console_app(Snapshots PRODUCT_NAME "Snapshots")
+    juce_generate_juce_header(Snapshots)
+    target_sources(Snapshots PRIVATE Tools/Snapshots.cpp)
+    target_include_directories(Snapshots PRIVATE Source)
+    target_compile_definitions(Snapshots PRIVATE ${RIFF_DEFINITIONS})
+    target_link_libraries(Snapshots PRIVATE juce::juce_gui_extra juce::juce_audio_utils juce::juce_dsp)
 endif()

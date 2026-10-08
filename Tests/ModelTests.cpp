@@ -176,7 +176,7 @@ TEST_CASE ("Bad project files are rejected with a message", "[model][file]")
 
     error = {};
     CHECK_FALSE (model::fromJson (R"({"hello": 1})", f, error).isValid());
-    CHECK (error.contains ("isn't a Riff project"));
+    CHECK (error.contains ("isn't an Audio Tech Pro project"));
 
     error = {};
     CHECK_FALSE (model::fromJson (R"({"riffVersion": 999, "project": {"type": "PROJECT"}})", f, error).isValid());

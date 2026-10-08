@@ -117,7 +117,7 @@ Result estimateDelay (const float* recorded, int numSamples, double sampleRate)
 
     if (agreeing < 3 || weakest < 0.5f)
     {
-        result.error = "Riff couldn't hear the test signal clearly. Check the cable from the output to the input "
+        result.error = "The app couldn't hear the test signal clearly. Check the cable from the output to the input "
                        "(or turn the speaker and mic up), make sure the input level isn't clipping, and try again.";
         result.confidence = weakest;
         return result;

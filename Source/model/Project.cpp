@@ -1,5 +1,6 @@
 #include "Project.h"
 #include "../engine/BuiltInEffects.h"
+#include "../AppInfo.h"
 #include <array>
 
 namespace riff::model
@@ -644,6 +645,32 @@ juce::ValueTree laneFor (juce::ValueTree project, const juce::String& owner, con
     return lane;
 }
 
+bool clearAutomation (juce::ValueTree project, const juce::String& owner, const juce::String& param, juce::UndoManager* um)
+{
+    auto lane = laneFor (project, owner, param, false);
+    if (! lane.isValid())
+        return false;
+
+    const bool hadPoints = lane.getNumChildren() > 0;
+    mixerOf (project).removeChild (lane, um);
+    return hadPoints;
+}
+
+int clearAllAutomation (juce::ValueTree project, const juce::String& owner, juce::UndoManager* um)
+{
+    auto mixer = mixerOf (project);
+    juce::Array<juce::ValueTree> lanes;
+
+    for (const auto& lane : mixer)
+        if (lane.hasType (ids::LANE) && lane[ids::owner].toString() == owner)
+            lanes.add (lane);
+
+    for (auto& lane : lanes)
+        mixer.removeChild (lane, um);
+
+    return lanes.size();
+}
+
 juce::ValueTree addPoint (juce::ValueTree lane, double time, double value, juce::UndoManager* um)
 {
     juce::ValueTree point { ids::POINT };
@@ -811,12 +838,12 @@ juce::ValueTree fromJson (const juce::String& json, const juce::File& projectFil
     const int version = parsed.getProperty ("riffVersion", 0);
     if (version < 1)
     {
-        error = "This isn't a Riff project file.";
+        error = "This isn't an " + app::name + " project file.";
         return {};
     }
     if (version > schemaVersion)
     {
-        error = "This project was made with a newer version of Riff.";
+        error = "This project was made with a newer version of " + app::name + ".";
         return {};
     }
 

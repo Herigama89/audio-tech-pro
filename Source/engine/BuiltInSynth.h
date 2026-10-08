@@ -32,7 +32,7 @@ public:
 
     void prepare (double sampleRate, int maxBlockSize) override;
     void render (float* left, float* right, int numSamples, const juce::MidiBuffer& midi) noexcept override;
-    juce::String getName() const override { return "Riff Synth"; }
+    juce::String getName() const override { return "Tech Synth"; }
 
     int getNumActiveVoices() const noexcept;
 
