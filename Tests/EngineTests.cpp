@@ -1034,3 +1034,280 @@ TEST_CASE ("Delay compensation lines tracks up", "[engine][pdc]")
     CHECK (peakIn (out, 0, 1150) == 0.0f);
     CHECK (peakIn (out, 1151, 4800) == 0.0f);
 }
+
+//==============================================================================
+// Master Bus Compressor
+//==============================================================================
+#include "engine/MasterBusCompressor.h"
+
+namespace
+{
+    /** Runs a sine of the given peak through the compressor; returns the output's peak over the last 0.2 s. */
+    float compressSine (MasterBusCompressor& comp, float amplitude, double seconds = 1.0)
+    {
+        constexpr double rate = 48000.0;
+        const auto total = (int) (seconds * rate);
+        std::vector<float> l (512), r (512);
+        float peak = 0.0f;
+
+        for (int done = 0; done < total; done += 512)
+        {
+            for (int i = 0; i < 512; ++i)
+            {
+                l[(size_t) i] = r[(size_t) i] = amplitude * (float) std::sin (juce::MathConstants<double>::twoPi * 200.0 * (done + i) / rate);
+            }
+
+            comp.process (l.data(), r.data(), 512);
+
+            if (done >= total - (int) (0.2 * rate))
+                for (auto s : l)
+                    peak = juce::jmax (peak, std::abs (s));
+        }
+
+        return peak;
+    }
+}
+
+TEST_CASE ("The Master Bus Compressor", "[buscomp]")
+{
+    MasterBusCompressor comp;
+    MasterBusCompressor::Settings s;
+    s.thresholdDb = -20.0f;
+    s.ratio = 1;            // 4:1
+    s.attack = 3;           // 3 ms
+    s.release = 2;          // 0.6 s
+
+    SECTION ("does nothing while it's switched off")
+    {
+        s.enabled = false;
+        comp.setSettings (s);
+        comp.prepare (48000.0);
+        CHECK_THAT (compressSine (comp, 0.9f), WithinAbs (0.9, 1e-3));
+        CHECK (comp.getGainReductionDb() == 0.0f);
+    }
+
+    SECTION ("leaves quiet signals alone")
+    {
+        s.enabled = true;
+        comp.setSettings (s);
+        comp.prepare (48000.0);
+        CHECK_THAT (compressSine (comp, 0.05f), WithinAbs (0.05, 1e-3));   // -26 dB, under the threshold
+    }
+
+    SECTION ("reduces loud signals by the ratio")
+    {
+        s.enabled = true;
+        comp.setSettings (s);
+        comp.prepare (48000.0);
+
+        // 0 dB peak, 20 dB over a -20 dB threshold at 4:1 -> about 15 dB of reduction.
+        const auto outDb = juce::Decibels::gainToDecibels (compressSine (comp, 1.0f));
+        CHECK (outDb < -12.0f);
+        CHECK (outDb > -16.5f);
+
+        const auto gr = comp.getGainReductionDb();
+        CHECK (gr > 13.0f);
+        CHECK (gr < 16.5f);
+
+        comp.meterRead();
+        CHECK (comp.getGainReductionDb() == 0.0f);
+    }
+
+    SECTION ("a higher ratio squeezes harder")
+    {
+        s.enabled = true;
+        s.ratio = 0;        // 2:1
+        comp.setSettings (s);
+        comp.prepare (48000.0);
+        const auto gentle = compressSine (comp, 1.0f);
+
+        s.ratio = 2;        // 10:1
+        comp.setSettings (s);
+        comp.prepare (48000.0);
+        const auto hard = compressSine (comp, 1.0f);
+
+        CHECK (hard < gentle * 0.5f);
+    }
+
+    SECTION ("make-up gain and the mix")
+    {
+        s.enabled = true;
+        comp.setSettings (s);
+        comp.prepare (48000.0);
+        const auto plain = compressSine (comp, 1.0f);
+
+        s.makeupDb = 6.0f;
+        comp.setSettings (s);
+        comp.prepare (48000.0);
+        CHECK_THAT (compressSine (comp, 1.0f), WithinAbs (plain * 1.9953f, 0.02));
+
+        s.makeupDb = 0.0f;
+        s.mix = 0.0f;       // fully dry
+        comp.setSettings (s);
+        comp.prepare (48000.0);
+        CHECK_THAT (compressSine (comp, 1.0f), WithinAbs (1.0, 1e-3));
+    }
+
+    SECTION ("switching it on fades in rather than clicking")
+    {
+        s.enabled = false;
+        comp.setSettings (s);
+        comp.prepare (48000.0);
+
+        s.enabled = true;
+        comp.setSettings (s);
+
+        std::vector<float> l (48, 1.0f), r (48, 1.0f);
+        comp.process (l.data(), r.data(), 48);   // 1 ms: at most 5% of the way in
+        CHECK (l[47] > 0.9f);
+    }
+}
+
+TEST_CASE ("The Master Bus Compressor is set from the project and runs on the master", "[buscomp]")
+{
+    Fixture f;
+    const auto wav = writeConstantWav (f.temp.dir.getChildFile ("loud.wav"), 48000.0, 48000, 0.9f);
+    model::addRegion (model::addTrack (f.project, "A", nullptr), wav, 0.0, 1.0, nullptr);
+
+    auto settings = MasterBusCompressor::fromProject (f.project);
+    CHECK_FALSE (settings.enabled);                 // off in a new project
+    CHECK (settings.release == MasterBusCompressor::autoRelease);
+
+    juce::UndoManager um;
+    MasterBusCompressor::setInProject (f.project, ids::busCompOn, true, &um);
+    MasterBusCompressor::setInProject (f.project, ids::busCompThreshold, -20.0, &um);
+    MasterBusCompressor::setInProject (f.project, ids::busCompRatio, 2, &um);
+    MasterBusCompressor::setInProject (f.project, ids::busCompThreshold, -99.0, nullptr);   // clamped on reading
+    settings = MasterBusCompressor::fromProject (f.project);
+    CHECK (settings.enabled);
+    CHECK (settings.ratio == 2);
+    CHECK (settings.thresholdDb == MasterBusCompressor::minThresholdDb);
+    MasterBusCompressor::setInProject (f.project, ids::busCompThreshold, -20.0, nullptr);
+
+    f.player.setProject (f.project);
+    f.player.rebuildNow();
+
+    f.engine.play();
+    const auto out = renderLeft (f.engine, 24000);
+
+    // 0.9 * 0.8 master would be 0.72 without it; 10:1 from -20 dB pulls it far down.
+    CHECK (std::abs (out[20000]) < 0.3f);
+    CHECK (f.engine.takeBusCompGainReduction() > 6.0f);
+
+    // Saved and loaded with the project.
+    const auto file = f.temp.dir.getChildFile ("comp.atp");
+    juce::String error;
+    REQUIRE (model::save (f.project, file, error));
+    const auto loaded = model::load (file, error);
+    REQUIRE (error.isEmpty());
+    CHECK (MasterBusCompressor::fromProject (loaded) == MasterBusCompressor::fromProject (f.project));
+}
+
+//==============================================================================
+// Console channel (EQ and Dynamics on each strip)
+//==============================================================================
+#include "engine/ConsoleChannel.h"
+
+namespace
+{
+    float sinePeakThrough (ConsoleChannel& c, double frequency, float amplitude = 0.25f)
+    {
+        constexpr double rate = 48000.0;
+        std::vector<float> l (480), r (480);
+        float peak = 0.0f;
+
+        for (int block = 0; block < 100; ++block)
+        {
+            for (int i = 0; i < 480; ++i)
+                l[(size_t) i] = r[(size_t) i] = amplitude * (float) std::sin (juce::MathConstants<double>::twoPi * frequency * (block * 480 + i) / rate);
+            c.process (l.data(), r.data(), 480);
+            if (block >= 80)
+                for (auto s : l)
+                    peak = juce::jmax (peak, std::abs (s));
+        }
+
+        return peak;
+    }
+}
+
+TEST_CASE ("The console EQ and Dynamics", "[console]")
+{
+    ConsoleChannel c;
+    c.prepare (48000.0);
+    ConsoleChannel::Settings s;
+
+    SECTION ("flat settings leave the sound untouched")
+    {
+        CHECK_FALSE (s.isActive());
+        c.setSettings (s);
+        CHECK (sinePeakThrough (c, 1000.0) == 0.25f);
+    }
+
+    SECTION ("each band boosts its own range")
+    {
+        s.lf = 12.0f;
+        c.setSettings (s);
+        const auto lowDb = juce::Decibels::gainToDecibels (sinePeakThrough (c, 40.0) / 0.25f);
+        const auto highDb = juce::Decibels::gainToDecibels (sinePeakThrough (c, 6000.0) / 0.25f);
+        CHECK (lowDb > 10.0f);
+        CHECK (std::abs (highDb) < 1.0f);
+
+        s.lf = 0.0f;
+        s.hmf = -12.0f;
+        c.setSettings (s);
+        c.reset();
+        CHECK (juce::Decibels::gainToDecibels (sinePeakThrough (c, ConsoleChannel::hmfFrequency) / 0.25f) < -10.0f);
+        CHECK (std::abs (juce::Decibels::gainToDecibels (sinePeakThrough (c, 100.0) / 0.25f)) < 1.5f);
+    }
+
+    SECTION ("IN off bypasses everything")
+    {
+        s.hf = 15.0f;
+        s.dynamics = 8.0f;
+        s.enabled = false;
+        CHECK_FALSE (s.isActive());
+        c.setSettings (s);
+        CHECK (sinePeakThrough (c, 1000.0) == 0.25f);   // 1 kHz: a sample lands on every peak
+    }
+
+    SECTION ("Dynamics compresses loud signals")
+    {
+        s.dynamics = 10.0f;
+        c.setSettings (s);
+        const auto loud = sinePeakThrough (c, 200.0, 1.0f);
+        CHECK (c.getGainReductionDb() > 10.0f);
+        CHECK (loud < 1.0f);
+    }
+
+    SECTION ("settings come from the track")
+    {
+        auto project = model::createProject();
+        auto track = model::addTrack (project, "A", nullptr);
+        CHECK (ConsoleChannel::fromTrack (track) == ConsoleChannel::Settings{});
+
+        track.setProperty (ids::consoleHF, 40.0, nullptr);      // clamped
+        track.setProperty (ids::consoleDynamics, 3.0, nullptr);
+        track.setProperty (ids::consoleIn, false, nullptr);
+        const auto read = ConsoleChannel::fromTrack (track);
+        CHECK (read.hf == ConsoleChannel::maxGainDb);
+        CHECK (read.dynamics == 3.0f);
+        CHECK_FALSE (read.enabled);
+    }
+}
+
+TEST_CASE ("The console section runs on a track in the engine", "[console]")
+{
+    Fixture f;
+    const auto wav = writeConstantWav (f.temp.dir.getChildFile ("dc.wav"), 48000.0, 48000, 0.5f);
+    auto track = model::addTrack (f.project, "A", nullptr);
+    model::addRegion (track, wav, 0.0, 1.0, nullptr);
+
+    // A constant (0 Hz) signal: the LF shelf lifts it by its full gain.
+    track.setProperty (ids::consoleLF, 6.0, nullptr);
+    f.player.setProject (f.project);
+    f.player.rebuildNow();
+
+    f.engine.play();
+    const auto out = renderLeft (f.engine, 24000);
+    CHECK_THAT (out[20000], WithinAbs (0.5 * 0.8 * juce::Decibels::decibelsToGain (6.0), 0.01));
+}

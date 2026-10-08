@@ -7,6 +7,7 @@
 #include "LatencyMeasure.h"
 #include "DelayLine.h"
 #include "BuiltInEffects.h"
+#include "MasterBusCompressor.h"
 #include <optional>
 
 namespace riff
@@ -143,6 +144,14 @@ public:
     /** Post-fader peak of a track since the last call (by the track's slot in the graph). */
     std::pair<float, float> takeTrackLevel (int slot) noexcept;
 
+    /** The Master Bus Compressor's largest gain reduction (dB) since the last call. */
+    float takeBusCompGainReduction() noexcept
+    {
+        const auto gr = busComp.getGainReductionDb();
+        busComp.meterRead();
+        return gr;
+    }
+
     // --- Export (message thread) ------------------------------------------------
     /**
         Renders [start, end) of the project faster than real time into a WAV
@@ -263,6 +272,8 @@ private:
     struct TrackState { juce::SmoothedValue<float> gainL, gainR; bool initialised = false; };
     std::array<TrackState, PlaybackGraph::maxTracks> trackStates;
     juce::SmoothedValue<float> masterGain;
+    MasterBusCompressor busComp;
+    std::array<ConsoleChannel, PlaybackGraph::maxTracks> consoles;
 
     // Metronome click
     int clickSamplesLeft = 0, clickLength = 0;

@@ -31,7 +31,8 @@ class MainComponent final : public juce::Component,
                             private juce::Timer
 {
 public:
-    MainComponent();
+    /** `openAudioDevice` false skips the audio device (for the snapshot tool). */
+    explicit MainComponent (bool openAudioDevice = true);
     ~MainComponent() override;
 
     /** Asks to save unsaved changes, then calls `then` unless the user cancels. */
@@ -188,6 +189,7 @@ private:
     std::map<juce::String, std::unique_ptr<EditorWindow>> editorWindows;
     std::unique_ptr<EditorWindow> scannerWindow;
 
+    friend class SnapshotTool;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };
 

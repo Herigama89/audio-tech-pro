@@ -210,6 +210,7 @@ void AudioEngine::beginOfflineRender()
     offlineSavedPlayhead = playheadSample.load();
     offlineSavedPlaying = playing.load();
     bouncing.store (true); // keeps old graphs alive until the offline render has moved on
+    busComp.reset();       // every bounce starts the same way
 }
 
 void AudioEngine::endOfflineRender()
@@ -217,6 +218,7 @@ void AudioEngine::endOfflineRender()
     JUCE_ASSERT_MESSAGE_THREAD
 
     bouncing.store (false);
+    busComp.reset();
     playing.store (offlineSavedPlaying);
     playheadSample.store (offlineSavedPlayhead);
 
@@ -568,6 +570,11 @@ void AudioEngine::prepare (double newSampleRate, int)
 
     masterGain.reset (newSampleRate, 0.03);
     masterGain.setCurrentAndTargetValue (currentGraph.load()->masterGain);
+    busComp.setSettings (currentGraph.load()->busComp);
+    busComp.prepare (newSampleRate);
+
+    for (auto& console : consoles)
+        console.prepare (newSampleRate);
 
     clickLength = (int) (newSampleRate * 0.035);
     clickSamplesLeft = 0;
@@ -686,6 +693,10 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
             // The master chain (e.g. a limiter) on the sum of every track; the click comes after it.
             for (const auto& effect : graph->masterInserts)
                 effect->process (mixL, mixR, n);
+
+            // Then the Master Bus Compressor, before the master fader.
+            busComp.setSettings (graph->busComp);
+            busComp.process (mixL, mixR, n);
 
             const bool countingIn = isRecordingNow && position < recordStart;
             if (isPlayingNow && (graph->metronome || countingIn) && ! bouncing)
@@ -963,8 +974,15 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         }
     }
 
-    // Insert effects, before the fader (as on a console). They run even on
-    // silence so delays and reverbs ring out.
+    // The strip's console EQ and Dynamics, then the insert effects, all before
+    // the fader. Inserts run even on silence so delays and reverbs ring out.
+    if (track.console.isActive())
+    {
+        auto& console = consoles[(size_t) track.slot];
+        console.setSettings (track.console);
+        console.process (tL, tR, n);
+    }
+
     for (const auto& effect : track.inserts)
         effect->process (tL, tR, n);
 

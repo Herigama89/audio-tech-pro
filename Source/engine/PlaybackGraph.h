@@ -3,6 +3,8 @@
 #include "AudioFileCache.h"
 #include "Instrument.h"
 #include "Effect.h"
+#include "MasterBusCompressor.h"
+#include "ConsoleChannel.h"
 #include <vector>
 
 namespace riff
@@ -87,6 +89,7 @@ struct PlaybackGraph
         std::shared_ptr<Instrument> instrument;   // owned by the InstrumentRack; may be null while loading
         bool receivesLiveMidi = false;            // the track your MIDI keyboard plays
 
+        ConsoleChannel::Settings console;               // the strip's EQ and Dynamics, before the inserts
         std::vector<std::shared_ptr<Effect>> inserts;   // in order, bypassed ones left out
 
         bool isBus = false;
@@ -116,6 +119,7 @@ struct PlaybackGraph
     std::vector<Track> tracks;
     std::vector<std::shared_ptr<Effect>> masterInserts;
     Curve masterVolumeAutomation;
+    MasterBusCompressor::Settings busComp;
 
     int directDelay = 0;        // extra delay for tracks heard directly, matching the slowest bus
     int playbackLatency = 0;    // how late everything is heard because of plugin latency

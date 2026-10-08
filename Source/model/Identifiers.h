@@ -6,12 +6,13 @@
     Names used in the project tree.
 
     PROJECT  { name, tempo, timeSigNumerator, masterGain, metronome,
-               cycleEnabled, cycleStart, cycleEnd, countIn }
+               cycleEnabled, cycleStart, cycleEnd, countIn, busComp* (Master Bus Compressor) }
       TRACK  { id, name, colour, volume, pan, mute, solo, armed, monitor, input, inputStereo,
                kind ("audio" | "instrument" | "bus"), showAutomation, automationParam,
                instrument ("synth" | "plugin"), pluginDescription (XML), pluginState (base64),
                synthWave, synthCutoff, synthResonance, synthAttack, synthDecay, synthSustain,
-               synthRelease, synthGain }
+               synthRelease, synthGain, consoleIn, consoleHF, consoleHMF, consoleLMF, consoleLF,
+               consoleDynamics }
         REGION { id, name, file, start, offset, length, gain, activeTake?, midi? }
           TAKE { id, name, file, offset }       (only in take folders from loop recording;
                                                  the region's file/offset mirror the active take)
@@ -78,6 +79,23 @@ namespace riff::ids
     RIFF_DECLARE_ID (cycleStart)
     RIFF_DECLARE_ID (cycleEnd)
     RIFF_DECLARE_ID (countIn)      // one bar of click before recording
+
+    // The console section of each mixer strip (TRACK properties; see ConsoleChannel.h)
+    RIFF_DECLARE_ID (consoleIn)
+    RIFF_DECLARE_ID (consoleHF)          // dB, -15..15
+    RIFF_DECLARE_ID (consoleHMF)
+    RIFF_DECLARE_ID (consoleLMF)
+    RIFF_DECLARE_ID (consoleLF)
+    RIFF_DECLARE_ID (consoleDynamics)    // 0..10
+
+    // The Master Bus Compressor (PROJECT properties; see MasterBusCompressor.h)
+    RIFF_DECLARE_ID (busCompOn)
+    RIFF_DECLARE_ID (busCompThreshold)   // dB
+    RIFF_DECLARE_ID (busCompRatio)       // index: 2, 4, 10
+    RIFF_DECLARE_ID (busCompAttack)      // index: 0.1, 0.3, 1, 3, 10, 30 ms
+    RIFF_DECLARE_ID (busCompRelease)     // index: 0.1, 0.3, 0.6, 1.2 s, Auto
+    RIFF_DECLARE_ID (busCompMakeup)      // dB
+    RIFF_DECLARE_ID (busCompMix)         // 0..1
     RIFF_DECLARE_ID (activeTake)   // index of the TAKE child that's playing
 
     // MIDI and instruments

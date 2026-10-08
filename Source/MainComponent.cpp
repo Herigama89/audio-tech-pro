@@ -19,7 +19,7 @@ namespace
     constexpr int statusHeight = 24;
 }
 
-MainComponent::MainComponent()
+MainComponent::MainComponent (bool openAudioDevice)
 {
     theme::apply (getLookAndFeel());
 
@@ -216,7 +216,10 @@ MainComponent::MainComponent()
    #endif
 
     // --- Start ------------------------------------------------------------------
-    startupError = engine.initialise();
+    if (openAudioDevice)
+        startupError = engine.initialise();
+    else
+        engine.prepare (48000.0, 512);
     setProject (model::createProject(), {});
     statusLabel.setText (deviceStatusText(), juce::dontSendNotification);
 

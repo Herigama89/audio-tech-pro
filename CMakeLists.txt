@@ -40,6 +40,8 @@ set(RIFF_CORE_SOURCES
     Source/engine/InstrumentRack.cpp
     Source/engine/BuiltInEffects.cpp
     Source/engine/EffectRack.cpp
+    Source/engine/MasterBusCompressor.cpp
+    Source/engine/ConsoleChannel.cpp
 )
 
 set(RIFF_DEFINITIONS
@@ -170,8 +172,11 @@ option(RIFF_BUILD_SNAPSHOTS "Build the UI snapshot tool" OFF)
 if(RIFF_BUILD_SNAPSHOTS)
     juce_add_console_app(Snapshots PRODUCT_NAME "Snapshots")
     juce_generate_juce_header(Snapshots)
-    target_sources(Snapshots PRIVATE Tools/Snapshots.cpp)
+    target_sources(Snapshots PRIVATE Tools/Snapshots.cpp ${RIFF_CORE_SOURCES} ${RIFF_UI_SOURCES})
     target_include_directories(Snapshots PRIVATE Source)
-    target_compile_definitions(Snapshots PRIVATE ${RIFF_DEFINITIONS})
+    target_compile_definitions(Snapshots PRIVATE ${RIFF_DEFINITIONS} JUCE_MODAL_LOOPS_PERMITTED=1)
     target_link_libraries(Snapshots PRIVATE juce::juce_gui_extra juce::juce_audio_utils juce::juce_dsp)
+    if(APPLE)
+        target_link_libraries(Snapshots PRIVATE "-framework CoreAudioKit")
+    endif()
 endif()
