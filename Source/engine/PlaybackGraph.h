@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AudioFileCache.h"
+#include "Instrument.h"
 #include <vector>
 
 namespace riff
@@ -15,8 +16,16 @@ namespace riff
 */
 struct PlaybackGraph
 {
+    /** A MIDI note at absolute timeline positions, already clipped to its region. */
+    struct Note
+    {
+        juce::int64 start = 0, end = 0;
+        juce::uint8 pitch = 60, velocity = 100;
+    };
+
     struct Region
     {
+        std::vector<Note> notes;    // MIDI regions only, sorted by start
         SharedAudio audio;          // stereo, at `sampleRate`
         juce::int64 start = 0;      // timeline position
         juce::int64 sourceOffset = 0;
@@ -31,6 +40,10 @@ struct PlaybackGraph
         float pan = 0.0f;           // -1 .. +1
         bool audible = true;        // already accounts for mute and solo
         std::vector<Region> regions;
+
+        bool isInstrument = false;
+        std::shared_ptr<Instrument> instrument;   // owned by the InstrumentRack; may be null while loading
+        bool receivesLiveMidi = false;            // the track your MIDI keyboard plays
 
         bool monitorInput = false;  // armed + monitor: pass the input through this track
         int inputChannel = 0;       // index among the device's active inputs

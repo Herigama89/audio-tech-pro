@@ -4,6 +4,7 @@
 #include <map>
 #include "AudioEngine.h"
 #include "AudioFileCache.h"
+#include "InstrumentRack.h"
 
 namespace riff
 {
@@ -20,7 +21,7 @@ class ProjectPlayer final : private juce::ValueTree::Listener,
                             private juce::ChangeListener
 {
 public:
-    ProjectPlayer (AudioEngine& engine, AudioFileCache& cache);
+    ProjectPlayer (AudioEngine& engine, AudioFileCache& cache, InstrumentRack* rack = nullptr);
     ~ProjectPlayer() override;
 
     /** Switches to a different project tree (after New / Open). */
@@ -28,6 +29,13 @@ public:
 
     /** Builds and installs a graph right now (also used by tests). */
     void rebuildNow();
+
+    /** Schedules a rebuild (e.g. when a plugin finishes loading). */
+    void requestRebuild() { triggerAsyncUpdate(); }
+
+    /** Which track your MIDI keyboard plays. */
+    void setLiveMidiTrack (const juce::String& trackId);
+    juce::String getLiveMidiTrack() const { return liveMidiTrackId; }
 
     /** Pure function: model -> graph. Exposed for tests. */
     std::unique_ptr<PlaybackGraph> buildGraph (double sampleRate);
@@ -46,6 +54,8 @@ private:
 
     AudioEngine& engine;
     AudioFileCache& cache;
+    InstrumentRack* rack;
+    juce::String liveMidiTrackId;
     juce::ValueTree project;
     double builtForRate = 0.0;
 

@@ -328,3 +328,84 @@ TEST_CASE ("Cycle range is ordered and not undoable", "[model][cycle]")
     CHECK (num (p, ids::cycleEnd) == 8.0);
     CHECK ((bool) p[ids::cycleEnabled]);
 }
+
+TEST_CASE ("MIDI regions and notes", "[model][midi]")
+{
+    juce::UndoManager um;
+    auto p = model::createProject();
+    auto audio = model::addTrack (p, "Gtr", nullptr);
+    auto inst = model::addTrack (p, "Keys", nullptr, -1, model::instrumentKind);
+
+    CHECK_FALSE (model::isInstrumentTrack (audio));
+    CHECK (model::isInstrumentTrack (inst));
+    CHECK (inst[ids::instrument].toString() == "synth");
+
+    um.beginNewTransaction();
+    auto r = model::addMidiRegion (inst, 2.0, 2.0, &um);
+    CHECK (model::isMidiRegion (r));
+
+    um.beginNewTransaction();
+    auto n1 = model::addNote (r, 60, 0.0, 0.5, 100, &um);
+    auto n2 = model::addNote (r, 64, 0.53, 0.5, 200, &um);   // velocity clamps to 127
+    CHECK ((int) n2[ids::velocity] == 127);
+    CHECK (r.getNumChildren() == 2);
+
+    um.beginNewTransaction();
+    model::moveNote (n1, 1.0, 62, &um);
+    model::resizeNote (n1, 0.25, &um);
+    CHECK ((int) n1[ids::pitch] == 62);
+    CHECK (num (n1, ids::length) == 0.25);
+    um.undo();
+    CHECK ((int) n1[ids::pitch] == 60);
+    CHECK (num (n1, ids::start) == 0.0);
+
+    um.beginNewTransaction();
+    model::quantizeNotes (r, 0.125, &um);
+    CHECK_THAT (num (n2, ids::start), WithinAbs (0.5, 1e-9));
+
+    // Splitting keeps the notes in place: the right half reads from further in.
+    auto right = model::splitRegion (r, 2.5, nullptr);
+    REQUIRE (right.isValid());
+    CHECK (model::isMidiRegion (right));
+    CHECK (num (right, ids::offset) == 0.5);
+    CHECK (right.getNumChildren() == 2);
+
+    // Notes survive a save.
+    juce::String error;
+    const juce::File f ("/tmp/riff-midi/Song.riff");
+    auto loaded = model::fromJson (model::toJson (p, f), f, error);
+    REQUIRE (loaded.isValid());
+    const auto lr = loaded.getChild (1).getChild (0);
+    CHECK (model::isMidiRegion (lr));
+    CHECK ((int) lr.getChild (0)[ids::pitch] == 60);
+}
+
+TEST_CASE ("Recorded MIDI events become notes", "[model][midi]")
+{
+    using E = model::RecordedMidiEvent;
+
+    SECTION ("pairs ons with offs, relative to the region")
+    {
+        const std::vector<E> events { { 10.0, 0x90, 60, 100 }, { 10.5, 0x90, 64, 90 },
+                                      { 11.0, 0x80, 60, 0 },   { 11.25, 0x90, 64, 0 } };
+        const auto notes = model::notesFromEvents (events, 10.0, 12.0);
+        REQUIRE (notes.size() == 2);
+        CHECK (notes[0].pitch == 60);
+        CHECK (notes[0].start == 0.0);
+        CHECK (notes[0].length == 1.0);
+        CHECK (notes[0].velocity == 100);
+        CHECK (notes[1].pitch == 64);
+        CHECK (notes[1].start == 0.5);
+        CHECK (notes[1].length == 0.75);
+    }
+
+    SECTION ("held notes end at the region end; wrapped releases too")
+    {
+        const std::vector<E> events { { 3.5, 0x90, 48, 80 },                       // never released
+                                      { 3.8, 0x90, 50, 80 }, { 2.2, 0x80, 50, 0 } }; // released after a wrap
+        const auto notes = model::notesFromEvents (events, 2.0, 4.0);
+        REQUIRE (notes.size() == 2);
+        CHECK_THAT (notes[0].length, WithinAbs (0.5, 1e-9));
+        CHECK_THAT (notes[1].length, WithinAbs (0.2, 1e-9));
+    }
+}

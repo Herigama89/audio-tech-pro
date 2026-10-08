@@ -1,12 +1,15 @@
 # Riff: a Logic-style DAW
 
-A native DAW in C++20 + JUCE 8. Phases 0 and 1 are complete. Riff has:
+A native DAW in C++20 + JUCE 8. Phases 0 and 1 are complete, and Phase 2 (MIDI and
+instruments) is well under way. Riff has:
 
 - a multitrack arrange view and an undoable project model
 - saving and opening projects
 - audio recording with measured latency compensation
 - loop (cycle) recording into takes
 - a count-in, a metronome, and input monitoring
+- instrument tracks with a built-in synth or a VST3 / Audio Unit instrument plugin
+- MIDI regions, a piano roll, and MIDI keyboard playing and recording
 
 All of it runs on a real-time engine that never blocks the audio thread.
 
@@ -59,6 +62,7 @@ The tests cover:
 - **Model:** tracks and regions, undo and redo, move, split, trim, and the JSON round trip.
 - **Engine:** sample-accurate region placement, source offsets, mute, solo, volume, pan, resampling alignment, and swapping graphs mid-playback.
 - **Recording:** WAV output, punch-in position, input monitoring, the metronome, and latency compensation.
+- **MIDI:** notes, splitting, quantize, the JSON round trip, turning recorded events into notes, synth timing and release, sample-accurate note playback, stop releasing notes, live MIDI routing, and MIDI recording positions.
 - **Cycle:** sample-exact wrap, count-in clicks, splitting loop recordings into passes, take folders (switch, split, flatten, save), and the latency estimator, including a full loopback through a simulated cable.
 
 ## Using it
@@ -73,6 +77,13 @@ The tests cover:
 | Loop recording | Turn Cycle on and record. Each pass becomes a take. Click a take folder's name bar (or right-click it, then **Takes**) to switch takes, or choose **Keep only this take**. |
 | Count-in | **Count** gives one bar of click before recording starts. |
 | Latency calibration | **Audio > Calibrate recording latency...** Connect a cable from output 1 to an input and click **Measure**. Riff stores the difference from the driver's reported latency and applies it to every recording. |
+| New instrument track | **+ Track > Instrument track (MIDI)**. It starts with Riff Synth. |
+| Choose an instrument | Click the instrument button on the track (it shows "Riff Synth" at first). Pick **Riff Synth**, or a plugin under **Plugins**. **Show plugin window** / **Show synth controls** opens its window. |
+| Find your plugins | Instrument button > **Scan for plugins...**, then **Options > Scan for new or updated VST3 / AudioUnit plug-ins**. Run this once; the list is remembered. |
+| Play with a MIDI keyboard | Plug it in; Riff listens to every MIDI input. It plays the armed instrument track, or else the selected one. |
+| Record MIDI | Arm an instrument track and press **R**. With Cycle on, each pass merges into the same region. |
+| Make a MIDI region | Double-click an empty spot on an instrument track to get a one-bar region. |
+| Piano roll | Double-click a MIDI region. Click to add a note (drag to set its length), drag a note to move it, drag its right edge to resize, Shift-click to select several, Delete to remove, **Q** to quantize to 16ths, Cmd+A to select all. Click the keyboard on the left to hear a pitch. |
 | Add audio | Drag files from Finder onto a track, or onto empty space for a new track. Or use **Import** (Cmd+I) to place them at the playhead. |
 | Play / stop | Space |
 | Go to start | Return |
@@ -139,8 +150,18 @@ Tests/                    Catch2 unit tests
 - [x] Loopback latency calibration, saved between sessions
 - [ ] Later: comping (stitching the best parts of several takes), and disk streaming for very long files
 
+## Phase 2: MIDI and instruments
+
+- [x] Instrument tracks with a built-in polyphonic synth (saw/square/triangle/sine, resonant filter, ADSR)
+- [x] MIDI regions with notes; trim, split and move like audio
+- [x] Piano roll: draw, move, resize, delete, quantize, keyboard preview
+- [x] MIDI keyboard input (hot-plug), live playing, MIDI recording (merging on cycle)
+- [x] VST3 and Audio Unit instrument hosting: scanning, plugin windows, settings saved in the project
+- [ ] CLAP hosting (needs Riff's own CLAP host layer; JUCE doesn't host CLAP)
+- [ ] Velocity editing, pitch bend and controllers in the piano roll
+- [ ] A sampler instrument (also used by the drum machine in Phase 4)
+
 ## Later phases
 
-- **Phase 2:** MIDI and instruments. Piano roll, a built-in synth and sampler, and VST3 / AU / CLAP instrument hosting.
 - **Phase 3:** Mixer and effects. Channel strips with plugin inserts (VST3 / AU / CLAP), sends, buses, automation, and delay compensation.
 - **Phase 4:** Drums and loops. Step sequencer and a tempo-synced loop browser.

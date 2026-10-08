@@ -14,9 +14,18 @@ namespace
 }
 
 //==============================================================================
-TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineState& tl, InputNamesFn names)
-    : track (t), undoManager (um), timeline (tl), inputNames (std::move (names))
+TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineState& tl,
+                          InputNamesFn names, InstrumentMenuFn menuFn)
+    : track (t), undoManager (um), timeline (tl), inputNames (std::move (names)), instrumentMenu (std::move (menuFn))
 {
+    isInstrument = model::isInstrumentTrack (track);
+
+    instrumentButton.setWantsKeyboardFocus (false);
+    instrumentButton.setTooltip ("Choose the instrument, or open its window");
+    instrumentButton.onClick = [this] { if (instrumentMenu) instrumentMenu (track, instrumentButton); };
+    instrumentButton.setColour (juce::TextButton::buttonColourId, theme::selection);
+    addChildComponent (instrumentButton);
+    instrumentButton.setVisible (isInstrument);
     nameLabel.setEditable (false, true, false);
     nameLabel.setFont (juce::FontOptions (13.0f, juce::Font::bold));
     nameLabel.onTextChange = [this]
@@ -42,6 +51,8 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
     soloButton.setTooltip ("Solo");
     monitorButton.setTooltip ("Input monitoring: hear the input through this track while it's armed.\n"
                               "Use headphones, or a mic near speakers will feed back.");
+
+    monitorButton.setVisible (! isInstrument); // instruments are monitored through their sound already
 
     // Arming and monitoring are live settings, not edits, so they skip undo.
     armButton.onClick = [this] { track.setProperty (ids::armed, ! (bool) track[ids::armed], nullptr); };
@@ -102,8 +113,24 @@ void TrackHeader::refresh()
     soloButton.setToggleState ((bool) track[ids::solo], juce::dontSendNotification);
     armButton.setToggleState ((bool) track[ids::armed], juce::dontSendNotification);
     monitorButton.setToggleState ((bool) track[ids::monitor], juce::dontSendNotification);
-    armButton.setTooltip ("Record enable. Input: " + model::inputName (track, inputNames ? inputNames() : juce::StringArray())
-                          + "\nRight-click to choose the input.");
+    if (isInstrument)
+    {
+        armButton.setTooltip ("Record enable: records your MIDI keyboard");
+
+        juce::String name = "Riff Synth";
+        if (track[ids::instrument].toString() == "plugin")
+        {
+            juce::PluginDescription d;
+            if (auto xml = juce::parseXML (track[ids::pluginDescription].toString()); xml != nullptr && d.loadFromXml (*xml))
+                name = d.name;
+        }
+        instrumentButton.setButtonText (name);
+    }
+    else
+    {
+        armButton.setTooltip ("Record enable. Input: " + model::inputName (track, inputNames ? inputNames() : juce::StringArray())
+                              + "\nRight-click to choose the input.");
+    }
     volumeSlider.setValue (gainToDb (track.getProperty (ids::volume, 1.0)), juce::dontSendNotification);
     panKnob.setValue (track.getProperty (ids::pan, 0.0), juce::dontSendNotification);
     repaint();
@@ -129,6 +156,8 @@ void TrackHeader::resized()
     auto top = area.removeFromTop (38).withTrimmedTop (8).withHeight (22);
     for (auto* b : { &monitorButton, &armButton, &soloButton, &muteButton })
     {
+        if (! b->isVisible() && b == &monitorButton)
+            continue;
         b->setBounds (top.removeFromRight (22));
         top.removeFromRight (3);
     }
@@ -138,6 +167,13 @@ void TrackHeader::resized()
     auto bottom = area.withHeight (30);
     panKnob.setBounds (bottom.removeFromRight (30));
     bottom.removeFromRight (6);
+
+    if (isInstrument)
+    {
+        instrumentButton.setBounds (bottom.removeFromLeft (96).reduced (0, 4));
+        bottom.removeFromLeft (6);
+    }
+
     volumeSlider.setBounds (bottom);
 }
 
@@ -147,7 +183,7 @@ void TrackHeader::mouseDown (const juce::MouseEvent& e)
 
     if (e.mods.isPopupMenu())
     {
-        if (e.eventComponent == &armButton)
+        if (e.eventComponent == &armButton && ! isInstrument)
             showInputMenu();
         else
             showMenu();
@@ -195,7 +231,8 @@ void TrackHeader::showInputMenu()
 void TrackHeader::showMenu()
 {
     juce::PopupMenu menu;
-    menu.addItem ("Choose input...", [this] { showInputMenu(); });
+    if (! isInstrument)
+        menu.addItem ("Choose input...", [this] { showInputMenu(); });
     menu.addItem ("Rename", [this] { nameLabel.showEditor(); });
     menu.addSeparator();
     menu.addItem ("Delete track", [t = track, &um = undoManager]
@@ -233,7 +270,7 @@ void TrackHeaderList::rebuild()
     headers.clear();
 
     for (const auto& track : project)
-        content.addAndMakeVisible (headers.add (new TrackHeader (track, undoManager, timeline, inputNames)));
+        content.addAndMakeVisible (headers.add (new TrackHeader (track, undoManager, timeline, inputNames, instrumentMenu)));
 
     resized();
     repaint();

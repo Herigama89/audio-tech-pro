@@ -4,11 +4,14 @@
 #include "engine/AudioEngine.h"
 #include "engine/AudioFileCache.h"
 #include "engine/ProjectPlayer.h"
+#include "engine/InstrumentRack.h"
 #include "ui/TimelineState.h"
 #include "ui/WaveformCache.h"
 #include "ui/TrackHeaders.h"
 #include "ui/ArrangeCanvas.h"
 #include "ui/LevelMeter.h"
+#include "ui/PianoRoll.h"
+#include "ui/InstrumentWindows.h"
 
 namespace riff
 {
@@ -46,6 +49,7 @@ private:
 
     // Editing
     void addTrack();
+    void addTrack (const juce::String& kind);
     void importAudio();
     void splitAtPlayhead();
     void deleteSelection();
@@ -63,6 +67,15 @@ private:
     void toggleCycle();
     void showAudioMenu();
     void showLatencyCalibration();
+
+    // Instruments and MIDI
+    void showInstrumentMenu (juce::ValueTree track, juce::Component& target);
+    void openInstrumentWindow (const juce::ValueTree& track);
+    void showPluginScanner();
+    void openPianoRoll (juce::ValueTree region);
+    void closePianoRoll();
+    void updateLiveMidiTrack();
+    void createMidiRegionFromTake (juce::ValueTree track, const AudioEngine::FinishedTake& take, juce::ValueTree& last);
     juce::File recordingFolder() const;
     juce::File nextTakeFile (const juce::ValueTree& track) const;
 
@@ -87,7 +100,8 @@ private:
     // --- Engine and model ---------------------------------------------------
     AudioEngine engine;
     AudioFileCache fileCache { engine.getFormatManager() };
-    ProjectPlayer player { engine, fileCache };
+    InstrumentRack rack;
+    ProjectPlayer player { engine, fileCache, &rack };
     juce::UndoManager undoManager;
     juce::ValueTree project;
     juce::File projectFile;
@@ -110,6 +124,7 @@ private:
     ArrangeCanvas canvas { undoManager, timeline, engine, fileCache, waveforms };
     juce::ScrollBar hScroll { false }, vScroll { true };
     LevelMeter inputMeter { "IN" }, outputMeter { "OUT" };
+    PianoRoll pianoRoll { undoManager, engine };
 
     juce::TooltipWindow tooltips { this, 600 };
     std::unique_ptr<juce::FileChooser> fileChooser;
@@ -123,6 +138,11 @@ private:
     // The cycle as it was when recording started (it can't change while recording).
     bool recordCycleOn = false;
     double recordCycleStart = 0.0, recordCycleEnd = 0.0;
+
+    // Plugin and synth windows, by track id. Declared last so they close before
+    // the instruments they show are destroyed.
+    std::map<juce::String, std::unique_ptr<EditorWindow>> editorWindows;
+    std::unique_ptr<EditorWindow> scannerWindow;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

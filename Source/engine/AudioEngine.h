@@ -25,6 +25,7 @@ namespace riff
     no file I/O, no logging inside render().
 */
 class AudioEngine final : private juce::AudioIODeviceCallback,
+                          private juce::MidiInputCallback,
                           private juce::Timer
 {
 public:
@@ -55,6 +56,13 @@ public:
 
     double getSampleRate() const noexcept     { return sampleRate.load(); }
 
+    /** The largest block the engine ever renders in one go (instruments are prepared for this). */
+    static constexpr int maxChunkSize = 4096;
+
+    // --- Live MIDI ---------------------------------------------------------------
+    /** Sends a MIDI message to the live MIDI track (from a keyboard, or the piano roll's keys). */
+    void sendLiveMidi (const juce::MidiMessage& message) noexcept;
+
     // --- Recording (message thread) -------------------------------------------
     struct RecordRequest
     {
@@ -62,6 +70,13 @@ public:
         juce::File file;
         int firstChannel = 0;   // index among the device's active inputs
         int numChannels = 1;    // 1 or 2
+        bool midi = false;      // record the live MIDI input instead of audio (no file)
+    };
+
+    struct MidiEventRecord
+    {
+        juce::int64 sample = 0;
+        juce::uint8 status = 0, data1 = 0, data2 = 0;
     };
 
     struct FinishedTake
@@ -70,6 +85,8 @@ public:
         juce::File file;
         juce::int64 startSample = 0;
         juce::int64 numSamples = 0;
+        bool isMidi = false;
+        std::vector<MidiEventRecord> midiEvents;
     };
 
     struct LiveTake
@@ -131,7 +148,11 @@ private:
     void audioDeviceAboutToStart (juce::AudioIODevice* device) override;
     void audioDeviceStopped() override;
 
-    void timerCallback() override;          // frees retired graphs
+    void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message) override;
+    void enableAllMidiInputs();
+    void drainRecordedMidi();
+
+    void timerCallback() override;          // frees retired graphs, collects recorded MIDI
     void collectGarbage();
     void waitForAudioThread();
 
@@ -143,10 +164,13 @@ private:
         std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> writer;
         std::atomic<juce::int64> startSample { -1 };
         std::atomic<juce::int64> samplesWritten { 0 };
+        bool isMidi = false;
     };
 
     void renderChunk (const PlaybackGraph& graph, const float* const* inputs, int numInputs, int inputOffset,
-                      float* mixL, float* mixR, int numSamples, bool playingNow) noexcept;
+                      float* mixL, float* mixR, int numSamples, bool playingNow,
+                      bool resetNotes, bool withLiveMidi) noexcept;
+    void collectNotes (const PlaybackGraph::Track& track, juce::int64 from, juce::int64 to) noexcept;
     void recordChunk (const float* const* inputs, int numInputs, int inputOffset, int numSamples) noexcept;
     void renderClick (const PlaybackGraph& graph, float* mixL, float* mixR, int numSamples) noexcept;
     void renderMeasurement (const float* const* inputs, int numInputs,
@@ -176,6 +200,27 @@ private:
     std::atomic<bool> recording { false };
     std::atomic<bool> recordOverflow { false };
     std::atomic<juce::int64> recordFrom { 0 };
+    std::atomic<bool> midiTakeActive { false };
+
+    // --- MIDI ----------------------------------------------------------------------
+    // Live input: many producers (MIDI thread, UI) guarded by a spin lock that the
+    // audio thread never takes; the audio thread is the only consumer.
+    struct LiveEvent { juce::uint8 data[3]; int size; };
+    static constexpr int liveFifoSize = 1024;
+    juce::AbstractFifo liveFifo { liveFifoSize };
+    std::array<LiveEvent, liveFifoSize> liveEvents {};
+    juce::SpinLock liveProducerLock;
+
+    // Recorded MIDI: the audio thread produces, the message thread consumes.
+    static constexpr int recordFifoSize = 32768;
+    juce::AbstractFifo recordFifo { recordFifoSize };
+    std::array<MidiEventRecord, recordFifoSize> recordEvents {};
+    std::vector<MidiEventRecord> recordedMidi;   // message thread
+
+    juce::MidiBuffer liveMidi, trackMidi;        // audio thread scratch, pre-sized
+    juce::int64 expectedPosition = 0;
+    bool wasPlaying = false;
+    std::unique_ptr<juce::MidiDeviceListConnection> midiDeviceListener;
 
     // --- Latency measurement ---------------------------------------------------
     std::atomic<int> measureState { 0 };     // 0 idle, 1 running, 2 finished

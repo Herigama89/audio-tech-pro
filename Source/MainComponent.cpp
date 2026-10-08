@@ -47,7 +47,13 @@ MainComponent::MainComponent()
     recordButton.setColour (juce::TextButton::buttonOnColourId, theme::danger);
     recordButton.setColour (juce::TextButton::textColourOffId, theme::danger.brighter (0.3f));
     clickButton.setColour (juce::TextButton::buttonOnColourId, theme::accent);
-    addTrackButton.onClick = [this] { addTrack(); };
+    addTrackButton.onClick = [this]
+    {
+        juce::PopupMenu menu;
+        menu.addItem ("Audio track", [this] { addTrack (model::audioKind); });
+        menu.addItem ("Instrument track (MIDI)", [this] { addTrack (model::instrumentKind); });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addTrackButton));
+    };
     importButton.onClick   = [this] { importAudio(); };
     settingsButton.onClick = [this] { showAudioMenu(); };
 
@@ -63,7 +69,7 @@ MainComponent::MainComponent()
     cycleButton.setTooltip ("Cycle (C). Drag in the top half of the ruler to set the range; click it to turn it on or off.\n"
                             "Recording with Cycle on makes a new take on every pass.");
     countInButton.setTooltip ("One bar of click before recording starts");
-    addTrackButton.setTooltip ("New audio track");
+    addTrackButton.setTooltip ("New audio or instrument track");
     importButton.setTooltip ("Import audio files at the playhead (Cmd+I)");
     settingsButton.setTooltip ("Audio device settings");
 
@@ -127,6 +133,18 @@ MainComponent::MainComponent()
         canvas.mouseWheelMove (e.getEventRelativeTo (&canvas), w);
     };
     canvas.onViewChanged = [this] { updateScrollBars(); };
+    canvas.onOpenPianoRoll = [this] (juce::ValueTree region) { openPianoRoll (region); };
+    pianoRoll.onClose = [this] { closePianoRoll(); };
+    addChildComponent (pianoRoll);
+    headers.instrumentMenu = [this] (juce::ValueTree track, juce::Component& target) { showInstrumentMenu (track, target); };
+
+    // Instruments
+    rack.onInstrumentReady = [this] { player.requestRebuild(); };
+    rack.onLoadError = [this] (const juce::String& trackName, const juce::String& error)
+    {
+        showError ("Plugin problem on \"" + trackName + "\"", error);
+    };
+    rack.onPluginReplaced = [this] (const juce::String& trackId) { editorWindows.erase (trackId); };
     headers.inputNames = [this] { return engine.getActiveInputChannelNames(); };
     waveforms.onChange = [this] { canvas.repaint(); };
 
@@ -141,6 +159,10 @@ MainComponent::MainComponent()
     settingsOptions.osxLibrarySubFolder = "Application Support";
     appProperties.setStorageParameters (settingsOptions);
     recordingOffsetMs = appProperties.getUserSettings()->getDoubleValue ("recordingOffsetMs", 0.0);
+
+    // The list of plugins found by earlier scans.
+    if (auto xml = appProperties.getUserSettings()->getXmlValue ("knownPlugins"))
+        rack.getKnownPlugins().recreateFromXml (*xml);
 
     // --- Start ------------------------------------------------------------------
     startupError = engine.initialise();
@@ -163,6 +185,18 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+    editorWindows.clear();
+    scannerWindow.reset();
+
+    // Stop the audio and drop the playback graph first, so plugins are released
+    // while the plugin host that loaded them still exists.
+    engine.getDeviceManager().closeAudioDevice();
+    engine.setGraph (std::make_unique<PlaybackGraph>());
+
+    if (auto xml = rack.getKnownPlugins().createXml())
+        appProperties.getUserSettings()->setValue ("knownPlugins", xml.get());
+    appProperties.saveIfNeeded();
+
     stopTimer();
     engine.stop();
     engine.getDeviceManager().removeChangeListener (this);
@@ -224,6 +258,9 @@ void MainComponent::resized()
 
     // Status line
     statusLabel.setBounds (area.removeFromBottom (statusHeight).reduced (10, 0));
+
+    if (pianoRoll.isVisible())
+        pianoRoll.setBounds (area.removeFromBottom (juce::jlimit (200, 360, getHeight() / 3)));
 
     // Meters on the right
     auto meters = area.removeFromRight (meterWidth).reduced (8, 10);
@@ -312,6 +349,8 @@ void MainComponent::setProject (juce::ValueTree newProject, const juce::File& fi
     if (engine.isRecording())
         finishRecording();
 
+    closePianoRoll();
+    editorWindows.clear();
     engine.stop();
     engine.setPlayheadSeconds (0.0);
 
@@ -401,6 +440,9 @@ void MainComponent::saveProject (std::function<void()> then)
         return;
     }
 
+    // Plugins keep their own settings; copy them into the project first.
+    rack.storePluginStates (project);
+
     juce::String error;
     if (! model::save (project, projectFile, error))
     {
@@ -480,6 +522,16 @@ int MainComponent::selectedTrackIndex() const
 {
     const auto track = model::findById (project, timeline.selectedTrackId);
     return track.isValid() ? project.indexOf (track) : -1;
+}
+
+void MainComponent::addTrack (const juce::String& kind)
+{
+    const bool instrument = kind == model::instrumentKind;
+    undoManager.beginNewTransaction ("New track");
+    auto track = model::addTrack (project, (instrument ? "Inst " : "Audio ") + juce::String (project.getNumChildren() + 1),
+                                  &undoManager, -1, kind);
+    timeline.selectedTrackId = track[ids::id].toString();
+    timeline.changed();
 }
 
 void MainComponent::addTrack()
@@ -604,14 +656,6 @@ void MainComponent::beginRecording()
 {
     const auto numInputs = engine.getNumActiveInputChannels();
 
-    if (numInputs == 0)
-    {
-        showError ("No audio input",
-                   "Riff can't hear any inputs. Click Audio to choose an input device.\n\n"
-                   "On a Mac, also check System Settings > Privacy & Security > Microphone and allow Riff.");
-        return;
-    }
-
     juce::Array<juce::ValueTree> armed;
     for (const auto& track : project)
         if ((bool) track[ids::armed])
@@ -638,6 +682,24 @@ void MainComponent::beginRecording()
 
     for (const auto& track : armed)
     {
+        // Instrument tracks record what you play on a MIDI keyboard.
+        if (model::isInstrumentTrack (track))
+        {
+            AudioEngine::RecordRequest request;
+            request.trackId = track[ids::id].toString();
+            request.midi = true;
+            requests.push_back (request);
+            continue;
+        }
+
+        if (numInputs == 0)
+        {
+            showError ("No audio input",
+                       "Riff can't hear any inputs. Click Audio to choose an input device.\n\n"
+                       "On a Mac, also check System Settings > Privacy & Security > Microphone and allow Riff.");
+            return;
+        }
+
         const int first = track.getProperty (ids::input, 0);
         const int channels = (bool) track.getProperty (ids::inputStereo, false) ? 2 : 1;
 
@@ -649,7 +711,7 @@ void MainComponent::beginRecording()
             return;
         }
 
-        requests.push_back ({ track[ids::id].toString(), nextTakeFile (track), first, channels });
+        requests.push_back ({ track[ids::id].toString(), nextTakeFile (track), first, channels, false });
     }
 
     // Where recording begins: right here when punching in during playback;
@@ -700,6 +762,12 @@ void MainComponent::finishRecording()
         auto track = model::findById (project, take.trackId);
         if (! track.isValid())
             continue; // the track was deleted while recording; the file stays on disk
+
+        if (take.isMidi)
+        {
+            createMidiRegionFromTake (track, take, last);
+            continue;
+        }
 
         const auto pieces = model::splitRecording ((double) take.startSample / rate, (double) take.numSamples / rate,
                                                    totalLatency, recordCycleOn, recordCycleStart, recordCycleEnd);
@@ -826,6 +894,11 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 
 void MainComponent::timerCallback()
 {
+    updateLiveMidiTrack();
+
+    if (pianoRoll.isVisible())
+        pianoRoll.repaint();
+
     const auto levels = engine.takeLevels();
     inputMeter.push (levels.inL, levels.inR);
     outputMeter.push (levels.outL, levels.outR);
@@ -897,6 +970,216 @@ juce::String MainComponent::deviceStatusText() const
     return device->getName() + "  |  " + juce::String (sr / 1000.0, 1) + " kHz  |  buffer " + juce::String (bs)
          + "  |  ~" + juce::String (latencyMs, 1) + " ms round trip"
          + "        Drag regions to move (hold Cmd to skip the grid), drag edges to trim, Cmd+scroll to zoom";
+}
+
+//==============================================================================
+// Instruments and MIDI
+//==============================================================================
+void MainComponent::createMidiRegionFromTake (juce::ValueTree track, const AudioEngine::FinishedTake& take, juce::ValueTree& last)
+{
+    const auto rate = engine.getSampleRate();
+    const auto start = (double) take.startSample / rate;
+    const auto length = (double) take.numSamples / rate;
+
+    // With Cycle on, passes overlap and their notes merge into one region over the cycle.
+    const bool wrapped = recordCycleOn && start < recordCycleEnd && start + length > recordCycleEnd;
+    const auto regionStart = wrapped ? juce::jmin (start, recordCycleStart) : start;
+    const auto regionEnd = wrapped ? recordCycleEnd : start + length;
+
+    std::vector<model::RecordedMidiEvent> events;
+    for (const auto& e : take.midiEvents)
+        events.push_back ({ (double) e.sample / rate, e.status, e.data1, e.data2 });
+
+    const auto notes = model::notesFromEvents (events, regionStart, regionEnd);
+    if (notes.empty())
+        return;
+
+    auto region = model::addMidiRegion (track, regionStart, regionEnd - regionStart, &undoManager);
+    for (const auto& n : notes)
+        model::addNote (region, n.pitch, n.start, n.length, n.velocity, &undoManager);
+
+    last = region;
+}
+
+void MainComponent::updateLiveMidiTrack()
+{
+    // Your MIDI keyboard plays the first armed instrument track, otherwise the
+    // selected one (or the one open in the piano roll).
+    juce::String target;
+
+    for (const auto& track : project)
+        if (model::isInstrumentTrack (track) && (bool) track[ids::armed])
+        {
+            target = track[ids::id].toString();
+            break;
+        }
+
+    if (target.isEmpty())
+    {
+        const auto selected = model::findById (project, timeline.selectedTrackId);
+        if (model::isInstrumentTrack (selected))
+            target = selected[ids::id].toString();
+        else if (pianoRoll.isVisible() && pianoRoll.getRegion().isValid())
+            target = pianoRoll.getRegion().getParent()[ids::id].toString();
+    }
+
+    player.setLiveMidiTrack (target);
+}
+
+void MainComponent::openPianoRoll (juce::ValueTree region)
+{
+    timeline.selectedRegionId = region[ids::id].toString();
+    timeline.selectedTrackId = region.getParent()[ids::id].toString();
+    timeline.changed();
+
+    pianoRoll.setVisible (true);
+    resized();
+    pianoRoll.setRegion (region);
+    pianoRoll.grabKeyboardFocus();
+}
+
+void MainComponent::closePianoRoll()
+{
+    if (! pianoRoll.isVisible())
+        return;
+
+    pianoRoll.setRegion ({});
+    pianoRoll.setVisible (false);
+    resized();
+    canvas.grabKeyboardFocus();
+}
+
+void MainComponent::showInstrumentMenu (juce::ValueTree track, juce::Component& target)
+{
+    const bool isPlugin = track[ids::instrument].toString() == "plugin";
+    const auto currentDescription = track[ids::pluginDescription].toString();
+
+    juce::PopupMenu menu;
+    menu.addItem (isPlugin ? "Show plugin window" : "Show synth controls", [this, track] { openInstrumentWindow (track); });
+    menu.addSeparator();
+
+    menu.addItem ("Riff Synth", true, ! isPlugin, [this, track]() mutable
+    {
+        undoManager.beginNewTransaction ("Choose instrument");
+        track.setProperty (ids::instrument, "synth", &undoManager);
+    });
+
+    // Instrument plugins found by the scanner, grouped by maker.
+    std::map<juce::String, juce::PopupMenu> byMaker;
+    int numInstruments = 0;
+
+    for (const auto& type : rack.getKnownPlugins().getTypes())
+    {
+        if (! type.isInstrument)
+            continue;
+
+        ++numInstruments;
+        const auto xml = type.createXml()->toString (juce::XmlElement::TextFormat().singleLine());
+        const auto label = type.name + "  (" + type.pluginFormatName + ")";
+
+        byMaker[type.manufacturerName.isNotEmpty() ? type.manufacturerName : "Other"]
+            .addItem (label, true, isPlugin && xml == currentDescription, [this, track, xml]() mutable
+            {
+                undoManager.beginNewTransaction ("Choose instrument");
+                track.setProperty (ids::instrument, "plugin", &undoManager);
+                track.setProperty (ids::pluginDescription, xml, &undoManager);
+                track.setProperty (ids::pluginState, juce::String(), &undoManager);
+
+                // Open the plugin's window once it has loaded.
+                juce::Timer::callAfterDelay (600, [safe = juce::Component::SafePointer<MainComponent> (this), track]
+                {
+                    if (safe != nullptr)
+                        safe->openInstrumentWindow (track);
+                });
+            });
+    }
+
+    if (numInstruments > 0)
+    {
+        juce::PopupMenu plugins;
+        for (auto& [maker, sub] : byMaker)
+            plugins.addSubMenu (maker, sub);
+        menu.addSubMenu ("Plugins", plugins);
+    }
+    else
+    {
+        menu.addItem ("No plugins yet. Scan for them first.", false, false, [] {});
+    }
+
+    menu.addSeparator();
+    menu.addItem ("Scan for plugins...", [this] { showPluginScanner(); });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+}
+
+void MainComponent::openInstrumentWindow (const juce::ValueTree& track)
+{
+    const auto id = track[ids::id].toString();
+
+    if (auto it = editorWindows.find (id); it != editorWindows.end())
+    {
+        it->second->toFront (true);
+        return;
+    }
+
+    auto closer = [this, id]
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this), id]
+        {
+            if (safe != nullptr)
+                safe->editorWindows.erase (id);
+        });
+    };
+
+    const auto title = track[ids::name].toString();
+
+    if (track[ids::instrument].toString() == "plugin")
+    {
+        auto* plugin = rack.getPlugin (id);
+        if (plugin == nullptr)
+        {
+            showError ("Plugin not loaded yet", "The plugin is still loading, or it failed to load. Try again in a moment.");
+            return;
+        }
+
+        if (auto* editor = plugin->createEditorAndMakeActive())
+            editorWindows[id] = std::make_unique<EditorWindow> (title + ": " + plugin->getName(), editor,
+                                                                editor->isResizable(), closer);
+        else
+            showError ("No window", plugin->getName() + " doesn't have its own window.");
+        return;
+    }
+
+    editorWindows[id] = std::make_unique<EditorWindow> (title + ": Riff Synth", new SynthPanel (track, undoManager), false, closer);
+}
+
+void MainComponent::showPluginScanner()
+{
+    if (scannerWindow != nullptr)
+    {
+        scannerWindow->toFront (true);
+        return;
+    }
+
+    // If a plugin crashes Riff while scanning, it's listed in this file and skipped next time.
+    const auto deadMansPedal = appProperties.getUserSettings()->getFile().getSiblingFile ("PluginScanCrashes.txt");
+
+    auto* list = new juce::PluginListComponent (rack.getFormatManager(), rack.getKnownPlugins(),
+                                                deadMansPedal, appProperties.getUserSettings(), true);
+    list->setSize (760, 520);
+
+    // Closing the window saves the list for next time.
+    scannerWindow = std::make_unique<EditorWindow> ("Plugins (use Options to scan)", list, true, [this]
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this)]
+        {
+            if (safe == nullptr)
+                return;
+            if (auto xml = safe->rack.getKnownPlugins().createXml())
+                safe->appProperties.getUserSettings()->setValue ("knownPlugins", xml.get());
+            safe->appProperties.saveIfNeeded();
+            safe->scannerWindow.reset();
+        });
+    });
 }
 
 void MainComponent::showAudioMenu()

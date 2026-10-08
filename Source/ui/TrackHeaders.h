@@ -12,8 +12,10 @@ class TrackHeader final : public juce::Component,
 {
 public:
     using InputNamesFn = std::function<juce::StringArray()>;
+    using InstrumentMenuFn = std::function<void (juce::ValueTree track, juce::Component& target)>;
 
-    TrackHeader (juce::ValueTree track, juce::UndoManager& um, TimelineState& timeline, InputNamesFn inputNames);
+    TrackHeader (juce::ValueTree track, juce::UndoManager& um, TimelineState& timeline,
+                 InputNamesFn inputNames, InstrumentMenuFn instrumentMenu);
     ~TrackHeader() override;
 
     juce::ValueTree getTrack() const { return track; }
@@ -35,7 +37,10 @@ private:
 
     juce::Label nameLabel;
     InputNamesFn inputNames;
+    InstrumentMenuFn instrumentMenu;
+    bool isInstrument = false;
     juce::TextButton muteButton { "M" }, soloButton { "S" }, armButton { "R" }, monitorButton { "I" };
+    juce::TextButton instrumentButton;
     juce::Slider volumeSlider, panKnob;
 };
 
@@ -52,6 +57,9 @@ public:
 
     /** Supplies the names of the device's active inputs, for the input menu. */
     TrackHeader::InputNamesFn inputNames;
+
+    /** Shows the instrument menu for an instrument track. */
+    TrackHeader::InstrumentMenuFn instrumentMenu;
 
     void paint (juce::Graphics& g) override;
     void resized() override;

@@ -12,6 +12,8 @@ AudioEngine::AudioEngine()
         slot.store (nullptr);
 
     diskThread.startThread (juce::Thread::Priority::high);
+    liveMidi.ensureSize (8192);
+    trackMidi.ensureSize (32768);
     prepare (44100.0, 2048);
     startTimer (250);
 }
@@ -19,10 +21,12 @@ AudioEngine::AudioEngine()
 AudioEngine::~AudioEngine()
 {
     stopTimer();
+    midiDeviceListener.reset();
 
     if (isRecording())
         stopRecording();
 
+    deviceManager.removeMidiInputDeviceCallback ({}, this);
     deviceManager.removeAudioCallback (this);
     deviceManager.closeAudioDevice();
     diskThread.stopThread (2000);
@@ -40,7 +44,55 @@ juce::String AudioEngine::initialise()
         error = deviceManager.initialiseWithDefaultDevices (0, 2);
 
     deviceManager.addAudioCallback (this);
+
+    // Listen to every MIDI keyboard, including ones plugged in later.
+    enableAllMidiInputs();
+    deviceManager.addMidiInputDeviceCallback ({}, this);
+    midiDeviceListener = std::make_unique<juce::MidiDeviceListConnection> (
+        juce::MidiDeviceListConnection::make ([this] { enableAllMidiInputs(); }));
+
     return error;
+}
+
+void AudioEngine::enableAllMidiInputs()
+{
+    for (const auto& device : juce::MidiInput::getAvailableDevices())
+        if (! deviceManager.isMidiInputDeviceEnabled (device.identifier))
+            deviceManager.setMidiInputDeviceEnabled (device.identifier, true);
+}
+
+void AudioEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)
+{
+    sendLiveMidi (message);
+}
+
+void AudioEngine::sendLiveMidi (const juce::MidiMessage& message) noexcept
+{
+    // Only short channel messages (notes, controllers, pitch bend...).
+    if (message.getRawDataSize() > 3 || message.isSysEx() || message.isActiveSense() || message.isMidiClock())
+        return;
+
+    const juce::SpinLock::ScopedLockType lock (liveProducerLock);
+
+    if (liveFifo.getFreeSpace() < 1)
+        return;
+
+    const auto scope = liveFifo.write (1);
+    auto& e = liveEvents[(size_t) (scope.blockSize1 > 0 ? scope.startIndex1 : scope.startIndex2)];
+    e.size = message.getRawDataSize();
+    for (int i = 0; i < e.size; ++i)
+        e.data[i] = message.getRawData()[i];
+}
+
+void AudioEngine::drainRecordedMidi()
+{
+    const auto ready = recordFifo.getNumReady();
+    if (ready <= 0)
+        return;
+
+    const auto scope = recordFifo.read (ready);
+    for (int i = 0; i < scope.blockSize1; ++i) recordedMidi.push_back (recordEvents[(size_t) (scope.startIndex1 + i)]);
+    for (int i = 0; i < scope.blockSize2; ++i) recordedMidi.push_back (recordEvents[(size_t) (scope.startIndex2 + i)]);
 }
 
 //==============================================================================
@@ -62,6 +114,9 @@ void AudioEngine::setGraph (std::unique_ptr<PlaybackGraph> newGraph)
 void AudioEngine::timerCallback()
 {
     collectGarbage();
+
+    if (isRecording())
+        drainRecordedMidi();
 }
 
 void AudioEngine::collectGarbage()
@@ -147,14 +202,27 @@ bool AudioEngine::startRecording (const std::vector<RecordRequest>& requests, ju
         for (auto& t : newTakes)
         {
             t->writer.reset();
-            t->file.deleteFile();
+            if (! t->isMidi)
+                t->file.deleteFile();
         }
         error = message;
         return false;
     };
 
+    bool anyMidi = false;
+
     for (const auto& request : requests)
     {
+        if (request.midi)
+        {
+            auto take = std::make_unique<Take>();
+            take->trackId = request.trackId;
+            take->isMidi = true;
+            newTakes.push_back (std::move (take));
+            anyMidi = true;
+            continue;
+        }
+
         if (! request.file.getParentDirectory().createDirectory())
             return fail ("Couldn't create the folder " + request.file.getParentDirectory().getFullPathName());
 
@@ -188,6 +256,10 @@ bool AudioEngine::startRecording (const std::vector<RecordRequest>& requests, ju
     takes = std::move (newTakes);
     recordFrom.store (recordFromSample.value_or (playheadSample.load()));
 
+    recordedMidi.clear();
+    recordFifo.reset();
+    midiTakeActive.store (anyMidi);
+
     for (size_t i = 0; i < takes.size(); ++i)
         takeSlots[i].store (takes[i].get(), std::memory_order_release);
 
@@ -209,6 +281,9 @@ std::vector<AudioEngine::FinishedTake> AudioEngine::stopRecording()
     for (auto& slot : takeSlots)
         slot.store (nullptr, std::memory_order_release);
 
+    midiTakeActive.store (false);
+    drainRecordedMidi();
+
     for (auto& take : takes)
     {
         take->writer.reset(); // flushes the remaining FIFO contents and closes the file
@@ -216,11 +291,20 @@ std::vector<AudioEngine::FinishedTake> AudioEngine::stopRecording()
         const auto written = take->samplesWritten.load();
         const auto start = take->startSample.load();
 
+        if (take->isMidi)
+        {
+            if (written > 0 && start >= 0)
+                finished.push_back ({ take->trackId, {}, start, written, true, recordedMidi });
+            continue;
+        }
+
         if (written > 0 && start >= 0)
-            finished.push_back ({ take->trackId, take->file, start, written });
+            finished.push_back ({ take->trackId, take->file, start, written, false, {} });
         else
             take->file.deleteFile(); // nothing was captured
     }
+
+    recordedMidi.clear();
 
     takes.clear();
     return finished;
@@ -331,8 +415,12 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
 //==============================================================================
 // Rendering
 //==============================================================================
-void AudioEngine::prepare (double newSampleRate, int maxBlockSize)
+void AudioEngine::prepare (double newSampleRate, int)
 {
+    // Every block is processed in chunks of at most maxChunkSize, so instruments
+    // and plugins can be prepared once for that size whatever the device uses.
+    const int maxBlockSize = maxChunkSize;
+
     // Keep the playhead at the same time if the sample rate changes.
     const auto oldRate = sampleRate.load();
     if (oldRate > 0.0 && std::abs (oldRate - newSampleRate) > 0.5)
@@ -357,6 +445,9 @@ void AudioEngine::prepare (double newSampleRate, int maxBlockSize)
 
     clickLength = (int) (newSampleRate * 0.035);
     clickSamplesLeft = 0;
+
+    expectedPosition = playheadSample.load();
+    wasPlaying = false;
 }
 
 void AudioEngine::render (const float* const* inputs, int numInputs,
@@ -399,6 +490,39 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
     if (graph != nullptr)
         masterGain.setTargetValue (graph->masterGain);
 
+    // Live MIDI that arrived since the last block lands at its start.
+    liveMidi.clear();
+    {
+        const auto ready = liveFifo.getNumReady();
+        if (ready > 0)
+        {
+            const auto scope = liveFifo.read (ready);
+            auto take = [this] (int index) { const auto& e = liveEvents[(size_t) index]; liveMidi.addEvent (e.data, e.size, 0); };
+            for (int i = 0; i < scope.blockSize1; ++i) take (scope.startIndex1 + i);
+            for (int i = 0; i < scope.blockSize2; ++i) take (scope.startIndex2 + i);
+        }
+    }
+
+    // Keep what you play for MIDI recording, at the timeline position it was heard.
+    if (isRecordingNow && isPlayingNow && midiTakeActive.load() && ! liveMidi.isEmpty()
+        && playheadSample.load() >= recordStart)
+    {
+        const auto at = playheadSample.load();
+        for (const auto meta : liveMidi)
+        {
+            if (meta.numBytes < 1 || recordFifo.getFreeSpace() < 1)
+                continue;
+
+            const auto scope = recordFifo.write (1);
+            auto& r = recordEvents[(size_t) (scope.blockSize1 > 0 ? scope.startIndex1 : scope.startIndex2)];
+            r.sample = at;
+            r.status = meta.data[0];
+            r.data1 = meta.numBytes > 1 ? meta.data[1] : 0;
+            r.data2 = meta.numBytes > 2 ? meta.data[2] : 0;
+        }
+    }
+
+    bool liveMidiPending = ! liveMidi.isEmpty();
     int offset = 0;
 
     while (offset < numSamples)
@@ -422,9 +546,14 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
         if (isRecordingNow && isPlayingNow && position >= recordStart)
             recordChunk (inputs, numInputs, offset, n);
 
+        // Any jump (start, stop, locate, cycle wrap) silences notes from regions,
+        // so nothing hangs on.
+        const bool resetNotes = isPlayingNow != wasPlaying || (isPlayingNow && position != expectedPosition);
+
         if (graph != nullptr)
         {
-            renderChunk (*graph, inputs, numInputs, offset, mixL, mixR, n, isPlayingNow);
+            renderChunk (*graph, inputs, numInputs, offset, mixL, mixR, n, isPlayingNow, resetNotes, liveMidiPending);
+            liveMidiPending = false;
 
             const bool countingIn = isRecordingNow && position < recordStart;
             if (isPlayingNow && (graph->metronome || countingIn))
@@ -441,7 +570,11 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
                 playheadSample.store (graph->cycleStart);
             else
                 playheadSample.store (next);
+
+            expectedPosition = next;
         }
+
+        wasPlaying = isPlayingNow;
 
         for (int i = 0; i < n; ++i)
         {
@@ -478,7 +611,18 @@ void AudioEngine::recordChunk (const float* const* inputs, int numInputs, int in
     for (auto& slot : takeSlots)
     {
         auto* take = slot.load (std::memory_order_acquire);
-        if (take == nullptr || take->writer == nullptr)
+        if (take == nullptr)
+            continue;
+
+        if (take->isMidi)
+        {
+            juce::int64 expectedStart = -1;
+            take->startSample.compare_exchange_strong (expectedStart, blockStart);
+            take->samplesWritten.fetch_add (n);
+            continue;
+        }
+
+        if (take->writer == nullptr)
             continue;
 
         const float* channels[2];
@@ -499,8 +643,37 @@ void AudioEngine::recordChunk (const float* const* inputs, int numInputs, int in
     }
 }
 
+void AudioEngine::collectNotes (const PlaybackGraph::Track& track, juce::int64 from, juce::int64 to) noexcept
+{
+    // Note-offs first, so a note ending exactly where the next one starts is
+    // released before it's struck again.
+    for (int pass = 0; pass < 2; ++pass)
+    {
+        for (const auto& region : track.regions)
+        {
+            for (const auto& note : region.notes)
+            {
+                if (note.start >= to)
+                    break; // sorted by start; later notes can't end in this block either
+
+                if (pass == 0 && note.end >= from && note.end < to)
+                {
+                    const juce::uint8 off[3] = { 0x80, note.pitch, 0 };
+                    trackMidi.addEvent (off, 3, (int) (note.end - from));
+                }
+                else if (pass == 1 && note.start >= from)
+                {
+                    const juce::uint8 on[3] = { 0x90, note.pitch, note.velocity };
+                    trackMidi.addEvent (on, 3, (int) (note.start - from));
+                }
+            }
+        }
+    }
+}
+
 void AudioEngine::renderChunk (const PlaybackGraph& graph, const float* const* inputs, int numInputs, int inputOffset,
-                               float* mixL, float* mixR, int n, bool playingNow) noexcept
+                               float* mixL, float* mixR, int n, bool playingNow,
+                               bool resetNotes, bool withLiveMidi) noexcept
 {
     const auto blockStart = playheadSample.load();
     const auto blockEnd = blockStart + n;
@@ -531,20 +704,45 @@ void AudioEngine::renderChunk (const PlaybackGraph& graph, const float* const* i
             state.gainR.setTargetValue (targetR);
         }
 
-        // Silent and not fading: nothing to do.
-        if (! state.gainL.isSmoothing() && ! state.gainR.isSmoothing()
-            && state.gainL.getCurrentValue() <= 0.0f && state.gainR.getCurrentValue() <= 0.0f)
-            continue;
-
         juce::FloatVectorOperations::clear (tL, n);
         juce::FloatVectorOperations::clear (tR, n);
         bool anyAudio = false;
+
+        // Instruments always run, even when muted, so their notes start and stop on time.
+        if (track.isInstrument)
+        {
+            if (track.instrument != nullptr)
+            {
+                trackMidi.clear();
+
+                if (resetNotes)
+                {
+                    const juce::uint8 allOff[3] = { 0xb0, 123, 0 };
+                    trackMidi.addEvent (allOff, 3, 0);
+                }
+
+                if (playingNow)
+                    collectNotes (track, blockStart, blockEnd);
+
+                if (withLiveMidi && track.receivesLiveMidi)
+                    trackMidi.addEvents (liveMidi, 0, -1, 0);
+
+                track.instrument->render (tL, tR, n, trackMidi);
+                anyAudio = true;
+            }
+        }
+        // Silent and not fading: nothing to do.
+        else if (! state.gainL.isSmoothing() && ! state.gainR.isSmoothing()
+                 && state.gainL.getCurrentValue() <= 0.0f && state.gainR.getCurrentValue() <= 0.0f)
+        {
+            continue;
+        }
 
         if (playingNow)
         {
             for (const auto& region : track.regions)
             {
-                if (region.audio == nullptr)
+                if (region.audio == nullptr || track.isInstrument)
                     continue;
 
                 const auto from = juce::jmax (blockStart, region.start);

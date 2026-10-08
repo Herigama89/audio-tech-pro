@@ -35,13 +35,22 @@ set(RIFF_CORE_SOURCES
     Source/engine/AudioFileCache.cpp
     Source/engine/ProjectPlayer.cpp
     Source/engine/LatencyMeasure.cpp
+    Source/engine/BuiltInSynth.cpp
+    Source/engine/PluginInstrument.cpp
+    Source/engine/InstrumentRack.cpp
 )
 
 set(RIFF_DEFINITIONS
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_DISPLAY_SPLASH_SCREEN=0
+    JUCE_PLUGINHOST_VST3=1
 )
+
+# Audio Units exist only on macOS.
+if(APPLE)
+    list(APPEND RIFF_DEFINITIONS JUCE_PLUGINHOST_AU=1)
+endif()
 
 # ---------------------------------------------------------------------------
 # The app
@@ -64,6 +73,8 @@ target_sources(Riff PRIVATE
     Source/ui/TrackHeaders.cpp
     Source/ui/ArrangeCanvas.cpp
     Source/ui/LatencyCalibrator.cpp
+    Source/ui/PianoRoll.cpp
+    Source/ui/InstrumentWindows.cpp
 )
 
 target_include_directories(Riff PRIVATE Source)
@@ -121,6 +132,7 @@ if(RIFF_BUILD_TESTS)
             juce::juce_audio_formats
             juce::juce_data_structures
             juce::juce_graphics
+            juce::juce_audio_processors
             Catch2::Catch2
         PUBLIC
             juce::juce_recommended_config_flags

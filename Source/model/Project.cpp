@@ -1,4 +1,5 @@
 #include "Project.h"
+#include <array>
 
 namespace riff::model
 {
@@ -124,7 +125,8 @@ juce::ValueTree createProject (const juce::String& name)
     return project;
 }
 
-juce::ValueTree addTrack (juce::ValueTree project, const juce::String& name, juce::UndoManager* um, int index)
+juce::ValueTree addTrack (juce::ValueTree project, const juce::String& name, juce::UndoManager* um,
+                          int index, const juce::String& kind)
 {
     jassert (project.hasType (ids::PROJECT));
 
@@ -142,6 +144,20 @@ juce::ValueTree addTrack (juce::ValueTree project, const juce::String& name, juc
     track.setProperty (ids::monitor, false, nullptr);
     track.setProperty (ids::input, 0, nullptr);
     track.setProperty (ids::inputStereo, false, nullptr);
+    track.setProperty (ids::kind, kind, nullptr);
+
+    if (kind == instrumentKind)
+    {
+        track.setProperty (ids::instrument, "synth", nullptr);
+        track.setProperty (ids::synthWave, 0, nullptr);
+        track.setProperty (ids::synthCutoff, 3000.0, nullptr);
+        track.setProperty (ids::synthResonance, 0.2, nullptr);
+        track.setProperty (ids::synthAttack, 0.005, nullptr);
+        track.setProperty (ids::synthDecay, 0.3, nullptr);
+        track.setProperty (ids::synthSustain, 0.6, nullptr);
+        track.setProperty (ids::synthRelease, 0.3, nullptr);
+        track.setProperty (ids::synthGain, 0.5, nullptr);
+    }
 
     project.addChild (track, index, um);
     return track;
@@ -345,6 +361,124 @@ void flattenTakes (juce::ValueTree region, juce::UndoManager* um)
             region.removeChild (i, um);
 
     region.removeProperty (ids::activeTake, um);
+}
+
+//==============================================================================
+bool isInstrumentTrack (const juce::ValueTree& track)
+{
+    return track[ids::kind].toString() == instrumentKind;
+}
+
+bool isMidiRegion (const juce::ValueTree& region)
+{
+    return (bool) region[ids::midi];
+}
+
+juce::ValueTree addMidiRegion (juce::ValueTree track, double start, double length, juce::UndoManager* um)
+{
+    juce::ValueTree region { ids::REGION };
+    region.setProperty (ids::id, newId(), nullptr);
+    region.setProperty (ids::name, track[ids::name], nullptr);
+    region.setProperty (ids::midi, true, nullptr);
+    region.setProperty (ids::start, juce::jmax (0.0, start), nullptr);
+    region.setProperty (ids::offset, 0.0, nullptr);
+    region.setProperty (ids::length, juce::jmax (minRegionLength, length), nullptr);
+    region.setProperty (ids::gain, 1.0, nullptr);
+
+    track.appendChild (region, um);
+    return region;
+}
+
+juce::ValueTree addNote (juce::ValueTree region, int pitch, double start, double length, int velocity, juce::UndoManager* um)
+{
+    juce::ValueTree note { ids::NOTE };
+    note.setProperty (ids::pitch, juce::jlimit (0, 127, pitch), nullptr);
+    note.setProperty (ids::start, juce::jmax (0.0, start), nullptr);
+    note.setProperty (ids::length, juce::jmax (minRegionLength, length), nullptr);
+    note.setProperty (ids::velocity, juce::jlimit (1, 127, velocity), nullptr);
+
+    region.appendChild (note, um);
+    return note;
+}
+
+void moveNote (juce::ValueTree note, double newStart, int newPitch, juce::UndoManager* um)
+{
+    note.setProperty (ids::start, juce::jmax (0.0, newStart), um);
+    note.setProperty (ids::pitch, juce::jlimit (0, 127, newPitch), um);
+}
+
+void resizeNote (juce::ValueTree note, double newLength, juce::UndoManager* um)
+{
+    note.setProperty (ids::length, juce::jmax (minRegionLength, newLength), um);
+}
+
+void setNoteVelocity (juce::ValueTree note, int velocity, juce::UndoManager* um)
+{
+    note.setProperty (ids::velocity, juce::jlimit (1, 127, velocity), um);
+}
+
+void deleteNote (juce::ValueTree note, juce::UndoManager* um)
+{
+    if (auto parent = note.getParent(); parent.isValid())
+        parent.removeChild (note, um);
+}
+
+void quantizeNotes (juce::ValueTree region, double gridSeconds, juce::UndoManager* um)
+{
+    if (gridSeconds <= 0.0)
+        return;
+
+    for (auto note : region)
+        if (note.hasType (ids::NOTE))
+            note.setProperty (ids::start, juce::jmax (0.0, std::round ((double) note[ids::start] / gridSeconds) * gridSeconds), um);
+}
+
+std::vector<RecordedNote> notesFromEvents (const std::vector<RecordedMidiEvent>& events,
+                                           double regionStart, double regionEnd)
+{
+    struct Pending { double time; int velocity; };
+    std::array<std::vector<Pending>, 128> held;
+    std::vector<RecordedNote> notes;
+
+    auto finish = [&] (int pitch, const Pending& on, double end)
+    {
+        // Released "before" it started means the playhead wrapped round the cycle.
+        if (end < on.time)
+            end = regionEnd;
+
+        const auto start = juce::jmax (on.time, regionStart);
+        end = juce::jmin (end, regionEnd);
+
+        if (end - start >= 0.001)
+            notes.push_back ({ pitch, start - regionStart, juce::jmax (minRegionLength, end - start), on.velocity });
+    };
+
+    for (const auto& e : events)
+    {
+        const auto type = e.status & 0xf0;
+        const int pitch = e.data1 & 0x7f;
+
+        if (type == 0x90 && e.data2 > 0)
+        {
+            held[(size_t) pitch].push_back ({ e.time, e.data2 });
+        }
+        else if (type == 0x80 || (type == 0x90 && e.data2 == 0))
+        {
+            auto& stack = held[(size_t) pitch];
+            if (! stack.empty())
+            {
+                finish (pitch, stack.front(), e.time);
+                stack.erase (stack.begin());
+            }
+        }
+    }
+
+    for (int pitch = 0; pitch < 128; ++pitch)
+        for (const auto& on : held[(size_t) pitch])
+            finish (pitch, on, regionEnd);
+
+    std::sort (notes.begin(), notes.end(), [] (const RecordedNote& a, const RecordedNote& b) { return a.start < b.start; });
+    return notes;
 }
 
 void setCycle (juce::ValueTree project, double start, double end, bool enabled)

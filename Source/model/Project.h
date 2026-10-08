@@ -21,7 +21,10 @@ namespace riff::model
     // --- Creation ---------------------------------------------------------
     juce::ValueTree createProject (const juce::String& name = "Untitled");
 
-    juce::ValueTree addTrack (juce::ValueTree project, const juce::String& name, juce::UndoManager* um, int index = -1);
+    inline const juce::String audioKind { "audio" }, instrumentKind { "instrument" };
+
+    juce::ValueTree addTrack (juce::ValueTree project, const juce::String& name, juce::UndoManager* um,
+                              int index = -1, const juce::String& kind = audioKind);
 
     juce::ValueTree addRegion (juce::ValueTree track, const juce::File& audioFile,
                                double start, double length, juce::UndoManager* um);
@@ -79,6 +82,38 @@ namespace riff::model
 
     /** Keeps the active take and removes the others. */
     void flattenTakes (juce::ValueTree region, juce::UndoManager* um);
+
+    // --- MIDI -------------------------------------------------------------------
+    bool isInstrumentTrack (const juce::ValueTree& track);
+    bool isMidiRegion (const juce::ValueTree& region);
+
+    juce::ValueTree addMidiRegion (juce::ValueTree track, double start, double length, juce::UndoManager* um);
+
+    /** `start` is measured from the beginning of the region's content (see Identifiers.h). */
+    juce::ValueTree addNote (juce::ValueTree region, int pitch, double start, double length, int velocity, juce::UndoManager* um);
+    void moveNote (juce::ValueTree note, double newStart, int newPitch, juce::UndoManager* um);
+    void resizeNote (juce::ValueTree note, double newLength, juce::UndoManager* um);
+    void setNoteVelocity (juce::ValueTree note, int velocity, juce::UndoManager* um);
+    void deleteNote (juce::ValueTree note, juce::UndoManager* um);
+
+    /** Moves every note's start to the nearest grid line (in content time). */
+    void quantizeNotes (juce::ValueTree region, double gridSeconds, juce::UndoManager* um);
+
+    /** A raw MIDI event captured while recording, at an absolute timeline position. */
+    struct RecordedMidiEvent
+    {
+        double time = 0.0;
+        juce::uint8 status = 0, data1 = 0, data2 = 0;
+    };
+
+    struct RecordedNote { int pitch; double start; double length; int velocity; };
+
+    /**
+        Pairs note-ons with note-offs. Times come back relative to `regionStart`.
+        Notes still held at the end, or released after a cycle wrap, end at `regionEnd`.
+    */
+    std::vector<RecordedNote> notesFromEvents (const std::vector<RecordedMidiEvent>& events,
+                                               double regionStart, double regionEnd);
 
     // --- Cycle ----------------------------------------------------------------
     void setCycle (juce::ValueTree project, double start, double end, bool enabled);

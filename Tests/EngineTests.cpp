@@ -5,6 +5,8 @@
 #include "engine/AudioEngine.h"
 #include "engine/AudioFileCache.h"
 #include "engine/ProjectPlayer.h"
+#include "engine/InstrumentRack.h"
+#include "engine/BuiltInSynth.h"
 
 using namespace riff;
 using Catch::Matchers::WithinAbs;
@@ -61,7 +63,8 @@ namespace
         TempDir temp;
         AudioEngine engine;
         AudioFileCache cache { engine.getFormatManager() };
-        ProjectPlayer player { engine, cache };
+        InstrumentRack rack;
+        ProjectPlayer player { engine, cache, &rack };
         juce::ValueTree project = model::createProject();
 
         Fixture() { engine.prepare (48000.0, 512); }
@@ -545,4 +548,149 @@ TEST_CASE ("Engine latency measurement through a simulated cable", "[latency][en
     f.engine.play();
     renderLeft (f.engine, 512);
     CHECK (f.engine.getPlayheadSeconds() > 0.0);
+}
+
+namespace
+{
+    int firstNonSilent (const std::vector<float>& v, float threshold = 1e-6f)
+    {
+        for (size_t i = 0; i < v.size(); ++i)
+            if (std::abs (v[i]) > threshold)
+                return (int) i;
+        return -1;
+    }
+
+    float peakIn (const std::vector<float>& v, int from, int to)
+    {
+        float p = 0.0f;
+        for (int i = juce::jmax (0, from); i < juce::jmin ((int) v.size(), to); ++i)
+            p = juce::jmax (p, std::abs (v[(size_t) i]));
+        return p;
+    }
+}
+
+TEST_CASE ("Built-in synth plays notes sample-accurately", "[synth]")
+{
+    BuiltInSynth synth;
+    synth.prepare (48000.0, 4096);
+    BuiltInSynth::Settings s;
+    s.attack = 0.001f;
+    s.release = 0.05f;
+    synth.setSettings (s);
+
+    juce::MidiBuffer midi;
+    midi.addEvent (juce::MidiMessage::noteOn (1, 69, (juce::uint8) 100), 100);
+    midi.addEvent (juce::MidiMessage::noteOff (1, 69), 2000);
+
+    std::vector<float> l (4096), r (4096);
+    synth.render (l.data(), r.data(), 4096, midi);
+
+    CHECK (firstNonSilent (l) == 101);           // nothing before the note-on (the first sample is the zero crossing)
+    CHECK (peakIn (l, 500, 1900) > 0.01f);
+    CHECK (l == r);                               // mono voice, stereo out
+    CHECK (synth.getNumActiveVoices() == 1);      // releasing
+
+    // After the release has finished the voice is free and output is silent.
+    juce::MidiBuffer none;
+    for (int i = 0; i < 4; ++i)
+        synth.render (l.data(), r.data(), 4096, none);
+    CHECK (synth.getNumActiveVoices() == 0);
+    CHECK (peakIn (l, 0, 4096) == 0.0f);
+
+    // All-notes-off releases everything.
+    juce::MidiBuffer chord;
+    for (int n : { 60, 64, 67 })
+        chord.addEvent (juce::MidiMessage::noteOn (1, n, (juce::uint8) 90), 0);
+    synth.render (l.data(), r.data(), 512, chord);
+    CHECK (synth.getNumActiveVoices() == 3);
+    juce::MidiBuffer panic;
+    panic.addEvent (juce::MidiMessage::allSoundOff (1), 0);
+    synth.render (l.data(), r.data(), 512, panic);
+    CHECK (synth.getNumActiveVoices() == 0);
+}
+
+TEST_CASE ("Instrument tracks play MIDI regions on time", "[engine][midi]")
+{
+    Fixture f;
+    auto track = model::addTrack (f.project, "Keys", nullptr, -1, model::instrumentKind);
+    track.setProperty (ids::synthAttack, 0.001, nullptr);
+    track.setProperty (ids::synthRelease, 0.02, nullptr);
+
+    auto region = model::addMidiRegion (track, 0.5, 1.0, nullptr);       // from sample 24000
+    model::addNote (region, 60, 0.25, 0.25, 100, nullptr);             // sample 36000 .. 48000
+    f.player.setProject (f.project);
+    f.engine.play();
+
+    const auto out = renderLeft (f.engine, 72000);
+    CHECK (firstNonSilent (out) == 36001);
+    CHECK (peakIn (out, 37000, 47000) > 0.005f);
+    CHECK (peakIn (out, 48000 + 2400, 72000) == 0.0f); // released and silent after 20 ms + margin
+}
+
+TEST_CASE ("Stopping playback releases sounding notes", "[engine][midi]")
+{
+    Fixture f;
+    auto track = model::addTrack (f.project, "Pad", nullptr, -1, model::instrumentKind);
+    track.setProperty (ids::synthRelease, 0.01, nullptr);
+    model::addNote (model::addMidiRegion (track, 0.0, 10.0, nullptr), 60, 0.0, 9.0, 100, nullptr);
+    f.player.setProject (f.project);
+
+    f.engine.play();
+    renderLeft (f.engine, 4800);
+    f.engine.stop();
+    renderLeft (f.engine, 4800);                       // release happens here
+    const auto after = renderLeft (f.engine, 4800);
+    CHECK (peakIn (after, 0, 4800) == 0.0f);
+}
+
+TEST_CASE ("Live MIDI plays only the live track", "[engine][midi]")
+{
+    Fixture f;
+    auto a = model::addTrack (f.project, "A", nullptr, -1, model::instrumentKind);
+    auto b = model::addTrack (f.project, "B", nullptr, -1, model::instrumentKind);
+    b.setProperty (ids::mute, true, nullptr);   // so anything heard comes from A
+    f.player.setProject (f.project);
+
+    // No live track yet: a key press makes no sound.
+    f.engine.sendLiveMidi (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100));
+    CHECK (peakIn (renderLeft (f.engine, 2048), 0, 2048) == 0.0f);
+    f.engine.sendLiveMidi (juce::MidiMessage::allNotesOff (1));
+    renderLeft (f.engine, 512);
+
+    f.player.setLiveMidiTrack (a[ids::id].toString());
+    f.player.rebuildNow();
+    f.engine.sendLiveMidi (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100));
+    CHECK (peakIn (renderLeft (f.engine, 2048), 0, 2048) > 0.005f); // works while stopped
+}
+
+TEST_CASE ("Recording MIDI captures what you play, at the playhead", "[engine][midi][record]")
+{
+    Fixture f;
+    auto track = model::addTrack (f.project, "Keys", nullptr, -1, model::instrumentKind);
+    f.player.setProject (f.project);
+    f.player.setLiveMidiTrack (track[ids::id].toString());
+    f.player.rebuildNow();
+
+    AudioEngine::RecordRequest request;
+    request.trackId = track[ids::id].toString();
+    request.midi = true;
+
+    juce::String error;
+    REQUIRE (f.engine.startRecording ({ request }, error, (juce::int64) 0));
+    f.engine.play();
+
+    renderLeft (f.engine, 4096);                                         // playhead 4096
+    f.engine.sendLiveMidi (juce::MidiMessage::noteOn (1, 62, (juce::uint8) 90));
+    renderLeft (f.engine, 4096);                                         // event lands at 4096
+    f.engine.sendLiveMidi (juce::MidiMessage::noteOff (1, 62));
+    renderLeft (f.engine, 4096);                                         // at 8192
+
+    const auto takes = f.engine.stopRecording();
+    REQUIRE (takes.size() == 1);
+    CHECK (takes[0].isMidi);
+    CHECK (takes[0].startSample == 0);
+    REQUIRE (takes[0].midiEvents.size() == 2);
+    CHECK (takes[0].midiEvents[0].sample == 4096);
+    CHECK (takes[0].midiEvents[0].data1 == 62);
+    CHECK (takes[0].midiEvents[1].sample == 8192);
 }

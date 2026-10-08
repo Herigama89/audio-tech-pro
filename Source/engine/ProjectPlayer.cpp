@@ -4,8 +4,8 @@
 namespace riff
 {
 
-ProjectPlayer::ProjectPlayer (AudioEngine& e, AudioFileCache& c)
-    : engine (e), cache (c)
+ProjectPlayer::ProjectPlayer (AudioEngine& e, AudioFileCache& c, InstrumentRack* r)
+    : engine (e), cache (c), rack (r)
 {
     engine.getDeviceManager().addChangeListener (this);
 }
@@ -34,6 +34,15 @@ void ProjectPlayer::changeListenerCallback (juce::ChangeBroadcaster*)
     if (auto* device = engine.getDeviceManager().getCurrentAudioDevice())
         if (std::abs (device->getCurrentSampleRate() - builtForRate) > 0.5)
             rebuildNow();
+}
+
+void ProjectPlayer::setLiveMidiTrack (const juce::String& trackId)
+{
+    if (trackId != liveMidiTrackId)
+    {
+        liveMidiTrackId = trackId;
+        triggerAsyncUpdate();
+    }
 }
 
 int ProjectPlayer::slotFor (const juce::String& trackId)
@@ -99,6 +108,56 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         if (t.slot < 0)
             continue;
 
+        t.isInstrument = model::isInstrumentTrack (track);
+        t.receivesLiveMidi = t.isInstrument && track[ids::id].toString() == liveMidiTrackId;
+
+        if (t.isInstrument)
+        {
+            if (rack != nullptr)
+                t.instrument = rack->instrumentFor (track, sampleRate, AudioEngine::maxChunkSize);
+
+            for (const auto& region : track)
+            {
+                if (! model::isMidiRegion (region))
+                    continue;
+
+                PlaybackGraph::Region r;
+                r.start  = toSamples (region[ids::start]);
+                r.length = toSamples (region[ids::length]);
+
+                const double regionStart = region[ids::start];
+                const double offset = region[ids::offset];
+                const double windowEnd = offset + (double) region[ids::length];
+
+                for (const auto& note : region)
+                {
+                    if (! note.hasType (ids::NOTE))
+                        continue;
+
+                    // Notes play only if they start inside the region's window.
+                    const double noteStart = note[ids::start];
+                    if (noteStart < offset || noteStart >= windowEnd)
+                        continue;
+
+                    const double noteEnd = juce::jmin (noteStart + (double) note[ids::length], windowEnd);
+
+                    PlaybackGraph::Note n;
+                    n.start    = toSamples (regionStart + noteStart - offset);
+                    n.end      = juce::jmax (n.start + 1, toSamples (regionStart + noteEnd - offset));
+                    n.pitch    = (juce::uint8) juce::jlimit (0, 127, (int) note[ids::pitch]);
+                    n.velocity = (juce::uint8) juce::jlimit (1, 127, (int) note[ids::velocity]);
+                    r.notes.push_back (n);
+                }
+
+                std::sort (r.notes.begin(), r.notes.end(),
+                           [] (const auto& a, const auto& b) { return a.start < b.start; });
+                t.regions.push_back (std::move (r));
+            }
+
+            graph->tracks.push_back (std::move (t));
+            continue;
+        }
+
         for (const auto& region : track)
         {
             PlaybackGraph::Region r;
@@ -113,6 +172,14 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         }
 
         graph->tracks.push_back (std::move (t));
+    }
+
+    if (rack != nullptr)
+    {
+        juce::StringArray ids;
+        for (const auto& track : project)
+            ids.add (track[riff::ids::id].toString());
+        rack->removeAllExcept (ids);
     }
 
     return graph;

@@ -7,13 +7,23 @@
 
     PROJECT  { name, tempo, timeSigNumerator, masterGain, metronome,
                cycleEnabled, cycleStart, cycleEnd, countIn }
-      TRACK  { id, name, colour, volume, pan, mute, solo, armed, monitor, input, inputStereo }
-        REGION { id, name, file, start, offset, length, gain, activeTake? }
+      TRACK  { id, name, colour, volume, pan, mute, solo, armed, monitor, input, inputStereo,
+               kind ("audio" | "instrument"),
+               instrument ("synth" | "plugin"), pluginDescription (XML), pluginState (base64),
+               synthWave, synthCutoff, synthResonance, synthAttack, synthDecay, synthSustain,
+               synthRelease, synthGain }
+        REGION { id, name, file, start, offset, length, gain, activeTake?, midi? }
           TAKE { id, name, file, offset }       (only in take folders from loop recording;
                                                  the region's file/offset mirror the active take)
+          NOTE { pitch, start, length, velocity }   (only in MIDI regions)
 
     All times are in seconds (double). The engine converts them to samples
     at the device's sample rate when it builds its playback graph.
+
+    A region plays its content from `offset` for `length` seconds. For audio
+    the content is the file; for MIDI it's the notes, whose `start` is measured
+    from the beginning of that content. So trimming and splitting work the same
+    way for both: only the window moves, the notes stay put.
 */
 namespace riff::ids
 {
@@ -24,6 +34,7 @@ namespace riff::ids
     RIFF_DECLARE_ID (TRACK)
     RIFF_DECLARE_ID (REGION)
     RIFF_DECLARE_ID (TAKE)
+    RIFF_DECLARE_ID (NOTE)
 
     // Properties
     RIFF_DECLARE_ID (id)
@@ -51,6 +62,23 @@ namespace riff::ids
     RIFF_DECLARE_ID (cycleEnd)
     RIFF_DECLARE_ID (countIn)      // one bar of click before recording
     RIFF_DECLARE_ID (activeTake)   // index of the TAKE child that's playing
+
+    // MIDI and instruments
+    RIFF_DECLARE_ID (kind)
+    RIFF_DECLARE_ID (midi)
+    RIFF_DECLARE_ID (pitch)
+    RIFF_DECLARE_ID (velocity)
+    RIFF_DECLARE_ID (instrument)
+    RIFF_DECLARE_ID (pluginDescription)
+    RIFF_DECLARE_ID (pluginState)
+    RIFF_DECLARE_ID (synthWave)       // 0 saw, 1 square, 2 triangle, 3 sine
+    RIFF_DECLARE_ID (synthCutoff)     // Hz
+    RIFF_DECLARE_ID (synthResonance)  // 0..1
+    RIFF_DECLARE_ID (synthAttack)     // seconds
+    RIFF_DECLARE_ID (synthDecay)
+    RIFF_DECLARE_ID (synthSustain)    // 0..1
+    RIFF_DECLARE_ID (synthRelease)
+    RIFF_DECLARE_ID (synthGain)       // linear
 
     #undef RIFF_DECLARE_ID
 }

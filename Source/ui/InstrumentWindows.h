@@ -1,0 +1,66 @@
+#pragma once
+
+#include <JuceHeader.h>
+
+namespace riff
+{
+
+/** A floating window for a plugin's editor or the synth controls. */
+class EditorWindow final : public juce::DocumentWindow
+{
+public:
+    EditorWindow (const juce::String& title, juce::Component* contentToOwn, bool canResize,
+                  std::function<void()> onCloseRequested)
+        : DocumentWindow (title, juce::Colour (0xff1c1d21), DocumentWindow::closeButton),
+          onClose (std::move (onCloseRequested))
+    {
+        setUsingNativeTitleBar (true);
+        setContentOwned (contentToOwn, true);
+        setResizable (canResize, false);
+        centreAroundComponent (nullptr, getWidth(), getHeight());
+        setVisible (true);
+        toFront (true);
+    }
+
+    void closeButtonPressed() override
+    {
+        if (onClose)
+            onClose(); // the owner deletes this window
+    }
+
+private:
+    std::function<void()> onClose;
+};
+
+/** Controls for Riff's built-in synth, bound (undoably) to the track's properties. */
+class SynthPanel final : public juce::Component,
+                         private juce::ValueTree::Listener
+{
+public:
+    SynthPanel (juce::ValueTree track, juce::UndoManager& um);
+    ~SynthPanel() override;
+
+    void paint (juce::Graphics& g) override;
+    void resized() override;
+
+private:
+    struct Control
+    {
+        juce::Identifier id;
+        juce::Slider slider;
+        juce::Label label;
+    };
+
+    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { refresh(); }
+    void refresh();
+    void addControl (const juce::Identifier& id, const juce::String& name, double min, double max,
+                     double mid, const juce::String& suffix);
+
+    juce::ValueTree track;
+    juce::UndoManager& undoManager;
+    juce::ComboBox waveBox;
+    juce::Label waveLabel;
+    juce::OwnedArray<Control> controls;
+};
+
+} // namespace riff

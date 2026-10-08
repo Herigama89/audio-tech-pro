@@ -228,6 +228,49 @@ void ArrangeCanvas::paintCycle (juce::Graphics& g)
     g.fillRoundedRectangle (r, 3.0f);
 }
 
+void ArrangeCanvas::paintMidiNotes (juce::Graphics& g, const juce::ValueTree& region,
+                                    juce::Rectangle<float> body, juce::Colour colour)
+{
+    // A miniature piano roll, scaled to the notes' pitch range.
+    const double offset = region[ids::offset], length = region[ids::length];
+    int low = 127, high = 0;
+
+    for (const auto& note : region)
+    {
+        if (note.hasType (ids::NOTE))
+        {
+            low = juce::jmin (low, (int) note[ids::pitch]);
+            high = juce::jmax (high, (int) note[ids::pitch]);
+        }
+    }
+
+    if (low > high)
+        return;
+
+    low = juce::jmax (0, low - 2);
+    high = juce::jmin (127, high + 2);
+    const auto rowH = juce::jmin (4.0f, body.getHeight() / (float) (high - low + 1));
+
+    juce::Graphics::ScopedSaveState save (g);
+    g.reduceClipRegion (body.toNearestInt());
+    g.setColour (colour.brighter (0.6f));
+
+    for (const auto& note : region)
+    {
+        if (! note.hasType (ids::NOTE))
+            continue;
+
+        const double s = note[ids::start];
+        if (s < offset || s >= offset + length)
+            continue;
+
+        const auto x = body.getX() + (float) ((s - offset) * timeline.pixelsPerSecond);
+        const auto w = juce::jmax (1.5f, (float) ((double) note[ids::length] * timeline.pixelsPerSecond));
+        const auto y = body.getBottom() - (float) ((int) note[ids::pitch] - low + 1) * (body.getHeight() / (float) (high - low + 1));
+        g.fillRect (x, y, w, juce::jmax (1.5f, rowH));
+    }
+}
+
 void ArrangeCanvas::paintLiveTakes (juce::Graphics& g)
 {
     for (const auto& take : engine.getLiveTakes())
@@ -269,7 +312,8 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
     const auto colour = model::trackColour (region.getParent());
     const bool selected = timeline.selectedRegionId == region[ids::id].toString();
     const juce::File file (region[ids::file].toString());
-    const bool missing = ! file.existsAsFile();
+    const bool isMidi = model::isMidiRegion (region);
+    const bool missing = ! isMidi && ! file.existsAsFile();
 
     g.setColour ((missing ? theme::danger : colour).withAlpha (0.25f));
     g.fillRoundedRectangle (bounds, 4.0f);
@@ -294,8 +338,11 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
 
     g.drawText (label, textArea, juce::Justification::centredLeft, true);
 
+    if (isMidi)
+        paintMidiNotes (g, region, bounds.withTrimmedTop ((float) regionHeader + 1.0f).reduced (0.0f, 3.0f), colour);
+
     // Waveform, drawn only for the visible part
-    if (! missing)
+    if (! missing && ! isMidi)
     {
         auto& thumb = waveforms.get (file);
         const auto body = bounds.withTrimmedTop ((float) regionHeader + 1.0f).reduced (0.0f, 2.0f);
@@ -462,6 +509,10 @@ void ArrangeCanvas::mouseDrag (const juce::MouseEvent& e)
             const auto targetIndex = juce::jlimit (0, project.getNumChildren() - 1, timeline.trackIndexAt (e.y));
             auto target = project.getChild (targetIndex);
 
+            // MIDI belongs on instrument tracks and audio on audio tracks.
+            if (model::isMidiRegion (dragRegion) != model::isInstrumentTrack (target))
+                target = dragRegion.getParent();
+
             model::moveRegion (dragRegion, target, newStart, &undoManager);
             timeline.selectedTrackId = target[ids::id].toString();
             break;
@@ -550,6 +601,43 @@ void ArrangeCanvas::showTakeMenu (juce::ValueTree region)
     menu.addSectionHeader ("Takes");
     addTakeItems (menu, region);
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+}
+
+void ArrangeCanvas::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (e.y < TimelineState::rulerHeight)
+        return;
+
+    int trackIndex = -1;
+    auto region = regionAt (e.position, trackIndex);
+
+    if (region.isValid())
+    {
+        if (model::isMidiRegion (region) && onOpenPianoRoll)
+            onOpenPianoRoll (region);
+        return;
+    }
+
+    // Double-click an empty spot on an instrument track: a new one-bar MIDI region there.
+    if (trackIndex < 0 || trackIndex >= project.getNumChildren())
+        return;
+
+    auto track = project.getChild (trackIndex);
+    if (! model::isInstrumentTrack (track))
+        return;
+
+    const auto bar = model::secondsPerBeat (project) * (int) project.getProperty (ids::timeSigNumerator, 4);
+    const auto start = std::floor (timeline.xToTime ((float) e.x) / bar) * bar;
+
+    undoManager.beginNewTransaction ("New MIDI region");
+    auto newRegion = model::addMidiRegion (track, juce::jmax (0.0, start), bar, &undoManager);
+
+    timeline.selectedRegionId = newRegion[ids::id].toString();
+    timeline.selectedTrackId = track[ids::id].toString();
+    timeline.changed();
+
+    if (onOpenPianoRoll)
+        onOpenPianoRoll (newRegion);
 }
 
 void ArrangeCanvas::mouseMove (const juce::MouseEvent& e)
@@ -657,7 +745,8 @@ void ArrangeCanvas::importFiles (const juce::StringArray& files, int trackIndex,
         juce::ValueTree track;
 
         // The first file goes on the track under the drop; the rest each get a new track.
-        if (! usedExistingTrack && trackIndex >= 0 && trackIndex < project.getNumChildren())
+        if (! usedExistingTrack && trackIndex >= 0 && trackIndex < project.getNumChildren()
+            && ! model::isInstrumentTrack (project.getChild (trackIndex)))
         {
             track = project.getChild (trackIndex);
             usedExistingTrack = true;

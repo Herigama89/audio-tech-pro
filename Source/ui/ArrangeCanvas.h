@@ -39,6 +39,7 @@ public:
     void mouseDrag (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
     void mouseMove (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
@@ -48,6 +49,9 @@ public:
 
     /** Called when the user scrolls or zooms with the wheel (so scrollbars can update). */
     std::function<void()> onViewChanged;
+
+    /** Called to open a MIDI region in the piano roll. */
+    std::function<void (juce::ValueTree region)> onOpenPianoRoll;
 
 private:
     enum class DragMode { none, scrub, move, trimStart, trimEnd, cycleNew, cycleMove };
@@ -63,6 +67,7 @@ private:
     void paintRuler (juce::Graphics& g);
     void paintGrid (juce::Graphics& g);
     void paintRegion (juce::Graphics& g, const juce::ValueTree& region, int trackIndex);
+    void paintMidiNotes (juce::Graphics& g, const juce::ValueTree& region, juce::Rectangle<float> body, juce::Colour colour);
     void paintLiveTakes (juce::Graphics& g);
     void paintCycle (juce::Graphics& g);
     void showTakeMenu (juce::ValueTree region);
