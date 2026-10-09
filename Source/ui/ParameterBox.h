@@ -104,6 +104,17 @@ public:
                 r->refresh();
     }
 
+    void setCollapsed (bool shouldBeCollapsed)
+    {
+        collapsed = shouldBeCollapsed;
+        resized();
+        repaint();
+        if (onLayoutChanged)
+            onLayoutChanged();
+    }
+    bool isCollapsed() const noexcept { return collapsed; }
+    static constexpr int titleBarHeight() { return titleHeight; }
+
     int preferredHeight() const { return titleHeight + (collapsed ? 0 : (int) rows.size() * rowHeight + 6); }
 
     std::function<void()> onLayoutChanged;

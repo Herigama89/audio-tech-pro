@@ -728,8 +728,8 @@ void TrackHeaderList::paint (juce::Graphics& g)
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (11.0f));
     g.drawText (juce::String (model::numTracks (project)) + (model::numTracks (project) == 1 ? " track" : " tracks"),
-                getLocalBounds().removeFromTop (TimelineState::barRulerHeight).reduced (12, 0),
-                juce::Justification::centredLeft);
+                getLocalBounds().withY (TimelineState::barRulerHeight).withHeight (TimelineState::markerHeight).reduced (12, 0),
+                juce::Justification::centredLeft);   // (the top row has the Edit, Functions and View menus)
     g.drawText ("Markers", getLocalBounds().withY (TimelineState::barRulerHeight).withHeight (TimelineState::markerHeight).reduced (12, 0),
                 juce::Justification::centredRight);
     g.drawText ("Tempo", getLocalBounds().withY (TimelineState::tempoTop).withHeight (TimelineState::tempoHeight).reduced (12, 0),

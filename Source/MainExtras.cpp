@@ -1,5 +1,7 @@
 // Undo History, Settings, templates, project alternatives, Autopunch and the Event List.
 #include "MainComponent.h"
+#include "ui/RoutingMenu.h"
+#include "ui/Commands.h"
 #include "ui/LiveLoopsGrid.h"
 #include "ui/ThemePanel.h"
 #include "model/Project.h"
@@ -941,6 +943,109 @@ void MainComponent::showSignalFlow()
     }
     launch (new SignalFlowPanel (project, track, headers.inputNames ? headers.inputNames() : juce::StringArray(), effectRack),
             "Signal Flow: " + track[ids::name].toString(), this);
+}
+
+} // namespace riff
+
+namespace riff
+{
+
+void MainComponent::showInspectorTrackMenu (juce::ValueTree track, juce::Component& target)
+{
+    // The Inspector's track menu (on the track's name at its top): the Track menu's items for this
+    // track, its routing and channel strip, and what the Inspector shows.
+    if (! track.isValid())
+        return;
+    if (timeline.selectedTrackId != track[ids::id].toString())
+    {
+        timeline.selectOnly (track[ids::id].toString());
+        timeline.changed();
+    }
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader (track[ids::name].toString());
+    auto add = [&] (std::initializer_list<juce::CommandID> list)
+    {
+        for (auto id : list)
+            menu.addCommandItem (&commandManager, id);
+    };
+    add ({ commands::muteTrack, commands::soloTrack, commands::armTrack, commands::showAutomation });
+    menu.addSeparator();
+    add ({ commands::trackColours });
+
+    // Mono / stereo, as on the strip's format button
+    if (! model::isVcaTrack (track))
+    {
+        juce::PopupMenu format;
+        const bool stereo = model::isStereoChannel (track);
+        format.addItem ("Mono", true, ! stereo, [this, track]() mutable
+        {
+            undoManager.beginNewTransaction ("Channel format");
+            model::setStereoChannel (track, false, &undoManager);
+        });
+        format.addItem ("Stereo", true, stereo, [this, track]() mutable
+        {
+            undoManager.beginNewTransaction ("Channel format");
+            model::setStereoChannel (track, true, &undoManager);
+        });
+        menu.addSubMenu ("Channel Format", format);
+    }
+
+    juce::PopupMenu routingMenu;
+    routing::addRoutingItems (routingMenu, project, track, undoManager);
+    menu.addSubMenu ("Routing, Groups, VCA and Stacks", routingMenu);
+
+    if (! model::isVcaTrack (track))
+        menu.addItem ("Channel Strip Setting...", [this, track, safe = juce::Component::SafePointer<juce::Component> (&target)]
+        {
+            if (safe != nullptr)
+                showChannelSettingMenu (track, *safe);
+        });
+    if (! model::isVcaTrack (track))
+        menu.addItem ("Open Channel EQ...", [this, track] { if (mixer.onOpenStripWindow) mixer.onOpenStripWindow (track); });
+
+    menu.addSeparator();
+    add ({ commands::duplicateTrack, commands::createTrackStack, commands::freezeTracks, commands::bounceInPlace });
+    menu.addSeparator();
+    add ({ commands::hideTrack, commands::showHiddenTracks, commands::deleteTrack });
+    menu.addSeparator();
+    inspector.addInspectorItems (menu);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+}
+
+void MainComponent::showLocalMenu (int which, juce::Component& target)
+{
+    // Logic's tracks-area menus.
+    juce::PopupMenu menu;
+    auto add = [&] (std::initializer_list<juce::CommandID> list)
+    {
+        for (auto id : list)
+            menu.addCommandItem (&commandManager, id);
+    };
+
+    if (which == 0)
+        menu = getMenuForIndex (1, "Edit");
+    else if (which == 1)
+    {
+        menu.addSectionHeader ("Region");
+        add ({ commands::quantize, commands::muteRegions, commands::loopRegions, commands::regionGain, commands::removeFades });
+        menu.addSeparator();
+        add ({ commands::bounceInPlace, commands::generateMidi });
+        menu.addSectionHeader ("Track");
+        add ({ commands::createTrackStack, commands::freezeTracks, commands::newVca, commands::duplicateTrack });
+        menu.addSectionHeader ("Markers and Locators");
+        add ({ commands::createMarker, commands::deleteMarker, commands::setLocatorsBySelection });
+        menu.addSeparator();
+        add ({ commands::splitByLocators, commands::cutSectionBetweenLocators, commands::insertSilenceBetweenLocators,
+               commands::repeatSectionBetweenLocators });
+    }
+    else
+    {
+        menu = getMenuForIndex (6, "View");
+        menu.addSeparator();
+        add ({ commands::showHiddenTracks, commands::showAutomation });
+    }
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
 }
 
 } // namespace riff

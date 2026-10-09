@@ -32,6 +32,63 @@ Inspector::Inspector (MixerPanel& m)
     divider.onReset = [this] { boxesWanted = -1; resized(); };
     divider.setTooltip ("Drag up or down: more room for the channel strips or for the Region and Track boxes. Double-click to reset.");
     addAndMakeVisible (divider);
+
+    // The menus at the top, on the strips' names (as in Logic's Inspector).
+    for (auto* b : { &trackMenuButton, &masterMenuButton })
+    {
+        b->setWantsKeyboardFocus (false);
+        b->setColour (juce::TextButton::buttonColourId, theme::toolbarDark);
+        b->setColour (juce::TextButton::textColourOffId, theme::text);
+        addAndMakeVisible (b);
+    }
+    trackMenuButton.setTooltip ("The track's menu: mute, solo, record, automation, colour, icon, routing, groups, stacks, mono/stereo, freeze, channel strip settings, and what the Inspector shows");
+    trackMenuButton.onClick = [this]
+    {
+        if (onTrackMenu && track.isValid())
+            onTrackMenu (track, trackMenuButton);
+        else
+        {
+            juce::PopupMenu menu;
+            addInspectorItems (menu);
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&trackMenuButton));
+        }
+    };
+    masterMenuButton.setTooltip ("The Stereo Out's menu");
+    masterMenuButton.onClick = [this]
+    {
+        juce::PopupMenu menu;
+        menu.addSectionHeader ("Stereo Out");
+        menu.addItem ("Set Volume to 0 dB", [this]
+        {
+            if (! project.isValid()) return;
+            mixer.getUndoManager().beginNewTransaction ("Master volume");
+            project.setProperty (ids::masterGain, 1.0, &mixer.getUndoManager());
+        });
+        menu.addSeparator();
+        addInspectorItems (menu);
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&masterMenuButton));
+    };
+}
+
+void Inspector::addInspectorItems (juce::PopupMenu& menu)
+{
+    juce::PopupMenu view;
+    view.addItem ("Region Box Open", true, ! regionBox.isCollapsed(), [this] { regionBox.setCollapsed (! regionBox.isCollapsed()); });
+    view.addItem ("Track Box Open", true, ! trackBox.isCollapsed(), [this] { trackBox.setCollapsed (! trackBox.isCollapsed()); });
+    view.addSeparator();
+    view.addItem ("Open All Boxes", [this] { regionBox.setCollapsed (false); trackBox.setCollapsed (false); boxesWanted = -1; resized(); });
+    view.addItem ("Close All Boxes", [this] { regionBox.setCollapsed (true); trackBox.setCollapsed (true); });
+    view.addItem ("Channel Strips Taller (boxes scroll)", [this] { boxesWanted = 0; resized(); });
+    view.addItem ("Reset Divider", [this] { boxesWanted = -1; resized(); });
+    menu.addSubMenu ("Inspector", view);
+}
+
+void Inspector::updateHeaderButtons()
+{
+    const auto arrow = juce::String::fromUTF8 (" \xe2\x96\xbe");
+    trackMenuButton.setButtonText ((track.isValid() ? track[ids::name].toString() : juce::String ("No track")) + arrow);
+    trackMenuButton.setEnabled (true);
+    masterMenuButton.setButtonText ("Stereo Out" + arrow);
 }
 
 Inspector::~Inspector()
@@ -51,7 +108,10 @@ void Inspector::clear()
 void Inspector::setTrack (juce::ValueTree newProject, juce::ValueTree newTrack)
 {
     if (newProject == project && newTrack == track && masterStrip != nullptr)
+    {
+        updateHeaderButtons();   // (the name may have changed)
         return;
+    }
 
     clear();
     project = newProject;
@@ -71,6 +131,7 @@ void Inspector::setTrack (juce::ValueTree newProject, juce::ValueTree newTrack)
     }
 
     buildTrackBox();
+    updateHeaderButtons();
     resized();
     repaint();
 }
@@ -236,16 +297,7 @@ void Inspector::paint (juce::Graphics& g)
     g.setColour (juce::Colours::black);
     g.fillRect (header.removeFromBottom (1));
 
-    // Each strip's name above it.
-    auto names = getLocalBounds().removeFromTop (headerHeight).withTrimmedLeft (4);
-    const auto left = names.removeFromLeft (ChannelStrip::stripWidth).reduced (2, 0);
-    names.removeFromLeft (4);
-    const auto right = names.removeFromLeft (ChannelStrip::stripWidth).reduced (2, 0);
-    g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
-    g.setColour (theme::text);
-    g.drawFittedText (track.isValid() ? track[ids::name].toString() : juce::String ("No track"), left, juce::Justification::centred, 1, 0.7f);
-    g.setColour (theme::dimText);
-    g.drawFittedText ("Stereo Out", right, juce::Justification::centred, 1, 0.7f);
+    // (Each strip's name above it is a menu button.)
 
     g.setColour (juce::Colours::black);
     g.fillRect (getWidth() - 1, 0, 1, getHeight());
@@ -253,11 +305,21 @@ void Inspector::paint (juce::Graphics& g)
 
 void Inspector::resized()
 {
+    {
+        auto names = getLocalBounds().removeFromTop (headerHeight).withTrimmedLeft (4).reduced (0, 3);
+        trackMenuButton.setBounds (names.removeFromLeft (ChannelStrip::stripWidth));
+        names.removeFromLeft (4);
+        masterMenuButton.setBounds (names.removeFromLeft (ChannelStrip::stripWidth));
+    }
     auto area = getLocalBounds().withTrimmedTop (headerHeight).withTrimmedRight (1);
 
-    // The Region and Track boxes on top (scrolling if the divider makes them short)...
+    // The Region and Track boxes on top (scrolling if the divider makes them short); their title bars always show.
     const auto boxes = boxesHeight();
-    const auto top = juce::jlimit (0, juce::jmax (0, area.getHeight() - 120), boxesWanted >= 0 ? boxesWanted : boxes);
+    int titles = 0;
+    for (const auto* box : { &regionBox, &trackBox })
+        if (box->isVisible())
+            titles += ParameterBox::titleBarHeight() + 4;
+    const auto top = juce::jlimit (juce::jmin (titles, boxes), juce::jmax (titles, area.getHeight() - 120), boxesWanted >= 0 ? boxesWanted : boxes);
     viewport.setBounds (area.removeFromTop (top));
     holder.setSize (viewport.getWidth() - (boxes > top ? viewport.getScrollBarThickness() : 0), boxes);
     auto all = holder.getLocalBounds();

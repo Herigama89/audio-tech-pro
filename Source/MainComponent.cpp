@@ -228,6 +228,23 @@ MainComponent::MainComponent (bool openAudioDevice)
     canvas.onOpenPianoRoll = [this] (juce::ValueTree region) { openPianoRoll (region); };
     canvas.onSplit = [this] { splitAtPlayhead(); };
     mixer.onLayoutChanged = [this] { inspector.resized(); };
+    inspector.onTrackMenu = [this] (juce::ValueTree t, juce::Component& target) { showInspectorTrackMenu (t, target); };
+
+    // Logic's local menu bar over the track headers.
+    {
+        int which = 0;
+        for (auto* b : { &localEditButton, &localFunctionsButton, &localViewButton })
+        {
+            b->setButtonText (b->getButtonText() + juce::String::fromUTF8 (" \xe2\x96\xbe"));
+            b->setWantsKeyboardFocus (false);
+            b->setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+            b->setColour (juce::TextButton::textColourOffId, theme::text);
+            b->setConnectedEdges (juce::Button::ConnectedOnLeft | juce::Button::ConnectedOnRight);
+            b->onClick = [this, b, which] { showLocalMenu (which, *b); };
+            addAndMakeVisible (b);
+            ++which;
+        }
+    }
     canvas.commandManager = &commandManager;
     canvas.onEmptyAreaMenu = [this] { showToolMenu (true); };
     canvas.onDelete = [this] { deleteSelection(); };
@@ -821,6 +838,17 @@ void MainComponent::resized()
     vScroll.setBounds (area.removeFromRight (scrollBarSize).withTrimmedTop (TimelineState::rulerHeight).withTrimmedBottom (scrollBarSize));
     hScroll.setBounds (area.removeFromBottom (scrollBarSize));
     canvas.setBounds (area);
+
+    // Edit, Functions and View over the headers, level with the bar ruler.
+    {
+        auto bar = headers.getBounds().withHeight (TimelineState::barRulerHeight).reduced (4, 4);
+        for (auto [b, w] : { std::pair { &localEditButton, 52 }, std::pair { &localFunctionsButton, 82 }, std::pair { &localViewButton, 56 } })
+        {
+            b->setVisible (showTrackHeaders);
+            b->setBounds (bar.removeFromLeft (w));
+            b->toFront (false);
+        }
+    }
 
     updateScrollBars();
 }

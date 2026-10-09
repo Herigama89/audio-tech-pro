@@ -224,6 +224,11 @@ private:
     void hideSelectedTracks();
     void toggleInspector();
     void showCreateStackDialog();
+    void showInspectorTrackMenu (juce::ValueTree track, juce::Component& target);
+
+    // Logic's local menus over the track headers: Edit, Functions, View
+    juce::TextButton localEditButton { "Edit" }, localFunctionsButton { "Functions" }, localViewButton { "View" };
+    void showLocalMenu (int which, juce::Component& target);
     void showTrackColours();
     void moveByBars (int bars);
     void quantizeSelection();

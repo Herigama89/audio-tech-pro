@@ -27,6 +27,12 @@ public:
     void resized() override;
 
     static constexpr int headerHeight = 26;
+
+    /** The menu at the top (the track's name): everything you can do to the track and its channel strip. */
+    std::function<void (juce::ValueTree track, juce::Component& target)> onTrackMenu;
+
+    /** The Inspector's own options (which boxes show), for that menu. */
+    void addInspectorItems (juce::PopupMenu& menu);
     static constexpr int preferredWidth = 2 * ChannelStrip::stripWidth + 3 * 4 + 12;
 
 private:
@@ -49,6 +55,8 @@ private:
         std::function<void (int)> onDrag;
     };
     Divider divider;
+    juce::TextButton trackMenuButton, masterMenuButton;
+    void updateHeaderButtons();
     int boxesWanted = -1, boxesAtDragStart = 0;   // -1: as tall as the boxes need
     juce::Viewport stripView;
     juce::Component stripHolder;
