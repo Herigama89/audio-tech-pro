@@ -152,6 +152,7 @@ private:
     void addTemplateAndAlternativeItems (juce::PopupMenu& menu);
     juce::File templatesFolder() const;
     int autosaveMinutes = 2;
+    bool regeneratingPlayer = false;
     void toggleFreeze (juce::ValueTree track);
     void createStackFromSelection (bool summing);
     void newVcaForSelection();

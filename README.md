@@ -353,7 +353,8 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [x] Undo History window, Settings window (autosave, backups, recording format, stop behaviour, open last project)
 - [x] Library (save a track's sound as a patch, put it on other tracks; Y) and Loop Browser (a folder of loops and samples, preview, drag onto tracks; O)
 - [x] Smart Controls (B): eight knobs per track, mapped automatically, right-click to remap
-- [ ] Live Loops, Drummer and Session Players (instruments come last)
+- [x] Drummer and Session Players (bass, keys): Track > New Drummer Track; the Player view sets genre, simple/complex and soft/loud, fills, swing, pieces
+- [ ] Live Loops
 
 ## Later phases
 

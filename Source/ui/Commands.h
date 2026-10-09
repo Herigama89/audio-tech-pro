@@ -35,7 +35,8 @@ namespace riff::commands
         createFolderStack = 0x2901, createSummingStack, freezeTracks, newVca,
         toggleAutopunch = 0x2a01, toggleReplace, toggleMidiMerge, undoHistory, preferences, saveAsTemplate, newAlternative, eventList,
         controllerAssignments, showLibrary, showLoopBrowser, showSmartControls,
-        splitByLocators = 0x2b01, cutSectionBetweenLocators, insertSilenceBetweenLocators, repeatSectionBetweenLocators, groupSettings, ioLabels, signalFlow
+        splitByLocators = 0x2b01, cutSectionBetweenLocators, insertSilenceBetweenLocators, repeatSectionBetweenLocators, groupSettings, ioLabels, signalFlow,
+        newDrummerTrack = 0x2c01, newBassPlayerTrack, newKeysPlayerTrack
     };
 
     struct Info

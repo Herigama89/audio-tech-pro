@@ -191,6 +191,21 @@ bool MainComponent::perform (const InvocationInfo& info)
             }
             break;
         case commands::duplicateTrack:         duplicateSelectedTrack(); break;
+        case commands::newDrummerTrack:
+        case commands::newBassPlayerTrack:
+        case commands::newKeysPlayerTrack:
+        {
+            const auto what = info.commandID == commands::newDrummerTrack ? "drums" : info.commandID == commands::newBassPlayerTrack ? "bass" : "keys";
+            undoManager.beginNewTransaction (commands::find (info.commandID)->name);
+            // From the bar at the playhead, eight bars (drag the region's end for more).
+            const auto bar = model::moveByBars (project, engine.getPlayheadSeconds() + 1.0e-6, 0);
+            auto track = generator::player::addPlayerTrack (project, what, bar, 8, &undoManager);
+            timeline.selectOnly (track[ids::id].toString());
+            timeline.changed();
+            if (auto region = track.getChild (0); region.isValid())
+                openPianoRoll (region);
+            break;
+        }
         case commands::createFolderStack:      createStackFromSelection (false); break;
         case commands::createSummingStack:     createStackFromSelection (true); break;
         case commands::freezeTracks:           if (auto t = selectedTrack(); t.isValid()) toggleFreeze (t); break;
@@ -304,6 +319,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
 
         case 2:
             add ({ commands::newAudioTrack, commands::newInstrumentTrack, commands::newAuxBus, commands::newVca, commands::duplicateTrack });
+            menu.addSeparator();
+            add ({ commands::newDrummerTrack, commands::newBassPlayerTrack, commands::newKeysPlayerTrack });
             menu.addSeparator();
             add ({ commands::createFolderStack, commands::createSummingStack, commands::freezeTracks });
             menu.addSeparator();

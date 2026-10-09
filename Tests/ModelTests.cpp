@@ -723,3 +723,34 @@ TEST_CASE ("More MIDI transforms", "[model][midi]")
     model::transformNotes ({ a }, model::Transform::noteRepeat, nullptr, 125);
     CHECK (region.getNumChildren() == 5);   // a became four 125 ms repeats
 }
+
+#include "../Source/model/Generator.h"
+
+TEST_CASE ("Drummer and Session Players write their regions from their settings", "[model][player]")
+{
+    auto project = model::createProject();
+    project.setProperty (ids::tempo, 100.0, nullptr);
+    auto track = generator::player::addPlayerTrack (project, "drums", 0.0, 4, nullptr);
+    CHECK (track[ids::instrument].toString() == "drums");
+    auto region = track.getChild (0);
+    const auto busy = region.getNumChildren();
+    CHECK (busy > 10);
+
+    region.setProperty (generator::player::complexity, 0.0, nullptr);
+    generator::player::regenerate (region, nullptr);
+    const auto simple = region.getNumChildren();
+    CHECK (simple < busy);
+
+    // Only kick and snare.
+    region.setProperty (generator::player::pieces, 1, nullptr);
+    generator::player::regenerate (region, nullptr);
+    for (const auto& n : region)
+        CHECK (((int) n[ids::pitch] == 36 || (int) n[ids::pitch] == 38 || (int) n[ids::pitch] == 37 || (int) n[ids::pitch] == 39));
+
+    // Everything stays inside the region.
+    for (const auto& n : region)
+        CHECK ((double) n[ids::start] < (double) region[ids::length]);
+
+    auto bass = generator::player::addPlayerTrack (project, "bass", 0.0, 2, nullptr);
+    CHECK (bass.getChild (0).getNumChildren() > 0);
+}

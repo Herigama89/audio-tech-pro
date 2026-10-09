@@ -135,6 +135,14 @@ public:
         pump (main, 150);
         save (main.pianoRoll, "step-editor.png");
         main.pianoRoll.viewBox.setSelectedId (1);
+        {
+            auto drummer = generator::player::addPlayerTrack (main.project, "drums", 0.0, 4, nullptr);
+            main.openPianoRoll (drummer.getChild (0));
+            pump (main, 200);
+            save (main.pianoRoll, "drummer.png");
+            main.closePianoRoll();
+            main.project.removeChild (drummer, nullptr);
+        }
         main.closePianoRoll();
 
         {

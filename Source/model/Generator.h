@@ -79,4 +79,27 @@ namespace riff::generator
     */
     juce::Array<juce::ValueTree> apply (juce::ValueTree project, const Result& result, const Settings& settings,
                                         double startSeconds, bool setTempo, juce::UndoManager* um);
+
+    /**
+        Logic's Drummer and Session Players: a region that a player plays, in a genre, set by
+        how complex and how loud (an XY pad), fills, swing and (for drums) which pieces. Its
+        notes are written from those settings; change one and they're written again.
+    */
+    namespace player
+    {
+        inline const juce::Identifier kind { "player" };            // "drums", "bass" or "keys"
+        inline const juce::Identifier genre { "playerGenre" };
+        inline const juce::Identifier complexity { "playerComplexity" };   // 0 simple .. 1 complex
+        inline const juce::Identifier loudness { "playerLoudness" };       // 0 soft .. 1 loud
+        inline const juce::Identifier fills { "playerFills" };             // 0 .. 1
+        inline const juce::Identifier swing { "playerSwing" };             // 0 .. 1 (on top of the genre's)
+        inline const juce::Identifier pieces { "playerPieces" };           // drums: bit 0 kick+snare, 1 hats, 2 cymbals, 3 toms, 4 percussion
+        inline const juce::Identifier seed { "playerSeed" };
+
+        /** Writes the region's notes again from its settings. */
+        void regenerate (juce::ValueTree region, juce::UndoManager* um);
+
+        /** A new player track (Drum Kit for drums, the synth for bass and keys) with a region of `bars` bars at `start`. */
+        juce::ValueTree addPlayerTrack (juce::ValueTree project, const juce::String& kind, double start, int bars, juce::UndoManager* um);
+    }
 }

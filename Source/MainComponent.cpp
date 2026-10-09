@@ -1606,6 +1606,13 @@ void MainComponent::valueTreePropertyChanged (juce::ValueTree& tree, const juce:
         || property == ids::mute || property == ids::solo || property == ids::armed || property == ids::showAutomation)
         commandManager.commandStatusChanged();
 
+    // A player region made longer or shorter plays to its new length (written again, in the same undo step).
+    if (property == ids::length && tree.hasType (ids::REGION) && tree.hasProperty (generator::player::kind) && ! regeneratingPlayer)
+    {
+        const juce::ScopedValueSetter<bool> busy (regeneratingPlayer, true);
+        generator::player::regenerate (tree, &undoManager);
+    }
+
     markDirty();
 }
 

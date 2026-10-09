@@ -1,5 +1,6 @@
 #include "Generator.h"
 #include "Project.h"
+#include <map>
 
 namespace riff::generator
 {
@@ -524,6 +525,125 @@ Result generate (const Settings& settingsIn)
     }
 
     return result;
+}
+
+//==============================================================================
+namespace player
+{
+    void regenerate (juce::ValueTree region, juce::UndoManager* um)
+    {
+        const auto what = region[kind].toString();
+        auto track = region.getParent();
+        auto project = track.getParent();
+        if (what.isEmpty() || ! project.isValid())
+            return;
+
+        const auto map = model::tempoMapOf (project);
+        const double start = region[ids::start], length = region[ids::length];
+        const auto startBeat = map.beatAt (start);
+        const auto beatsLong = map.beatAt (start + length) - startBeat;
+        const auto beatsPerBar = map.beatsPerBarAt (startBeat);
+
+        Settings s;
+        s.genre = juce::jlimit (0, (int) genres().size() - 1, (int) region.getProperty (genre, 0));
+        const auto [root, minor] = model::keyAt (project, start);
+        s.root = root;
+        s.minor = minor;
+        s.bars = juce::jmax (1, (int) std::ceil (beatsLong / beatsPerBar - 1.0e-6));
+        s.drums = what == "drums";
+        s.bass = what == "bass";
+        s.chords = what == "keys";
+        s.melody = false;
+        s.variation = (float) (double) region.getProperty (fills, 0.4);
+        s.seed = (juce::uint32) (int) region.getProperty (seed, 1);
+
+        const auto result = generate (s);
+        if (result.parts.empty())
+            return;
+
+        const double complexityValue = region.getProperty (complexity, 0.5);
+        const double loud = region.getProperty (loudness, 0.6);
+        const double extraSwing = region.getProperty (swing, 0.0);
+        const int pieceMask = region.getProperty (pieces, 0x1f);
+
+        const auto pieceOf = [] (int pitch)
+        {
+            switch (pitch)
+            {
+                case gm::kick: case gm::snare: case gm::rim: case gm::clap: return 0;
+                case gm::closedHat: case gm::pedalHat: case gm::openHat: return 1;
+                case gm::crash: case gm::ride: case 57: case 59: return 2;
+                case gm::lowTom: case gm::highTom: case 41: case 43: case 47: case 50: return 3;
+                default: return 4;
+            }
+        };
+
+        // Out with the old notes (the region's other children stay).
+        for (int i = region.getNumChildren(); --i >= 0;)
+            if (region.getChild (i).hasType (ids::NOTE))
+                region.removeChild (i, um);
+
+        const double offset = region[ids::offset];
+        for (const auto& n : result.parts.front().notes)
+        {
+            if (n.start >= beatsLong - 1.0e-6)
+                continue;
+
+            // Simple playing keeps the main beats: 16ths off the 8th grid and quiet ghost notes go.
+            const auto onEighth = std::abs (n.start * 2.0 - std::round (n.start * 2.0)) < 0.05;
+            if (complexityValue < 0.35 && (! onEighth || n.velocity < 60))
+                continue;
+            if (complexityValue < 0.15 && std::abs (n.start - std::round (n.start)) > 0.05)
+                continue;
+            if (what == "drums" && ((pieceMask >> pieceOf (n.pitch)) & 1) == 0)
+                continue;
+
+            // Swing: the off-beat 8ths (and 16ths) a little late.
+            auto beat = n.start;
+            const auto frac = beat - std::floor (beat);
+            if (extraSwing > 0.0 && (std::abs (frac - 0.5) < 0.05 || std::abs (frac - 0.25) < 0.05 || std::abs (frac - 0.75) < 0.05))
+                beat += extraSwing * (std::abs (frac - 0.5) < 0.05 ? 1.0 / 6.0 : 1.0 / 12.0);
+
+            const auto velocity = juce::jlimit (1, 127, juce::roundToInt (n.velocity * (0.55 + 0.75 * loud)));
+            const auto noteStart = map.secondsAt (startBeat + beat) - start + offset;
+            const auto noteEnd = map.secondsAt (startBeat + juce::jmin (beatsLong, beat + n.length)) - start + offset;
+            model::addNote (region, n.pitch, noteStart, juce::jmax (0.01, noteEnd - noteStart), velocity, um);
+        }
+    }
+
+    juce::ValueTree addPlayerTrack (juce::ValueTree project, const juce::String& what, double start, int bars, juce::UndoManager* um)
+    {
+        const auto names = std::map<juce::String, juce::String> { { "drums", "Drummer" }, { "bass", "Bass Player" }, { "keys", "Keyboard Player" } };
+        auto track = model::addTrack (project, names.count (what) > 0 ? names.at (what) : juce::String ("Player"), um, -1, model::instrumentKind);
+        if (what == "drums")
+            track.setProperty (ids::instrument, "drums", um);
+        else if (what == "bass")
+        {
+            track.setProperty (ids::synthWave, 0, um);
+            track.setProperty (ids::synthCutoff, 700.0, um);
+            track.setProperty (ids::synthGain, 0.55, um);
+        }
+        else
+        {
+            track.setProperty (ids::synthCutoff, 1600.0, um);
+            track.setProperty (ids::synthAttack, 0.06, um);
+            track.setProperty (ids::synthRelease, 0.7, um);
+            track.setProperty (ids::synthGain, 0.3, um);
+        }
+        track.setProperty (ids::icon, what == "drums" ? 4 : what == "bass" ? 3 : 5, um);
+
+        const auto map = model::tempoMapOf (project);
+        const auto startBeat = map.beatAt (start);
+        const auto end = map.secondsAt (startBeat + bars * map.beatsPerBarAt (startBeat));
+        auto region = model::addMidiRegion (track, start, end - start, um);
+        region.setProperty (ids::name, track[ids::name], um);
+        region.setProperty (kind, what, um);
+        region.setProperty (seed, juce::Random::getSystemRandom().nextInt (100000) + 1, um);
+        // The project's genre if it came from the generator; otherwise the first one.
+        region.setProperty (genre, 0, um);
+        regenerate (region, um);
+        return track;
+    }
 }
 
 //==============================================================================

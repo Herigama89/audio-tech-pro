@@ -1,6 +1,7 @@
 #include "PianoRoll.h"
 #include "Theme.h"
 #include "../model/Project.h"
+#include "../model/Generator.h"
 
 namespace riff
 {
@@ -62,7 +63,8 @@ PianoRoll::PianoRoll (juce::UndoManager& um, AudioEngine& e)
     laneBox.setSelectedId (1, juce::dontSendNotification);
     laneBox.setTooltip ("What the lane under the notes shows and edits");
     laneBox.onChange = [this] { repaint(); };
-    viewBox.addItemList ({ "Piano Roll", "Score", "Step Editor" }, 1);
+    viewBox.addItemList ({ "Piano Roll", "Score", "Step Editor", "Player" }, 1);
+    addChildComponent (playerEditor);
     viewBox.setSelectedId (1, juce::dontSendNotification);
     viewBox.setTooltip ("The region as a piano roll, as notation (Score), or as a grid of steps (Step Editor)");
     viewBox.onChange = [this] { showView (viewBox.getSelectedId()); };
@@ -135,6 +137,12 @@ void PianoRoll::setRegion (juce::ValueTree newRegion)
                         juce::dontSendNotification);
     score.setRegion (region);
     stepEditor.setRegion (region);
+    playerEditor.setRegion (region);
+    // A Drummer or Session Player region opens on its player's settings.
+    const bool isPlayer = region.hasProperty (generator::player::kind);
+    viewBox.setItemEnabled (4, isPlayer);
+    if (isPlayer != (viewBox.getSelectedId() == 4))
+        viewBox.setSelectedId (isPlayer ? 4 : 1);
 
     scrollContent = juce::jmax (0.0, (double) region[ids::offset] - 0.1);
 
@@ -297,6 +305,7 @@ void PianoRoll::resized()
     titleLabel.setBounds (header);
     score.setBounds (getLocalBounds().withTrimmedTop (headerHeight));
     stepEditor.setBounds (getLocalBounds().withTrimmedTop (headerHeight));
+    playerEditor.setBounds (getLocalBounds().withTrimmedTop (headerHeight));
 }
 
 void PianoRoll::paint (juce::Graphics& g)
@@ -744,6 +753,7 @@ void PianoRoll::showView (int id)
 {
     score.setVisible (id == 2);
     stepEditor.setVisible (id == 3);
+    playerEditor.setVisible (id == 4);
     for (auto* c : std::initializer_list<juce::Component*> { &laneBox, &stepButton, &restButton })
         c->setVisible (id == 1);
     resized();

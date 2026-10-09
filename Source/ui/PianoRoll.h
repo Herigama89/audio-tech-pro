@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "../engine/AudioEngine.h"
 #include "NoteViews.h"
+#include "PlayerEditor.h"
 
 namespace riff
 {
@@ -104,6 +105,7 @@ private:
     friend class SnapshotTool;
     ScoreView score;
     StepEditor stepEditor { undoManager };
+    PlayerEditor playerEditor { undoManager };
     void showView (int id);
     juce::TextButton stepButton { "Step In" }, restButton { "Rest" };
     double stepContent = 0.0;     // where the next step goes (content time)
