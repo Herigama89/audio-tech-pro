@@ -218,6 +218,35 @@ double detectTempo (const juce::AudioBuffer<float>& audio, double sampleRate)
     return std::round (bestBpm * 10.0) / 10.0;
 }
 
+namespace
+{
+    /** Stretches the audio between anchors (in samples, from, to), first and last included. */
+    juce::AudioBuffer<float> warp (const juce::AudioBuffer<float>& audio, double sampleRate, const std::vector<std::pair<int, int>>& anchors)
+    {
+        const auto endTarget = anchors.back().second;
+        juce::AudioBuffer<float> out (audio.getNumChannels(), juce::jmax (1, endTarget));
+        out.clear();
+        int written = 0;
+        for (size_t i = 0; i + 1 < anchors.size(); ++i)
+        {
+            const auto inLen = anchors[i + 1].first - anchors[i].first;
+            const auto outLen = anchors[i + 1].second - anchors[i].second;
+            if (inLen <= 0 || outLen <= 0)
+                continue;
+            juce::AudioBuffer<float> piece (audio.getNumChannels(), inLen);
+            for (int c = 0; c < audio.getNumChannels(); ++c)
+                piece.copyFrom (c, 0, audio, c, anchors[i].first, inLen);
+            const auto stretched = std::abs (outLen - inLen) < 8 ? piece : timeStretch (piece, (double) outLen / inLen, sampleRate);
+            const auto n = juce::jmin (stretched.getNumSamples(), out.getNumSamples() - written);
+            for (int c = 0; c < audio.getNumChannels(); ++c)
+                out.copyFrom (c, written, stretched, c, 0, n);
+            written += n;
+        }
+        out.setSize (out.getNumChannels(), juce::jmax (1, written), true);
+        return out;
+    }
+}
+
 juce::AudioBuffer<float> flexQuantize (const juce::AudioBuffer<float>& audio, double sampleRate, const std::function<double (double)>& target)
 {
     const auto onsets = detectTransients (audio, sampleRate);
@@ -231,29 +260,22 @@ juce::AudioBuffer<float> flexQuantize (const juce::AudioBuffer<float>& audio, do
         if (o > anchors.back().first + 64 && to > anchors.back().second + 64)
             anchors.push_back ({ o, to });
     }
-    const auto endTarget = anchors.back().second + (length - anchors.back().first);
-    anchors.push_back ({ length, endTarget });
+    anchors.push_back ({ length, anchors.back().second + (length - anchors.back().first) });
+    return warp (audio, sampleRate, anchors);
+}
 
-    juce::AudioBuffer<float> out (audio.getNumChannels(), juce::jmax (1, endTarget));
-    out.clear();
-    int written = 0;
-    for (size_t i = 0; i + 1 < anchors.size(); ++i)
+juce::AudioBuffer<float> flexWarp (const juce::AudioBuffer<float>& audio, double sampleRate, const std::vector<std::pair<double, double>>& markers)
+{
+    const auto length = audio.getNumSamples();
+    std::vector<std::pair<int, int>> anchors { { 0, 0 } };
+    for (const auto& [from, to] : markers)
     {
-        const auto inLen = anchors[i + 1].first - anchors[i].first;
-        const auto outLen = anchors[i + 1].second - anchors[i].second;
-        if (inLen <= 0 || outLen <= 0)
-            continue;
-        juce::AudioBuffer<float> piece (audio.getNumChannels(), inLen);
-        for (int c = 0; c < audio.getNumChannels(); ++c)
-            piece.copyFrom (c, 0, audio, c, anchors[i].first, inLen);
-        const auto stretched = std::abs (outLen - inLen) < 8 ? piece : timeStretch (piece, (double) outLen / inLen, sampleRate);
-        const auto n = juce::jmin (stretched.getNumSamples(), out.getNumSamples() - written);
-        for (int c = 0; c < audio.getNumChannels(); ++c)
-            out.copyFrom (c, written, stretched, c, 0, n);
-        written += n;
+        const auto f = (int) std::llround (from * sampleRate), t = (int) std::llround (to * sampleRate);
+        if (f > anchors.back().first + 64 && f < length - 64 && t > anchors.back().second + 64)
+            anchors.push_back ({ f, t });
     }
-    out.setSize (out.getNumChannels(), juce::jmax (1, written), true);
-    return out;
+    anchors.push_back ({ length, anchors.back().second + (length - anchors.back().first) });
+    return warp (audio, sampleRate, anchors);
 }
 
 double detectPitch (const juce::AudioBuffer<float>& audio, double sampleRate, int centre)
@@ -406,6 +428,9 @@ void apply (juce::AudioBuffer<float>& audio, const Request& request, double samp
         case Operation::flexQuantize:
             if (request.target)
                 audio = flexQuantize (audio, sampleRate, request.target);
+            break;
+        case Operation::flexWarp:
+            audio = flexWarp (audio, sampleRate, request.anchors);
             break;
     }
 }

@@ -26,8 +26,11 @@ public:
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseDrag (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
+    void mouseMove (const juce::MouseEvent& e) override;
 
 private:
+    friend class SnapshotTool;
     void run (audioedit::Request request, const juce::String& name);
     void ask (const juce::String& title, const juce::String& question, const juce::String& initial,
               std::function<void (double)> then);
@@ -59,6 +62,17 @@ private:
     juce::Rectangle<float> noteBox (const audioedit::PitchedNote& n, double lowMidi, double highMidi) const;
     std::pair<double, double> pitchRange() const;
     juce::Label info;
+
+    // Flex Time: markers on the hits (and any you add); drag one sideways and the
+    // audio on either side of it stretches, up to the markers next to it.
+    juce::TextButton flexTimeButton { "Flex Time" };
+    std::vector<double> markers;       // seconds into the region, in order
+    std::vector<double> handMarkers;   // the ones you added (kept through edits)
+    int dragMarker = -1;
+    double dragTo = 0.0;
+    void findMarkers();
+    int markerAt (int x) const;
+    std::pair<double, double> markerLimits (int index) const;
 };
 
 } // namespace riff

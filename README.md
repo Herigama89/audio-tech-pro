@@ -316,7 +316,7 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [x] Loop regions (L, or drag a region's upper right edge), X-Fade and Shuffle R/L drag modes, region gain, fades (drag the handles at a region's top corners, Shift-drag bends the curve, or the Fade tool) and equal-power crossfades, trim region start/end to playhead
 - [x] Time stretch and transpose for audio regions (in the Audio File Editor, without changing pitch / length)
 - [x] Flex Time quantize (hits moved onto the grid), Flex Pitch (the notes in audio at their pitch; drag one to change it), Smart Tempo (detect the tempo of audio, set the project to it) - all in the Audio File Editor
-- [ ] Flex markers you drag by hand
+- [x] Flex markers you drag by hand (Audio File Editor > Flex Time; double-click adds, right-click removes)
 - [x] Marquee selection across tracks; Split by Locators, Cut Section / Insert Silence / Repeat Section between locators
 
 **Editors**
@@ -332,7 +332,7 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 
 **Mixer**
 - [x] Resizable mixer (drag the bar above it), filters (all, audio, instrument, aux, VCA)
-- [ ] Narrow/wide strips
+- [x] Narrow/wide strips (Narrow in the mixer header)
 - [x] Groups 1-8 (linked volume, mute, solo), VCA faders, track outputs into buses (right-click a strip's fader or a track header)
 - [x] Group Settings (names; what each group links), I/O Labels
 - [x] Stereo width (Track box in the Inspector)

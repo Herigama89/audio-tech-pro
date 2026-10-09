@@ -88,6 +88,11 @@ public:
         main.showMixer();
         pump (main, 200);
         save (main, "mixer.png");
+        main.mixer.narrowButton.setToggleState (true, juce::sendNotificationSync);
+        pump (main, 100);
+        save (main, "mixer-narrow.png");
+        main.mixer.narrowButton.setToggleState (false, juce::sendNotificationSync);
+        pump (main, 50);
         if (auto* firstStrip = findById (main.mixer, "strip0"))
             save (*firstStrip, "strip.png", 3.0f);
 
@@ -160,6 +165,15 @@ public:
             AudioEditorPanel editor (track.getChild (0), main.undoManager, main.engine.getFormatManager(), juce::File::getSpecialLocation (juce::File::tempDirectory));
             pump (main, 400);
             save (editor, "audio-editor.png");
+            editor.flexTimeButton.setToggleState (true, juce::sendNotificationSync);
+            if (editor.markers.size() > 2)
+            {
+                editor.dragMarker = 1;
+                editor.dragTo = editor.markerLimits (1).second - 0.02;
+            }
+            pump (main, 50);
+            save (editor, "audio-editor-flex-time.png");
+            editor.dragMarker = -1;
 
             main.timeline.selectOnly (track[ids::id].toString());
             main.toggleSmartControls();

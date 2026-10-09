@@ -1238,6 +1238,16 @@ MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p,
     filterBox.onChange = [this] { rebuild(); };
     addAndMakeVisible (filterBox);
 
+    narrowButton.setClickingTogglesState (true);
+    narrowButton.setTooltip ("Narrow strips: more channels on screen at once");
+    narrowButton.setWantsKeyboardFocus (false);
+    narrowButton.onClick = [this]
+    {
+        project.setProperty ("mixerNarrow", narrowButton.getToggleState(), nullptr);   // (kept with the project, not an undo step)
+        resized();
+    };
+    addAndMakeVisible (narrowButton);
+
     title.setText ("Mixer", juce::dontSendNotification);
     title.setFont (juce::FontOptions (13.0f, juce::Font::bold));
     title.setColour (juce::Label::textColourId, theme::text);
@@ -1273,8 +1283,14 @@ void MixerPanel::setProject (juce::ValueTree newProject)
     project.addListener (this);
     busComp.setProject (project);
     consolePanel.setProject (project);
+    narrowButton.setToggleState ((bool) project.getProperty ("mixerNarrow", false), juce::dontSendNotification);
     refreshConsoleBox();
     rebuild();
+}
+
+float MixerPanel::stripScale() const
+{
+    return narrowButton.getToggleState() ? 0.7f : 1.0f;
 }
 
 void MixerPanel::changed (const juce::ValueTree& parent)
@@ -1485,17 +1501,31 @@ void MixerPanel::resized()
     consoleCaption.setBounds (header.removeFromRight (60));
     title.setBounds (header.removeFromLeft (60));
     filterBox.setBounds (header.removeFromLeft (110));
+    header.removeFromLeft (8);
+    narrowButton.setBounds (header.removeFromLeft (64));
+
+    // Narrow strips are the same strips, drawn smaller.
+    const auto scale = stripScale();
+    const auto stripW = (int) std::ceil (ChannelStrip::stripWidth * scale);
+    const auto minimumHeight = (int) std::ceil (ChannelStrip::minimumHeight * scale);
 
     // Everything scrolls up and down together if the pane is shorter than a strip.
     outer.setBounds (area);
-    const auto tall = area.getHeight() < ChannelStrip::minimumHeight;
+    const auto tall = area.getHeight() < minimumHeight;
     const auto width = area.getWidth() - (tall ? outer.getScrollBarThickness() : 0);
-    body.setSize (width, juce::jmax (area.getHeight(), ChannelStrip::minimumHeight));
+    body.setSize (width, juce::jmax (area.getHeight(), minimumHeight));
 
     auto content = body.getLocalBounds();
 
+    auto place = [scale] (juce::Component& c, juce::Rectangle<int> r)
+    {
+        c.setTransform (juce::AffineTransform::scale (scale));
+        c.setBounds (juce::Rectangle<float> ((float) r.getX() / scale, (float) r.getY() / scale,
+                                             (float) ChannelStrip::stripWidth, (float) r.getHeight() / scale).toNearestInt());
+    };
+
     if (masterStrip != nullptr)
-        masterStrip->setBounds (content.removeFromRight (ChannelStrip::stripWidth));
+        place (*masterStrip, content.removeFromRight (stripW));
 
     // Console mode shows the user's own bus compressor; otherwise the built-in one.
     const bool console = consolePanel.isAvailable();
@@ -1509,12 +1539,12 @@ void MixerPanel::resized()
 
     viewport.setBounds (content);
 
-    const auto wide = strips.size() * ChannelStrip::stripWidth > content.getWidth();
+    const auto wide = strips.size() * stripW > content.getWidth();
     const auto height = content.getHeight() - (wide ? viewport.getScrollBarThickness() : 0);
-    stripHolder.setSize (juce::jmax (content.getWidth(), strips.size() * ChannelStrip::stripWidth), height);
+    stripHolder.setSize (juce::jmax (content.getWidth(), strips.size() * stripW), height);
 
     for (int i = 0; i < strips.size(); ++i)
-        strips[i]->setBounds (i * ChannelStrip::stripWidth, 0, ChannelStrip::stripWidth, stripHolder.getHeight());
+        place (*strips[i], { i * stripW, 0, stripW, stripHolder.getHeight() });
 }
 
 } // namespace riff

@@ -95,8 +95,31 @@ AudioEditorPanel::AudioEditorPanel (juce::ValueTree r, juce::UndoManager& um, ju
     flexPitchButton.setClickingTogglesState (true);
     flexPitchButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffd08a1c));
     flexPitchButton.setTooltip ("Flex Pitch: shows the notes in the audio at their pitch; drag one up or down to change it");
-    flexPitchButton.onClick = [this] { if (flexPitchButton.getToggleState()) findNotes(); repaint(); };
+    flexPitchButton.onClick = [this]
+    {
+        if (flexPitchButton.getToggleState())
+        {
+            flexTimeButton.setToggleState (false, juce::dontSendNotification);
+            findNotes();
+        }
+        repaint();
+    };
     addAndMakeVisible (flexPitchButton);
+
+    flexTimeButton.setClickingTogglesState (true);
+    flexTimeButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff8f5bd6));
+    flexTimeButton.setTooltip ("Flex Time: markers on the hits. Drag one sideways to move that moment; the audio either side stretches to fit. "
+                               "Double-click to add a marker, right-click one to remove it.");
+    flexTimeButton.onClick = [this]
+    {
+        if (flexTimeButton.getToggleState())
+        {
+            flexPitchButton.setToggleState (false, juce::dontSendNotification);
+            findMarkers();
+        }
+        repaint();
+    };
+    addAndMakeVisible (flexTimeButton);
 
     info.setFont (juce::FontOptions (11.5f));
     info.setColour (juce::Label::textColourId, theme::dimText);
@@ -114,6 +137,61 @@ AudioEditorPanel::~AudioEditorPanel()
 {
     region.removeListener (this);
     thumbnail.removeChangeListener (this);
+}
+
+void AudioEditorPanel::findMarkers()
+{
+    juce::MouseCursor::showWaitCursor();
+    double rate = 48000.0;
+    const auto audio = audioedit::readRegion (formats, juce::File (region[ids::file].toString()), region[ids::offset], region[ids::length], rate);
+    markers.clear();
+    for (auto o : audioedit::detectTransients (audio, rate))
+        markers.push_back (o / rate);
+    for (auto h : handMarkers)
+        markers.push_back (h);
+    std::sort (markers.begin(), markers.end());
+    // Two markers closer than 20 ms are one.
+    markers.erase (std::unique (markers.begin(), markers.end(), [] (double a, double b) { return std::abs (a - b) < 0.02; }), markers.end());
+    juce::MouseCursor::hideWaitCursor();
+}
+
+int AudioEditorPanel::markerAt (int x) const
+{
+    int best = -1, bestDistance = 5;
+    for (size_t i = 0; i < markers.size(); ++i)
+        if (const auto d = std::abs (secondsToX (markers[i]) - x); d <= bestDistance)
+        {
+            best = (int) i;
+            bestDistance = d;
+        }
+    return best;
+}
+
+std::pair<double, double> AudioEditorPanel::markerLimits (int index) const
+{
+    const double length = region[ids::length];
+    const auto lo = index > 0 ? markers[(size_t) index - 1] : 0.0;
+    const auto hi = index + 1 < (int) markers.size() ? markers[(size_t) index + 1] : length;
+    const auto margin = juce::jmin (0.01, (hi - lo) * 0.1);
+    return { lo + margin, hi - margin };
+}
+
+void AudioEditorPanel::mouseMove (const juce::MouseEvent& e)
+{
+    setMouseCursor (flexTimeButton.getToggleState() && waveArea().contains (e.getPosition()) && markerAt (e.x) >= 0
+                        ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor);
+}
+
+void AudioEditorPanel::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (! flexTimeButton.getToggleState() || ! waveArea().contains (e.getPosition()) || markerAt (e.x) >= 0)
+        return;
+    const auto t = xToSeconds (e.x);
+    handMarkers.push_back (t);
+    markers.push_back (t);
+    std::sort (markers.begin(), markers.end());
+    selFrom = selTo = 0.0;
+    repaint();
 }
 
 void AudioEditorPanel::findNotes()
@@ -148,6 +226,39 @@ juce::Rectangle<float> AudioEditorPanel::noteBox (const audioedit::PitchedNote& 
 
 void AudioEditorPanel::mouseUp (const juce::MouseEvent&)
 {
+    if (dragMarker >= 0)
+    {
+        const auto from = markers[(size_t) dragMarker], to = dragTo;
+        dragMarker = -1;
+        if (std::abs (to - from) > 0.001)
+        {
+            // Every marker stays put but the one you moved, so only its two neighbours' stretches change.
+            audioedit::Request request { audioedit::Operation::flexWarp };
+            for (auto m : markers)
+                request.anchors.push_back ({ m, juce::exactlyEqual (m, from) ? to : m });
+
+            // Your own markers move with the audio.
+            const double length = region[ids::length];
+            auto mapped = [&] (double t)
+            {
+                std::vector<std::pair<double, double>> points { { 0.0, 0.0 } };
+                for (const auto& a : request.anchors)
+                    points.push_back (a);
+                points.push_back ({ length, length });
+                for (size_t i = 0; i + 1 < points.size(); ++i)
+                    if (t >= points[i].first && t <= points[i + 1].first && points[i + 1].first > points[i].first)
+                        return points[i].second + (t - points[i].first) / (points[i + 1].first - points[i].first) * (points[i + 1].second - points[i].second);
+                return t;
+            };
+            for (auto& h : handMarkers)
+                h = mapped (h);
+            selFrom = selTo = 0.0;
+            run (request, "Flex Time");
+        }
+        repaint();
+        return;
+    }
+
     if (dragNote >= 0 && dragSemitones != 0 && juce::isPositiveAndBelow (dragNote, (int) notes.size()))
     {
         const auto& n = notes[(size_t) dragNote];
@@ -166,6 +277,8 @@ void AudioEditorPanel::loadWaveform()
     selFrom = selTo = 0.0;
     if (flexPitchButton.getToggleState())
         findNotes();
+    if (flexTimeButton.getToggleState())
+        findMarkers();
     repaint();
 }
 
@@ -227,6 +340,32 @@ void AudioEditorPanel::paint (juce::Graphics& g)
         }
     }
 
+    // Flex Time: the markers; while one is dragged, the two stretches it changes are tinted
+    // (wider: slowed down, in orange; narrower: sped up, in green), as in Logic.
+    if (flexTimeButton.getToggleState())
+    {
+        for (size_t i = 0; i < markers.size(); ++i)
+        {
+            const bool dragged = (int) i == dragMarker;
+            const auto x = secondsToX (dragged ? dragTo : markers[i]);
+            if (dragged)
+            {
+                const auto from = markers[i];
+                const auto prev = i > 0 ? markers[i - 1] : 0.0;
+                const auto next = i + 1 < markers.size() ? markers[i + 1] : (double) region[ids::length];
+                g.setColour ((dragTo - prev > from - prev ? juce::Colour (0xffe0902a) : juce::Colour (0xff3fbf6a)).withAlpha (0.22f));
+                g.fillRect (juce::Rectangle<int>::leftTopRightBottom (secondsToX (prev), a.getY(), x, a.getBottom()));
+                g.setColour ((next - dragTo > next - from ? juce::Colour (0xffe0902a) : juce::Colour (0xff3fbf6a)).withAlpha (0.22f));
+                g.fillRect (juce::Rectangle<int>::leftTopRightBottom (x, a.getY(), secondsToX (next), a.getBottom()));
+            }
+            g.setColour (juce::Colour (0xffb98cf5).withAlpha (dragged ? 1.0f : 0.8f));
+            g.fillRect (x, a.getY(), dragged ? 2 : 1, a.getHeight());
+            juce::Path handle;
+            handle.addTriangle ((float) x - 5.0f, (float) a.getY(), (float) x + 5.0f, (float) a.getY(), (float) x, (float) a.getY() + 7.0f);
+            g.fillPath (handle);
+        }
+    }
+
     if (selTo > selFrom)
     {
         g.setColour (juce::Colours::white.withAlpha (0.2f));
@@ -249,6 +388,7 @@ void AudioEditorPanel::resized()
     info.setBounds (bottom.removeFromBottom (24));
     auto row = bottom.removeFromTop (30);
     flexPitchButton.setBounds (row.removeFromRight (90).reduced (2, 0));
+    flexTimeButton.setBounds (row.removeFromRight (90).reduced (2, 0));
     const auto w = row.getWidth() / juce::jmax (1, buttons.size());
     for (auto* b : buttons)
         b->setBounds (row.removeFromLeft (w).reduced (2, 0));
@@ -258,6 +398,25 @@ void AudioEditorPanel::mouseDown (const juce::MouseEvent& e)
 {
     if (! waveArea().contains (e.getPosition()))
         return;
+
+    if (flexTimeButton.getToggleState())
+    {
+        if (const auto m = markerAt (e.x); m >= 0)
+        {
+            if (e.mods.isPopupMenu())
+            {
+                // Remove it (a hit marker comes back if you turn Flex Time off and on).
+                const auto t = markers[(size_t) m];
+                markers.erase (markers.begin() + m);
+                handMarkers.erase (std::remove_if (handMarkers.begin(), handMarkers.end(), [t] (double h) { return std::abs (h - t) < 0.02; }), handMarkers.end());
+                repaint();
+                return;
+            }
+            dragMarker = m;
+            dragTo = markers[(size_t) m];
+            return;
+        }
+    }
 
     if (flexPitchButton.getToggleState())
     {
@@ -278,6 +437,13 @@ void AudioEditorPanel::mouseDown (const juce::MouseEvent& e)
 
 void AudioEditorPanel::mouseDrag (const juce::MouseEvent& e)
 {
+    if (dragMarker >= 0)
+    {
+        const auto [lo, hi] = markerLimits (dragMarker);
+        dragTo = juce::jlimit (lo, juce::jmax (lo, hi), xToSeconds (e.x));
+        repaint();
+        return;
+    }
     if (dragNote >= 0)
     {
         const auto [lo, hi] = pitchRange();
@@ -316,7 +482,8 @@ void AudioEditorPanel::run (audioedit::Request request, const juce::String& name
     }
 
     const bool wholeRegion = request.operation == audioedit::Operation::timeStretch || request.operation == audioedit::Operation::pitchShift
-                            || request.operation == audioedit::Operation::flexQuantize;
+                            || request.operation == audioedit::Operation::flexQuantize
+                            || request.operation == audioedit::Operation::flexWarp;
     if (selTo > selFrom + 1.0e-3 && ! wholeRegion)
     {
         request.from = selFrom;

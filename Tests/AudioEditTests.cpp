@@ -117,3 +117,23 @@ TEST_CASE ("Flex Pitch: notes and their pitch", "[audioedit]")
     CHECK_THAT (audioedit::detectPitch (both, 48000.0, 36000), WithinAbs (369.99, 6.0));
     CHECK_THAT (audioedit::detectPitch (both, 48000.0, 12000), WithinAbs (220.0, 2.0));
 }
+
+TEST_CASE ("Flex markers moved by hand stretch only the audio either side", "[audioedit][flex]")
+{
+    // Clicks at 0.25, 0.5 and 0.75 s; move the middle one to 0.6 s.
+    const double rate = 48000.0;
+    juce::AudioBuffer<float> audio (1, 48000);
+    audio.clear();
+    for (auto t : { 0.25, 0.5, 0.75 })
+        for (int i = 0; i < 200; ++i)
+            audio.setSample (0, (int) (t * rate) + i, 0.9f * (1.0f - i / 200.0f));
+
+    const auto out = audioedit::flexWarp (audio, rate, { { 0.25, 0.25 }, { 0.5, 0.6 }, { 0.75, 0.75 } });
+    REQUIRE (std::abs (out.getNumSamples() - 48000) < 64);   // same length overall
+
+    const auto hits = audioedit::detectTransients (out, rate);
+    REQUIRE (hits.size() == 3);
+    CHECK (std::abs (hits[0] / rate - 0.25) < 0.01);
+    CHECK (std::abs (hits[1] / rate - 0.6) < 0.015);
+    CHECK (std::abs (hits[2] / rate - 0.75) < 0.01);
+}

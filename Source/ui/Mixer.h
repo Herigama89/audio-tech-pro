@@ -232,6 +232,9 @@ private:
 
     juce::Label title, consoleCaption { {}, "Console" };
     juce::ComboBox consoleBox, filterBox;   // filterBox: which kinds of strip to show
+    friend class SnapshotTool;
+    juce::TextButton narrowButton { "Narrow" };   // smaller strips, to see more at once
+    float stripScale() const;
     juce::Array<juce::PluginDescription> stripCandidates;
     int syncCounter = 0;
     void refreshConsoleBox();

@@ -10,7 +10,7 @@ namespace riff::audioedit
     pitch changes. They never touch the original file: the region's audio is
     read, processed, and written to a new file, which the region then plays.
 */
-enum class Operation { normalize, gain, fadeIn, fadeOut, silence, reverse, invert, timeStretch, pitchShift, flexQuantize };
+enum class Operation { normalize, gain, fadeIn, fadeOut, silence, reverse, invert, timeStretch, pitchShift, flexQuantize, flexWarp };
 
 struct Request
 {
@@ -20,6 +20,10 @@ struct Request
 
     /** flexQuantize: where a time in the audio (seconds from its start) should land (seconds from its start). */
     std::function<double (double)> target;
+
+    /** flexWarp: flex markers moved by hand, as (from, to) seconds from the region's start, in order.
+        The audio between neighbouring markers stretches to fit; the rest stays. */
+    std::vector<std::pair<double, double>> anchors;
 };
 
 /** The onsets (hits) in the audio, in samples. */
@@ -29,6 +33,9 @@ std::vector<int> detectTransients (const juce::AudioBuffer<float>& audio, double
 double detectTempo (const juce::AudioBuffer<float>& audio, double sampleRate);
 
 /** Flex Time quantize: every hit moves to where `target` says, the audio between them stretched to fit (pitch kept). */
+/** Flex markers: each (from, to) pair, in seconds, moves that point of the audio; the audio between stretches. */
+juce::AudioBuffer<float> flexWarp (const juce::AudioBuffer<float>& audio, double sampleRate, const std::vector<std::pair<double, double>>& anchors);
+
 juce::AudioBuffer<float> flexQuantize (const juce::AudioBuffer<float>& audio, double sampleRate, const std::function<double (double)>& target);
 
 /** The pitch (Hz) of the audio around a sample position (YIN), or 0 when it isn't pitched. */
