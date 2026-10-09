@@ -12,6 +12,11 @@ namespace riff
     Click empty space to add a note (drag to set its length), drag a note to
     move it, drag its right edge to resize, Delete removes the selection,
     Q quantizes. Click the keyboard to hear a note.
+
+    Below the notes, a lane for velocity (drag the stalks, or across them) or
+    a controller / pitch bend (click to add points, drag to draw, Option-click
+    to remove). The header has the quantize grid and strength, Scale Quantize
+    (to the song's key) and the MIDI Transform presets.
 */
 class PianoRoll final : public juce::Component,
                         private juce::ValueTree::Listener
@@ -37,9 +42,11 @@ public:
     void quantizeSelection();
 
 private:
-    enum class Drag { none, move, resize, keyboard };
+    enum class Drag { none, move, resize, keyboard, rubberBand, velocity, controller };
 
     static constexpr int headerHeight = 28;
+    static constexpr int laneHeight = 84;
+    static constexpr int laneGap = 4;
     static constexpr int keyboardWidth = 56;
     static constexpr int rowHeight = 12;
 
@@ -50,6 +57,21 @@ private:
 
     // Coordinates: "content time" is time within the region's notes (see Identifiers.h).
     juce::Rectangle<int> gridArea() const;
+    juce::Rectangle<int> laneArea() const;
+    int laneController() const;   // -1: velocity
+    double quantizeGrid() const;
+    void paintLane (juce::Graphics& g);
+    void laneMouse (const juce::MouseEvent& e, bool down);
+    void showTransformMenu();
+    void scaleQuantizeSelection();
+    juce::Array<juce::ValueTree> selectedOrAllNotes() const;
+    juce::ValueTree controllerPointNear (juce::Point<float> p) const;
+    float laneValueToY (double v) const;
+    double laneYToValue (float y) const;
+    float lastLaneX = 0.0f;
+    bool laneDrawing = false;   // drawing new controller points, rather than moving one
+    juce::ValueTree dragEvent;
+    juce::Rectangle<float> rubberBand;
     float contentToX (double c) const;
     double xToContent (float x) const;
     int yToPitch (int y) const;
@@ -68,7 +90,8 @@ private:
     AudioEngine& engine;
     juce::ValueTree region;
 
-    juce::TextButton quantizeButton { "Quantize" }, closeButton { "Close" };
+    juce::TextButton quantizeButton { "Quantize" }, closeButton { "Close" }, scaleButton { "Scale Q" }, transformButton { "Transform" };
+    juce::ComboBox gridBox, strengthBox, laneBox;
     juce::Label titleLabel;
 
     double pixelsPerSecond = 160.0;

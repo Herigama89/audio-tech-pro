@@ -146,6 +146,26 @@ namespace riff::model
     /** Moves every note's start to the nearest grid line (in content time). */
     void quantizeNotes (juce::ValueTree region, double gridSeconds, juce::UndoManager* um);
 
+    /** Quantizes notes (in content time) to a grid, pulled `strength` (0..1) of the way, with swing
+        (0..1, delays every second grid step by up to half a step). The grid follows the song's
+        bars: `regionStart - offset` is where content time 0 falls in the song. */
+    void quantizeNotesTo (const juce::Array<juce::ValueTree>& notes, double gridSeconds, double strength, double swing,
+                          double contentToSong, juce::UndoManager* um);
+
+    // Controllers and pitch bend
+    inline constexpr int pitchBend = 128;
+    juce::ValueTree addControllerEvent (juce::ValueTree region, int controller, double start, double value, juce::UndoManager* um);
+    juce::Array<juce::ValueTree> controllerEvents (const juce::ValueTree& region, int controller);   // in time order
+    juce::String controllerName (int controller);
+
+    /** Scale Quantize: notes move to the nearest note of the key's scale (major or natural minor). */
+    void scaleQuantize (const juce::Array<juce::ValueTree>& notes, int keyRoot, bool minor, juce::UndoManager* um);
+    bool isInScale (int pitch, int keyRoot, bool minor);
+
+    // MIDI Transform (Logic's presets, the common ones)
+    enum class Transform { humanize, fixedVelocity, crescendo, decrescendo, legato, doubleSpeed, halfSpeed, transposeUp, transposeDown, reverse };
+    void transformNotes (const juce::Array<juce::ValueTree>& notes, Transform transform, juce::UndoManager* um, int seed = 0);
+
     /** A raw MIDI event captured while recording, at an absolute timeline position. */
     struct RecordedMidiEvent
     {

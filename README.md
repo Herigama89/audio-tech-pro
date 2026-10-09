@@ -252,7 +252,7 @@ Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderC
 - [x] MIDI keyboard input (hot-plug), live playing, MIDI recording (merging on cycle)
 - [x] VST3 and Audio Unit instrument hosting: scanning, plugin windows, settings saved in the project
 - [ ] CLAP hosting (needs our own CLAP host layer; JUCE doesn't host CLAP)
-- [ ] Velocity editing, pitch bend and controllers in the piano roll
+- [x] Velocity editing, pitch bend and controllers in the piano roll
 - [ ] A sampler instrument (also used by the drum machine in Phase 4)
 
 ## Phase 3: mixer and effects
@@ -313,10 +313,11 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [ ] Marquee selection across tracks; edit with the playhead (split by locators, delete between)
 
 **Editors**
-- [ ] Piano Roll: velocity lane, MIDI CC / pitch bend automation, Time Handles, scale quantize, note repeat, MIDI transform functions
+- [x] Piano Roll: velocity lane, MIDI CC and pitch bend lanes (recorded too), quantize grid / strength / swing, Scale Quantize, MIDI Transform presets, rubber-band note selection
+- [ ] Piano Roll: Time Handles, note repeat, more Transform sets
 - [ ] Step Editor, Event List, Score Editor, Audio Track Editor and Audio File Editor
 - [ ] Step Sequencer
-- [ ] Editors open below the tracks with a resizable divider; the editor follows the selected track and region
+- [x] Editors open below the tracks with a resizable divider (double-click it for the default); the editor follows the selected track and region
 
 **Mixer**
 - [ ] Resizable mixer, narrow/wide strips, filters (audio, instrument, aux, bus, input, output, master/VCA)

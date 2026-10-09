@@ -48,6 +48,7 @@ namespace riff::ids
     RIFF_DECLARE_ID (REGION)
     RIFF_DECLARE_ID (TAKE)
     RIFF_DECLARE_ID (NOTE)
+    RIFF_DECLARE_ID (CC)           // in MIDI regions: { start, controller (0..127, 128 = pitch bend), value (0..1) }
     RIFF_DECLARE_ID (MIXER)
     RIFF_DECLARE_ID (CHAIN)
     RIFF_DECLARE_ID (INSERT)
@@ -118,6 +119,7 @@ namespace riff::ids
     RIFF_DECLARE_ID (midi)
     RIFF_DECLARE_ID (pitch)
     RIFF_DECLARE_ID (velocity)
+    RIFF_DECLARE_ID (controller)
     RIFF_DECLARE_ID (instrument)
     RIFF_DECLARE_ID (pluginDescription)
     RIFF_DECLARE_ID (pluginState)

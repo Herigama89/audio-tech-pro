@@ -1688,3 +1688,25 @@ TEST_CASE ("Crossfades, shuffle and loops in the model", "[model][fades]")
     model::setLoop (b, false, nullptr);
     CHECK_THAT (model::loopEndOf (b), WithinAbs (2.3, 1e-9));
 }
+
+TEST_CASE ("Controller events reach the instrument at their time", "[engine][midi]")
+{
+    auto project = model::createProject();
+    auto track = model::addTrack (project, "Keys", nullptr, -1, model::instrumentKind);
+    auto region = model::addMidiRegion (track, 1.0, 2.0, nullptr);
+    region.setProperty (ids::offset, 0.5, nullptr);
+    model::addControllerEvent (region, 1, 0.75, 1.0, nullptr);            // at 1.25 s in the song
+    model::addControllerEvent (region, model::pitchBend, 0.25, 0.5, nullptr);   // before the window: left out
+
+    Fixture f;
+    f.player.setProject (project);
+    auto graph = f.player.buildGraph (48000.0);
+    REQUIRE (graph->tracks.size() == 1);
+    REQUIRE (graph->tracks[0].regions.size() == 1);
+    const auto& events = graph->tracks[0].regions[0].events;
+    REQUIRE (events.size() == 1);
+    CHECK (events[0].time == 60000);
+    CHECK (events[0].status == 0xb0);
+    CHECK (events[0].data1 == 1);
+    CHECK (events[0].data2 == 127);
+}

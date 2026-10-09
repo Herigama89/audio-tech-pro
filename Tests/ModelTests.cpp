@@ -539,3 +539,43 @@ TEST_CASE ("Automation lanes", "[model][automation]")
     CHECK (model::laneFor (loaded, id, model::volumeParam, false).getNumChildren() == 1);
     CHECK (model::insertsOf (model::findChain (loaded, id)).size() == 1); // the insert went in its chain, not the lane
 }
+
+TEST_CASE ("MIDI: quantize strength and swing, scale quantize, transforms, controllers", "[model][midi]")
+{
+    auto project = model::createProject();
+    auto track = model::addTrack (project, "Keys", nullptr, -1, model::instrumentKind);
+    auto region = model::addMidiRegion (track, 0.0, 4.0, nullptr);
+    auto a = model::addNote (region, 61, 0.11, 0.2, 100, nullptr);   // C#
+    auto b = model::addNote (region, 64, 0.52, 0.2, 80, nullptr);
+
+    model::quantizeNotesTo ({ a, b }, 0.25, 0.5, 0.0, 0.0, nullptr);
+    CHECK_THAT ((double) a[ids::start], WithinAbs (0.055, 1e-9));   // half way to the grid
+    CHECK_THAT ((double) b[ids::start], WithinAbs (0.51, 1e-9));
+    model::quantizeNotesTo ({ a, b }, 0.25, 1.0, 0.0, 0.0, nullptr);
+    CHECK_THAT ((double) a[ids::start], Catch::Matchers::WithinAbs (0.0, 1e-9));
+    CHECK_THAT ((double) b[ids::start], Catch::Matchers::WithinAbs (0.5, 1e-9));
+    model::quantizeNotesTo ({ a }, 0.25, 1.0, 0.6, 0.0, nullptr);
+    CHECK_THAT ((double) a[ids::start], Catch::Matchers::WithinAbs (0.0, 1e-9));   // on the beat: no swing
+    a.setProperty (ids::start, 0.26, nullptr);
+    model::quantizeNotesTo ({ a }, 0.25, 1.0, 0.6, 0.0, nullptr);
+    CHECK_THAT ((double) a[ids::start], Catch::Matchers::WithinAbs (0.25 + 0.075, 1e-9));   // off the beat: pushed late
+
+    model::scaleQuantize ({ a, b }, 0, false, nullptr);   // C major: C# -> C, E stays
+    CHECK ((int) a[ids::pitch] == 60);
+    CHECK ((int) b[ids::pitch] == 64);
+
+    model::transformNotes ({ a, b }, model::Transform::crescendo, nullptr);
+    CHECK ((int) a[ids::velocity] < (int) b[ids::velocity]);
+    model::transformNotes ({ a, b }, model::Transform::legato, nullptr);
+    CHECK_THAT ((double) a[ids::length], Catch::Matchers::WithinAbs ((double) b[ids::start] - (double) a[ids::start], 1e-9));
+    model::transformNotes ({ a, b }, model::Transform::transposeUp, nullptr);
+    CHECK ((int) a[ids::pitch] == 72);
+
+    model::addControllerEvent (region, 1, 1.0, 0.5, nullptr);
+    model::addControllerEvent (region, 1, 0.5, 0.25, nullptr);
+    model::addControllerEvent (region, model::pitchBend, 0.5, 1.0, nullptr);
+    const auto mod = model::controllerEvents (region, 1);
+    REQUIRE (mod.size() == 2);
+    CHECK ((double) mod[0][ids::start] == 0.5);
+    CHECK (model::controllerName (model::pitchBend) == "Pitch Bend");
+}

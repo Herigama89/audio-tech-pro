@@ -949,6 +949,19 @@ void AudioEngine::recordChunk (const float* const* inputs, int numInputs, int in
 
 void AudioEngine::collectNotes (const PlaybackGraph::Track& track, juce::int64 from, juce::int64 to) noexcept
 {
+    // Controllers and pitch bend.
+    for (const auto& region : track.regions)
+        for (const auto& event : region.events)
+        {
+            if (event.time >= to)
+                break;
+            if (event.time >= from)
+            {
+                const juce::uint8 bytes[3] = { event.status, event.data1, event.data2 };
+                trackMidi.addEvent (bytes, 3, (int) (event.time - from));
+            }
+        }
+
     // Note-offs first, so a note ending exactly where the next one starts is
     // released before it's struck again.
     for (int pass = 0; pass < 2; ++pass)

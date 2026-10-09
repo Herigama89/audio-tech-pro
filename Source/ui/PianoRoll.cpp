@@ -23,11 +23,71 @@ PianoRoll::PianoRoll (juce::UndoManager& um, AudioEngine& e)
     quantizeButton.onClick = [this] { quantizeSelection(); };
     closeButton.onClick = [this] { if (onClose) onClose(); };
 
-    for (auto* b : { &quantizeButton, &closeButton })
+    scaleButton.setTooltip ("Scale Quantize: move notes outside the song's key onto the nearest note of its scale");
+    scaleButton.onClick = [this] { scaleQuantizeSelection(); };
+    transformButton.setTooltip ("MIDI Transform: humanize, fixed velocity, crescendo, legato, double or half speed, transpose, reverse");
+    transformButton.onClick = [this] { showTransformMenu(); };
+
+    for (auto* b : { &quantizeButton, &closeButton, &scaleButton, &transformButton })
     {
         b->setWantsKeyboardFocus (false);
         addAndMakeVisible (b);
     }
+
+    gridBox.addItemList ({ "1/4", "1/8", "1/16", "1/32", "1/8 T", "1/16 T" }, 1);
+    gridBox.setSelectedId (3, juce::dontSendNotification);
+    gridBox.setTooltip ("Quantize grid");
+    strengthBox.addItemList ({ "100%", "75%", "50%", "100% swing 30%", "100% swing 60%" }, 1);
+    strengthBox.setSelectedId (1, juce::dontSendNotification);
+    strengthBox.setTooltip ("Quantize strength (how far notes move to the grid), and swing");
+    laneBox.addItemList ({ "Velocity", "Modulation", "Pitch Bend", "Sustain", "Expression", "Volume", "Pan", "Breath" }, 1);
+    laneBox.setSelectedId (1, juce::dontSendNotification);
+    laneBox.setTooltip ("What the lane under the notes shows and edits");
+    laneBox.onChange = [this] { repaint(); };
+    for (auto* box : { &gridBox, &strengthBox, &laneBox })
+    {
+        box->setWantsKeyboardFocus (false);
+        addAndMakeVisible (box);
+    }
+}
+
+int PianoRoll::laneController() const
+{
+    switch (laneBox.getSelectedId())
+    {
+        case 2: return 1;
+        case 3: return model::pitchBend;
+        case 4: return 64;
+        case 5: return 11;
+        case 6: return 7;
+        case 7: return 10;
+        case 8: return 2;
+        default: return -1;
+    }
+}
+
+double PianoRoll::quantizeGrid() const
+{
+    const auto beat = model::secondsPerBeat (region.getParent().getParent());
+    switch (gridBox.getSelectedId())
+    {
+        case 1: return beat;
+        case 2: return beat / 2.0;
+        case 4: return beat / 8.0;
+        case 5: return beat / 3.0;
+        case 6: return beat / 6.0;
+        default: return beat / 4.0;
+    }
+}
+
+juce::Array<juce::ValueTree> PianoRoll::selectedOrAllNotes() const
+{
+    juce::Array<juce::ValueTree> notes = selection;
+    if (notes.isEmpty())
+        for (const auto& note : region)
+            if (note.hasType (ids::NOTE))
+                notes.add (note);
+    return notes;
 }
 
 PianoRoll::~PianoRoll()
@@ -88,7 +148,32 @@ void PianoRoll::valueTreeParentChanged (juce::ValueTree& tree)
 //==============================================================================
 juce::Rectangle<int> PianoRoll::gridArea() const
 {
-    return getLocalBounds().withTrimmedTop (headerHeight).withTrimmedLeft (keyboardWidth);
+    return getLocalBounds().withTrimmedTop (headerHeight).withTrimmedLeft (keyboardWidth).withTrimmedBottom (laneHeight + laneGap);
+}
+
+juce::Rectangle<int> PianoRoll::laneArea() const
+{
+    return getLocalBounds().removeFromBottom (laneHeight).withTrimmedLeft (keyboardWidth);
+}
+
+float PianoRoll::laneValueToY (double v) const
+{
+    const auto a = laneArea().reduced (0, 6);
+    return (float) a.getBottom() - (float) juce::jlimit (0.0, 1.0, v) * (float) a.getHeight();
+}
+
+double PianoRoll::laneYToValue (float y) const
+{
+    const auto a = laneArea().reduced (0, 6);
+    return juce::jlimit (0.0, 1.0, ((double) a.getBottom() - y) / (double) a.getHeight());
+}
+
+juce::ValueTree PianoRoll::controllerPointNear (juce::Point<float> p) const
+{
+    for (const auto& e : model::controllerEvents (region, laneController()))
+        if (juce::Point<float> (contentToX (e[ids::start]), laneValueToY (e[ids::value])).getDistanceFrom (p) <= 6.0f)
+            return e;
+    return {};
 }
 
 float PianoRoll::contentToX (double c) const
@@ -160,8 +245,18 @@ void PianoRoll::resized()
 {
     auto header = getLocalBounds().removeFromTop (headerHeight).reduced (8, 3);
     closeButton.setBounds (header.removeFromRight (60));
-    header.removeFromRight (6);
-    quantizeButton.setBounds (header.removeFromRight (80));
+    header.removeFromRight (10);
+    laneBox.setBounds (header.removeFromRight (110));
+    header.removeFromRight (10);
+    transformButton.setBounds (header.removeFromRight (80));
+    header.removeFromRight (4);
+    scaleButton.setBounds (header.removeFromRight (70));
+    header.removeFromRight (10);
+    strengthBox.setBounds (header.removeFromRight (120));
+    header.removeFromRight (4);
+    gridBox.setBounds (header.removeFromRight (70));
+    header.removeFromRight (4);
+    quantizeButton.setBounds (header.removeFromRight (76));
     titleLabel.setBounds (header);
 }
 
@@ -252,6 +347,16 @@ void PianoRoll::paint (juce::Graphics& g)
         g.fillRect (playX - 0.5f, (float) area.getY(), 1.5f, (float) area.getHeight());
     }
 
+    if (! rubberBand.isEmpty())
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.12f));
+        g.fillRect (rubberBand);
+        g.setColour (juce::Colours::white.withAlpha (0.7f));
+        g.drawRect (rubberBand, 1.0f);
+    }
+
+    paintLane (g);
+
     // Keyboard
     const juce::Rectangle<int> keys (0, area.getY(), keyboardWidth, area.getHeight());
     {
@@ -301,6 +406,14 @@ void PianoRoll::mouseDown (const juce::MouseEvent& e)
     if (! region.isValid() || e.y < headerHeight)
         return;
 
+    if (laneArea().contains (e.getPosition()))
+    {
+        laneMouse (e, true);
+        return;
+    }
+    if (e.y >= gridArea().getBottom())
+        return;
+
     if (e.x < keyboardWidth)
     {
         keyboardNote = yToPitch (e.y);
@@ -336,6 +449,16 @@ void PianoRoll::mouseDown (const juce::MouseEvent& e)
         dragStartPitch = note[ids::pitch];
         lastPreviewPitch = dragStartPitch;
         previewNote (dragStartPitch);
+    }
+    else if (e.mods.isShiftDown() || e.mods.isAltDown())
+    {
+        // Shift or Option-drag over empty space: select the notes in a rectangle.
+        if (! e.mods.isShiftDown())
+            selection.clear();
+        drag = Drag::rubberBand;
+        rubberBand = {};
+        repaint();
+        return;
     }
     else
     {
@@ -376,6 +499,22 @@ void PianoRoll::mouseDrag (const juce::MouseEvent& e)
             engine.sendLiveMidi (juce::MidiMessage::noteOn (1, keyboardNote, (juce::uint8) 100));
             repaint();
         }
+        return;
+    }
+
+    if (drag == Drag::velocity || drag == Drag::controller)
+    {
+        laneMouse (e, false);
+        return;
+    }
+
+    if (drag == Drag::rubberBand)
+    {
+        rubberBand = juce::Rectangle<float> (e.mouseDownPosition, e.position).getIntersection (gridArea().toFloat());
+        for (const auto& note : region)
+            if (note.hasType (ids::NOTE) && noteBounds (note).intersects (rubberBand))
+                selection.addIfNotAlreadyThere (note);
+        repaint();
         return;
     }
 
@@ -424,6 +563,9 @@ void PianoRoll::mouseUp (const juce::MouseEvent&)
 
     drag = Drag::none;
     originals.clear();
+    rubberBand = {};
+    dragEvent = {};
+    repaint();
 }
 
 void PianoRoll::mouseMove (const juce::MouseEvent& e)
@@ -509,17 +651,167 @@ void PianoRoll::quantizeSelection()
 
     undoManager.beginNewTransaction ("Quantize");
 
-    // Sixteenth notes, whatever the zoom.
-    const auto sixteenth = model::secondsPerBeat (region.getParent().getParent()) / 4.0;
+    // The grid, strength and swing from the header.
+    const auto strength = strengthBox.getSelectedId() == 2 ? 0.75 : strengthBox.getSelectedId() == 3 ? 0.5 : 1.0;
+    const auto swing = strengthBox.getSelectedId() == 4 ? 0.3 : strengthBox.getSelectedId() == 5 ? 0.6 : 0.0;
+    model::quantizeNotesTo (selectedOrAllNotes(), quantizeGrid(), strength, swing,
+                            (double) region[ids::start] - (double) region[ids::offset], &undoManager);
+}
 
-    juce::Array<juce::ValueTree> notes = selection;
-    if (notes.isEmpty())
+void PianoRoll::scaleQuantizeSelection()
+{
+    if (! region.isValid())
+        return;
+    const auto project = region.getParent().getParent();
+    undoManager.beginNewTransaction ("Scale Quantize");
+    model::scaleQuantize (selectedOrAllNotes(), (int) project.getProperty (ids::keyRoot, 0), (bool) project.getProperty (ids::keyMinor, false), &undoManager);
+}
+
+void PianoRoll::showTransformMenu()
+{
+    using T = model::Transform;
+    juce::PopupMenu menu;
+    menu.addSectionHeader (selection.isEmpty() ? "Transform (all notes)" : "Transform (selected notes)");
+    const std::pair<T, const char*> items[] {
+        { T::humanize, "Humanize (timing and velocity)" }, { T::fixedVelocity, "Fixed Velocity (100)" },
+        { T::crescendo, "Crescendo" }, { T::decrescendo, "Decrescendo" }, { T::legato, "Legato" },
+        { T::doubleSpeed, "Double Speed" }, { T::halfSpeed, "Half Speed" },
+        { T::transposeUp, "Transpose +12" }, { T::transposeDown, "Transpose -12" }, { T::reverse, "Reverse Position" } };
+    for (const auto& [t, name] : items)
+        menu.addItem (name, [this, t = t, name = juce::String (name)]
+        {
+            undoManager.beginNewTransaction ("Transform: " + name);
+            model::transformNotes (selectedOrAllNotes(), t, &undoManager);
+        });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&transformButton));
+}
+
+void PianoRoll::paintLane (juce::Graphics& g)
+{
+    const auto lane = laneArea();
+    g.setColour (theme::toolbarDark);
+    g.fillRect (getLocalBounds().removeFromBottom (laneHeight + laneGap).removeFromTop (laneGap));
+    g.setColour (theme::laneA);
+    g.fillRect (lane);
+    g.setColour (theme::toolbar);
+    g.fillRect (getLocalBounds().removeFromBottom (laneHeight).withWidth (keyboardWidth));
+
+    const auto controller = laneController();
+    g.setColour (theme::dimText);
+    g.setFont (juce::FontOptions (10.5f));
+    g.drawFittedText (controller < 0 ? juce::String ("Velocity") : model::controllerName (controller),
+                      getLocalBounds().removeFromBottom (laneHeight).withWidth (keyboardWidth).reduced (4), juce::Justification::centred, 2);
+
+    juce::Graphics::ScopedSaveState save (g);
+    g.reduceClipRegion (lane);
+
+    // Guide lines: the middle (pitch bend's centre), and the top and bottom.
+    g.setColour (theme::gridBeat);
+    g.fillRect ((float) lane.getX(), laneValueToY (0.5), (float) lane.getWidth(), 1.0f);
+
+    const auto colour = model::trackColour (region.getParent());
+    if (controller < 0)
+    {
         for (const auto& note : region)
-            if (note.hasType (ids::NOTE))
-                notes.add (note);
+        {
+            if (! note.hasType (ids::NOTE))
+                continue;
+            const auto x = contentToX (note[ids::start]);
+            const auto y = laneValueToY ((int) note[ids::velocity] / 127.0);
+            g.setColour (isSelected (note) ? juce::Colours::white : colour.brighter (0.3f));
+            g.fillRect (x, y, 2.0f, (float) lane.getBottom() - y);
+            g.fillEllipse (x - 2.5f, y - 2.5f, 7.0f, 7.0f);
+        }
+        return;
+    }
 
-    for (auto note : notes)
-        note.setProperty (ids::start, snapContent (note[ids::start], sixteenth), &undoManager);
+    // Controller values hold until the next point.
+    const auto events = model::controllerEvents (region, controller);
+    juce::Path line;
+    for (int i = 0; i < events.size(); ++i)
+    {
+        const auto x = contentToX (events[i][ids::start]);
+        const auto y = laneValueToY (events[i][ids::value]);
+        if (i == 0) line.startNewSubPath (x, y);
+        else        line.lineTo (x, line.getCurrentPosition().y), line.lineTo (x, y);
+    }
+    if (! events.isEmpty())
+        line.lineTo ((float) lane.getRight(), line.getCurrentPosition().y);
+    g.setColour (colour.brighter (0.3f));
+    g.strokePath (line, juce::PathStrokeType (1.5f));
+    for (const auto& e : events)
+    {
+        g.setColour (e == dragEvent ? juce::Colours::white : colour.brighter (0.6f));
+        g.fillEllipse (contentToX (e[ids::start]) - 3.0f, laneValueToY (e[ids::value]) - 3.0f, 6.0f, 6.0f);
+    }
+}
+
+void PianoRoll::laneMouse (const juce::MouseEvent& e, bool down)
+{
+    const auto controller = laneController();
+    const auto value = laneYToValue ((float) e.y);
+
+    if (controller < 0)
+    {
+        // Velocity: the stalks the mouse passes over (or the one clicked) take its height.
+        if (down)
+        {
+            undoManager.beginNewTransaction ("Velocity");
+            drag = Drag::velocity;
+            lastLaneX = (float) e.x - 4.0f;
+        }
+        const auto x0 = juce::jmin (lastLaneX, (float) e.x) - 3.0f, x1 = juce::jmax (lastLaneX, (float) e.x) + 3.0f;
+        for (auto note : region)
+            if (note.hasType (ids::NOTE))
+                if (const auto x = contentToX (note[ids::start]); x >= x0 && x <= x1 && (selection.isEmpty() || isSelected (note)))
+                    model::setNoteVelocity (note, juce::jlimit (1, 127, juce::roundToInt (value * 127.0)), &undoManager);
+        lastLaneX = (float) e.x;
+        repaint();
+        return;
+    }
+
+    const auto time = juce::jmax (0.0, xToContent ((float) e.x));
+    if (down)
+    {
+        drag = Drag::controller;
+        if (auto near = controllerPointNear (e.position); near.isValid())
+        {
+            if (e.mods.isAltDown())
+            {
+                undoManager.beginNewTransaction ("Remove controller point");
+                region.removeChild (near, &undoManager);
+                drag = Drag::none;
+                repaint();
+                return;
+            }
+            undoManager.beginNewTransaction ("Move controller point");
+            dragEvent = near;
+            laneDrawing = false;
+        }
+        else
+        {
+            undoManager.beginNewTransaction ("Draw " + model::controllerName (controller));
+            dragEvent = model::addControllerEvent (region, controller, time, value, &undoManager);
+            laneDrawing = true;
+        }
+        lastLaneX = (float) e.x;
+        repaint();
+        return;
+    }
+
+    // Dragging a point moves it; dragging away from it draws more (one every few pixels).
+    if (dragEvent.isValid() && (! laneDrawing || std::abs ((float) e.x - lastLaneX) < 8.0f))
+    {
+        dragEvent.setProperty (ids::value, value, &undoManager);
+        if (! e.mods.isShiftDown())
+            dragEvent.setProperty (ids::start, time, &undoManager);
+    }
+    else
+    {
+        dragEvent = model::addControllerEvent (region, controller, time, value, &undoManager);
+        lastLaneX = (float) e.x;
+    }
+    repaint();
 }
 
 } // namespace riff

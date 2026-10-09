@@ -306,6 +306,37 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
 
                     std::sort (r.notes.begin(), r.notes.end(),
                                [] (const auto& a, const auto& b) { return a.start < b.start; });
+
+                    // Controllers and pitch bend inside the window.
+                    for (const auto& event : region)
+                    {
+                        if (! event.hasType (ids::CC))
+                            continue;
+                        const double time = event[ids::start];
+                        if (time < offset || time >= windowEnd)
+                            continue;
+
+                        PlaybackGraph::MidiEvent m;
+                        m.time = toSamples (repeatStart + time - offset);
+                        const auto controller = (int) event[ids::controller];
+                        const auto value = juce::jlimit (0.0, 1.0, (double) event[ids::value]);
+                        if (controller == model::pitchBend)
+                        {
+                            const auto bend = juce::jlimit (0, 16383, juce::roundToInt (value * 16383.0));
+                            m.status = 0xe0;
+                            m.data1 = (juce::uint8) (bend & 0x7f);
+                            m.data2 = (juce::uint8) (bend >> 7);
+                        }
+                        else
+                        {
+                            m.status = 0xb0;
+                            m.data1 = (juce::uint8) juce::jlimit (0, 127, controller);
+                            m.data2 = (juce::uint8) juce::roundToInt (value * 127.0);
+                        }
+                        r.events.push_back (m);
+                    }
+                    std::stable_sort (r.events.begin(), r.events.end(), [] (const auto& a, const auto& b) { return a.time < b.time; });
+
                     t.regions.push_back (std::move (r));
                 }
             }

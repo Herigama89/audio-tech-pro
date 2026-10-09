@@ -67,9 +67,17 @@ struct PlaybackGraph
         juce::uint8 pitch = 60, velocity = 100;
     };
 
+    /** A controller or pitch bend message at an absolute timeline position. */
+    struct MidiEvent
+    {
+        juce::int64 time = 0;
+        juce::uint8 status = 0xb0, data1 = 0, data2 = 0;
+    };
+
     struct Region
     {
         std::vector<Note> notes;    // MIDI regions only, sorted by start
+        std::vector<MidiEvent> events;   // MIDI regions only, sorted by time
         SharedAudio audio;          // stereo, at the file's own rate
         juce::int64 start = 0;      // timeline position (engine samples)
         juce::int64 sourceOffset = 0;   // where the region starts in the file (file samples), when no conversion is needed

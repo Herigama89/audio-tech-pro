@@ -270,6 +270,15 @@ MainComponent::MainComponent (bool openAudioDevice)
     waveforms.onChange = [this] { canvas.repaint(); };
 
     timeline.addChangeListener (this);
+
+    addChildComponent (paneDivider);
+    paneDivider.onStart = [this] { paneHeightAtDragStart = pianoRoll.isVisible() ? pianoRoll.getHeight() : mixer.getHeight(); };
+    paneDivider.onDrag = [this] (int dy)
+    {
+        (pianoRoll.isVisible() ? editorPaneHeight : mixerPaneHeight) = juce::jmax (150, paneHeightAtDragStart - dy);
+        resized();
+    };
+    paneDivider.onReset = [this] { (pianoRoll.isVisible() ? editorPaneHeight : mixerPaneHeight) = 0; resized(); };
     fileCache.addChangeListener (this);
     undoManager.addChangeListener (this);
     engine.getDeviceManager().addChangeListener (this);
@@ -573,12 +582,22 @@ void MainComponent::resized()
     if (inspector.isVisible())
         inspector.setBounds (area.removeFromLeft (Inspector::preferredWidth));
 
+    // The editor or the mixer below the tracks, with a divider to drag (double-click it for the default size).
+    paneDivider.setVisible (pianoRoll.isVisible() || mixer.isVisible());
     if (pianoRoll.isVisible())
-        pianoRoll.setBounds (area.removeFromBottom (juce::jlimit (200, 360, getHeight() / 3)));
+    {
+        const auto h = editorPaneHeight > 0 ? editorPaneHeight : juce::jlimit (200, 360, getHeight() / 3);
+        pianoRoll.setBounds (area.removeFromBottom (juce::jlimit (150, juce::jmax (150, area.getHeight() - 120), h)));
+        paneDivider.setBounds (area.removeFromBottom (6));
+    }
     else if (mixer.isVisible())
-        mixer.setBounds (area.removeFromBottom (juce::jmax (200, juce::jmin (area.getHeight() - 100,
-                                                                             ChannelStrip::minimumHeight + MixerPanel::headerHeight + 40,
-                                                                             (int) (getHeight() * 0.8)))));
+    {
+        const auto fallback = juce::jmax (200, juce::jmin (area.getHeight() - 100, ChannelStrip::minimumHeight + MixerPanel::headerHeight + 40,
+                                                         (int) (getHeight() * 0.8)));
+        const auto h = mixerPaneHeight > 0 ? mixerPaneHeight : fallback;
+        mixer.setBounds (area.removeFromBottom (juce::jlimit (150, juce::jmax (150, area.getHeight() - 60), h)));
+        paneDivider.setBounds (area.removeFromBottom (6));
+    }
 
     // Meters on the right
     auto meters = area.removeFromRight (meterWidth).reduced (8, 10);
@@ -1403,6 +1422,27 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
     if (source == &timeline)
     {
         mixer.setSelectedTracks (timeline.selectedTrackIds(), timeline.selectedTrackId);   // one selection, as in Logic
+
+        // The open editor follows the selection: the selected MIDI region, or the one on the
+        // selected instrument track under the playhead (else its first).
+        if (pianoRoll.isVisible())
+        {
+            auto region = model::findById (project, timeline.selectedRegionId);
+            if (! (region.isValid() && model::isMidiRegion (region)))
+            {
+                region = {};
+                const auto track = model::findById (project, timeline.selectedTrackId);
+                if (track.isValid() && model::isInstrumentTrack (track) && pianoRoll.getRegion().getParent() != track)
+                {
+                    const auto t = engine.getPlayheadSeconds();
+                    for (const auto& r : track)
+                        if (model::isMidiRegion (r) && (! region.isValid() || ((double) r[ids::start] <= t && t < model::regionEnd (r))))
+                            region = r;
+                }
+            }
+            if (region.isValid() && region != pianoRoll.getRegion())
+                pianoRoll.setRegion (region);
+        }
         updateScrollBars();
         commandManager.commandStatusChanged(); // the selection changed what the Track commands act on
     }
@@ -1573,12 +1613,29 @@ void MainComponent::createMidiRegionFromTake (juce::ValueTree track, const Audio
         events.push_back ({ (double) e.sample / rate, e.status, e.data1, e.data2 });
 
     const auto notes = model::notesFromEvents (events, regionStart, regionEnd);
-    if (notes.empty())
+
+    // Controllers and pitch bend you played come along too.
+    struct Controller { int controller; double time, value; };
+    std::vector<Controller> controllers;
+    for (const auto& e : events)
+    {
+        const auto type = e.status & 0xf0;
+        if (e.time < regionStart || e.time > regionEnd)
+            continue;
+        if (type == 0xb0 && e.data1 < 120)
+            controllers.push_back ({ e.data1, e.time - regionStart, e.data2 / 127.0 });
+        else if (type == 0xe0)
+            controllers.push_back ({ model::pitchBend, e.time - regionStart, ((e.data2 << 7) | e.data1) / 16383.0 });
+    }
+
+    if (notes.empty() && controllers.empty())
         return;
 
     auto region = model::addMidiRegion (track, regionStart, regionEnd - regionStart, &undoManager);
     for (const auto& n : notes)
         model::addNote (region, n.pitch, n.start, n.length, n.velocity, &undoManager);
+    for (const auto& c : controllers)
+        model::addControllerEvent (region, c.controller, c.time, c.value, &undoManager);
 
     last = region;
 }

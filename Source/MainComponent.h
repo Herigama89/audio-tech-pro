@@ -261,6 +261,25 @@ private:
     LevelMeter inputMeter { "IN" }, outputMeter { "OUT" };
     PianoRoll pianoRoll { undoManager, engine };
     MixerPanel mixer { undoManager, engine, player, effectRack };
+
+    /** The bar between the tracks and the editor or mixer below: drag it to resize them. */
+    struct PaneDivider final : juce::Component
+    {
+        PaneDivider() { setMouseCursor (juce::MouseCursor::UpDownResizeCursor); setRepaintsOnMouseActivity (true); }
+        void paint (juce::Graphics& g) override
+        {
+            g.fillAll (juce::Colour (0xff141516));
+            g.setColour (isMouseOverOrDragging() ? juce::Colour (0xff2f8cff) : juce::Colour (0xff3e4045));
+            g.fillRoundedRectangle (getLocalBounds().toFloat().withSizeKeepingCentre (40.0f, 2.0f), 1.0f);
+        }
+        void mouseDown (const juce::MouseEvent&) override { if (onStart) onStart(); }
+        void mouseDrag (const juce::MouseEvent& e) override { if (onDrag) onDrag (e.getDistanceFromDragStartY()); }
+        void mouseDoubleClick (const juce::MouseEvent&) override { if (onReset) onReset(); }
+        std::function<void()> onStart, onReset;
+        std::function<void (int)> onDrag;
+    };
+    PaneDivider paneDivider;
+    int editorPaneHeight = 0, mixerPaneHeight = 0, paneHeightAtDragStart = 0;   // 0: the default size
     Inspector inspector { mixer };
 
     juce::TooltipWindow tooltips { this, 600 };

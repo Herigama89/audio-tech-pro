@@ -690,6 +690,152 @@ void quantizeNotes (juce::ValueTree region, double gridSeconds, juce::UndoManage
             note.setProperty (ids::start, juce::jmax (0.0, std::round ((double) note[ids::start] / gridSeconds) * gridSeconds), um);
 }
 
+void quantizeNotesTo (const juce::Array<juce::ValueTree>& notes, double grid, double strength, double swing,
+                      double contentToSong, juce::UndoManager* um)
+{
+    if (grid <= 0.0)
+        return;
+
+    for (auto note : notes)
+    {
+        const auto song = (double) note[ids::start] + contentToSong;
+        const auto step = std::round (song / grid);
+        auto target = step * grid;
+        if (((juce::int64) step) % 2 != 0)
+            target += swing * grid * 0.5;
+        const auto moved = song + (target - song) * juce::jlimit (0.0, 1.0, strength);
+        note.setProperty (ids::start, juce::jmax (0.0, moved - contentToSong), um);
+    }
+}
+
+juce::ValueTree addControllerEvent (juce::ValueTree region, int controller, double start, double value, juce::UndoManager* um)
+{
+    juce::ValueTree event { ids::CC };
+    event.setProperty (ids::start, juce::jmax (0.0, start), nullptr);
+    event.setProperty (ids::controller, controller, nullptr);
+    event.setProperty (ids::value, juce::jlimit (0.0, 1.0, value), nullptr);
+    region.appendChild (event, um);
+    return event;
+}
+
+juce::Array<juce::ValueTree> controllerEvents (const juce::ValueTree& region, int controller)
+{
+    juce::Array<juce::ValueTree> events;
+    for (const auto& e : region)
+        if (e.hasType (ids::CC) && (int) e[ids::controller] == controller)
+            events.add (e);
+    std::stable_sort (events.begin(), events.end(), [] (const juce::ValueTree& a, const juce::ValueTree& b)
+                      { return (double) a[ids::start] < (double) b[ids::start]; });
+    return events;
+}
+
+juce::String controllerName (int controller)
+{
+    switch (controller)
+    {
+        case pitchBend: return "Pitch Bend";
+        case 1:  return "Modulation";
+        case 2:  return "Breath";
+        case 7:  return "Volume";
+        case 10: return "Pan";
+        case 11: return "Expression";
+        case 64: return "Sustain";
+        default: return "CC " + juce::String (controller);
+    }
+}
+
+bool isInScale (int pitch, int keyRoot, bool minor)
+{
+    static constexpr bool majorSteps[12] { true, false, true, false, true, true, false, true, false, true, false, true };
+    static constexpr bool minorSteps[12] { true, false, true, true, false, true, false, true, true, false, true, false };
+    const auto degree = ((pitch - keyRoot) % 12 + 12) % 12;
+    return minor ? minorSteps[degree] : majorSteps[degree];
+}
+
+void scaleQuantize (const juce::Array<juce::ValueTree>& notes, int keyRoot, bool minor, juce::UndoManager* um)
+{
+    for (auto note : notes)
+    {
+        const int pitch = note[ids::pitch];
+        if (isInScale (pitch, keyRoot, minor))
+            continue;
+        // The nearest scale note (down first: a semitone either way, the one below wins a tie).
+        const auto target = isInScale (pitch - 1, keyRoot, minor) ? pitch - 1 : pitch + 1;
+        note.setProperty (ids::pitch, juce::jlimit (0, 127, target), um);
+    }
+}
+
+void transformNotes (const juce::Array<juce::ValueTree>& notes, Transform transform, juce::UndoManager* um, int seed)
+{
+    if (notes.isEmpty())
+        return;
+
+    auto sorted = notes;
+    std::stable_sort (sorted.begin(), sorted.end(), [] (const juce::ValueTree& a, const juce::ValueTree& b)
+                      { return (double) a[ids::start] < (double) b[ids::start]; });
+    const double first = sorted.getFirst()[ids::start];
+    double last = first;
+    for (const auto& n : sorted)
+        last = juce::jmax (last, (double) n[ids::start] + (double) n[ids::length]);
+
+    juce::Random random (seed != 0 ? seed : juce::Random::getSystemRandom().nextInt());
+
+    for (int i = 0; i < sorted.size(); ++i)
+    {
+        auto note = sorted[i];
+        const double start = note[ids::start], length = note[ids::length];
+        const int velocity = note[ids::velocity], pitch = note[ids::pitch];
+
+        switch (transform)
+        {
+            case Transform::humanize:
+                note.setProperty (ids::start, juce::jmax (0.0, start + (random.nextDouble() - 0.5) * 0.02), um);   // +-10 ms
+                note.setProperty (ids::velocity, juce::jlimit (1, 127, velocity + random.nextInt (21) - 10), um);
+                break;
+            case Transform::fixedVelocity:
+                note.setProperty (ids::velocity, 100, um);
+                break;
+            case Transform::crescendo:
+            case Transform::decrescendo:
+            {
+                const auto f = sorted.size() > 1 ? (double) i / (double) (sorted.size() - 1) : 1.0;
+                const auto v = transform == Transform::crescendo ? 40.0 + f * 87.0 : 127.0 - f * 87.0;
+                note.setProperty (ids::velocity, juce::jlimit (1, 127, juce::roundToInt (v)), um);
+                break;
+            }
+            case Transform::legato:
+            {
+                // Up to the next note that starts later.
+                for (int j = i + 1; j < sorted.size(); ++j)
+                    if ((double) sorted[j][ids::start] > start + 1.0e-6)
+                    {
+                        note.setProperty (ids::length, (double) sorted[j][ids::start] - start, um);
+                        break;
+                    }
+                break;
+            }
+            case Transform::doubleSpeed:
+                note.setProperty (ids::start, first + (start - first) * 0.5, um);
+                note.setProperty (ids::length, juce::jmax (minRegionLength, length * 0.5), um);
+                break;
+            case Transform::halfSpeed:
+                note.setProperty (ids::start, first + (start - first) * 2.0, um);
+                note.setProperty (ids::length, length * 2.0, um);
+                break;
+            case Transform::transposeUp:
+                note.setProperty (ids::pitch, juce::jlimit (0, 127, pitch + 12), um);
+                break;
+            case Transform::transposeDown:
+                note.setProperty (ids::pitch, juce::jlimit (0, 127, pitch - 12), um);
+                break;
+            case Transform::reverse:
+                // Mirrored in time within the notes' span.
+                note.setProperty (ids::start, juce::jmax (0.0, first + (last - (start + length) )), um);
+                break;
+        }
+    }
+}
+
 std::vector<RecordedNote> notesFromEvents (const std::vector<RecordedMidiEvent>& events,
                                            double regionStart, double regionEnd)
 {
