@@ -25,6 +25,7 @@ public:
     void resized() override;
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseDrag (const juce::MouseEvent& e) override;
+    void mouseUp (const juce::MouseEvent& e) override;
 
 private:
     void run (audioedit::Request request, const juce::String& name);
@@ -48,6 +49,15 @@ private:
     double selFrom = 0.0, selTo = 0.0, dragAnchor = 0.0;
 
     juce::OwnedArray<juce::TextButton> buttons;
+
+    // Flex Pitch: the notes found in the audio; drag one up or down to move its pitch.
+    juce::TextButton flexPitchButton { "Flex Pitch" };
+    std::vector<audioedit::PitchedNote> notes;
+    double notesRate = 48000.0;
+    int dragNote = -1, dragSemitones = 0;
+    void findNotes();
+    juce::Rectangle<float> noteBox (const audioedit::PitchedNote& n, double lowMidi, double highMidi) const;
+    std::pair<double, double> pitchRange() const;
     juce::Label info;
 };
 

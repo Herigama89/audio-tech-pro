@@ -39,6 +39,65 @@ AudioEditorPanel::AudioEditorPanel (juce::ValueTree r, juce::UndoManager& um, ju
              [this] (double semis) { run ({ Op::pitchShift, semis }, "Transpose"); });
     });
 
+    add ("Quantize (Flex)...", "Flex Time: move every hit onto the grid, the audio between stretched to fit", [this]
+    {
+        juce::PopupMenu menu;
+        menu.addSectionHeader ("Move the hits to");
+        for (auto [name, beats] : { std::pair { "Quarter notes", 1.0 }, std::pair { "Eighth notes", 0.5 }, std::pair { "Sixteenth notes", 0.25 } })
+            menu.addItem (name, [this, beats = beats]
+            {
+                const auto project = region.getParent().getParent();
+                const auto map = model::tempoMapOf (project);
+                const double regionStart = region[ids::start];
+                audioedit::Request request { audioedit::Operation::flexQuantize };
+                request.target = [map, regionStart, beats] (double t)
+                {
+                    const auto beat = map.beatAt (regionStart + t);
+                    return map.secondsAt (std::round (beat / beats) * beats) - regionStart;
+                };
+                run (request, "Flex quantize");
+            });
+        menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+    });
+    add ("Detect Tempo", "Smart Tempo: find the tempo this audio was played at, and use it for the project if you like", [this]
+    {
+        double rate = 48000.0;
+        const auto audio = audioedit::readRegion (formats, juce::File (region[ids::file].toString()), region[ids::offset], region[ids::length], rate);
+        const auto bpm = audioedit::detectTempo (audio, rate);
+        if (bpm <= 0.0)
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Detect Tempo", "There's no clear beat in this audio.");
+            return;
+        }
+        auto project = region.getParent().getParent();
+        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Detect Tempo",
+            "This audio is at about " + juce::String (bpm, 1) + " BPM. Set the project's tempo to " + juce::String (bpm, 1)
+                + " and start the region on a bar?",
+            "Set Tempo", "Cancel", this, juce::ModalCallbackFunction::create ([this, project, bpm] (int result) mutable
+            {
+                if (result != 1)
+                    return;
+                undoManager.beginNewTransaction ("Smart Tempo");
+                model::setTempo (project, bpm, &undoManager);
+                // The region's first hit on the nearest bar line.
+                double rate = 48000.0;
+                const auto audio = audioedit::readRegion (formats, juce::File (region[ids::file].toString()), region[ids::offset], region[ids::length], rate);
+                const auto onsets = audioedit::detectTransients (audio, rate);
+                const auto firstHit = onsets.empty() ? 0.0 : onsets.front() / rate;
+                const auto map = model::tempoMapOf (project);
+                const auto hitAt = (double) region[ids::start] + firstHit;
+                const auto bar = map.barAndBeat (map.beatAt (hitAt));
+                const auto barStart = map.secondsAt (map.beatOfBar (bar.second > map.beatsPerBarAt (map.beatAt (hitAt)) * 0.5 ? bar.first + 1 : bar.first));
+                region.setProperty (ids::start, juce::jmax (0.0, barStart - firstHit), &undoManager);
+            }));
+    });
+
+    flexPitchButton.setClickingTogglesState (true);
+    flexPitchButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffd08a1c));
+    flexPitchButton.setTooltip ("Flex Pitch: shows the notes in the audio at their pitch; drag one up or down to change it");
+    flexPitchButton.onClick = [this] { if (flexPitchButton.getToggleState()) findNotes(); repaint(); };
+    addAndMakeVisible (flexPitchButton);
+
     info.setFont (juce::FontOptions (11.5f));
     info.setColour (juce::Label::textColourId, theme::dimText);
     info.setText ("Drag over the waveform to select; edits apply to the selection, or all of it. Stretch and Transpose work on the whole region.",
@@ -48,7 +107,7 @@ AudioEditorPanel::AudioEditorPanel (juce::ValueTree r, juce::UndoManager& um, ju
     thumbnail.addChangeListener (this);
     region.addListener (this);
     loadWaveform();
-    setSize (820, 330);
+    setSize (1040, 330);
 }
 
 AudioEditorPanel::~AudioEditorPanel()
@@ -57,10 +116,56 @@ AudioEditorPanel::~AudioEditorPanel()
     thumbnail.removeChangeListener (this);
 }
 
+void AudioEditorPanel::findNotes()
+{
+    juce::MouseCursor::showWaitCursor();
+    const auto audio = audioedit::readRegion (formats, juce::File (region[ids::file].toString()), region[ids::offset], region[ids::length], notesRate);
+    notes = audioedit::detectNotes (audio, notesRate);
+    juce::MouseCursor::hideWaitCursor();
+}
+
+std::pair<double, double> AudioEditorPanel::pitchRange() const
+{
+    double lo = 127.0, hi = 0.0;
+    for (const auto& n : notes)
+        if (n.midi > 0.0)
+        {
+            lo = juce::jmin (lo, n.midi);
+            hi = juce::jmax (hi, n.midi);
+        }
+    if (hi < lo)
+        return { 48.0, 72.0 };
+    return { std::floor (lo) - 5.0, std::ceil (hi) + 5.0 };
+}
+
+juce::Rectangle<float> AudioEditorPanel::noteBox (const audioedit::PitchedNote& n, double lowMidi, double highMidi) const
+{
+    const auto a = waveArea().toFloat();
+    const auto x0 = (float) secondsToX (n.start / notesRate), x1 = (float) secondsToX (n.end / notesRate);
+    const auto y = a.getBottom() - (float) ((n.midi - lowMidi) / (highMidi - lowMidi)) * a.getHeight();
+    return { x0 + 1.0f, y - 6.0f, juce::jmax (4.0f, x1 - x0 - 2.0f), 12.0f };
+}
+
+void AudioEditorPanel::mouseUp (const juce::MouseEvent&)
+{
+    if (dragNote >= 0 && dragSemitones != 0 && juce::isPositiveAndBelow (dragNote, (int) notes.size()))
+    {
+        const auto& n = notes[(size_t) dragNote];
+        audioedit::Request request { audioedit::Operation::pitchShift, (double) dragSemitones, n.start / notesRate, n.end / notesRate };
+        selFrom = selTo = 0.0;
+        run (request, "Flex Pitch");
+    }
+    dragNote = -1;
+    dragSemitones = 0;
+    repaint();
+}
+
 void AudioEditorPanel::loadWaveform()
 {
     thumbnail.setSource (new juce::FileInputSource (juce::File (region[ids::file].toString())));
     selFrom = selTo = 0.0;
+    if (flexPitchButton.getToggleState())
+        findNotes();
     repaint();
 }
 
@@ -99,6 +204,29 @@ void AudioEditorPanel::paint (juce::Graphics& g)
     if (thumbnail.getTotalLength() > 0.0)
         thumbnail.drawChannels (g, a.reduced (0, 4), offset, offset + length, (float) (double) region.getProperty (ids::gain, 1.0));
 
+    // Flex Pitch: each note as a bar at its pitch, with its name.
+    if (flexPitchButton.getToggleState())
+    {
+        const auto [lo, hi] = pitchRange();
+        for (size_t i = 0; i < notes.size(); ++i)
+        {
+            auto n = notes[i];
+            if (n.midi <= 0.0)
+                continue;
+            if ((int) i == dragNote)
+                n.midi += dragSemitones;
+            const auto box = noteBox (n, lo, hi);
+            g.setColour (juce::Colour (0xffd08a1c).withAlpha ((int) i == dragNote ? 0.95f : 0.75f));
+            g.fillRoundedRectangle (box, 3.0f);
+            g.setColour (juce::Colours::white);
+            g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+            const auto cents = juce::roundToInt ((n.midi - std::round (n.midi)) * 100.0);
+            g.drawText (juce::MidiMessage::getMidiNoteName (juce::roundToInt (n.midi), true, true, 3)
+                            + (std::abs (cents) > 9 ? (cents > 0 ? " +" : " ") + juce::String (cents) : juce::String()),
+                        box.translated (0.0f, -13.0f).withHeight (12.0f).withWidth (juce::jmax (60.0f, box.getWidth())), juce::Justification::left, false);
+        }
+    }
+
     if (selTo > selFrom)
     {
         g.setColour (juce::Colours::white.withAlpha (0.2f));
@@ -120,6 +248,7 @@ void AudioEditorPanel::resized()
     auto bottom = r.removeFromBottom (60);
     info.setBounds (bottom.removeFromBottom (24));
     auto row = bottom.removeFromTop (30);
+    flexPitchButton.setBounds (row.removeFromRight (90).reduced (2, 0));
     const auto w = row.getWidth() / juce::jmax (1, buttons.size());
     for (auto* b : buttons)
         b->setBounds (row.removeFromLeft (w).reduced (2, 0));
@@ -129,6 +258,19 @@ void AudioEditorPanel::mouseDown (const juce::MouseEvent& e)
 {
     if (! waveArea().contains (e.getPosition()))
         return;
+
+    if (flexPitchButton.getToggleState())
+    {
+        const auto [lo, hi] = pitchRange();
+        for (size_t i = 0; i < notes.size(); ++i)
+            if (notes[i].midi > 0.0 && noteBox (notes[i], lo, hi).expanded (0.0f, 3.0f).contains (e.position))
+            {
+                dragNote = (int) i;
+                dragSemitones = 0;
+                return;
+            }
+    }
+
     dragAnchor = xToSeconds (e.x);
     selFrom = selTo = dragAnchor;
     repaint();
@@ -136,6 +278,14 @@ void AudioEditorPanel::mouseDown (const juce::MouseEvent& e)
 
 void AudioEditorPanel::mouseDrag (const juce::MouseEvent& e)
 {
+    if (dragNote >= 0)
+    {
+        const auto [lo, hi] = pitchRange();
+        const auto perSemitone = (double) waveArea().getHeight() / (hi - lo);
+        dragSemitones = juce::jlimit (-12, 12, (int) std::round (-e.getDistanceFromDragStartY() / perSemitone));
+        repaint();
+        return;
+    }
     const auto t = xToSeconds (e.x);
     selFrom = juce::jmin (dragAnchor, t);
     selTo = juce::jmax (dragAnchor, t);
@@ -165,7 +315,8 @@ void AudioEditorPanel::run (audioedit::Request request, const juce::String& name
         return;
     }
 
-    const bool wholeRegion = request.operation == audioedit::Operation::timeStretch || request.operation == audioedit::Operation::pitchShift;
+    const bool wholeRegion = request.operation == audioedit::Operation::timeStretch || request.operation == audioedit::Operation::pitchShift
+                            || request.operation == audioedit::Operation::flexQuantize;
     if (selTo > selFrom + 1.0e-3 && ! wholeRegion)
     {
         request.from = selFrom;

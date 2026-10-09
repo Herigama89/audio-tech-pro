@@ -57,3 +57,63 @@ TEST_CASE ("Audio File Editor edits", "[audioedit]")
     audioedit::apply (a, { audioedit::Operation::fadeIn, 0.0, 0.5, 1.0 }, 48000.0);
     CHECK (std::abs (a.getSample (0, 24000)) < 0.05f);
 }
+
+namespace
+{
+    /** Clicks at the given times (seconds), in a second or so of silence. */
+    juce::AudioBuffer<float> clicks (const std::vector<double>& times, double seconds, double rate = 48000.0)
+    {
+        juce::AudioBuffer<float> b (1, (int) (seconds * rate));
+        b.clear();
+        for (auto t : times)
+            for (int i = 0; i < 2000; ++i)
+                if (const auto at = (int) (t * rate) + i; at < b.getNumSamples())
+                    b.setSample (0, at, 0.8f * std::exp (-i / 300.0f) * (float) std::sin (i * 0.3));
+        return b;
+    }
+}
+
+TEST_CASE ("Smart Tempo and Flex Time", "[audioedit]")
+{
+    // 120 BPM: a hit every half second.
+    std::vector<double> beats;
+    for (int i = 0; i < 16; ++i)
+        beats.push_back (i * 0.5);
+    const auto steady = clicks (beats, 8.2);
+    const auto onsets = audioedit::detectTransients (steady, 48000.0);
+    CHECK (onsets.size() == 16);
+    CHECK_THAT (audioedit::detectTempo (steady, 48000.0), WithinAbs (120.0, 1.0));
+
+    // Hits a little late: quantized onto the half-second grid.
+    const auto sloppy = clicks ({ 0.0, 0.53, 1.04, 1.49 }, 2.2);
+    const auto fixed = audioedit::flexQuantize (sloppy, 48000.0, [] (double t) { return std::round (t / 0.5) * 0.5; });
+    const auto after = audioedit::detectTransients (fixed, 48000.0);
+    REQUIRE (after.size() == 4);
+    CHECK (std::abs (after[1] - 24000) < 600);
+    CHECK (std::abs (after[2] - 48000) < 600);
+}
+
+TEST_CASE ("Flex Pitch: notes and their pitch", "[audioedit]")
+{
+    CHECK_THAT (audioedit::detectPitch (sine (220.0, 0.5), 48000.0, 12000), WithinAbs (220.0, 2.0));
+
+    // A, then E above it.
+    auto a = sine (220.0, 0.5);
+    auto e = sine (329.63, 0.5);
+    juce::AudioBuffer<float> both (1, 48000);
+    both.clear();
+    both.copyFrom (0, 0, a, 0, 0, 24000);
+    both.copyFrom (0, 24000, e, 0, 0, 24000);
+    both.applyGainRamp (0, 0, 200, 0.0f, 1.0f);
+    // A gap so the second note has a hit.
+    both.clear (0, 23000, 1000);
+    const auto notes = audioedit::detectNotes (both, 48000.0);
+    REQUIRE (notes.size() >= 2);
+    CHECK_THAT (notes.front().midi, WithinAbs (57.0, 0.3));
+    CHECK_THAT (notes.back().midi, WithinAbs (64.0, 0.3));
+
+    // Shifting just the second note up two semitones.
+    audioedit::apply (both, { audioedit::Operation::pitchShift, 2.0, 0.5, 1.0 }, 48000.0);
+    CHECK_THAT (audioedit::detectPitch (both, 48000.0, 36000), WithinAbs (369.99, 6.0));
+    CHECK_THAT (audioedit::detectPitch (both, 48000.0, 12000), WithinAbs (220.0, 2.0));
+}
