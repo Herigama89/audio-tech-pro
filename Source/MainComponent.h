@@ -138,6 +138,8 @@ private:
     void newAlternative();
     void showEventList();
     void showLiveLoops();
+    void showThemeSettings();
+    void applyTheme (const theme::Settings& settings);
     void showControllerAssignments();
     void toggleLibrary (LibraryPanel::Page page);
     void toggleSmartControls();

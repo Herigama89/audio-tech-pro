@@ -206,6 +206,9 @@ public:
     void addExtraStrip (ChannelStrip* s)    { extraStrips.addIfNotAlreadyThere (s); }
     std::function<void()> onLayoutChanged;   // the strips' layout changed (EQ/Dyn shown or hidden)
 
+    /** Lays every strip out again (after the skin changed). */
+    void relayoutStrips();
+
     /** For the strips' Input slots: the interface's inputs, and an instrument track's instrument chooser. */
     std::function<juce::StringArray()> inputNames;
     std::function<void (juce::ValueTree track, juce::Component& target)> onInstrumentMenu;

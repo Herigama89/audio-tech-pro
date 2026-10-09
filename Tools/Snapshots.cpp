@@ -5,6 +5,7 @@
 #include "../Source/ui/LiveLoopsGrid.h"
 #include "../Source/ui/ToolIcons.h"
 #include "../Source/ui/PluginPicker.h"
+#include "../Source/ui/ThemePanel.h"
 #include <JuceHeader.h>
 #include "MainComponent.h"
 #include "model/Project.h"
@@ -469,6 +470,31 @@ public:
             } sheet;
             sheet.setSize (52 * 11 + 8, 58);
             save (sheet, "tool-icons.png", 2.0f);
+        }
+
+        {
+            // The flat skin, and the Theme window.
+            theme::Settings flat;
+            flat.skin = theme::Skin::flat;
+            main.applyTheme (flat);
+            main.showMixer();
+            pump (main, 200);
+            save (main, "flat-mixer.png");
+            main.closeMixer();
+            pump (main, 100);
+            save (main, "flat-arrange.png");
+            ThemePanel panel (flat, {});
+            pump (main, 30);
+            save (panel, "theme-panel.png");
+
+            theme::Settings warm { theme::Skin::flat, -175.0f, 1.2f, 0.0f, 0.1f, 0.0f, 30.0f, 1.0f, 1.0f };
+            main.applyTheme (warm);
+            main.showMixer();
+            pump (main, 200);
+            save (main, "flat-warm.png");
+            main.closeMixer();
+            main.applyTheme ({});
+            pump (main, 50);
         }
 
         {

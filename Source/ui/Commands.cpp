@@ -65,6 +65,7 @@ const std::vector<Info>& all()
         { newBassPlayerTrack,     "New Bass Player Track",      "Track",     "A session bass player, in the song's key" },
         { openMixerWindow,        "Open Mixer Window",          "View",      "The mixer in a window of its own (resize it, put it on another screen)" },
         { openEditorWindow,       "Open Editor Window",         "View",      "The piano roll (and the other region editors) in a window of its own" },
+        { themeSettings,          "Theme...",                   "View",      "The skin (studio grey or flat dark) and its colours: hue, lightness, contrast, text, accent, meters, grid" },
         { liveLoops,              "Live Loops",                 "View",      "A grid of loops per track: start and stop cells and scenes in time, on the next bar" },
         { newKeysPlayerTrack,     "New Keyboard Player Track",  "Track",     "A session keyboard player playing chords in the song's key" },
         { createFolderStack,      "Create Folder Stack",        "Track",     "Put the selected tracks in a folder stack: one fader, mute and solo for them all" },

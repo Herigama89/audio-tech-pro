@@ -122,7 +122,7 @@ void ConsoleLook::drawButtonBackground (juce::Graphics& g, juce::Button& button,
     auto area = button.getLocalBounds().toFloat().reduced (0.5f);
 
     // Inserts and sends: the picture's slots.
-    if (style == look::Key::slot)
+    if (style == look::Key::slot && theme::imageSkin())
         if (const auto kind = button.getProperties().getWithDefault ("atpSkin", {}).toString(); kind.isNotEmpty())
         {
             const auto image = kind == "send" ? skin::send() : skin::slot();
@@ -314,7 +314,7 @@ namespace look
         juce::ignoreUnused (fromCentre);
         // On the grey face: black knobs (silver for the white ones); on a black panel: the panel's white knobs.
         const bool white = silver || ! light;
-        if (const auto body = silver ? skin::knobWhite() : (light ? skin::knobBlack() : skin::knobBus()); body.isValid())
+        if (const auto body = silver ? skin::knobWhite() : (light ? skin::knobBlack() : skin::knobBus()); body.isValid() && theme::imageSkin())
         {
             const auto knobArea = area.withSizeKeepingCentre (outer * 1.5f, outer * 1.5f);
             g.setColour (juce::Colours::black.withAlpha (0.35f * alpha));
@@ -383,6 +383,22 @@ namespace look
     void drawFaderCap (juce::Graphics& g, juce::Rectangle<float> cap, bool vertical)
     {
         // The picture's fader cap.
+        if (! theme::imageSkin())
+        {
+            // The flat skin's cap: a dark block with a lit line across it.
+            g.setColour (juce::Colours::black.withAlpha (0.35f));
+            g.fillRoundedRectangle (cap.translated (0.0f, 1.5f), 2.0f);
+            g.setColour (theme::panel.brighter (0.25f));
+            g.fillRoundedRectangle (cap, 2.0f);
+            g.setColour (theme::panel.brighter (0.45f));
+            g.drawRoundedRectangle (cap.reduced (0.5f), 2.0f, 1.0f);
+            g.setColour (theme::accent);
+            if (vertical)
+                g.fillRect (cap.getX() + 2.0f, cap.getCentreY() - 1.0f, cap.getWidth() - 4.0f, 2.0f);
+            else
+                g.fillRect (cap.getCentreX() - 1.0f, cap.getY() + 2.0f, 2.0f, cap.getHeight() - 4.0f);
+            return;
+        }
         if (const auto image = skin::faderCap(); image.isValid())
         {
             g.setOpacity (1.0f);
@@ -713,8 +729,20 @@ void GainReductionMeter::paint (juce::Graphics& g)
     auto face = bounds.reduced (9.0f, 8.0f).withTrimmedBottom (10.0f);
 
     // The picture's VU face (its needle taken off); the needle is drawn here.
-    g.setOpacity (1.0f);
-    g.drawImage (skin::vuFace(), face);
+    if (theme::imageSkin())
+    {
+        g.setOpacity (1.0f);
+        g.drawImage (skin::vuFace(), face);
+    }
+    else
+    {
+        // Flat: a dark window with a lit scale
+        g.setColour (theme::lcd);
+        g.fillRoundedRectangle (face, 3.0f);
+        g.setColour (theme::lcdDim);
+        g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+        g.drawText ("GAIN REDUCTION", face.withTrimmedTop (face.getHeight() * 0.55f), juce::Justification::centred, false);
+    }
     {
         juce::Graphics::ScopedSaveState state (g);
         g.reduceClipRegion (face.toNearestInt());
@@ -729,7 +757,7 @@ void GainReductionMeter::paint (juce::Graphics& g)
         const juce::Point<float> shadow (1.5f, 1.5f);
         g.setColour (juce::Colours::black.withAlpha (0.2f));
         g.drawLine (juce::Line<float> (onCircle (pivot, radius * 0.55f, a) + shadow, onCircle (pivot, radius * 0.97f, a) + shadow), 1.6f);
-        g.setColour (juce::Colour (0xff141414));
+        g.setColour (theme::imageSkin() ? juce::Colour (0xff141414) : theme::accent);
         g.drawLine (juce::Line<float> (onCircle (pivot, radius * 0.55f, a), onCircle (pivot, radius * 0.97f, a)), 1.4f);
     }
     g.setColour (juce::Colours::black.withAlpha (0.5f));

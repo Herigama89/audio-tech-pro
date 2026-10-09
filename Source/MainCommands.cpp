@@ -246,6 +246,7 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::newAlternative:         newAlternative(); break;
         case commands::eventList:              showEventList(); break;
         case commands::liveLoops:              showLiveLoops(); break;
+        case commands::themeSettings:          showThemeSettings(); break;
         case commands::openMixerWindow:        mixerWindow != nullptr ? dockMixer() : openMixerWindow(); break;
         case commands::openEditorWindow:       editorWindow != nullptr ? dockEditor() : openEditorWindow(); break;
         case commands::controllerAssignments:  showControllerAssignments(); break;
@@ -367,7 +368,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
 
         case 6:
             add ({ commands::toggleInspector, commands::showSmartControls, commands::showLibrary, commands::showLoopBrowser, commands::undoHistory, commands::eventList, commands::liveLoops });
-            add ({ commands::openMixerWindow, commands::openEditorWindow });
+            add ({ commands::openMixerWindow, commands::openEditorWindow, commands::themeSettings });
             add ({ commands::showPianoRoll, commands::zoomIn, commands::zoomOut, commands::zoomVerticalIn, commands::zoomVerticalOut });
             menu.addSeparator();
             add ({ commands::showAssistant, commands::recordScreen });

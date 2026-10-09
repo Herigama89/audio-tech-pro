@@ -107,7 +107,7 @@ PointerKnob::PointerKnob (juce::Colour pointerColour) : pointer (pointerColour)
 
 void PointerKnob::paint (juce::Graphics& g)
 {
-    if (skinBody.isValid())
+    if (skinBody.isValid() && theme::imageSkin())
     {
         const auto params = getRotaryParameters();
         const auto angle = params.startAngleRadians + (float) valueToProportionOfLength (getValue()) * (params.endAngleRadians - params.startAngleRadians);

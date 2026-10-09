@@ -221,6 +221,10 @@ void TrackHeader::followAutomation (double time)
 
 void TrackHeader::paint (juce::Graphics& g)
 {
+    // (follows the theme when it changes)
+    if (nameLabel.findColour (juce::Label::textColourId) != theme::stripInk)
+        nameLabel.setColour (juce::Label::textColourId, theme::stripInk);
+
     const bool selected = timeline.isTrackSelected (track[ids::id].toString());
     auto area = getLocalBounds();
 

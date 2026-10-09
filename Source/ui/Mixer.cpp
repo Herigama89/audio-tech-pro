@@ -872,14 +872,29 @@ juce::Rectangle<int> ChannelStrip::faderArea() const
 
 void ChannelStrip::paint (juce::Graphics& g)
 {
+    // Labels follow the theme when it changes
+    if (dbLabel.findColour (juce::Label::textColourId) != theme::lcdText)
+        dbLabel.setColour (juce::Label::textColourId, theme::lcdText);
+    if (dynLabel.findColour (juce::Label::textColourId) != theme::stripInk)
+        dynLabel.setColour (juce::Label::textColourId, theme::stripInk);
+
     const auto bounds = getLocalBounds();
     const auto w = (float) getWidth();
     const bool channel = ! isMaster() && ! isVca();
 
     // The strip, from the picture: its top (knob scales, keys, Dynamics), then its plain face below.
-    skin::tileDown (g, skin::stripFace(), bounds.toFloat());
+    if (theme::imageSkin())
+        skin::tileDown (g, skin::stripFace(), bounds.toFloat());
+    else
+    {
+        // The flat skin: a plain panel, lit a touch at the top, with a dark gap between strips
+        g.setGradientFill (juce::ColourGradient (theme::stripFace.brighter (0.06f), 0.0f, 0.0f, theme::stripFaceLow, 0.0f, (float) getHeight(), false));
+        g.fillRect (bounds);
+        g.setColour (theme::stripEdge);
+        g.fillRect (getWidth() - 1, 0, 1, getHeight());
+    }
     const bool console = showsConsole();
-    if (channel && console)
+    if (channel && console && theme::imageSkin())
         g.setOpacity (1.0f), g.drawImage (skin::stripTop(), juce::Rectangle<float> (0.0f, 0.0f, w, (float) topHeight + 1.0f));
 
     // Without the console section: the channel number, and the pan value beside its knob.
@@ -1005,8 +1020,16 @@ void ChannelStrip::paint (juce::Graphics& g)
     }
 
     // The level box, from the picture
-    g.setOpacity (1.0f);
-    g.drawImage (skin::dbBox(), dbLabel.getBounds().toFloat());
+    if (theme::imageSkin())
+    {
+        g.setOpacity (1.0f);
+        g.drawImage (skin::dbBox(), dbLabel.getBounds().toFloat());
+    }
+    else
+    {
+        g.setColour (theme::lcd);
+        g.fillRoundedRectangle (dbLabel.getBounds().toFloat(), 2.5f);
+    }
 
     // The name, printed at the foot of the strip (a thin line of the track's colour under it)
     const auto plate = bounds.toFloat().withTop ((float) (getHeight() - nameHeight)).reduced (3.0f, 1.0f);
@@ -1160,7 +1183,8 @@ void ChannelStrip::resized()
         for (auto* c : std::initializer_list<juce::Component*> { &hfKnob, &hmfKnob, &lmfKnob, &lfKnob, &dynKnob, &consoleInButton, &dynInButton, &stripInButton, &dynLabel })
             c->setVisible (console);
         consoleTag.setVisible (! console);
-        muteButton.onArt = soloButton.onArt = console;
+        muteButton.onArt = soloButton.onArt = console && theme::imageSkin();
+        stripInButton.onArt = consoleInButton.onArt = dynInButton.onArt = theme::imageSkin();
         panKnob.asKnob = ! console;
     }
 
@@ -1384,8 +1408,13 @@ void MasterBusCompressorPanel::paint (juce::Graphics& g)
     auto bounds = getLocalBounds();
 
     // The centre section: the picture's black panel.
-    g.setOpacity (1.0f);
-    g.drawImage (skin::panel(), bounds.toFloat());
+    if (theme::imageSkin())
+    {
+        g.setOpacity (1.0f);
+        g.drawImage (skin::panel(), bounds.toFloat());
+    }
+    else
+        g.fillAll (theme::consoleShade);
     g.setColour (theme::consoleDark);
     g.fillRect (0, 0, 1, getHeight());
     g.fillRect (getWidth() - 1, 0, 1, getHeight());
@@ -1760,6 +1789,18 @@ void MixerPanel::timerCallback()
         for (auto* s : extraStrips)
             s->syncFromPlugin();
     }
+}
+
+void MixerPanel::relayoutStrips()
+{
+    for (auto* s : strips)
+        s->resized(), s->repaint();
+    if (masterStrip != nullptr)
+        masterStrip->resized(), masterStrip->repaint();
+    for (auto* s : extraStrips)
+        s->resized(), s->repaint();
+    resized();
+    repaint();
 }
 
 void MixerPanel::setMasterLevels (float left, float right)

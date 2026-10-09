@@ -1,6 +1,7 @@
 // Undo History, Settings, templates, project alternatives, Autopunch and the Event List.
 #include "MainComponent.h"
 #include "ui/LiveLoopsGrid.h"
+#include "ui/ThemePanel.h"
 #include "model/Project.h"
 #include "ui/Theme.h"
 #include "ui/EventList.h"
@@ -358,6 +359,46 @@ void MainComponent::showEventList()
 }
 
 //==============================================================================
+void MainComponent::applyTheme (const theme::Settings& settings)
+{
+    theme::set (settings);
+    theme::apply (juce::LookAndFeel::getDefaultLookAndFeel());
+    appProperties.getUserSettings()->setValue ("theme", settings.toString());
+
+    // Everything repaints in the new colours (and the strips lay out for the skin).
+    mixer.relayoutStrips();
+    for (int i = 0; i < juce::TopLevelWindow::getNumTopLevelWindows(); ++i)
+        if (auto* w = juce::TopLevelWindow::getTopLevelWindow (i))
+        {
+            w->sendLookAndFeelChange();
+            if (auto* doc = dynamic_cast<juce::DocumentWindow*> (w))
+                doc->setBackgroundColour (theme::background);
+            w->repaint();
+        }
+    sendLookAndFeelChange();
+    repaint();
+}
+
+void MainComponent::showThemeSettings()
+{
+    const juce::String id ("theme");
+    if (auto it = editorWindows.find (id); it != editorWindows.end())
+    {
+        it->second->toFront (true);
+        return;
+    }
+    auto closer = [this, id]
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this), id]
+        {
+            if (safe != nullptr)
+                safe->editorWindows.erase (id);
+        });
+    };
+    editorWindows[id] = std::make_unique<EditorWindow> ("Theme", new ThemePanel (theme::current(), [this] (const theme::Settings& s) { applyTheme (s); }),
+                                                        false, closer);
+}
+
 void MainComponent::showLiveLoops()
 {
     const juce::String id ("liveloops");

@@ -45,7 +45,7 @@ namespace
             case commands::showAssistant: case commands::generateMidi: case commands::play: case commands::record:
             case commands::recordScreen: case commands::combineInterfaces:
             case commands::exportStems: case commands::importTracks: case commands::revertToBackup: case commands::consolidateProject:
-            case commands::undoHistory: case commands::preferences: case commands::saveAsTemplate: case commands::newAlternative: case commands::eventList: case commands::controllerAssignments: case commands::groupSettings: case commands::ioLabels: case commands::signalFlow: case commands::liveLoops: case commands::openMixerWindow: case commands::openEditorWindow:
+            case commands::undoHistory: case commands::preferences: case commands::saveAsTemplate: case commands::newAlternative: case commands::eventList: case commands::controllerAssignments: case commands::groupSettings: case commands::ioLabels: case commands::signalFlow: case commands::liveLoops: case commands::openMixerWindow: case commands::openEditorWindow: case commands::themeSettings:
                 return false;
             default:
                 return true;

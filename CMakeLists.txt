@@ -151,6 +151,7 @@ set(RIFF_UI_SOURCES
     Source/ui/EventList.cpp
     Source/ui/LiveLoopsGrid.cpp
     Source/ui/PluginPicker.cpp
+    Source/ui/ThemePanel.cpp
     Source/ui/SpectrumAnalyzer.cpp
     Source/ui/LibraryPanel.cpp
     Source/ui/AudioEditorPanel.cpp

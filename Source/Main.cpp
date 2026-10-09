@@ -2,6 +2,7 @@
 #include "MainComponent.h"
 #include "ui/ConsoleLook.h"
 #include "ui/Theme.h"
+#include "AppInfo.h"
 #include <BinaryData.h>
 
 class RiffApplication final : public juce::JUCEApplication
@@ -13,6 +14,16 @@ public:
 
     void initialise (const juce::String&) override
     {
+        // The skin and colours chosen in View > Theme, before anything is built in them.
+        {
+            juce::PropertiesFile::Options options;
+            options.applicationName = riff::app::name;
+            options.filenameSuffix = "settings";
+            options.osxLibrarySubFolder = "Application Support";
+            juce::PropertiesFile settings (options);
+            riff::theme::set (riff::theme::Settings::fromString (settings.getValue ("theme")));
+            riff::theme::apply (look);
+        }
         juce::LookAndFeel::setDefaultLookAndFeel (&look);
 
         // The logo while the app starts (click it to close it sooner).

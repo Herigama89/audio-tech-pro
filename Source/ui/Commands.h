@@ -37,7 +37,7 @@ namespace riff::commands
         controllerAssignments, showLibrary, showLoopBrowser, showSmartControls,
         splitByLocators = 0x2b01, cutSectionBetweenLocators, insertSilenceBetweenLocators, repeatSectionBetweenLocators, groupSettings, ioLabels, signalFlow,
         newDrummerTrack = 0x2c01, newBassPlayerTrack, newKeysPlayerTrack, liveLoops,
-        openMixerWindow = 0x2d01, openEditorWindow
+        openMixerWindow = 0x2d01, openEditorWindow, themeSettings
     };
 
     struct Info
