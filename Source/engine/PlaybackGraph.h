@@ -109,6 +109,8 @@ struct PlaybackGraph
         float volume = 1.0f;        // linear
         float pan = 0.0f;           // -1 .. +1
         bool audible = true;        // already accounts for mute and solo
+        float vcaGain = 1.0f;       // VCA and folder stack faders on top of the track's own
+        int outputBus = -1;         // plays into this bus instead of the main output (-1)
         std::vector<Region> regions;
 
         bool isInstrument = false;

@@ -294,8 +294,9 @@ juce::String AudioEngine::renderOffline (const juce::File& file, double startSec
 }
 
 juce::String AudioEngine::renderStems (const std::vector<StemTarget>& targets, double startSeconds, double endSeconds,
-                                      int bitDepth, std::function<bool (double)> progress)
+                                      int bitDepth, std::function<bool (double)> progress, bool beforeFader)
 {
+    stemBeforeFader = beforeFader;
     if (endSeconds <= startSeconds || targets.empty())
         return "There's nothing to export yet.";
 
@@ -1045,14 +1046,15 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
                       : (playingNow && ! track.volumeAutomation.empty()) ? track.volumeAutomation.valueAt (blockStart) : track.volume;
     const auto pan = ! std::isnan (panLive) ? panLive
                    : (playingNow && ! track.panAutomation.empty()) ? track.panAutomation.valueAt (blockStart) : track.pan;
+    const auto gain = volume * track.vcaGain;
 
     if (playingNow)
         for (const auto& automation : track.paramAutomation)
             automation.effect->setAutomatedParameter (automation.paramIndex, automation.curve.valueAt (blockStart));
 
     // Balance-style pan: unity at centre, the far side fades out.
-    const auto targetL = track.audible ? volume * (pan <= 0.0f ? 1.0f : 1.0f - pan) : 0.0f;
-    const auto targetR = track.audible ? volume * (pan >= 0.0f ? 1.0f : 1.0f + pan) : 0.0f;
+    const auto targetL = track.audible ? gain * (pan <= 0.0f ? 1.0f : 1.0f - pan) : 0.0f;
+    const auto targetR = track.audible ? gain * (pan >= 0.0f ? 1.0f : 1.0f + pan) : 0.0f;
 
     if (! state.initialised)
     {
@@ -1226,6 +1228,13 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         return;
     }
 
+    if (stemCapture != nullptr && stemBeforeFader && track.slot * 2 + 1 < stemCapture->getNumChannels()
+        && inputOffset + n <= stemCapture->getNumSamples())
+    {
+        juce::FloatVectorOperations::add (stemCapture->getWritePointer (track.slot * 2) + inputOffset, tL, n);
+        juce::FloatVectorOperations::add (stemCapture->getWritePointer (track.slot * 2 + 1) + inputOffset, tR, n);
+    }
+
     // Pre-fader sends (silenced with the track when it's muted).
     for (const auto& send : track.sends)
     {
@@ -1257,13 +1266,22 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         juce::FloatVectorOperations::addWithMultiply (busBuffer.getWritePointer (send.busIndex * 2 + 1), tR, send.level, n);
     }
 
-    juce::FloatVectorOperations::add (outL, tL, n);
-    juce::FloatVectorOperations::add (outR, tR, n);
+    // Into a bus (a summing stack, or an output chosen on the strip), or the main output.
+    if (juce::isPositiveAndBelow (track.outputBus, PlaybackGraph::maxBuses) && ! track.isBus)
+    {
+        juce::FloatVectorOperations::add (busBuffer.getWritePointer (track.outputBus * 2), tL, n);
+        juce::FloatVectorOperations::add (busBuffer.getWritePointer (track.outputBus * 2 + 1), tR, n);
+    }
+    else
+    {
+        juce::FloatVectorOperations::add (outL, tL, n);
+        juce::FloatVectorOperations::add (outR, tR, n);
+    }
 
     if (measuring && juce::isPositiveAndBelow (track.slot, (int) measuredTracks.size()))
         measuredTracks[(size_t) track.slot].add (tL, tR, n);
 
-    if (stemCapture != nullptr && track.slot * 2 + 1 < stemCapture->getNumChannels()
+    if (stemCapture != nullptr && ! stemBeforeFader && track.slot * 2 + 1 < stemCapture->getNumChannels()
         && inputOffset + n <= stemCapture->getNumSamples())
     {
         juce::FloatVectorOperations::add (stemCapture->getWritePointer (track.slot * 2) + inputOffset, tL, n);

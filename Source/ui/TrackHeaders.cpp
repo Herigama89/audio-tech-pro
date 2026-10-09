@@ -5,6 +5,7 @@
 #include "../engine/BuiltInEffects.h"
 #include "../AppInfo.h"
 #include "../engine/AutomationWriter.h"
+#include "RoutingMenu.h"
 
 namespace riff
 {
@@ -23,7 +24,7 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
     : track (t), undoManager (um), timeline (tl), inputNames (std::move (names)), instrumentMenu (std::move (menuFn))
 {
     isInstrument = model::isInstrumentTrack (track);
-    isBus = model::isBusTrack (track);
+    isBus = model::isBusTrack (track) || model::isVcaTrack (track);   // (nothing to record on either)
 
     instrumentButton.setWantsKeyboardFocus (false);
     instrumentButton.setTooltip ("Choose the instrument, or open its window");
@@ -86,11 +87,10 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
     {
         undoManager.beginNewTransaction (undoName);
         const auto value = ! (bool) track[flag];
-        track.setProperty (flag, value, &undoManager);
-        if (timeline.isTrackSelected (track[ids::id].toString()))
-            for (const auto& id : timeline.selectedTrackIds())
-                if (auto other = model::findById (track.getParent(), id); other.isValid())
-                    other.setProperty (flag, value, &undoManager);
+        // The selection (if this track is in it) and their groups follow.
+        const auto selected = timeline.isTrackSelected (track[ids::id].toString()) ? timeline.selectedTrackIds() : juce::StringArray();
+        for (auto other : routing::linkedTracks (track.getParent(), track, selected))
+            other.setProperty (flag, value, &undoManager);
     };
     muteButton.onClick = [toggle] { toggle (ids::mute, "Mute"); };
     soloButton.onClick = [toggle] { toggle (ids::solo, "Solo"); };
@@ -231,8 +231,33 @@ void TrackHeader::paint (juce::Graphics& g)
     // Kind, under the name
     g.setColour (theme::inkDim);
     g.setFont (juce::FontOptions (10.5f));
-    const auto kind = isBus ? "Aux bus" : (isInstrument ? "" : "Audio");
+    const auto stack = track[ids::stack].toString();
+    juce::String kind = stack == "folder" ? "Folder stack" : stack == "summing" ? "Summing stack"
+                      : model::isVcaTrack (track) ? "VCA" : model::isBusTrack (track) ? "Aux bus" : (isInstrument ? "" : "Audio");
+    if ((bool) track[ids::frozen])
+        kind = "Frozen";
+    if (const int group = track.getProperty (ids::group, 0); group > 0)
+        kind << (kind.isEmpty() ? "" : "  ") << "G" << group;
+    g.setColour ((bool) track[ids::frozen] ? theme::accent : theme::inkDim);
     g.drawText (kind, nameLabel.getBounds().translated (3, 18).withHeight (12), juce::Justification::centredLeft, false);
+
+    // A stack's main track: a disclosure triangle to fold its tracks away. Its tracks: a line in the number column.
+    if (stack.isNotEmpty())
+    {
+        const auto r = juce::Rectangle<float> (8.0f, (float) getHeight() - 20.0f, 14.0f, 12.0f);
+        juce::Path tri;
+        if ((bool) track[ids::collapsed])
+            tri.addTriangle (r.getX() + 3.0f, r.getY(), r.getX() + 3.0f, r.getBottom(), r.getRight() - 1.0f, r.getCentreY());
+        else
+            tri.addTriangle (r.getX(), r.getY() + 2.0f, r.getRight(), r.getY() + 2.0f, r.getCentreX(), r.getBottom());
+        g.setColour (theme::ink);
+        g.fillPath (tri);
+    }
+    else if (track[ids::stackParent].toString().isNotEmpty())
+    {
+        g.setColour (theme::ink.withAlpha (0.5f));
+        g.fillRect (numberWidth - 6, 0, 2, getHeight());
+    }
 
     // A hidden track, shown because Show Hidden Tracks is on: dimmed, with an H.
     if ((bool) track[ids::hidden])
@@ -362,6 +387,15 @@ void TrackHeader::mouseDown (const juce::MouseEvent& e)
     }
 
     lastClickWasPopup = e.mods.isPopupMenu();
+
+    // A stack's disclosure triangle.
+    if (! e.mods.isPopupMenu() && track[ids::stack].toString().isNotEmpty() && e.eventComponent == this
+        && e.x < numberWidth && e.y > getHeight() - 24)
+    {
+        track.setProperty (ids::collapsed, ! (bool) track[ids::collapsed], nullptr);
+        timeline.changed();
+        return;
+    }
 
     // Selecting: Cmd-click adds or removes, Shift-click selects a range, a plain click selects
     // just this one (unless it's part of the selection, so all of it can be dragged).
@@ -542,6 +576,9 @@ void TrackHeader::showMenu()
         menu.addItem ("Choose input...", [this] { showInputMenu(); });
     menu.addItem ("Rename", [this] { nameLabel.showEditor(); });
     menu.addItem ("Colour...", [this] { showColours(); });
+    menu.addSeparator();
+    routing::addRoutingItems (menu, track.getParent(), track, undoManager);
+    menu.addSeparator();
 
     const auto selection = timeline.selectedTrackIds();
     const auto plural = selection.size() > 1 ? juce::String (" ") + juce::String (selection.size()) + " tracks" : juce::String (" track");

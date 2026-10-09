@@ -52,7 +52,7 @@ public:
 private:
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier& p) override
     {
-        if (p != ids::height && p != ids::hidden && p != ids::showAutomation && p != ids::automationParam)   // view settings: nothing to hear
+        if (p != ids::height && p != ids::hidden && p != ids::showAutomation && p != ids::automationParam && p != ids::collapsed)   // view settings: nothing to hear
             triggerAsyncUpdate();
     }
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override             { triggerAsyncUpdate(); }

@@ -157,7 +157,22 @@ struct TimelineState : public juce::ChangeBroadcaster
 
     bool isHidden (int index) const
     {
-        return ! showHiddenTracks && (bool) project.getChild (index).getProperty (ids::hidden, false);
+        const auto track = project.getChild (index);
+        if (! showHiddenTracks && (bool) track.getProperty (ids::hidden, false))
+            return true;
+
+        // Folded away in a collapsed track stack.
+        auto parentId = track[ids::stackParent].toString();
+        for (int depth = 0; depth < 8 && parentId.isNotEmpty(); ++depth)
+        {
+            const auto parent = project.getChildWithProperty (ids::id, parentId);
+            if (! parent.isValid() || parent == track)
+                break;
+            if ((bool) parent[ids::collapsed])
+                return true;
+            parentId = parent[ids::stackParent].toString();
+        }
+        return false;
     }
 
     /** The project, for each track's own height (its "height" property, set by dragging its lower edge). */

@@ -276,7 +276,8 @@ Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderC
 - [ ] Built-in instruments (drum kit, sampler), at the end
 - [x] Console mode for the master: your UA SSL G Bus Compressor plugin, with a hardware-style face
 - [x] Console mode for the strips: your UA SSL 4000 E channel strip plugin driven from each strip's console section
-- [ ] Console strips, part 2: an IN key on every strip (bypasses the whole channel strip plugin, keeps it loaded), and every 4000 E control in a separate strip window that opens from the strip (as in LUNA): filters, EQ frequencies, Q and bell switches, compressor, gate/expander, input and output
+- [x] Console strips, part 2a: an IN key on every strip (bypasses the whole channel strip, a plugin stays loaded)
+- [ ] Console strips, part 2b: every 4000 E control in a separate strip window that opens from the strip (as in LUNA): filters, EQ frequencies, Q and bell switches, compressor, gate/expander, input and output
 - [x] Claude AI assistant (with your own API key): controls the DAW, writes MIDI, measures and advises on the mix, answers questions
 - [x] Screen recording of the app (or the whole screen) with the mix's sound and an optional mic, up to 4K (Mac)
 - [x] Several audio interfaces at once: Combine Audio Interfaces makes one device from them, with a clock and drift correction (Mac)
@@ -295,7 +296,7 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [x] Hide tracks (Ctrl+H hides and selects the next; H shows or leaves out hidden tracks)
 - [x] Inspector (I): the selected track's channel strip and the Stereo Out on the left
 - [ ] Inspector: region and track parameter boxes above the strips; track icons
-- [ ] Track stacks (folder and summing stacks), track freeze
+- [x] Track stacks (folder: one fader, mute, solo; summing: an aux bus; fold them away with the triangle), track freeze
 - [x] Marker track: double-click to add or rename, drag to move, click to go there, right-click to set the cycle or delete; Create Marker (Option+'), next/previous marker (Option+. / Option+,)
 - [x] Time signature and key in the display (click to change); the MIDI generator starts in the song's key
 - [ ] Tempo track with tempo changes, time signature and key changes along the song, arrangement markers
@@ -320,8 +321,10 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [x] Editors open below the tracks with a resizable divider (double-click it for the default); the editor follows the selected track and region
 
 **Mixer**
-- [ ] Resizable mixer, narrow/wide strips, filters (audio, instrument, aux, bus, input, output, master/VCA)
-- [ ] Groups (linked volume, mute, solo, selection), VCA faders, I/O labels, stereo panner modes
+- [x] Resizable mixer (drag the bar above it), filters (all, audio, instrument, aux, VCA)
+- [ ] Narrow/wide strips
+- [x] Groups 1-8 (linked volume, mute, solo), VCA faders, track outputs into buses (right-click a strip's fader or a track header)
+- [ ] Group settings window, I/O labels, stereo panner modes
 - [x] Track automation modes (Off, Read, Touch, Latch, Write) on every strip and in the A menu; fader and pan moves are written while playing
 - [ ] Channel EQ display on the strip, signal flow view; writing plugin knob moves as automation
 - [x] Inserts, sends (pre/post), aux buses, master bus compressor, console channel strips

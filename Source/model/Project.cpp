@@ -170,7 +170,7 @@ juce::ValueTree addTrack (juce::ValueTree project, const juce::String& name, juc
     project.addChild (track, (index < 0 || index > count) ? count : index, um);
 
     // With a console plugin chosen for the mixer, new tracks get it too.
-    if (const auto console = consolePlugin (project); console.isNotEmpty())
+    if (const auto console = consolePlugin (project); console.isNotEmpty() && kind != vcaKind)
         setStripPlugin (project, track[ids::id].toString(), console, um);
 
     return track;
@@ -1098,6 +1098,132 @@ void removeInsert (juce::ValueTree insert, juce::UndoManager* um)
 bool isBusTrack (const juce::ValueTree& track)
 {
     return track[ids::kind].toString() == busKind;
+}
+
+juce::Array<juce::ValueTree> groupMembers (const juce::ValueTree& project, const juce::ValueTree& track)
+{
+    const int group = track.getProperty (ids::group, 0);
+    if (group <= 0)
+        return { track };
+
+    juce::Array<juce::ValueTree> members;
+    for (const auto& t : project)
+        if (t.hasType (ids::TRACK) && (int) t.getProperty (ids::group, 0) == group)
+            members.add (t);
+    return members;
+}
+
+juce::Array<juce::ValueTree> vcaMembers (const juce::ValueTree& project, const juce::ValueTree& vcaTrack)
+{
+    juce::Array<juce::ValueTree> members;
+    const auto id = vcaTrack[ids::id].toString();
+    for (const auto& t : project)
+        if (t.hasType (ids::TRACK) && t[ids::vca].toString() == id && id.isNotEmpty())
+            members.add (t);
+    return members;
+}
+
+namespace
+{
+    /** The VCAs above a track, nearest first (a VCA can itself be on a VCA; loops are cut). */
+    juce::Array<juce::ValueTree> vcaChain (const juce::ValueTree& project, const juce::ValueTree& track)
+    {
+        juce::Array<juce::ValueTree> chain;
+        auto current = track;
+        for (int depth = 0; depth < 8; ++depth)
+        {
+            const auto vcaId = current[ids::vca].toString();
+            if (vcaId.isEmpty())
+                break;
+            const auto vca = findById (project, vcaId);
+            if (! vca.isValid() || chain.contains (vca) || vca == track)
+                break;
+            chain.add (vca);
+            current = vca;
+        }
+        return chain;
+    }
+}
+
+double vcaGainOf (const juce::ValueTree& project, const juce::ValueTree& track)
+{
+    double gain = 1.0;
+    for (const auto& vca : vcaChain (project, track))
+        gain *= (double) vca.getProperty (ids::volume, 1.0);
+    return gain;
+}
+
+bool vcaMutes (const juce::ValueTree& project, const juce::ValueTree& track)
+{
+    for (const auto& vca : vcaChain (project, track))
+        if ((bool) vca[ids::mute])
+            return true;
+    return false;
+}
+
+bool vcaSolos (const juce::ValueTree& project, const juce::ValueTree& track)
+{
+    for (const auto& vca : vcaChain (project, track))
+        if ((bool) vca[ids::solo])
+            return true;
+    return false;
+}
+
+juce::ValueTree createTrackStack (juce::ValueTree project, const juce::Array<juce::ValueTree>& tracks, bool summing, juce::UndoManager* um)
+{
+    if (tracks.isEmpty())
+        return {};
+
+    auto ordered = tracks;
+    std::sort (ordered.begin(), ordered.end(), [&project] (const juce::ValueTree& a, const juce::ValueTree& b)
+               { return project.indexOf (a) < project.indexOf (b); });
+
+    const auto index = project.indexOf (ordered.getFirst());
+    auto main = addTrack (project, summing ? "Summing Stack" : "Folder Stack", um, index, summing ? busKind : vcaKind);
+    main.setProperty (ids::stack, summing ? "summing" : "folder", um);
+    main.setProperty (ids::colour, ordered.getFirst()[ids::colour], um);
+    const auto mainId = main[ids::id].toString();
+
+    for (auto t : ordered)
+    {
+        t.setProperty (ids::stackParent, mainId, um);
+        t.setProperty (summing ? ids::output : ids::vca, mainId, um);
+    }
+
+    moveTracks (project, ordered, project.indexOf (main) + 1, um);
+    return main;
+}
+
+void flattenStack (juce::ValueTree project, juce::ValueTree mainTrack, juce::UndoManager* um)
+{
+    const auto mainId = mainTrack[ids::id].toString();
+    for (auto t : project)
+    {
+        if (! t.hasType (ids::TRACK) || t[ids::stackParent].toString() != mainId)
+            continue;
+        t.removeProperty (ids::stackParent, um);
+        if (t[ids::output].toString() == mainId) t.removeProperty (ids::output, um);
+        if (t[ids::vca].toString() == mainId)    t.removeProperty (ids::vca, um);
+    }
+    deleteTrack (mainTrack, um);
+}
+
+bool isInCollapsedStack (const juce::ValueTree& project, const juce::ValueTree& track)
+{
+    auto current = track;
+    for (int depth = 0; depth < 8; ++depth)
+    {
+        const auto parentId = current[ids::stackParent].toString();
+        if (parentId.isEmpty())
+            return false;
+        const auto parent = findById (project, parentId);
+        if (! parent.isValid() || parent == track)
+            return false;
+        if ((bool) parent[ids::collapsed])
+            return true;
+        current = parent;
+    }
+    return false;
 }
 
 juce::ValueTree addSend (juce::ValueTree chain, const juce::String& busId, double level, juce::UndoManager* um)

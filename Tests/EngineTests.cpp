@@ -1710,3 +1710,83 @@ TEST_CASE ("Controller events reach the instrument at their time", "[engine][mid
     CHECK (events[0].data1 == 1);
     CHECK (events[0].data2 == 127);
 }
+
+TEST_CASE ("VCAs, outputs into a bus, stacks and freezing", "[engine][mixer]")
+{
+    Fixture f;
+    const auto wav = writeConstantWav (f.temp.dir.getChildFile ("a.wav"), 48000.0, 48000, 0.5f);
+    auto a = model::addTrack (f.project, "A", nullptr);
+    model::addRegion (a, wav, 0.0, 1.0, nullptr);
+    f.project.setProperty (ids::masterGain, 1.0, nullptr);
+
+    // A VCA at -6 dB turns A down; muting it mutes A.
+    auto vca = model::addTrack (f.project, "VCA", nullptr, -1, model::vcaKind);
+    vca.setProperty (ids::volume, 0.5, nullptr);
+    a.setProperty (ids::vca, vca[ids::id].toString(), nullptr);
+    f.player.setProject (f.project);
+    f.engine.setPlayheadSeconds (0.0);
+    f.engine.play();
+    auto out = renderLeft (f.engine, 4800);
+    CHECK_THAT (out[4000], WithinAbs (0.25f, 1e-3));
+
+    vca.setProperty (ids::mute, true, nullptr);
+    f.player.rebuildNow();
+    out = renderLeft (f.engine, 9600);
+    CHECK (std::abs (out[9000]) < 1e-4f);
+    vca.setProperty (ids::mute, false, nullptr);
+    a.removeProperty (ids::vca, nullptr);
+
+    // Output into a bus: the bus's fader applies.
+    auto bus = model::addTrack (f.project, "Bus", nullptr, -1, model::busKind);
+    bus.setProperty (ids::volume, 0.5, nullptr);
+    a.setProperty (ids::output, bus[ids::id].toString(), nullptr);
+    f.player.rebuildNow();
+    out = renderLeft (f.engine, 9600);
+    CHECK_THAT (out[9000], WithinAbs (0.25f, 1e-3));
+    a.removeProperty (ids::output, nullptr);
+
+    // A summing stack is a bus the tracks play into, with them under it.
+    auto stack = model::createTrackStack (f.project, { a }, true, nullptr);
+    CHECK (model::isBusTrack (stack));
+    CHECK (a[ids::output].toString() == stack[ids::id].toString());
+    CHECK (f.project.indexOf (a) == f.project.indexOf (stack) + 1);
+    stack.setProperty (ids::collapsed, true, nullptr);
+    CHECK (model::isInCollapsedStack (f.project, a));
+    model::flattenStack (f.project, stack, nullptr);
+    CHECK (a[ids::output].toString().isEmpty());
+
+    // Freezing renders what comes out of the plugins, before the fader.
+    a.setProperty (ids::volume, 0.5, nullptr);
+    f.player.rebuildNow();
+    const auto frozen = f.temp.dir.getChildFile ("Freeze.wav");
+    f.engine.beginOfflineRender();
+    REQUIRE (f.engine.renderStems ({ { f.player.slotOf (a[ids::id]), frozen } }, 0.0, 1.0, 24, nullptr, true).isEmpty());
+    f.engine.endOfflineRender();
+    auto reader = std::unique_ptr<juce::AudioFormatReader> (f.engine.getFormatManager().createReaderFor (frozen));
+    REQUIRE (reader != nullptr);
+    juce::AudioBuffer<float> data (2, 48000);
+    reader->read (&data, 0, 48000, 0, true, true);
+    CHECK_THAT (data.getSample (0, 24000), WithinAbs (0.5f, 1e-4));   // the fader isn't in it
+
+    a.setProperty (ids::frozenFile, frozen.getFullPathName(), nullptr);
+    a.setProperty (ids::frozen, true, nullptr);
+    f.player.rebuildNow();
+    f.engine.setPlayheadSeconds (0.0);
+    out = renderLeft (f.engine, 4800);
+    CHECK_THAT (out[4000], WithinAbs (0.25f, 1e-3));   // the frozen file, through the fader
+}
+
+TEST_CASE ("Groups link tracks", "[model][mixer]")
+{
+    auto project = model::createProject();
+    auto a = model::addTrack (project, "A", nullptr);
+    auto b = model::addTrack (project, "B", nullptr);
+    auto c = model::addTrack (project, "C", nullptr);
+    CHECK (model::groupMembers (project, a).size() == 1);
+    a.setProperty (ids::group, 2, nullptr);
+    c.setProperty (ids::group, 2, nullptr);
+    const auto members = model::groupMembers (project, a);
+    CHECK (members.size() == 2);
+    CHECK (members.contains (c));
+    CHECK_FALSE (members.contains (b));
+}

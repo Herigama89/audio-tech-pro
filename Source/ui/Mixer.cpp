@@ -1,4 +1,5 @@
 #include "Mixer.h"
+#include "RoutingMenu.h"
 #include "Theme.h"
 #include "../model/Project.h"
 #include "../engine/BuiltInEffects.h"
@@ -59,6 +60,21 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         addAndMakeVisible (consoleInButton);
         addAndMakeVisible (dynInButton);
 
+        // The strip's IN key: the whole channel strip (built-in or plugin) in or out; a plugin stays loaded.
+        stripInButton.setTooltip ("Channel strip IN: switch the whole strip (EQ, dynamics, or your strip plugin) in or out");
+        stripInButton.onClick = [this]
+        {
+            auto& um = owner.getUndoManager();
+            um.beginNewTransaction ("Channel strip in");
+            track.setProperty (ids::stripIn, ! (bool) track.getProperty (ids::stripIn, true), &um);
+        };
+        addAndMakeVisible (stripInButton);
+
+        // A VCA (or folder stack) strip is just a fader with mute and solo.
+        if (isVca())
+            for (auto* c : std::initializer_list<juce::Component*> { &hfKnob, &hmfKnob, &lmfKnob, &lfKnob, &dynKnob, &consoleInButton, &dynInButton, &stripInButton })
+                c->setVisible (false);
+
         muteButton.setTooltip ("Mute");
         soloButton.setTooltip ("Solo");
         // Mute and solo act on every selected track when this one is among them (as in Logic).
@@ -67,11 +83,8 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
             auto& um = owner.getUndoManager();
             um.beginNewTransaction (undoName);
             const auto value = ! (bool) track[flag];
-            track.setProperty (flag, value, &um);
-            if (selected)
-                for (const auto& id : owner.getSelectedTrackIds())
-                    if (auto other = model::findById (project, id); other.isValid())
-                        other.setProperty (flag, value, &um);
+            for (auto other : routing::linkedTracks (project, track, selected ? owner.getSelectedTrackIds() : juce::StringArray()))
+                other.setProperty (flag, value, &um);
         };
         muteButton.onClick = [toggle] { toggle (ids::mute, "Mute"); };
         soloButton.onClick = [toggle] { toggle (ids::solo, "Solo"); };
@@ -83,6 +96,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         dynLabel.setColour (juce::Label::textColourId, juce::Colour (0xffe9e6dc));
         dynLabel.setInterceptsMouseClicks (false, false);
         addAndMakeVisible (dynLabel);
+        dynLabel.setVisible (! isVca());
 
         panKnob.setRange (-1.0, 1.0, 0.01);
         panKnob.textFromValueFunction = [] (double value)
@@ -110,6 +124,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
             track.setProperty (ids::pan, panKnob.getValue(), &owner.getUndoManager());
         };
         addAndMakeVisible (panKnob);
+        panKnob.setVisible (! isVca());
     }
 
     for (int i = 0; i < numSlots; ++i)
@@ -120,6 +135,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         b->setTooltip ("Click to add an effect, or open this one. Right-click for bypass and remove.");
         b->addMouseListener (this, false);
         addAndMakeVisible (b);
+        b->setVisible (! isVca());
     }
 
     for (int i = 0; i < numSends; ++i)
@@ -159,14 +175,13 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     {
         owner.getUndoManager().beginNewTransaction (isMaster() ? "Master volume" : "Volume");
 
-        // With several tracks selected, the other selected faders follow this one (as in Logic).
+        // The other selected faders, and the ones in this track's group, follow this one (as in Logic).
         groupStart.clear();
         dragStartDb = fader.getValue();
-        if (! isMaster() && selected)
-            for (const auto& id : owner.getSelectedTrackIds())
-                if (id != track[ids::id].toString())
-                    if (const auto other = model::findById (project, id); other.isValid())
-                        groupStart[id] = gainToDb ((double) other.getProperty (ids::volume, 1.0));
+        if (! isMaster())
+            for (const auto& other : routing::linkedTracks (project, track, selected ? owner.getSelectedTrackIds() : juce::StringArray()))
+                if (other != track)
+                    groupStart[other[ids::id].toString()] = gainToDb ((double) other.getProperty (ids::volume, 1.0));
 
         if (auto* w = AutomationWriter::current(); w != nullptr && ! isMaster())
             w->begin (track[ids::id].toString(), model::volumeParam, dbToGain (fader.getValue()));
@@ -204,7 +219,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     addAndMakeVisible (fader);
     addAndMakeVisible (meter);
 
-    if (! isMaster())
+    if (! isMaster() && ! isVca())
     {
         look::key (automationButton, look::Key::slot);
         automationButton.setWantsKeyboardFocus (false);
@@ -517,7 +532,19 @@ void ChannelStrip::mouseDown (const juce::MouseEvent& e)
     const auto inConsole = e.eventComponent == this ? e.y < topHeight
                                                     : e.eventComponent->getY() < topHeight && e.eventComponent->getParentComponent() == this;
     if (inConsole)
+    {
         showConsoleMenu();
+        return;
+    }
+
+    // Below it (the fader, the name): output, group, VCA, stacks and freeze.
+    if (e.eventComponent == this || e.eventComponent == &fader || e.eventComponent == &meter)
+    {
+        juce::PopupMenu menu;
+        menu.addSectionHeader (track[ids::name].toString());
+        routing::addRoutingItems (menu, project, track, owner.getUndoManager());
+        menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+    }
 }
 
 juce::Rectangle<int> ChannelStrip::fromArt (float x, float y, float w, float h) const
@@ -532,7 +559,7 @@ juce::String ChannelStrip::getOwnerId() const
 
 bool ChannelStrip::hasSends() const
 {
-    return ! isMaster() && ! model::isBusTrack (track);
+    return ! isMaster() && ! model::isBusTrack (track) && ! isVca();
 }
 
 juce::ValueTree ChannelStrip::insertAt (int slot) const
@@ -655,6 +682,7 @@ void ChannelStrip::refresh()
     {
         panKnob.setValue (track.getProperty (ids::pan, 0.0), juce::dontSendNotification);
         muteButton.setToggleState ((bool) track[ids::mute], juce::dontSendNotification);
+        stripInButton.setToggleState ((bool) track.getProperty (ids::stripIn, true), juce::dontSendNotification);
         soloButton.setToggleState ((bool) track[ids::solo], juce::dontSendNotification);
     }
 
@@ -770,14 +798,21 @@ void ChannelStrip::paint (juce::Graphics& g)
         juce::Graphics::ScopedSaveState state (g);
         g.addTransform (juce::AffineTransform::scale (artScale));
 
-        if (isMaster())
+        if (isMaster() || isVca())
         {
+            const bool folder = isVca() && track[ids::stack].toString() == "folder";
             g.setColour (text);
             g.setFont (juce::FontOptions (40.0f, juce::Font::bold));
-            g.drawText ("MAIN", juce::Rectangle<float> (0.0f, 90.0f, strip::artWidth, 50.0f), juce::Justification::centred, false);
+            g.drawText (isMaster() ? "MAIN" : folder ? "STACK" : "VCA", juce::Rectangle<float> (0.0f, 90.0f, strip::artWidth, 50.0f), juce::Justification::centred, false);
             g.setColour (dim);
             g.setFont (juce::FontOptions (28.0f));
-            g.drawText ("Stereo Out", juce::Rectangle<float> (0.0f, 140.0f, strip::artWidth, 40.0f), juce::Justification::centred, false);
+            juce::String sub = "Stereo Out";
+            if (isVca())
+            {
+                const auto n = model::vcaMembers (project, track).size();
+                sub = juce::String (n) + (n == 1 ? " track" : " tracks");
+            }
+            g.drawText (sub, juce::Rectangle<float> (0.0f, 140.0f, strip::artWidth, 40.0f), juce::Justification::centred, false);
         }
         else
         {
@@ -799,8 +834,8 @@ void ChannelStrip::paint (juce::Graphics& g)
             // Console mode: which strip this is
             g.setColour (pluginMode ? theme::neon : dim);
             g.setFont (juce::FontOptions (19.0f, juce::Font::bold));
-            g.drawText (pluginMode ? (stripInstance() != nullptr ? "UAD" : "UAD...") : juce::String ("EQ"),
-                        juce::Rectangle<float> (16.0f, 30.0f, 110.0f, 40.0f), juce::Justification::centredLeft, false);
+            g.drawText (pluginMode ? (stripInstance() != nullptr ? "PLUG" : "...") : juce::String ("EQ"),
+                        juce::Rectangle<float> (64.0f, 30.0f, 76.0f, 40.0f), juce::Justification::centredRight, false);
             g.setColour (dim);
             g.drawText ("DYN", juce::Rectangle<float> (90.0f, 440.0f, 50.0f, 34.0f), juce::Justification::centredRight, false);
 
@@ -887,6 +922,7 @@ void ChannelStrip::resized()
         knobAt (dynKnob, 98.0f, 762.0f, 43.0f);
 
         consoleInButton.setBounds (fromArt (145.0f, 33.0f, 34.0f, 34.0f));
+        stripInButton.setBounds (fromArt (14.0f, 31.0f, 52.0f, 38.0f));
         dynInButton.setBounds (fromArt (145.0f, 440.0f, 34.0f, 34.0f));
         muteButton.setBounds (fromArt (32.0f, 610.0f, 61.0f, 40.0f));
         soloButton.setBounds (fromArt (101.0f, 610.0f, 60.0f, 40.0f));
@@ -1178,6 +1214,13 @@ MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p,
     };
     addChildComponent (consoleBox);
 
+    filterBox.addItemList ({ "All", "Audio", "Instrument", "Aux", "VCA" }, 1);
+    filterBox.setSelectedId (1, juce::dontSendNotification);
+    filterBox.setTooltip ("Show every strip, or only one kind (as Logic's mixer filters)");
+    filterBox.setWantsKeyboardFocus (false);
+    filterBox.onChange = [this] { rebuild(); };
+    addAndMakeVisible (filterBox);
+
     title.setText ("Mixer", juce::dontSendNotification);
     title.setFont (juce::FontOptions (13.0f, juce::Font::bold));
     title.setColour (juce::Label::textColourId, theme::text);
@@ -1310,8 +1353,21 @@ void MixerPanel::rebuild()
 {
     strips.clear();
 
+    const auto filter = filterBox.getSelectedId();
+    const auto shows = [filter] (const juce::ValueTree& track)
+    {
+        switch (filter)
+        {
+            case 2: return track[ids::kind].toString() == model::audioKind || track[ids::kind].toString().isEmpty();
+            case 3: return model::isInstrumentTrack (track);
+            case 4: return model::isBusTrack (track);
+            case 5: return model::isVcaTrack (track);
+            default: return true;
+        }
+    };
+
     for (const auto& track : project)
-        if (track.hasType (ids::TRACK))
+        if (track.hasType (ids::TRACK) && shows (track))
         {
             auto* strip = strips.add (new ChannelStrip (*this, project, track));
             strip->setSelected (track[ids::id].toString() == selectedTrackId || selectedTrackIds.contains (track[ids::id].toString()));
@@ -1410,7 +1466,8 @@ void MixerPanel::resized()
     header.removeFromRight (16);
     consoleBox.setBounds (header.removeFromRight (240));
     consoleCaption.setBounds (header.removeFromRight (60));
-    title.setBounds (header);
+    title.setBounds (header.removeFromLeft (60));
+    filterBox.setBounds (header.removeFromLeft (110));
 
     // Everything scrolls up and down together if the pane is shorter than a strip.
     outer.setBounds (area);

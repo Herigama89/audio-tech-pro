@@ -31,7 +31,8 @@ namespace riff::commands
         nudgeLeft, nudgeRight, toolMenu,
         createMarker = 0x2601, nextMarker, previousMarker, deleteMarker,
         consolidateProject = 0x2701, revertToBackup, recoverAutosave, exportStems, bounceInPlace, importTracks,
-        trimStartToPlayhead = 0x2801, trimEndToPlayhead, loopRegions, regionGain, removeFades
+        trimStartToPlayhead = 0x2801, trimEndToPlayhead, loopRegions, regionGain, removeFades,
+        createFolderStack = 0x2901, createSummingStack, freezeTracks, newVca
     };
 
     struct Info

@@ -55,6 +55,10 @@ const std::vector<Info>& all()
         { showHiddenTracks,       "Show Hidden Tracks",         "Track",     "Show or leave out the tracks you hid" },
         { duplicateTrack,         "New Track With Duplicate Settings", "Track", "A new track like the selected one (instrument, fader, console, inserts, sends), without its regions" },
         { trackColours,           "Track Colours...",           "Track",     "Choose a colour for the selected tracks" },
+        { createFolderStack,      "Create Folder Stack",        "Track",     "Put the selected tracks in a folder stack: one fader, mute and solo for them all" },
+        { createSummingStack,     "Create Summing Stack",       "Track",     "Put the selected tracks in a summing stack: they play into one aux bus" },
+        { freezeTracks,           "Freeze Track",               "Track",     "Render the selected tracks with their instrument and plugins to audio, to save processing (again to unfreeze)" },
+        { newVca,                 "New VCA",                    "Track",     "A VCA fader for the selected tracks: it moves them all, keeping their balance" },
         { generateMidi,           "Generate MIDI...",           "Track",     "Write drums, bass, chords and a melody in a genre's style" },
 
         { play,                   "Play or Stop",               "Transport", "Start or stop playback" },
@@ -196,6 +200,7 @@ namespace
             case repeatRegions:          return { key ('r', cmd) };
             case joinRegions:            return { key ('j', cmd) };
             case duplicateTrack:         return { key ('d', cmd) };
+            case createFolderStack:      return { key ('d', shift | cmd) };
             case nudgeLeft:              return { key (KeyPress::leftKey, opt) };
             case nudgeRight:             return { key (KeyPress::rightKey, opt) };
             case toolMenu:               return { key ('t') };

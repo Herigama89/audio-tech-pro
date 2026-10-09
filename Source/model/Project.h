@@ -21,7 +21,7 @@ namespace riff::model
     // --- Creation ---------------------------------------------------------
     juce::ValueTree createProject (const juce::String& name = "Untitled");
 
-    inline const juce::String audioKind { "audio" }, instrumentKind { "instrument" }, busKind { "bus" };
+    inline const juce::String audioKind { "audio" }, instrumentKind { "instrument" }, busKind { "bus" }, vcaKind { "vca" };
 
     juce::ValueTree addTrack (juce::ValueTree project, const juce::String& name, juce::UndoManager* um,
                               int index = -1, const juce::String& kind = audioKind);
@@ -240,6 +240,30 @@ namespace riff::model
 
     // --- Buses and sends --------------------------------------------------------
     bool isBusTrack (const juce::ValueTree& track);
+
+    // --- Groups, VCAs, outputs, stacks, freeze ------------------------------------
+    inline bool isVcaTrack (const juce::ValueTree& track) { return track[ids::kind].toString() == vcaKind; }
+
+    /** The track and every other track in its group (just the track when it has none). */
+    juce::Array<juce::ValueTree> groupMembers (const juce::ValueTree& project, const juce::ValueTree& track);
+
+    /** Tracks controlled by a VCA (or folder stack) track. */
+    juce::Array<juce::ValueTree> vcaMembers (const juce::ValueTree& project, const juce::ValueTree& vcaTrack);
+
+    /** The VCA gain on a track (its VCA's fader, and that VCA's own VCA), and whether a VCA mutes or solos it. */
+    double vcaGainOf (const juce::ValueTree& project, const juce::ValueTree& track);
+    bool vcaMutes (const juce::ValueTree& project, const juce::ValueTree& track);
+    bool vcaSolos (const juce::ValueTree& project, const juce::ValueTree& track);
+
+    /** Logic's Create Track Stack: a folder stack (a VCA-like main track) or a summing stack (an aux bus
+        the tracks play into). The tracks move under the new main track, which is returned. */
+    juce::ValueTree createTrackStack (juce::ValueTree project, const juce::Array<juce::ValueTree>& tracks, bool summing, juce::UndoManager* um);
+
+    /** Takes the tracks out of a stack and removes its main track. */
+    void flattenStack (juce::ValueTree project, juce::ValueTree mainTrack, juce::UndoManager* um);
+
+    /** True when the track is folded away inside a collapsed stack. */
+    bool isInCollapsedStack (const juce::ValueTree& project, const juce::ValueTree& track);
     juce::ValueTree addSend (juce::ValueTree chain, const juce::String& busId, double level, juce::UndoManager* um);
     juce::Array<juce::ValueTree> sendsOf (const juce::ValueTree& chain);
     juce::Array<juce::ValueTree> insertsOf (const juce::ValueTree& chain);

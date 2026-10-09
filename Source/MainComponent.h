@@ -125,6 +125,9 @@ private:
     void showFileMenu();
     void exportSong();
     void exportStems();
+    void toggleFreeze (juce::ValueTree track);
+    void createStackFromSelection (bool summing);
+    void newVcaForSelection();
     void trimSelectedToPlayhead (bool start);
     void loopSelectedRegions();
     void bounceInPlace();

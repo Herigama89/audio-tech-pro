@@ -55,7 +55,12 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::pasteRegions:    info.setActive (! clipboardRegions.isEmpty() && track.isValid() && ! recording); break;
         case commands::deleteMarker:    info.setActive (project.getChildWithName (ids::MARKERS).getChildWithProperty (ids::id, timeline.selectedMarkerId).isValid()); break;
         case commands::joinRegions:     info.setActive (timeline.selectedRegionTrees().size() > 1 && ! recording); break;
-        case commands::duplicateTrack:  info.setActive (track.isValid() && ! recording); break;
+        case commands::duplicateTrack:
+        case commands::createFolderStack:
+        case commands::createSummingStack:
+        case commands::newVca:          info.setActive (track.isValid() && ! recording); break;
+        case commands::freezeTracks:    info.setActive (track.isValid() && ! recording && ! model::isBusTrack (track) && ! model::isVcaTrack (track));
+                                        info.setTicked ((bool) track[ids::frozen]); break;
         case commands::quantize:        info.setActive (region.isValid() && model::isMidiRegion (region)); break;
         case commands::setLocatorsBySelection: info.setActive (region.isValid() && ! recording); break;
         case commands::exportSong:
@@ -163,6 +168,10 @@ bool MainComponent::perform (const InvocationInfo& info)
             }
             break;
         case commands::duplicateTrack:         duplicateSelectedTrack(); break;
+        case commands::createFolderStack:      createStackFromSelection (false); break;
+        case commands::createSummingStack:     createStackFromSelection (true); break;
+        case commands::freezeTracks:           if (auto t = selectedTrack(); t.isValid()) toggleFreeze (t); break;
+        case commands::newVca:                 newVcaForSelection(); break;
 
         case commands::newAudioTrack:          addTrack (model::audioKind); break;
         case commands::newInstrumentTrack:     addTrack (model::instrumentKind); break;
@@ -253,7 +262,9 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             break;
 
         case 2:
-            add ({ commands::newAudioTrack, commands::newInstrumentTrack, commands::newAuxBus, commands::duplicateTrack });
+            add ({ commands::newAudioTrack, commands::newInstrumentTrack, commands::newAuxBus, commands::newVca, commands::duplicateTrack });
+            menu.addSeparator();
+            add ({ commands::createFolderStack, commands::createSummingStack, commands::freezeTracks });
             menu.addSeparator();
             add ({ commands::generateMidi, commands::bounceInPlace });
             menu.addSeparator();
@@ -728,6 +739,32 @@ void MainComponent::duplicateSelectedTrack()
     undoManager.beginNewTransaction ("New track with duplicate settings");
     auto copy = model::duplicateTrackSettings (project, track, &undoManager);
     timeline.selectOnly (copy[ids::id].toString());
+    timeline.changed();
+}
+
+void MainComponent::createStackFromSelection (bool summing)
+{
+    juce::Array<juce::ValueTree> tracks;
+    for (const auto& id : timeline.selectedTrackIds())
+        if (auto t = model::findById (project, id); t.isValid() && t[ids::stack].toString().isEmpty())
+            tracks.add (t);
+    if (tracks.isEmpty())
+        return;
+
+    undoManager.beginNewTransaction (summing ? "Create summing stack" : "Create folder stack");
+    auto main = model::createTrackStack (project, tracks, summing, &undoManager);
+    timeline.selectOnly (main[ids::id].toString());
+    timeline.changed();
+}
+
+void MainComponent::newVcaForSelection()
+{
+    undoManager.beginNewTransaction ("New VCA");
+    auto vca = model::addTrack (project, "VCA", &undoManager, -1, model::vcaKind);
+    for (const auto& id : timeline.selectedTrackIds())
+        if (auto t = model::findById (project, id); t.isValid() && t != vca && ! model::isVcaTrack (t))
+            t.setProperty (ids::vca, vca[ids::id].toString(), &undoManager);
+    timeline.selectOnly (vca[ids::id].toString());
     timeline.changed();
 }
 

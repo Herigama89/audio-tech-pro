@@ -192,21 +192,33 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
 
     std::vector<int> latencies; // per graph track, for delay compensation
 
+    // A track counts as soloed when it is, or its VCA (folder stack) or the bus it plays into is.
+    const auto soloed = [this] (const juce::ValueTree& track)
+    {
+        if ((bool) track[ids::solo] || model::vcaSolos (project, track))
+            return true;
+        const auto out = model::findById (project, track[ids::output].toString());
+        return out.isValid() && (bool) out[ids::solo];
+    };
+
     bool anySolo = false;
     for (const auto& track : project)
-        anySolo = anySolo || (! ignoreSolo && (bool) track[ids::solo]);
+        anySolo = anySolo || (! ignoreSolo && track.hasType (ids::TRACK) && soloed (track));
 
     for (const auto& track : project)
     {
-        if (! track.hasType (ids::TRACK))
-            continue;
+        if (! track.hasType (ids::TRACK) || model::isVcaTrack (track))
+            continue;   // a VCA has no sound of its own
 
         PlaybackGraph::Track t;
         t.slot    = slotFor (track[ids::id].toString());
         t.volume  = (float) (double) track.getProperty (ids::volume, 1.0);
         t.console = ConsoleChannel::fromTrack (track);
         t.pan     = (float) juce::jlimit (-1.0, 1.0, (double) track.getProperty (ids::pan, 0.0));
-        t.audible = ! (bool) track[ids::mute] && (! anySolo || (bool) track[ids::solo]);
+        t.audible = ! (bool) track[ids::mute] && ! model::vcaMutes (project, track) && (! anySolo || soloed (track));
+        t.vcaGain = (float) model::vcaGainOf (project, track);
+        if (const auto out = busIndex.find (track[ids::output].toString()); out != busIndex.end() && ! model::isBusTrack (track))
+            t.outputBus = out->second;
 
         t.monitorInput = (bool) track[ids::armed] && (bool) track[ids::monitor];
         t.inputChannel = juce::jmax (0, (int) track.getProperty (ids::input, 0));
@@ -220,8 +232,46 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         t.stripPlugins = buildChain (model::stripOwner (trackId), sampleRate, insertIds, effectsById);
         if (model::stripPlugin (project, trackId).isValid())
             t.console.enabled = false;   // the plugin replaces the built-in strip (dry while it loads)
+        if (! (bool) track.getProperty (ids::stripIn, true))
+        {
+            t.stripPlugins.clear();      // the strip's IN key: out of the signal, still loaded
+            t.console.enabled = false;
+        }
         t.isInstrument = model::isInstrumentTrack (track);
         t.isBus = model::isBusTrack (track);
+
+        // A frozen track plays its frozen file: no instrument, plugins or strip (fader, pan and sends stay).
+        if ((bool) track[ids::frozen] && ! t.isBus)
+        {
+            const juce::File frozenFile (track[ids::frozenFile].toString());
+            if (auto audio = cache.get (frozenFile))
+            {
+                t.inserts.clear();
+                t.stripPlugins.clear();
+                t.console.enabled = false;
+                t.isInstrument = false;
+
+                PlaybackGraph::Region r;
+                r.audio = audio;
+                r.start = 0;
+                r.resample = std::abs (audio->sampleRate - sampleRate) > 0.5;
+                r.step = r.resample ? audio->sampleRate / sampleRate : 1.0;
+                r.length = (juce::int64) ((double) audio->buffer.getNumSamples() / r.step);
+                t.regions.push_back (std::move (r));
+
+                if (track.getProperty (ids::automationMode, "read").toString() != "off")
+                {
+                    t.volumeAutomation = curveFor (trackId, model::volumeParam, sampleRate);
+                    t.panAutomation = curveFor (trackId, model::panParam, sampleRate);
+                }
+                for (const auto& send : model::sendsOf (model::findChain (project, trackId)))
+                    if (auto it = busIndex.find (send[ids::target].toString()); it != busIndex.end())
+                        t.sends.push_back ({ it->second, (float) (double) send.getProperty (ids::level, 1.0), (bool) send[ids::pre] });
+                graph->tracks.push_back (std::move (t));
+                latencies.push_back (0);
+                continue;
+            }
+        }
 
         // Automation (not in Off mode)
         if (track.getProperty (ids::automationMode, "read").toString() != "off")

@@ -144,6 +144,15 @@ namespace riff::ids
     RIFF_DECLARE_ID (value)
     RIFF_DECLARE_ID (keyRoot)         // PROJECT: the song's key, 0 = C .. 11 = B
     RIFF_DECLARE_ID (keyMinor)        // PROJECT: minor (true) or major
+    RIFF_DECLARE_ID (group)           // TRACK: 0 (none) or 1..8 - linked volume, mute, solo and record
+    RIFF_DECLARE_ID (vca)             // TRACK: the VCA (or folder stack) track whose fader scales this one
+    RIFF_DECLARE_ID (output)          // TRACK: the bus track it plays into (empty: the main output)
+    RIFF_DECLARE_ID (stackParent)     // TRACK: the main track of the stack it's in
+    RIFF_DECLARE_ID (stack)           // TRACK (a stack's main track): "folder" or "summing"
+    RIFF_DECLARE_ID (collapsed)       // TRACK (a stack's main track): its tracks are folded away
+    RIFF_DECLARE_ID (frozen)          // TRACK: plays frozenFile instead of its regions and plugins
+    RIFF_DECLARE_ID (frozenFile)
+    RIFF_DECLARE_ID (stripIn)         // TRACK: the whole channel strip (built-in or plugin) in
     RIFF_DECLARE_ID (hidden)          // TRACK: hidden in the tracks area (Logic's Hide; it still plays)
     RIFF_DECLARE_ID (height)          // TRACK: its height in the tracks area (pixels; view only)
     RIFF_DECLARE_ID (showAutomation)

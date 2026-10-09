@@ -207,7 +207,7 @@ public:
         place. Between begin/endOfflineRender. */
     struct StemTarget { int slot = -1; juce::File file; };
     juce::String renderStems (const std::vector<StemTarget>& targets, double startSeconds, double endSeconds, int bitDepth,
-                              std::function<bool (double)> progress);
+                              std::function<bool (double)> progress, bool beforeFader = false);
 
     /** Measures every track and the master over [start, end) by rendering offline (between begin/endOfflineRender).
         Track results are by graph slot (see ProjectPlayer::slotFor); the master is the last entry. */
@@ -342,6 +342,7 @@ private:
     std::array<std::atomic<float>, PlaybackGraph::maxTracks> volumeOverride {}, panOverride {};   // NaN: none (set in the constructor)
     bool measuring = false;                       // only while measureMix renders
     juce::AudioBuffer<float>* stemCapture = nullptr;   // only while renderStems renders: 2 channels per slot
+    bool stemBeforeFader = false;                      // freezing: before the fader, pan and sends
     std::vector<LevelStats> measuredTracks;       // by slot
     LevelStats measuredMaster;
     bool offlineWasAttached = false, offlineSavedPlaying = false;

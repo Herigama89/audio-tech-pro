@@ -7,6 +7,7 @@
 #include "ui/Commands.h"
 #include "ui/KeyCommands.h"
 #include "ui/TrackPicker.h"
+#include "ui/RoutingMenu.h"
 #include "engine/ConsolePlugins.h"
 
 namespace riff
@@ -366,6 +367,8 @@ MainComponent::MainComponent (bool openAudioDevice)
     setWantsKeyboardFocus (true);
     setSize (1440, 920);
     automation.makeCurrent();
+    routing::toggleFreeze = [this] (juce::ValueTree track) { toggleFreeze (track); };
+    routing::createStack = [this] (bool summing) { createStackFromSelection (summing); };
     TrackHeader::pluginParameterNames = [this] (const juce::String& insertId)
     {
         juce::StringArray names;
@@ -2287,6 +2290,74 @@ void MainComponent::bounceInPlace()
             self.player.rebuildNow();
         });
 
+    job->launchThread();
+}
+
+void MainComponent::toggleFreeze (juce::ValueTree track)
+{
+    if (! track.isValid() || engine.isRecording())
+        return;
+
+    // Unfreeze: back to the regions and plugins (the frozen file goes).
+    if ((bool) track[ids::frozen])
+    {
+        juce::File (track[ids::frozenFile].toString()).deleteFile();
+        track.removeProperty (ids::frozen, nullptr);
+        track.removeProperty (ids::frozenFile, nullptr);
+        player.rebuildNow();
+        return;
+    }
+
+    if (model::isBusTrack (track) || model::isVcaTrack (track))
+        return;
+
+    if (fileCache.isLoading())
+    {
+        showError ("Still loading audio", "Some audio files are still loading. Try again in a moment.");
+        return;
+    }
+
+    const auto end = model::projectEnd (project) + 3.0;   // and the tails
+    const auto file = recordingFolder().getChildFile ("Freeze Files")
+                          .getNonexistentChildFile (juce::File::createLegalFileName (track[ids::name].toString() + " Freeze"), ".wav", false);
+
+    // Everything plays (solo ignored); the frozen part is what comes out of the plugins, before the fader.
+    player.setIgnoreSolo (true);
+    player.rebuildNow();
+    const auto slot = player.slotOf (track[ids::id].toString());
+    if (slot < 0)
+    {
+        player.setIgnoreSolo (false);
+        player.rebuildNow();
+        return;
+    }
+
+    engine.stop();
+    engine.beginOfflineRender();
+    auto& eng = engine;
+    std::vector<AudioEngine::StemTarget> targets { { slot, file } };
+    const auto trackId = track[ids::id].toString();
+
+    auto* job = new ExportJob (engine, "Freezing " + track[ids::name].toString(),
+        [&eng, targets, end] (std::function<bool (double)> progress)
+        {
+            return eng.renderStems (targets, 0.0, end, 24, std::move (progress), true);
+        },
+        [safe = juce::Component::SafePointer<MainComponent> (this), file, trackId] (const juce::String& error)
+        {
+            if (safe == nullptr)
+                return;
+            safe->player.setIgnoreSolo (false);
+            if (error.isEmpty())
+                if (auto t = model::findById (safe->project, trackId); t.isValid())
+                {
+                    t.setProperty (ids::frozenFile, file.getFullPathName(), nullptr);
+                    t.setProperty (ids::frozen, true, nullptr);
+                }
+            safe->player.rebuildNow();
+            if (error.isNotEmpty() && error != "cancelled")
+                safe->showError ("Freeze failed", error);
+        });
     job->launchThread();
 }
 

@@ -59,6 +59,7 @@ public:
 
 private:
     bool isMaster() const { return ! track.isValid(); }
+    bool isVca() const { return track.isValid() && track[ids::kind].toString() == "vca"; }
 
     /** Selects the track on any click on the strip (its knobs and fader included). */
     struct SelectOnClick final : juce::MouseListener
@@ -98,7 +99,7 @@ private:
     // Neon-ring encoders: blue for the EQ, white-blue for the Dynamics
     strip::PointerKnob hfKnob { theme::neon }, hmfKnob { theme::neon }, lmfKnob { theme::neon }, lfKnob { theme::neon }, dynKnob { theme::knobCream };
     strip::LampKey consoleInButton { "EQ in", theme::neon }, dynInButton { "Dynamics in", theme::neon };
-    strip::CreamKey muteButton { "M", theme::mute }, soloButton { "S", theme::solo };
+    strip::CreamKey muteButton { "M", theme::mute }, soloButton { "S", theme::solo }, stripInButton { "IN", theme::neon };
     strip::DisplaySlider panKnob;
     juce::Label dynLabel;
 
@@ -226,7 +227,7 @@ private:
     juce::ValueTree project;
 
     juce::Label title, consoleCaption { {}, "Console" };
-    juce::ComboBox consoleBox;
+    juce::ComboBox consoleBox, filterBox;   // filterBox: which kinds of strip to show
     juce::Array<juce::PluginDescription> stripCandidates;
     int syncCounter = 0;
     void refreshConsoleBox();

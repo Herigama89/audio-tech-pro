@@ -12,7 +12,7 @@ ConsoleChannel::Settings ConsoleChannel::fromTrack (const juce::ValueTree& track
     };
 
     Settings s;
-    s.enabled  = track.getProperty (ids::consoleIn, true);
+    s.enabled  = (bool) track.getProperty (ids::consoleIn, true) && (bool) track.getProperty (ids::stripIn, true);
     s.dynEnabled = track.getProperty (ids::consoleDynIn, true);
     s.hf       = gain (ids::consoleHF);
     s.hmf      = gain (ids::consoleHMF);
