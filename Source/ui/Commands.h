@@ -36,7 +36,8 @@ namespace riff::commands
         toggleAutopunch = 0x2a01, toggleReplace, toggleMidiMerge, undoHistory, preferences, saveAsTemplate, newAlternative, eventList,
         controllerAssignments, showLibrary, showLoopBrowser, showSmartControls,
         splitByLocators = 0x2b01, cutSectionBetweenLocators, insertSilenceBetweenLocators, repeatSectionBetweenLocators, groupSettings, ioLabels, signalFlow,
-        newDrummerTrack = 0x2c01, newBassPlayerTrack, newKeysPlayerTrack, liveLoops
+        newDrummerTrack = 0x2c01, newBassPlayerTrack, newKeysPlayerTrack, liveLoops,
+        openMixerWindow = 0x2d01, openEditorWindow
     };
 
     struct Info

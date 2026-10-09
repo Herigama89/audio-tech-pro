@@ -137,6 +137,25 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         };
         addAndMakeVisible (panKnob);
         panKnob.setVisible (! isVca());
+
+        // Compact mode's EQ tag: lit while the strip's EQ / Dynamics (or strip plugin) is working; click to open it.
+        look::key (consoleTag, look::Key::console);
+        consoleTag.setColour (juce::TextButton::buttonOnColourId, theme::knobArc);
+        consoleTag.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
+        consoleTag.setTooltip ("The channel strip's EQ and Dynamics: lit when they're working. Click to open them.");
+        consoleTag.setWantsKeyboardFocus (false);
+        consoleTag.onClick = [this]
+        {
+            if (auto insert = stripInsert(); insert.isValid())
+            {
+                if (owner.onOpenInsert)
+                    owner.onOpenInsert (insert);
+            }
+            else if (owner.onOpenStripWindow)
+                owner.onOpenStripWindow (track);
+        };
+        addChildComponent (consoleTag);
+        consoleTag.setVisible (! isVca());
     }
 
     for (int i = 0; i < numSlots; ++i)
@@ -546,9 +565,9 @@ void ChannelStrip::mouseDown (const juce::MouseEvent& e)
     if (! e.mods.isPopupMenu() || isMaster())
         return;
 
-    const auto inConsole = e.eventComponent == this ? e.y < topHeight
-                                                    : e.eventComponent->getY() < topHeight && e.eventComponent->getParentComponent() == this;
-    if (inConsole)
+    const auto inConsole = e.eventComponent == this ? e.y < topSection()
+                                                    : e.eventComponent->getY() < topSection() && e.eventComponent->getParentComponent() == this;
+    if (inConsole && showsConsole())
     {
         showConsoleMenu();
         return;
@@ -567,7 +586,7 @@ void ChannelStrip::mouseDown (const juce::MouseEvent& e)
 void ChannelStrip::mouseDoubleClick (const juce::MouseEvent& e)
 {
     // Double-click the console section's panel: the whole strip in its own window.
-    if (isMaster() || isVca() || e.eventComponent != this || e.y >= topHeight)
+    if (isMaster() || isVca() || e.eventComponent != this || e.y >= topSection())
         return;
     if (auto insert = stripInsert(); insert.isValid())
     {
@@ -703,6 +722,8 @@ void ChannelStrip::refresh()
         dynLabel.setText (juce::String ((double) track.getProperty (ids::consoleDynamics, 0.0), 1), juce::dontSendNotification);
     }
 
+    updateConsoleTag();
+
     const auto gain = isMaster() ? (double) project.getProperty (ids::masterGain, 0.8)
                                  : (double) track.getProperty (ids::volume, 1.0);
     fader.setValue (gainToDb (gain), juce::dontSendNotification);
@@ -803,7 +824,7 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
 juce::Rectangle<int> ChannelStrip::faderArea() const
 {
     // Below the sends, above the level display and the name plate.
-    const auto top = topHeight + 6 + numSlots * 17 + 6 + numSends * 18 + 4 + automationRow;
+    const auto top = topSection() + 6 + numSlots * 17 + 6 + numSends * 18 + 4 + automationRow;
     return { 0, top, getWidth(), getHeight() - nameHeight - 22 - top };
 }
 
@@ -815,15 +836,54 @@ void ChannelStrip::paint (juce::Graphics& g)
 
     // The strip, from the picture: its top (knob scales, keys, Dynamics), then its plain face below.
     skin::tileDown (g, skin::stripFace(), bounds.toFloat());
-    if (channel)
+    const bool console = showsConsole();
+    if (channel && console)
         g.setOpacity (1.0f), g.drawImage (skin::stripTop(), juce::Rectangle<float> (0.0f, 0.0f, w, (float) topHeight + 1.0f));
+
+    // Without the console section: the channel number, and the pan value beside its knob.
+    if (! console)
+    {
+        g.setColour (theme::stripInk);
+        if (channel || isVca())
+        {
+            g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+            g.drawText (isVca() ? juce::String ("VCA") : juce::String (track.getParent().indexOf (track) + 1),
+                        juce::Rectangle<int> (5, 3, 34, 16), juce::Justification::centredLeft, false);
+        }
+        else
+        {
+            g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+            g.drawText ("MAIN", juce::Rectangle<int> (0, 4, getWidth(), 16), juce::Justification::centred, false);
+            g.setColour (theme::stripInkDim);
+            g.setFont (juce::FontOptions (11.0f));
+            g.drawText ("Stereo Out", juce::Rectangle<int> (0, 20, getWidth(), 14), juce::Justification::centred, false);
+        }
+        if (channel)
+        {
+            g.setColour (theme::stripInk);
+            g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+            g.drawText (panKnob.getTextFromValue (panKnob.getValue()), panKnob.getBounds().translated (panKnob.getWidth() + 2, 0).withWidth (30),
+                        juce::Justification::centredLeft, false);
+            g.setColour (theme::stripInkDim);
+            g.setFont (juce::FontOptions (10.0f));
+            g.drawText ("Pan", panKnob.getBounds().translated (panKnob.getWidth() + 2, -9).withWidth (30), juce::Justification::centredLeft, false);
+        }
+        // A line under the section
+        g.setColour (juce::Colours::black.withAlpha (0.3f));
+        g.fillRect (4, compactTopHeight - 2, getWidth() - 8, 1);
+        g.setColour (juce::Colours::white.withAlpha (0.35f));
+        g.fillRect (4, compactTopHeight - 1, getWidth() - 8, 1);
+    }
 
     const auto text = theme::stripInk, dim = theme::stripInkDim;
     {
         juce::Graphics::ScopedSaveState state (g);
         g.addTransform (juce::AffineTransform::scale (artScale));
 
-        if (! channel)
+        if (! console)
+        {
+        }
+        else if (! channel)
         {
             const bool folder = isVca() && track[ids::stack].toString() == "folder";
             g.setColour (text);
@@ -917,9 +977,51 @@ void ChannelStrip::paint (juce::Graphics& g)
     }
 }
 
+int ChannelStrip::topSection() const
+{
+    return showsConsole() ? topHeight : compactTopHeight;
+}
+
+bool ChannelStrip::showsConsole() const
+{
+    return owner.showsConsole();
+}
+
+void ChannelStrip::updateConsoleTag()
+{
+    if (isMaster() || isVca())
+        return;
+    const bool plugin = usesPlugin();
+    const bool eqWorking = (bool) track.getProperty (ids::consoleIn, true)
+                           && (std::abs ((double) track.getProperty (ids::consoleHF, 0.0)) > 0.05 || std::abs ((double) track.getProperty (ids::consoleHMF, 0.0)) > 0.05
+                               || std::abs ((double) track.getProperty (ids::consoleLMF, 0.0)) > 0.05 || std::abs ((double) track.getProperty (ids::consoleLF, 0.0)) > 0.05);
+    const bool dynWorking = (bool) track.getProperty (ids::consoleDynIn, true) && (double) track.getProperty (ids::consoleDynamics, 0.0) > 0.05;
+    const bool on = (bool) track.getProperty (ids::stripIn, true) && (plugin || eqWorking || dynWorking);
+    consoleTag.setButtonText (plugin ? "PLUG" : eqWorking && dynWorking ? "EQ DYN" : dynWorking ? "DYN" : "EQ");
+    consoleTag.setToggleState (on, juce::dontSendNotification);
+}
+
 void ChannelStrip::resized()
 {
-    if (! isMaster())
+    const bool console = showsConsole();
+    if (! isMaster() && ! isVca())
+    {
+        for (auto* c : std::initializer_list<juce::Component*> { &hfKnob, &hmfKnob, &lmfKnob, &lfKnob, &dynKnob, &consoleInButton, &dynInButton, &stripInButton, &dynLabel })
+            c->setVisible (console);
+        consoleTag.setVisible (! console);
+        muteButton.onArt = soloButton.onArt = console;
+        panKnob.asKnob = ! console;
+    }
+
+    if (! isMaster() && ! console)
+    {
+        // Compact: number and EQ tag, the pan knob, then mute and solo.
+        consoleTag.setBounds (getWidth() - 40, 3, 36, 16);
+        panKnob.setBounds (8, 24, 30, 30);
+        muteButton.setBounds (6, 60, getWidth() / 2 - 8, 24);
+        soloButton.setBounds (getWidth() / 2 + 2, 60, getWidth() / 2 - 8, 24);
+    }
+    else if (! isMaster())
     {
         // Where things are on the picture's strip (art coordinates, 196 wide).
         auto knobAt = [this] (juce::Slider& k, float x, float y, float r) { k.setBounds (fromArt (x - r, y - r, r * 2.0f, r * 2.0f)); };
@@ -939,7 +1041,7 @@ void ChannelStrip::resized()
         panKnob.setBounds (fromArt (104.0f, 790.0f, 86.0f, 50.0f));
     }
 
-    auto area = getLocalBounds().reduced (3, 0).withTrimmedTop (topHeight + 4);
+    auto area = getLocalBounds().reduced (3, 0).withTrimmedTop (topSection() + 4);
 
     for (auto* b : slots)
     {
@@ -1239,6 +1341,24 @@ MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p,
     };
     addAndMakeVisible (narrowButton);
 
+    for (auto [button, property, tip] : { std::tuple { &consoleButton, "mixerConsole", "Show the EQ and Dynamics section on every strip (off: as in Logic, each strip's EQ tag opens them)" },
+                                          std::tuple { &busCompButton, "mixerBusComp", "Show the Master Bus Compressor beside the master strip" } })
+    {
+        button->setClickingTogglesState (true);
+        button->setTooltip (tip);
+        button->setWantsKeyboardFocus (false);
+        button->onClick = [this, button, property = juce::Identifier (property)]
+        {
+            project.setProperty (property, button->getToggleState(), nullptr);   // (kept with the project, not an undo step)
+            for (auto* s : strips)
+                s->resized(), s->repaint();
+            if (masterStrip != nullptr)
+                masterStrip->resized(), masterStrip->repaint();
+            resized();
+        };
+        addAndMakeVisible (button);
+    }
+
     title.setText ("Mixer", juce::dontSendNotification);
     title.setFont (juce::FontOptions (13.0f, juce::Font::bold));
     title.setColour (juce::Label::textColourId, theme::text);
@@ -1275,6 +1395,8 @@ void MixerPanel::setProject (juce::ValueTree newProject)
     busComp.setProject (project);
     consolePanel.setProject (project);
     narrowButton.setToggleState ((bool) project.getProperty ("mixerNarrow", false), juce::dontSendNotification);
+    consoleButton.setToggleState (showsConsole(), juce::dontSendNotification);
+    busCompButton.setToggleState (showsBusComp(), juce::dontSendNotification);
     refreshConsoleBox();
     rebuild();
 }
@@ -1494,11 +1616,15 @@ void MixerPanel::resized()
     filterBox.setBounds (header.removeFromLeft (110));
     header.removeFromLeft (8);
     narrowButton.setBounds (header.removeFromLeft (64));
+    header.removeFromLeft (6);
+    consoleButton.setBounds (header.removeFromLeft (64));
+    header.removeFromLeft (6);
+    busCompButton.setBounds (header.removeFromLeft (76));
 
     // Narrow strips are the same strips, drawn smaller.
     const auto scale = stripScale();
     const auto stripW = (int) std::ceil (ChannelStrip::stripWidth * scale);
-    const auto minimumHeight = (int) std::ceil (ChannelStrip::minimumHeight * scale);
+    const auto minimumHeight = (int) std::ceil (ChannelStrip::minimumHeightFor (showsConsole()) * scale);
 
     // Everything scrolls up and down together if the pane is shorter than a strip.
     outer.setBounds (area);
@@ -1518,14 +1644,14 @@ void MixerPanel::resized()
     if (masterStrip != nullptr)
         place (*masterStrip, content.removeFromRight (stripW));
 
-    // Console mode shows the user's own bus compressor; otherwise the built-in one.
+    // The bus compressor, when shown: the user's own (console mode) or the built-in one.
     const bool console = consolePanel.isAvailable();
-    consolePanel.setVisible (console);
-    busComp.setVisible (! console);
+    consolePanel.setVisible (console && showsBusComp());
+    busComp.setVisible (! console && showsBusComp());
 
-    if (console)
+    if (consolePanel.isVisible())
         consolePanel.setBounds (content.removeFromRight (consolePanel.widthForHeight (content.getHeight())));
-    else
+    else if (busComp.isVisible())
         busComp.setBounds (content.removeFromRight (MasterBusCompressorPanel::panelWidth));
 
     viewport.setBounds (content);

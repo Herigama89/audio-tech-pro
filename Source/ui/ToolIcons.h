@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "TimelineState.h"
+#include <map>
 
 /**
     Icons for the Edit window's tools (Pointer, Pencil, Eraser...), drawn in
@@ -215,6 +216,50 @@ namespace riff::toolicons
             case Tool::text:     return "rename";
         }
         return "";
+    }
+
+    /** The mouse pointer for a tool, as in Logic: the tool's icon, with its working point on the spot clicked. */
+    inline juce::MouseCursor cursor (Tool tool)
+    {
+        switch (tool)
+        {
+            case Tool::pointer: return juce::MouseCursor::NormalCursor;
+            case Tool::text:    return juce::MouseCursor::IBeamCursor;
+            case Tool::marquee: return juce::MouseCursor::CrosshairCursor;
+            default: break;
+        }
+
+        static std::map<int, juce::MouseCursor> cache;
+        if (auto it = cache.find ((int) tool); it != cache.end())
+            return it->second;
+
+        // Drawn at 2x for sharp screens: a black outline round a white icon, so it shows on any colour.
+        constexpr int size = 32, scale = 2;
+        juce::Image image (juce::Image::ARGB, size * scale, size * scale, true);
+        {
+            juce::Graphics g (image);
+            const auto area = juce::Rectangle<float> (2.0f, 2.0f, 28.0f, 28.0f) * (float) scale;
+            for (const auto d : { juce::Point<float> (-2.0f, 0.0f), { 2.0f, 0.0f }, { 0.0f, -2.0f }, { 0.0f, 2.0f },
+                                  { -1.5f, -1.5f }, { 1.5f, 1.5f }, { -1.5f, 1.5f }, { 1.5f, -1.5f } })
+                draw (g, tool, area.translated (d.x, d.y), juce::Colours::black);
+            draw (g, tool, area, juce::Colours::white);
+        }
+
+        // Where the tool works, on the 24 grid (the pencil's tip, the zoom glass's centre...).
+        juce::Point<float> hot (12.0f, 12.0f);
+        switch (tool)
+        {
+            case Tool::pencil:   hot = { 5.3f, 20.0f }; break;
+            case Tool::eraser:   hot = { 5.0f, 18.5f }; break;
+            case Tool::scissors: hot = { 12.0f, 9.0f }; break;
+            case Tool::glue:     hot = { 20.0f, 19.0f }; break;
+            case Tool::fade:     hot = { 3.0f, 19.0f }; break;
+            case Tool::zoom:     hot = { 9.5f, 9.5f }; break;
+            default: break;
+        }
+        const auto hx = juce::roundToInt (2.0f + hot.x * 28.0f / 24.0f), hy = juce::roundToInt (2.0f + hot.y * 28.0f / 24.0f);
+        juce::ScaledImage scaled (image, (double) scale);
+        return cache.emplace ((int) tool, juce::MouseCursor (scaled, { hx, hy })).first->second;
     }
 
     constexpr Tool all[] { Tool::pointer, Tool::pencil, Tool::eraser, Tool::text, Tool::scissors, Tool::glue,

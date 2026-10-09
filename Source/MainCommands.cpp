@@ -86,6 +86,8 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::eventList:       info.setActive (region.isValid() && model::isMidiRegion (region)); break;
 
         case commands::showMixer:       info.setTicked (mixer.isVisible()); break;
+        case commands::openMixerWindow: info.setTicked (mixerWindow != nullptr); break;
+        case commands::openEditorWindow: info.setTicked (editorWindow != nullptr); break;
         case commands::showHiddenTracks: info.setTicked (timeline.showHiddenTracks); break;
         case commands::hideTrack:       info.setActive (track.isValid()); break;
         case commands::trackColours:    info.setActive (track.isValid()); break;
@@ -244,6 +246,8 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::newAlternative:         newAlternative(); break;
         case commands::eventList:              showEventList(); break;
         case commands::liveLoops:              showLiveLoops(); break;
+        case commands::openMixerWindow:        mixerWindow != nullptr ? dockMixer() : openMixerWindow(); break;
+        case commands::openEditorWindow:       editorWindow != nullptr ? dockEditor() : openEditorWindow(); break;
         case commands::controllerAssignments:  showControllerAssignments(); break;
         case commands::showLibrary:            toggleLibrary (LibraryPanel::Page::patches); break;
         case commands::showSmartControls:      toggleSmartControls(); break;
@@ -363,6 +367,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
 
         case 6:
             add ({ commands::toggleInspector, commands::showSmartControls, commands::showLibrary, commands::showLoopBrowser, commands::undoHistory, commands::eventList, commands::liveLoops });
+            add ({ commands::openMixerWindow, commands::openEditorWindow });
             add ({ commands::showPianoRoll, commands::zoomIn, commands::zoomOut, commands::zoomVerticalIn, commands::zoomVerticalOut });
             menu.addSeparator();
             add ({ commands::showAssistant, commands::recordScreen });
@@ -874,6 +879,7 @@ void MainComponent::showToolMenu (bool withShortcuts)
 void MainComponent::setTool (TimelineState::Tool tool)
 {
     timeline.tool = tool;
+    canvas.setMouseCursor (toolicons::cursor (tool));
     toolBox.setSelectedId ((int) tool + 1, juce::dontSendNotification);
     statusLabel.setText (toolBox.getText() + " tool", juce::dontSendNotification);
 }
@@ -990,6 +996,116 @@ void MainComponent::togglePianoRoll()
 
     if (region.isValid())
         openPianoRoll (region);
+}
+
+//==============================================================================
+// The mixer and the editor in windows of their own (Logic's Mixer and Piano Roll windows)
+//==============================================================================
+MainComponent::DetachedWindow::DetachedWindow (const juce::String& title, juce::Component& content, const juce::String& savedState,
+                                               std::function<void()> onCloseRequested)
+    : DocumentWindow (title, theme::background, DocumentWindow::allButtons), onClose (std::move (onCloseRequested))
+{
+    setUsingNativeTitleBar (true);
+    setContentNonOwned (&content, false);
+    setResizable (true, false);
+    setResizeLimits (420, 240, 16000, 16000);
+    if (savedState.isEmpty() || ! restoreWindowStateFromString (savedState))
+        centreWithSize (1180, 700);
+    setVisible (true);
+    toFront (true);
+}
+
+void MainComponent::DetachedWindow::closeButtonPressed()
+{
+    if (onClose)
+        onClose();
+}
+
+void MainComponent::openMixerWindow()
+{
+    if (mixerWindow != nullptr)
+    {
+        mixerWindow->toFront (true);
+        return;
+    }
+    const bool wasInPane = mixer.isVisible();
+    removeChildComponent (&mixer);
+    mixer.setVisible (true);
+    mixerWindow = std::make_unique<DetachedWindow> ("Mixer", mixer, appProperties.getUserSettings()->getValue ("mixerWindow"),
+                                                    [this] { juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this)]
+                                                             { if (safe != nullptr) safe->dockMixer(); }); });
+    juce::ignoreUnused (wasInPane);
+    mixerWindow->addKeyListener (commandManager.getKeyMappings());   // the app's keys work there too
+    resized();
+    commandManager.commandStatusChanged();
+}
+
+void MainComponent::dockMixer()
+{
+    if (mixerWindow == nullptr)
+        return;
+    appProperties.getUserSettings()->setValue ("mixerWindow", mixerWindow->getWindowStateAsString());
+    mixerWindow->clearContentComponent();
+    mixerWindow.reset();
+    addChildComponent (mixer);
+    mixer.setVisible (false);   // back as the pane (X shows it)
+    resized();
+    commandManager.commandStatusChanged();
+}
+
+void MainComponent::openEditorWindow()
+{
+    if (editorWindow != nullptr)
+    {
+        editorWindow->toFront (true);
+        return;
+    }
+
+    // The region in the editor now, or the selected MIDI region, or the first one on the selected track.
+    auto region = model::findById (project, timeline.selectedRegionId);
+    if (! region.isValid() || ! model::isMidiRegion (region))
+    {
+        region = {};
+        for (const auto& r : selectedTrack())
+            if (model::isMidiRegion (r))
+            {
+                region = r;
+                break;
+            }
+    }
+    if (! region.isValid())
+    {
+        showError ("Editor", "Select a MIDI region first.");
+        return;
+    }
+
+    if (pianoRoll.isVisible())
+        pianoRoll.setVisible (false);
+    removeChildComponent (&pianoRoll);
+    pianoRoll.setVisible (true);
+    editorWindow = std::make_unique<DetachedWindow> ("Editor", pianoRoll, appProperties.getUserSettings()->getValue ("editorWindow"),
+                                                     [this] { juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this)]
+                                                              { if (safe != nullptr) safe->dockEditor(); }); });
+    editorWindow->addKeyListener (commandManager.getKeyMappings());
+    pianoRoll.setRegion (region);
+    editorWindow->setName ("Editor: " + region[ids::name].toString());
+    resized();
+    commandManager.commandStatusChanged();
+}
+
+void MainComponent::dockEditor()
+{
+    if (editorWindow == nullptr)
+        return;
+    appProperties.getUserSettings()->setValue ("editorWindow", editorWindow->getWindowStateAsString());
+    editorWindow->clearContentComponent();
+    editorWindow.reset();
+    pianoRoll.setRegion ({});
+    addChildComponent (pianoRoll);
+    pianoRoll.setVisible (false);
+    resized();
+    canvas.grabKeyboardFocus();
+    commandManager.commandStatusChanged();
 }
 
 void MainComponent::deleteSelectedTrack()

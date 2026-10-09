@@ -58,6 +58,14 @@ public:
     static constexpr int automationRow = 18;
     static constexpr int minimumHeight = topHeight + 6 + numSlots * 17 + 6 + numSends * 18 + automationRow + 100 + 20 + nameHeight;
 
+    /** Without the console section (EQ and Dynamics hidden, as in Logic): number, EQ/DYN tags, pan, mute and solo. */
+    static constexpr int compactTopHeight = 92;
+    static int minimumHeightFor (bool console) { return minimumHeight - (console ? 0 : topHeight - compactTopHeight); }
+
+    /** The height of the top section in the mode the mixer is in. */
+    int topSection() const;
+    bool showsConsole() const;
+
 private:
     bool isMaster() const { return ! track.isValid(); }
     bool isVca() const { return track.isValid() && track[ids::kind].toString() == "vca"; }
@@ -102,6 +110,8 @@ private:
     strip::LampKey consoleInButton { "EQ in", theme::knobArc }, dynInButton { "Dynamics in", theme::knobArc };
     strip::CreamKey muteButton { "M", theme::mute }, soloButton { "S", theme::solo }, stripInButton { "IN", theme::knobArc };
     strip::DisplaySlider panKnob;
+    juce::TextButton consoleTag { "EQ" };   // compact mode: lit when the strip's EQ/Dynamics (or plugin) is working; opens it
+    void updateConsoleTag();
     juce::Label dynLabel;
 
     juce::OwnedArray<juce::TextButton> slots;
@@ -213,6 +223,10 @@ public:
 
     static constexpr int headerHeight = 28;
 
+    /** Whether the strips show their console section, and the bus compressor its panel (both off by default). */
+    bool showsConsole() const { return (bool) project.getProperty ("mixerConsole", false); }
+    bool showsBusComp() const { return (bool) project.getProperty ("mixerBusComp", false); }
+
 private:
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { triggerAsyncUpdate(); }
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree&) override        { changed (parent); }
@@ -234,6 +248,8 @@ private:
     juce::ComboBox consoleBox, filterBox;   // filterBox: which kinds of strip to show
     friend class SnapshotTool;
     juce::TextButton narrowButton { "Narrow" };   // smaller strips, to see more at once
+    juce::TextButton consoleButton { "EQ/Dyn" };  // show the console section (EQ and Dynamics) on the strips
+    juce::TextButton busCompButton { "Bus Comp" }; // show the Master Bus Compressor beside the master
     float stripScale() const;
     juce::Array<juce::PluginDescription> stripCandidates;
     int syncCounter = 0;

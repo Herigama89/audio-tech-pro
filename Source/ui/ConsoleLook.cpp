@@ -227,7 +227,7 @@ namespace look
     {
         s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
         s.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
-        s.setRotaryParameters (juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f), true);
+        s.setRotaryParameters (juce::degreesToRadians (220.0f), juce::degreesToRadians (500.0f), true);   // (-140 to +140 degrees)
         s.getProperties().set (knobProperty, (int) cap);
         s.getProperties().set (ticksProperty, ticks);
     }

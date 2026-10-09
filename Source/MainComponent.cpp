@@ -301,13 +301,13 @@ MainComponent::MainComponent (bool openAudioDevice)
     timeline.addChangeListener (this);
 
     addChildComponent (paneDivider);
-    paneDivider.onStart = [this] { paneHeightAtDragStart = pianoRoll.isVisible() ? pianoRoll.getHeight() : mixer.getHeight(); };
+    paneDivider.onStart = [this] { paneHeightAtDragStart = editorInPane() ? pianoRoll.getHeight() : mixer.getHeight(); };
     paneDivider.onDrag = [this] (int dy)
     {
-        (pianoRoll.isVisible() ? editorPaneHeight : mixerPaneHeight) = juce::jmax (150, paneHeightAtDragStart - dy);
+        (editorInPane() ? editorPaneHeight : mixerPaneHeight) = juce::jmax (150, paneHeightAtDragStart - dy);
         resized();
     };
-    paneDivider.onReset = [this] { (pianoRoll.isVisible() ? editorPaneHeight : mixerPaneHeight) = 0; resized(); };
+    paneDivider.onReset = [this] { (editorInPane() ? editorPaneHeight : mixerPaneHeight) = 0; resized(); };
     fileCache.addChangeListener (this);
     undoManager.addChangeListener (this);
     engine.getDeviceManager().addChangeListener (this);
@@ -514,6 +514,12 @@ MainComponent::~MainComponent()
     juce::MenuBarModel::setMacMainMenu (nullptr);
    #endif
     keyCommandsWindow.reset();
+    if (mixerWindow != nullptr)
+        mixerWindow->clearContentComponent();
+    if (editorWindow != nullptr)
+        editorWindow->clearContentComponent();
+    mixerWindow.reset();
+    editorWindow.reset();
     generatorWindow.reset();
     assistantSettingsWindow.reset();
     screenRecordWindow.reset();
@@ -706,16 +712,16 @@ void MainComponent::resized()
         smartControls->setBounds (area.removeFromBottom (150));
 
     // The editor or the mixer below the tracks, with a divider to drag (double-click it for the default size).
-    paneDivider.setVisible (pianoRoll.isVisible() || mixer.isVisible());
-    if (pianoRoll.isVisible())
+    paneDivider.setVisible (editorInPane() || mixerInPane());
+    if (editorInPane())
     {
         const auto h = editorPaneHeight > 0 ? editorPaneHeight : juce::jlimit (200, 360, getHeight() / 3);
         pianoRoll.setBounds (area.removeFromBottom (juce::jlimit (150, juce::jmax (150, area.getHeight() - 120), h)));
         paneDivider.setBounds (area.removeFromBottom (6));
     }
-    else if (mixer.isVisible())
+    else if (mixerInPane())
     {
-        const auto fallback = juce::jmax (200, juce::jmin (area.getHeight() - 100, ChannelStrip::minimumHeight + MixerPanel::headerHeight + 40,
+        const auto fallback = juce::jmax (200, juce::jmin (area.getHeight() - 100, ChannelStrip::minimumHeightFor (mixer.showsConsole()) + MixerPanel::headerHeight + 40,
                                                          (int) (getHeight() * 0.8)));
         const auto h = mixerPaneHeight > 0 ? mixerPaneHeight : fallback;
         mixer.setBounds (area.removeFromBottom (juce::jlimit (150, juce::jmax (150, area.getHeight() - 60), h)));
@@ -1915,7 +1921,17 @@ void MainComponent::openPianoRoll (juce::ValueTree region)
     timeline.selectedTrackId = region.getParent()[ids::id].toString();
     timeline.changed();
 
-    mixer.setVisible (false);
+    if (editorWindow != nullptr)
+    {
+        // The editor has its own window: show the region there.
+        pianoRoll.setRegion (region);
+        editorWindow->setName ("Editor: " + region[ids::name].toString());
+        editorWindow->toFront (true);
+        commandManager.commandStatusChanged();
+        return;
+    }
+    if (mixerWindow == nullptr)
+        mixer.setVisible (false);
     pianoRoll.setVisible (true);
     resized();
     pianoRoll.setRegion (region);
@@ -1925,6 +1941,11 @@ void MainComponent::openPianoRoll (juce::ValueTree region)
 
 void MainComponent::closePianoRoll()
 {
+    if (editorWindow != nullptr)
+    {
+        dockEditor();
+        return;
+    }
     if (! pianoRoll.isVisible())
         return;
 
@@ -2089,7 +2110,13 @@ void MainComponent::showPluginScanner()
 //==============================================================================
 void MainComponent::showMixer()
 {
-    closePianoRoll();
+    if (mixerWindow != nullptr)
+    {
+        mixerWindow->toFront (true);
+        return;
+    }
+    if (editorWindow == nullptr)
+        closePianoRoll();
     mixer.setVisible (true);
     resized();
     commandManager.commandStatusChanged();
@@ -2097,6 +2124,11 @@ void MainComponent::showMixer()
 
 void MainComponent::closeMixer()
 {
+    if (mixerWindow != nullptr)
+    {
+        dockMixer();
+        return;
+    }
     mixer.setVisible (false);
     resized();
     canvas.grabKeyboardFocus();

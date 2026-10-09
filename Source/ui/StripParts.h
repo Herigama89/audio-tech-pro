@@ -62,6 +62,9 @@ namespace riff::strip
     public:
         DisplaySlider();
         void paint (juce::Graphics&) override;
+
+        /** Drawn as a small knob (the compact strip's pan) instead of a value. */
+        bool asKnob = false;
     };
 
     /** A long-throw fader: a dark slot and a dark cap with a white line. */

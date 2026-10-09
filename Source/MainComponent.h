@@ -296,6 +296,21 @@ private:
     PianoRoll pianoRoll { undoManager, engine };
     MixerPanel mixer { undoManager, engine, player, effectRack };
 
+    /** The mixer or the editor in a window of its own (Logic's Mixer and Piano Roll windows): resizable, anywhere. */
+    struct DetachedWindow final : juce::DocumentWindow
+    {
+        DetachedWindow (const juce::String& title, juce::Component& content, const juce::String& savedState, std::function<void()> onCloseRequested);
+        void closeButtonPressed() override;
+        std::function<void()> onClose;
+    };
+    std::unique_ptr<DetachedWindow> mixerWindow, editorWindow;
+    void openMixerWindow();
+    void dockMixer();
+    void openEditorWindow();
+    void dockEditor();
+    bool mixerInPane() const   { return mixer.isVisible() && mixerWindow == nullptr; }
+    bool editorInPane() const  { return pianoRoll.isVisible() && editorWindow == nullptr; }
+
     /** The bar between the tracks and the editor or mixer below: drag it to resize them. */
     struct PaneDivider final : juce::Component
     {

@@ -1,5 +1,6 @@
 #include "ArrangeCanvas.h"
 #include "Commands.h"
+#include "ToolIcons.h"
 #include "Theme.h"
 #include "../model/Project.h"
 
@@ -2117,32 +2118,19 @@ void ArrangeCanvas::mouseMove (const juce::MouseEvent& e)
 {
     int trackIndex = -1;
     const auto region = regionAt (e.position, trackIndex);
-    auto newCursor = juce::MouseCursor::NormalCursor;
-
-    switch (timeline.tool)
-    {
-        case TimelineState::Tool::pencil:   newCursor = juce::MouseCursor::CrosshairCursor; break;
-        case TimelineState::Tool::eraser:   newCursor = region.isValid() ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor; break;
-        case TimelineState::Tool::scissors: newCursor = region.isValid() ? juce::MouseCursor::IBeamCursor : juce::MouseCursor::NormalCursor; break;
-        case TimelineState::Tool::glue:
-        case TimelineState::Tool::mute:     newCursor = region.isValid() ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor; break;
-        case TimelineState::Tool::fade:     newCursor = region.isValid() ? juce::MouseCursor::CrosshairCursor : juce::MouseCursor::NormalCursor; break;
-        case TimelineState::Tool::marquee:  newCursor = juce::MouseCursor::CrosshairCursor; break;
-        case TimelineState::Tool::zoom:     newCursor = juce::MouseCursor::PointingHandCursor; break;
-        case TimelineState::Tool::solo:     newCursor = region.isValid() ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor; break;
-        case TimelineState::Tool::text:     newCursor = region.isValid() ? juce::MouseCursor::IBeamCursor : juce::MouseCursor::NormalCursor; break;
-        case TimelineState::Tool::pointer:  break;
-    }
+    // The tool's own pointer (as in Logic); region edges with the Pointer or Pencil show what dragging there does.
+    auto newCursor = toolicons::cursor (timeline.tool);
+    juce::ignoreUnused (trackIndex);
 
     if (region.isValid() && (timeline.tool == TimelineState::Tool::pointer || timeline.tool == TimelineState::Tool::pencil))
     {
         switch (edgeActionAt (region, trackIndex, e.position))
         {
             case DragMode::trimStart:
-            case DragMode::trimEnd:  newCursor = juce::MouseCursor::LeftRightResizeCursor; break;
+            case DragMode::trimEnd:  newCursor = juce::MouseCursor (juce::MouseCursor::LeftRightResizeCursor); break;
             case DragMode::fadeIn:
-            case DragMode::fadeOut:  newCursor = juce::MouseCursor::CrosshairCursor; break;
-            case DragMode::loopEnd:  newCursor = juce::MouseCursor::UpDownLeftRightResizeCursor; break;
+            case DragMode::fadeOut:  newCursor = toolicons::cursor (TimelineState::Tool::fade); break;
+            case DragMode::loopEnd:  newCursor = juce::MouseCursor (juce::MouseCursor::UpDownLeftRightResizeCursor); break;
             default: break;
         }
     }

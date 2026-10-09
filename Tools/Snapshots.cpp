@@ -93,6 +93,9 @@ public:
         pump (main, 100);
         save (main, "mixer-narrow.png");
         main.mixer.narrowButton.setToggleState (false, juce::sendNotificationSync);
+        main.showMixer();
+        pump (main, 50);
+        main.mixer.narrowButton.setToggleState (false, juce::sendNotificationSync);
         pump (main, 50);
         if (auto* firstStrip = findById (main.mixer, "strip0"))
             save (*firstStrip, "strip.png", 3.0f);

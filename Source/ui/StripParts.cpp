@@ -10,7 +10,7 @@ PointerKnob::PointerKnob (juce::Colour pointerColour) : pointer (pointerColour)
 {
     setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
     setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
-    setRotaryParameters (juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f), true);
+    setRotaryParameters (juce::degreesToRadians (220.0f), juce::degreesToRadians (500.0f), true);   // (-140 to +140 degrees)
     setMouseDragSensitivity (200);
     setScrollWheelEnabled (false);
     setWantsKeyboardFocus (false);
@@ -121,6 +121,14 @@ DisplaySlider::DisplaySlider()
 
 void DisplaySlider::paint (juce::Graphics& g)
 {
+    if (asKnob)
+    {
+        const auto proportion = (float) valueToProportionOfLength (getValue());
+        look::drawNeonKnob (g, getLocalBounds().toFloat(), proportion, juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f),
+                            theme::knobBlack, true, isEnabled(), true);
+        return;
+    }
+
     const auto r = getLocalBounds().toFloat();
     g.setColour (look::isOnLight (*this) ? theme::stripInk : juce::Colour (0xffe9e6dc));
     g.setFont (juce::FontOptions (r.getHeight() * 0.56f));
