@@ -52,6 +52,12 @@ public:
     explicit MainComponent (bool openAudioDevice = true);
     ~MainComponent() override;
 
+    /** For the start-up scan: the plugin formats, the list of plugins found, and where a crash is noted. */
+    juce::AudioPluginFormatManager& getPluginFormats() noexcept { return rack.getFormatManager(); }
+    juce::KnownPluginList& getKnownPlugins() noexcept           { return rack.getKnownPlugins(); }
+    juce::File pluginScanCrashFile();
+    void saveKnownPlugins();
+
     /** Asks to save unsaved changes, then calls `then` unless the user cancels. */
     void confirmDiscardChanges (std::function<void()> then);
 
@@ -217,6 +223,7 @@ private:
     void selectTrackFromMixer (const juce::String& trackId, juce::ModifierKeys mods = {});
     void hideSelectedTracks();
     void toggleInspector();
+    void showCreateStackDialog();
     void showTrackColours();
     void moveByBars (int bars);
     void quantizeSelection();
@@ -283,6 +290,15 @@ private:
     IconButton mixerButton     { "Mixer",   IconButton::Icon::mixer,  juce::Colour (0xff5a9cff) };
     IconButton editorButton    { "Editor",  IconButton::Icon::pianoRoll, juce::Colour (0xff5a9cff) };
     IconButton keysButton      { "Keys",    IconButton::Icon::keys };
+    IconButton inspectorButton { "Inspector", IconButton::Icon::inspector, juce::Colour (0xff5a9cff) };
+    IconButton libraryButton   { "Library", IconButton::Icon::library, juce::Colour (0xff5a9cff) };
+    IconButton smartButton     { "Smart",   IconButton::Icon::smartControls, juce::Colour (0xff5a9cff) };
+
+    // View > Show / Hide (kept between sessions)
+    bool showControlBar = true, showToolbarRow = true, showStatusBar = true, showMeters = true, showTrackHeaders = true;
+    int barHeight() const;
+    void setPanelShown (const juce::String& key, bool& flag, bool shown);
+    void applyPanelVisibility();
     IconButton generateButton  { "Generate", IconButton::Icon::generate, juce::Colour (0xffd3ae55) };
     juce::ComboBox toolBox, snapBox, dragBox;   // Logic's tool, Snap and Drag menus
     IconButton screenButton    { "Screen",  IconButton::Icon::screen, juce::Colour (0xffd8352d) };

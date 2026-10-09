@@ -283,6 +283,11 @@ namespace riff::model
     // --- Buses and sends --------------------------------------------------------
     bool isBusTrack (const juce::ValueTree& track);
 
+    /** Logic's channel format: a mono channel plays (and records) one channel, panned; stereo plays both.
+        Unset means stereo. Switching also sets the input to a mono input or a stereo pair. */
+    bool isStereoChannel (const juce::ValueTree& track);
+    void setStereoChannel (juce::ValueTree track, bool stereo, juce::UndoManager* um);
+
     // --- Groups, VCAs, outputs, stacks, freeze ------------------------------------
     inline bool isVcaTrack (const juce::ValueTree& track) { return track[ids::kind].toString() == vcaKind; }
 

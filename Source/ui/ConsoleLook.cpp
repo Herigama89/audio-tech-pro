@@ -632,6 +632,35 @@ void IconButton::drawIcon (juce::Graphics& g, Icon icon, juce::Rectangle<float> 
             break;
         }
 
+        case Icon::inspector:
+        {
+            // A window with its left column filled (Logic's Inspector key).
+            const auto b = r.reduced (r.getWidth() * 0.02f);
+            g.drawRoundedRectangle (b, 2.0f, juce::jmax (1.0f, r.getWidth() * 0.08f));
+            g.fillRect (b.withWidth (b.getWidth() * 0.34f).reduced (1.0f));
+            return;
+        }
+
+        case Icon::library:
+        {
+            // A window with its right column filled (Logic's Library key).
+            const auto b = r.reduced (r.getWidth() * 0.02f);
+            g.drawRoundedRectangle (b, 2.0f, juce::jmax (1.0f, r.getWidth() * 0.08f));
+            g.fillRect (b.withTrimmedLeft (b.getWidth() * 0.66f).reduced (1.0f));
+            return;
+        }
+
+        case Icon::smartControls:
+        {
+            // Three knobs in a row along the bottom of a window.
+            const auto b = r.reduced (r.getWidth() * 0.02f);
+            g.drawRoundedRectangle (b, 2.0f, juce::jmax (1.0f, r.getWidth() * 0.08f));
+            const auto d = b.getWidth() * 0.2f;
+            for (int i = 0; i < 3; ++i)
+                g.fillEllipse (b.getX() + b.getWidth() * (0.2f + 0.3f * (float) i) - d * 0.5f, b.getBottom() - d * 1.5f, d, d);
+            return;
+        }
+
         case Icon::keys:
         {
             const auto b = r.reduced (r.getWidth() * 0.02f);

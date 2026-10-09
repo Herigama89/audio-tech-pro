@@ -66,8 +66,16 @@ const std::vector<Info>& all()
         { openMixerWindow,        "Open Mixer Window",          "View",      "The mixer in a window of its own (resize it, put it on another screen)" },
         { openEditorWindow,       "Open Editor Window",         "View",      "The piano roll (and the other region editors) in a window of its own" },
         { themeSettings,          "Theme...",                   "View",      "The skin (studio grey or flat dark) and its colours: hue, lightness, contrast, text, accent, meters, grid" },
+        { toggleControlBar,       "Show Control Bar",           "View",      "The bar along the top (display, transport, tools): show or hide it" },
+        { toggleToolbar,          "Show Toolbar",               "View",      "The second row of the control bar (transport, tools and view keys)" },
+        { toggleStatusBar,        "Show Status Bar",            "View",      "The line of hints along the bottom" },
+        { toggleMeters,           "Show Input and Output Meters", "View",    "The meters to the right of the tracks" },
+        { toggleTrackHeaders,     "Show Track Headers",         "View",      "The track names, buttons and faders at the left of the tracks" },
+        { showAllPanels,          "Show All Panels",            "View",      "Inspector, control bar, toolbar, Smart Controls, meters and the status bar" },
+        { hideAllPanels,          "Hide All Panels",            "View",      "Just the tracks: every panel around them hidden" },
         { liveLoops,              "Live Loops",                 "View",      "A grid of loops per track: start and stop cells and scenes in time, on the next bar" },
         { newKeysPlayerTrack,     "New Keyboard Player Track",  "Track",     "A session keyboard player playing chords in the song's key" },
+        { createTrackStack,       "Create Track Stack...",      "Track",     "Put the selected tracks in a stack: a folder stack (one fader on top of theirs) or a summing stack (they play into a bus)" },
         { createFolderStack,      "Create Folder Stack",        "Track",     "Put the selected tracks in a folder stack: one fader, mute and solo for them all" },
         { createSummingStack,     "Create Summing Stack",       "Track",     "Put the selected tracks in a summing stack: they play into one aux bus" },
         { freezeTracks,           "Freeze Track",               "Track",     "Render the selected tracks with their instrument and plugins to audio, to save processing (again to unfreeze)" },
@@ -232,7 +240,7 @@ namespace
             case repeatRegions:          return { key ('r', cmd) };
             case joinRegions:            return { key ('j', cmd) };
             case duplicateTrack:         return { key ('d', cmd) };
-            case createFolderStack:      return { key ('d', shift | cmd) };
+            case createTrackStack:       return { key ('d', shift | cmd) };
             case nudgeLeft:              return { key (KeyPress::leftKey, opt) };
             case nudgeRight:             return { key (KeyPress::rightKey, opt) };
             case toolMenu:               return { key ('t') };

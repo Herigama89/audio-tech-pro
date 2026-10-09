@@ -571,6 +571,44 @@ void MainComponent::handleIncomingMidi()
                 if (! automation.move (trackId, model::panParam, pan))
                     track.setProperty (ids::pan, pan, nullptr);
             }
+            else if (param.startsWith ("send:"))
+            {
+                // A send's level, on the fader's curve.
+                const auto sends = model::sendsOf (model::findChain (project, trackId));
+                const auto index = param.fromFirstOccurrenceOf (":", false, false).getIntValue();
+                if (juce::isPositiveAndBelow (index, sends.size()))
+                {
+                    juce::NormalisableRange<double> range (-60.0, 6.0);
+                    range.setSkewForCentre (-12.0);
+                    const auto db = range.convertFrom0to1 (value / 127.0);
+                    sends[index].setProperty (ids::level, db <= -59.9 ? 0.0 : juce::Decibels::decibelsToGain (db), nullptr);
+                }
+            }
+            else if (param.startsWith ("insert:"))
+            {
+                // A built-in effect's knob, or a plugin's parameter (any format).
+                const auto parts = juce::StringArray::fromTokens (param, ":", {});
+                const auto amount = value / 127.0;
+                if (parts.size() == 3 && parts[2].startsWith ("#"))
+                {
+                    if (auto* plugin = effectRack.getPlugin (parts[1]))
+                    {
+                        const auto index = parts[2].substring (1).getIntValue();
+                        if (juce::isPositiveAndBelow (index, plugin->getParameters().size())
+                            && ! automation.move (trackId, param, amount))
+                            plugin->getParameters()[index]->setValueNotifyingHost ((float) amount);
+                    }
+                }
+                else if (parts.size() == 3)
+                {
+                    const auto range = model::rangeOf (project, param);
+                    const auto v = range.min + amount * (range.max - range.min);
+                    if (! automation.move (trackId, param, v))
+                        for (const auto& chain : model::mixerOf (project))
+                            if (auto insert = chain.getChildWithProperty (ids::id, parts[1]); insert.isValid())
+                                insert.setProperty (juce::Identifier (parts[2]), v, nullptr);
+                }
+            }
             else if (param == "mute" || param == "solo")
             {
                 // A button: each press toggles.

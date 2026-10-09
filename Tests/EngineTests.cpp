@@ -2036,3 +2036,49 @@ TEST_CASE ("Compressors and limiters report their gain reduction for the strip's
         CHECK (fx->takeGainReductionDb() == 0.0f);  // taken
     }
 }
+
+TEST_CASE ("A mono channel sums both sides of a stereo file", "[engine]")
+{
+    Fixture f;
+    // A stereo file: 0.5 on the left, 0.1 on the right.
+    const auto file = f.temp.dir.getChildFile ("stereo.wav");
+    {
+        juce::AudioBuffer<float> buffer (2, 96000);
+        for (int i = 0; i < buffer.getNumSamples(); ++i)
+        {
+            buffer.setSample (0, i, 0.5f);
+            buffer.setSample (1, i, 0.1f);
+        }
+        std::unique_ptr<juce::OutputStream> out = std::make_unique<juce::FileOutputStream> (file);
+        juce::WavAudioFormat wav;
+        auto writer = wav.createWriterFor (out, juce::AudioFormatWriterOptions{}.withSampleRate (48000.0).withNumChannels (2).withBitsPerSample (24));
+        REQUIRE (writer != nullptr);
+        writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples());
+    }
+
+    auto a = model::addTrack (f.project, "A", nullptr);
+    model::addRegion (a, file, 0.0, 2.0, nullptr);
+    CHECK (model::isStereoChannel (a));   // stereo unless you say otherwise
+
+    f.player.setProject (f.project);
+    f.engine.play();
+    renderLeft (f.engine, 4800);
+    {
+        juce::AudioBuffer<float> out (2, 256);
+        f.engine.render (nullptr, 0, out.getArrayOfWritePointers(), 2, 256);
+        CHECK_THAT (out.getSample (0, 100), WithinAbs (0.5f * 0.8f, 1e-3));
+        CHECK_THAT (out.getSample (1, 100), WithinAbs (0.1f * 0.8f, 1e-3));
+    }
+
+    model::setStereoChannel (a, false, nullptr);
+    CHECK_FALSE (model::isStereoChannel (a));
+    CHECK_FALSE ((bool) a[ids::inputStereo]);
+    f.player.rebuildNow();
+    renderLeft (f.engine, 4800);
+    {
+        juce::AudioBuffer<float> out (2, 256);
+        f.engine.render (nullptr, 0, out.getArrayOfWritePointers(), 2, 256);
+        CHECK_THAT (out.getSample (0, 100), WithinAbs (0.3f * 0.8f, 1e-3));
+        CHECK_THAT (out.getSample (1, 100), WithinAbs (0.3f * 0.8f, 1e-3));
+    }
+}

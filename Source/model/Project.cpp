@@ -1741,6 +1741,24 @@ bool isBusTrack (const juce::ValueTree& track)
     return track[ids::kind].toString() == busKind;
 }
 
+bool isStereoChannel (const juce::ValueTree& track)
+{
+    return track.getProperty (ids::channelFormat, "stereo").toString() != "mono";
+}
+
+void setStereoChannel (juce::ValueTree track, bool stereo, juce::UndoManager* um)
+{
+    if (! track.isValid() || isVcaTrack (track))
+        return;
+    track.setProperty (ids::channelFormat, stereo ? "stereo" : "mono", um);
+    if (track[ids::kind].toString() == audioKind || track[ids::kind].toString().isEmpty())
+    {
+        track.setProperty (ids::inputStereo, stereo, um);
+        if (stereo)   // a stereo pair starts on an odd input (1-2, 3-4...)
+            track.setProperty (ids::input, ((int) track.getProperty (ids::input, 0) / 2) * 2, um);
+    }
+}
+
 juce::Array<juce::ValueTree> groupMembers (const juce::ValueTree& project, const juce::ValueTree& track)
 {
     const int group = track.getProperty (ids::group, 0);

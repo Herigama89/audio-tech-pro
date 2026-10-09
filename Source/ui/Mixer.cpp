@@ -1,6 +1,7 @@
 #include "Mixer.h"
 #include "Skin.h"
 #include "RoutingMenu.h"
+#include "ControlMenu.h"
 #include "Theme.h"
 #include "../model/Project.h"
 #include "../engine/BuiltInEffects.h"
@@ -121,19 +122,39 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         panKnob.onDragStart = [this]
         {
             owner.getUndoManager().beginNewTransaction ("Pan");
+            // The other selected channels' pans move by the same amount (as in Logic).
+            panStart.clear();
+            panDragStart = panKnob.getValue();
+            for (const auto& other : acting())
+                if (other != track)
+                    panStart[other[ids::id].toString()] = (double) other.getProperty (ids::pan, 0.0);
             if (auto* w = AutomationWriter::current())
                 w->begin (track[ids::id].toString(), model::panParam, panKnob.getValue());
         };
         panKnob.onDragEnd = [this]
         {
+            panStart.clear();
             if (auto* w = AutomationWriter::current())
                 w->end (track[ids::id].toString(), model::panParam);
         };
         panKnob.onValueChange = [this]
         {
+            const auto delta = panKnob.getValue() - panDragStart;
+            for (const auto& [id, start] : panStart)
+                if (auto other = model::findById (project, id); other.isValid())
+                    other.setProperty (ids::pan, juce::jlimit (-1.0, 1.0, start + delta), &owner.getUndoManager());
             if (auto* w = AutomationWriter::current(); w != nullptr && w->move (track[ids::id].toString(), model::panParam, panKnob.getValue()))
                 return;   // written as automation
             track.setProperty (ids::pan, panKnob.getValue(), &owner.getUndoManager());
+        };
+        panKnob.onRightClick = [this] (const juce::MouseEvent&)
+        {
+            showControlMenu (panKnob, model::panParam, "Pan", [this]
+            {
+                owner.getUndoManager().beginNewTransaction ("Pan");
+                for (auto t2 : acting())
+                    t2.setProperty (ids::pan, 0.0, &owner.getUndoManager());
+            });
         };
         addAndMakeVisible (panKnob);
         panKnob.setVisible (! isVca());
@@ -172,6 +193,12 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     outputSlot.setTooltip ("Output: where this channel goes (the Stereo Out, or a bus)");
     inputSlot.onClick = [this] { showInputMenu(); };
 
+    formatButton.setTooltip ("Channel format: mono (one circle) or stereo (two). Click to switch.");
+    formatButton.setWantsKeyboardFocus (false);
+    formatButton.onClick = [this] { toggleFormat(); };
+    addChildComponent (formatButton);
+    formatButton.setVisible (! isMaster() && ! isVca());
+
     look::key (settingSlot, look::Key::console);
     settingSlot.setWantsKeyboardFocus (false);
     settingSlot.setTooltip ("Setting: copy, paste or reset this channel strip; save it as a patch or load one");
@@ -182,7 +209,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     inputSlot.setVisible (! isMaster() && ! isVca());
     outputSlot.setVisible (! isVca());
 
-    for (int i = 0; i < numSlots; ++i)
+    for (int i = 0; i < maxInserts; ++i)
     {
         auto* b = slots.add (new juce::TextButton());
         look::key (*b, look::Key::slot);
@@ -194,7 +221,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         b->setVisible (! isVca());
     }
 
-    for (int i = 0; i < numSends; ++i)
+    for (int i = 0; i < maxSends; ++i)
     {
         auto* b = sendButtons.add (new juce::TextButton());
         look::key (*b, look::Key::slot);
@@ -205,20 +232,56 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         addAndMakeVisible (b);
         b->setVisible (hasSends());
 
-        auto* s = sendLevels.add (new juce::Slider());
-        look::knob (*s, look::Knob::black, false);
+        // Logic's send knob: a ring that lights up to the level, beside the bus's name.
+        auto* s = sendLevels.add (new strip::PointerKnob (theme::neon));
         look::onLight (*s);
+        s->useSkin (skin::knobBlack(), juce::Colours::white);
         s->setRange (minDb, 6.0, 0.1);
         s->setSkewFactorFromMidPoint (-12.0);
         s->setDoubleClickReturnValue (true, 0.0);
-        s->setScrollWheelEnabled (false);
         s->setPopupDisplayEnabled (true, true, nullptr);
+        s->setTooltip ("Send level: drag up or down; Option-click for 0 dB. Right-click for more.");
         s->textFromValueFunction = [] (double db) { return db <= minDb + 0.01 ? juce::String ("-inf dB") : juce::String (db, 1) + " dB"; };
-        s->onDragStart = [this] { owner.getUndoManager().beginNewTransaction ("Send level"); };
+        s->onDragStart = [this, i, s]
+        {
+            owner.getUndoManager().beginNewTransaction ("Send level");
+            // The same send on the other selected channels follows (by the same amount).
+            sendStart.clear();
+            sendDragStart = s->getValue();
+            for (const auto& other : acting())
+                if (other != track)
+                {
+                    const auto sends = model::sendsOf (model::findChain (project, other[ids::id].toString()));
+                    if (juce::isPositiveAndBelow (i, sends.size()))
+                        sendStart[other[ids::id].toString()] = gainToDb ((double) sends[i].getProperty (ids::level, 0.0));
+                }
+        };
+        s->onDragEnd = [this] { sendStart.clear(); };
         s->onValueChange = [this, i, s]
         {
+            auto& um = owner.getUndoManager();
             if (auto send = sendAt (i); send.isValid())
-                send.setProperty (ids::level, dbToGain (s->getValue()), &owner.getUndoManager());
+                send.setProperty (ids::level, dbToGain (s->getValue()), &um);
+            const auto delta = s->getValue() - sendDragStart;
+            for (const auto& [id, startDb] : sendStart)
+            {
+                const auto sends = model::sendsOf (model::findChain (project, id));
+                if (juce::isPositiveAndBelow (i, sends.size()))
+                    sends[i].setProperty (ids::level, dbToGain (juce::jlimit (minDb, 6.0, startDb + delta)), &um);
+            }
+        };
+        s->onRightClick = [this, i, s] (const juce::MouseEvent&)
+        {
+            showControlMenu (*s, {}, "Send " + juce::String (i + 1) + " level", [this, i]
+            {
+                owner.getUndoManager().beginNewTransaction ("Send level");
+                for (const auto& t : acting())
+                {
+                    const auto sends = model::sendsOf (model::findChain (project, t[ids::id].toString()));
+                    if (juce::isPositiveAndBelow (i, sends.size()))
+                        sends[i].setProperty (ids::level, 1.0, &owner.getUndoManager());
+                }
+            }, "send:" + juce::String (i));
         };
         addAndMakeVisible (s);
         s->setVisible (hasSends());
@@ -243,6 +306,27 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
 
         if (auto* w = AutomationWriter::current(); w != nullptr && ! isMaster())
             w->begin (track[ids::id].toString(), model::volumeParam, dbToGain (fader.getValue()));
+    };
+    fader.onRightClick = [this] (const juce::MouseEvent&)
+    {
+        if (isMaster())
+        {
+            juce::PopupMenu menu;
+            menu.addSectionHeader ("Master volume");
+            menu.addItem ("Set to Default", [this]
+            {
+                owner.getUndoManager().beginNewTransaction ("Master volume");
+                project.setProperty (ids::masterGain, 1.0, &owner.getUndoManager());
+            });
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&fader).withMousePosition());
+            return;
+        }
+        showControlMenu (fader, model::volumeParam, "Volume", [this]
+        {
+            owner.getUndoManager().beginNewTransaction ("Volume");
+            for (auto t2 : routing::linkedTracks (project, track, selected ? owner.getSelectedTrackIds() : juce::StringArray(), "Volume"))
+                t2.setProperty (ids::volume, 1.0, &owner.getUndoManager());
+        });
     };
     fader.onDragEnd = [this]
     {
@@ -345,7 +429,30 @@ void ChannelStrip::setupConsoleKnob (juce::Slider& knob, const juce::Identifier&
             track.setProperty (property, knob.getValue(), &owner.getUndoManager());
         }
     };
-    knob.addMouseListener (this, false);   // right-click: the console menu
+    if (auto* drag = dynamic_cast<strip::DragSlider*> (&knob))
+        drag->onRightClick = [this, &knob, property, name, control] (const juce::MouseEvent&)
+        {
+            controlmenu::Target t;
+            t.project = project;
+            t.owner = track[ids::id].toString();
+            t.name = name;
+            t.learnParam = "-";
+            t.um = &owner.getUndoManager();
+            if (! pluginMode)
+                t.reset = [this, property, name]
+                {
+                    owner.getUndoManager().beginNewTransaction (name);
+                    for (auto t2 : acting())
+                        t2.setProperty (property, 0.0, &owner.getUndoManager());
+                };
+            t.extra = [this] (juce::PopupMenu& m)
+            {
+                m.addSeparator();
+                m.addItem ("Channel Strip Options...", [this] { showConsoleMenu(); });
+            };
+            juce::ignoreUnused (control);
+            controlmenu::show (knob, t);
+        };
     addAndMakeVisible (knob);
 }
 
@@ -588,6 +695,8 @@ void ChannelStrip::mouseDown (const juce::MouseEvent& e)
     // Right-click anywhere in the console section (knobs, lamps, the metal around them).
     if (! e.mods.isPopupMenu() || isMaster())
         return;
+    if (auto* drag = dynamic_cast<strip::DragSlider*> (e.eventComponent); drag != nullptr && drag->onRightClick)
+        return;   // faders and knobs have their own menu
 
     const auto inConsole = e.eventComponent == this ? e.y < topSection()
                                                     : e.eventComponent->getY() < topSection() && e.eventComponent->getParentComponent() == this;
@@ -626,6 +735,76 @@ juce::Rectangle<int> ChannelStrip::fromArt (float x, float y, float w, float h) 
     return juce::Rectangle<float> (x, y, w, h).transformedBy (juce::AffineTransform::scale (artScale)).getSmallestIntegerContainer();
 }
 
+//==============================================================================
+int ChannelStrip::insertRows() const { return owner.insertRows(); }
+int ChannelStrip::sendRows() const   { return owner.sendRows(); }
+
+juce::Array<juce::ValueTree> ChannelStrip::acting() const
+{
+    if (isMaster())
+        return {};
+    return routing::actingTracks (project, track, selected ? owner.getSelectedTrackIds() : juce::StringArray());
+}
+
+bool ChannelStrip::isStereo() const
+{
+    return model::isStereoChannel (track);
+}
+
+void ChannelStrip::toggleFormat()
+{
+    auto& um = owner.getUndoManager();
+    um.beginNewTransaction ("Channel format");
+    const bool toStereo = ! isStereo();
+    for (auto t : acting())
+        model::setStereoChannel (t, toStereo, &um);
+}
+
+void ChannelStrip::FormatButton::paintButton (juce::Graphics& g, bool over, bool down)
+{
+    // Logic's icon: one ring for a mono channel, two overlapping rings for stereo.
+    const auto r = getLocalBounds().toFloat().reduced (1.0f);
+    g.setColour (juce::Colours::black.withAlpha (down ? 0.45f : over ? 0.25f : 0.35f));
+    g.fillRoundedRectangle (r, 2.5f);
+    g.setColour (juce::Colour (0xffd8dde3));
+    const auto d = juce::jmin (r.getWidth(), r.getHeight()) * 0.52f;
+    const auto c = r.getCentre();
+    if (stereo)
+    {
+        g.drawEllipse (juce::Rectangle<float> (d, d).withCentre (c.translated (-d * 0.28f, 0.0f)), 1.2f);
+        g.drawEllipse (juce::Rectangle<float> (d, d).withCentre (c.translated (d * 0.28f, 0.0f)), 1.2f);
+    }
+    else
+        g.drawEllipse (juce::Rectangle<float> (d, d).withCentre (c), 1.2f);
+}
+
+void ChannelStrip::showControlMenu (juce::Slider& control, const juce::String& param, const juce::String& name,
+                                    std::function<void()> reset, const juce::String& learn)
+{
+    controlmenu::Target t;
+    t.project = project;
+    t.owner = track[ids::id].toString();
+    t.param = param;
+    t.name = name;
+    t.learnParam = learn;
+    t.um = &owner.getUndoManager();
+    t.reset = std::move (reset);
+    if (param == model::volumeParam)
+        t.value = [this] { return dbToGain (fader.getValue()); };
+    else if (param == model::panParam)
+        t.value = [this] { return panKnob.getValue(); };
+    if (param == model::volumeParam)
+        t.extra = [this] (juce::PopupMenu& m)
+        {
+            // The channel's routing, as on a right-click below the console section.
+            juce::PopupMenu routingMenu;
+            routing::addRoutingItems (routingMenu, project, track, owner.getUndoManager());
+            m.addSeparator();
+            m.addSubMenu ("Routing, Groups and Stacks", routingMenu);
+        };
+    controlmenu::show (control, t);
+}
+
 juce::String ChannelStrip::getOwnerId() const
 {
     return isMaster() ? model::masterOwner : track[ids::id].toString();
@@ -656,13 +835,23 @@ void ChannelStrip::showSendMenu (int index)
     auto proj = project;
 
     // Point the send at a bus (creating the send if this slot is empty).
-    auto setTarget = [&um, proj, ownerId, send] (const juce::String& busId) mutable
+    // Every selected channel gets the same send (as in Logic); a bus never sends to itself.
+    juce::StringArray owners;
+    for (const auto& t : acting())
+        if (! model::isBusTrack (t))
+            owners.add (t[ids::id].toString());
+    owners.addIfNotAlreadyThere (ownerId);
+    auto setTarget = [&um, proj, owners, index] (const juce::String& busId) mutable
     {
         um.beginNewTransaction ("Send");
-        if (send.isValid())
-            send.setProperty (ids::target, busId, &um);
-        else
-            model::addSend (model::chainFor (proj, ownerId), busId, juce::Decibels::decibelsToGain (-6.0), &um);
+        for (const auto& id : owners)
+        {
+            const auto sends = model::sendsOf (model::findChain (proj, id));
+            if (juce::isPositiveAndBelow (index, sends.size()))
+                sends[index].setProperty (ids::target, busId, &um);
+            else
+                model::addSend (model::chainFor (proj, id), busId, juce::Decibels::decibelsToGain (-6.0), &um);
+        }
     };
 
     juce::PopupMenu menu;
@@ -786,7 +975,23 @@ void ChannelStrip::refresh()
         soloButton.setToggleState ((bool) track[ids::solo], juce::dontSendNotification);
     }
 
-    for (int i = 0; i < numSends && hasSends(); ++i)
+    // Sends and insert slots: as many as the mixer shows now (more appear as they fill up).
+    for (int i = 0; i < maxSends; ++i)
+    {
+        const bool shown = hasSends() && i < sendRows();
+        sendButtons[i]->setVisible (shown);
+        sendLevels[i]->setVisible (shown);
+    }
+    for (int i = 0; i < maxInserts; ++i)
+        slots[i]->setVisible (! isVca() && i < insertRows());
+
+    if (! isMaster() && ! isVca())
+    {
+        formatButton.stereo = isStereo();
+        formatButton.repaint();
+    }
+
+    for (int i = 0; i < sendRows() && hasSends(); ++i)
     {
         const auto send = sendAt (i);
         const auto bus = model::findById (project, send[ids::target].toString());
@@ -798,7 +1003,7 @@ void ChannelStrip::refresh()
         sendLevels[i]->setValue (gainToDb (send.getProperty (ids::level, 0.0)), juce::dontSendNotification);
     }
 
-    for (int i = 0; i < numSlots; ++i)
+    for (int i = 0; i < insertRows(); ++i)
     {
         const auto insert = insertAt (i);
         auto* b = slots[i];
@@ -851,10 +1056,17 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
     auto& um = owner.getUndoManager();
     juce::PopupMenu menu;
     menu.addItem ("Open", [this, insert] { if (owner.onOpenInsert) owner.onOpenInsert (insert); });
-    menu.addItem ("Bypass", true, (bool) insert[ids::bypass], [insert, &um]() mutable
+    // Bypass and Remove act on this slot of every selected channel.
+    juce::Array<juce::ValueTree> same { insert };
+    if (! isMaster())
+        for (const auto& t : acting())
+            if (auto other = model::insertAtSlot (model::findChain (project, t[ids::id].toString()), index); other.isValid())
+                same.addIfNotAlreadyThere (other);
+    menu.addItem ("Bypass", true, (bool) insert[ids::bypass], [same, &um, value = ! (bool) insert[ids::bypass]]() mutable
     {
         um.beginNewTransaction ("Bypass");
-        insert.setProperty (ids::bypass, ! (bool) insert[ids::bypass], &um);
+        for (auto& i : same)
+            i.setProperty (ids::bypass, value, &um);
     });
     menu.addItem ("Replace...", [this, ownerId, index, insert, button]
     {
@@ -862,10 +1074,11 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
             owner.onChooseEffect (ownerId, index, insert, *button);
     });
     menu.addSeparator();
-    menu.addItem ("Remove", [insert, &um]
+    menu.addItem (same.size() > 1 ? "Remove (" + juce::String (same.size()) + " channels)" : juce::String ("Remove"), [same, &um]
     {
         um.beginNewTransaction ("Remove effect");
-        model::removeInsert (insert, &um);
+        for (const auto& i : same)
+            model::removeInsert (i, &um);
     });
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (button));
 }
@@ -873,7 +1086,7 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
 juce::Rectangle<int> ChannelStrip::faderArea() const
 {
     // Below the sends, above the level display and the name plate.
-    const auto top = topSection() + 6 + 2 * ioRow + numSlots * 17 + 6 + numSends * 18 + ioRow + 4 + automationRow;
+    const auto top = topSection() + 6 + 2 * ioRow + insertRows() * insertRowHeight + 6 + sendRows() * sendRowHeight + ioRow + 4 + automationRow;
     return { 0, top, getWidth(), getHeight() - nameHeight - 22 - top };
 }
 
@@ -1109,10 +1322,16 @@ void ChannelStrip::showInputMenu()
     menu.addSectionHeader ("Input");
     if (names.isEmpty())
         menu.addItem ("No inputs. Check Audio settings.", false, false, [] {});
-    auto setInput = [t = track] (int channel, bool isStereo) mutable
+    auto setInput = [targets = acting()] (int channel, bool isStereo) mutable
     {
-        t.setProperty (ids::input, channel, nullptr);
-        t.setProperty (ids::inputStereo, isStereo, nullptr);
+        // Every selected audio channel takes the same input (Logic steps them along when asked; here they share it).
+        for (auto& t : targets)
+            if (! model::isBusTrack (t) && ! model::isInstrumentTrack (t))
+            {
+                t.setProperty (ids::input, channel, nullptr);
+                t.setProperty (ids::inputStereo, isStereo, nullptr);
+                t.setProperty (ids::channelFormat, isStereo ? "stereo" : "mono", nullptr);
+            }
     };
     juce::PopupMenu mono, both;
     for (int i = 0; i < names.size(); ++i)
@@ -1131,29 +1350,37 @@ void ChannelStrip::showOutputMenu()
 
     auto& um = owner.getUndoManager();
     const auto current = track[ids::output].toString();
-    juce::PopupMenu menu;
-    menu.addSectionHeader ("Output");
-    menu.addItem ("Stereo Out", true, current.isEmpty(), [t = track, &um]() mutable
+    juce::Array<juce::ValueTree> targets;
+    for (const auto& t : acting())
+        if (! model::isBusTrack (t))
+            targets.add (t);   // every selected channel goes to the same place (as in Logic)
+    auto setOutput = [targets, &um] (const juce::String& id) mutable
     {
         um.beginNewTransaction ("Output");
-        t.removeProperty (ids::output, &um);
-    });
+        for (auto& t : targets)
+        {
+            if (id.isEmpty())
+                t.removeProperty (ids::output, &um);
+            else
+                t.setProperty (ids::output, id, &um);
+        }
+    };
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Output");
+    menu.addItem ("Stereo Out", true, current.isEmpty(), [setOutput]() mutable { setOutput ({}); });
     for (const auto& bus : project)
         if (bus.hasType (ids::TRACK) && model::isBusTrack (bus))
-            menu.addItem (bus[ids::name].toString(), true, current == bus[ids::id].toString(), [t = track, id = bus[ids::id].toString(), &um]() mutable
-            {
-                um.beginNewTransaction ("Output");
-                t.setProperty (ids::output, id, &um);
-            });
+            menu.addItem (bus[ids::name].toString(), true, current == bus[ids::id].toString(),
+                          [setOutput, id = bus[ids::id].toString()]() mutable { setOutput (id); });
     menu.addSeparator();
-    menu.addItem ("New Bus", [proj = project, t = track, &um]() mutable
+    menu.addItem ("New Bus", [proj = project, setOutput, &um]() mutable
     {
-        um.beginNewTransaction ("Output to a new bus");
         int buses = 0;
         for (const auto& c : proj)
             buses += (c.hasType (ids::TRACK) && model::isBusTrack (c)) ? 1 : 0;
+        um.beginNewTransaction ("Output to a new bus");
         const auto bus = model::addTrack (proj, "Bus " + juce::String (buses + 1), &um, -1, model::busKind);
-        t.setProperty (ids::output, bus[ids::id].toString(), &um);
+        setOutput (bus[ids::id].toString());
     });
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&outputSlot));
 }
@@ -1227,24 +1454,36 @@ void ChannelStrip::resized()
 
     settingSlot.setBounds (area.removeFromTop (15));
     area.removeFromTop (2);
-    inputSlot.setBounds (area.removeFromTop (15));
-    area.removeFromTop (2);
-    for (auto* b : slots)
     {
-        b->setBounds (area.removeFromTop (15));
-        area.removeFromTop (2);
+        auto row = area.removeFromTop (15);
+        if (formatButton.isVisible())
+        {
+            formatButton.setBounds (row.removeFromLeft (15));   // mono / stereo, left of the Input slot (as in Logic)
+            row.removeFromLeft (2);
+        }
+        inputSlot.setBounds (row);
+    }
+    area.removeFromTop (2);
+    for (int i = 0; i < slots.size(); ++i)
+    {
+        if (i < insertRows())
+            slots[i]->setBounds (area.removeFromTop (insertRowHeight - 2));
+        else
+            slots[i]->setBounds ({});
+        area.removeFromTop (i < insertRows() ? 2 : 0);
     }
 
     area.removeFromTop (4);
 
-    for (int i = 0; i < numSends; ++i)
+    for (int i = 0; i < sendRows(); ++i)
     {
-        auto row = area.removeFromTop (16);
+        auto row = area.removeFromTop (sendRowHeight - 2);
         if (hasSends())
         {
-            sendLevels[i]->setBounds (row.removeFromRight (16));
-            row.removeFromRight (1);
-            sendButtons[i]->setBounds (row);
+            // Logic's send: the bus name, and a knob the full height of the row beside it.
+            sendLevels[i]->setBounds (row.removeFromRight (row.getHeight() + 1));
+            row.removeFromRight (2);
+            sendButtons[i]->setBounds (row.withSizeKeepingCentre (row.getWidth(), 16));
         }
         area.removeFromTop (2);
     }
@@ -1594,7 +1833,33 @@ void MixerPanel::setProject (juce::ValueTree newProject)
     consoleButton.setToggleState (showsConsole(), juce::dontSendNotification);
     busCompButton.setToggleState (showsBusComp(), juce::dontSendNotification);
     refreshConsoleBox();
+    updateRows();
     rebuild();
+}
+
+std::pair<int, int> MixerPanel::rowsFor (const juce::ValueTree& project)
+{
+    // One empty insert slot below the lowest one used, and one empty send below the sends (as in Logic).
+    int inserts = ChannelStrip::defaultInserts, sends = ChannelStrip::defaultSends;
+    for (const auto& chain : project.getChildWithName (ids::MIXER))
+    {
+        if (! chain.hasType (ids::CHAIN) || chain[ids::owner].toString().startsWith ("strip:")
+            || chain[ids::owner].toString() == model::busCompOwner)
+            continue;
+        for (const auto& insert : model::insertsOf (chain))
+            inserts = juce::jmax (inserts, model::insertSlot (insert) + 2);
+        sends = juce::jmax (sends, model::sendsOf (chain).size() + 1);
+    }
+    return { juce::jmin (inserts, ChannelStrip::maxInserts), juce::jmin (sends, ChannelStrip::maxSends) };
+}
+
+bool MixerPanel::updateRows()
+{
+    const auto now = rowsFor (project);
+    if (now == rows)
+        return false;
+    rows = now;
+    return true;
 }
 
 float MixerPanel::stripScale() const
@@ -1648,6 +1913,18 @@ void MixerPanel::refreshConsoleBox()
 
 void MixerPanel::handleAsyncUpdate()
 {
+    // An insert went in the last slot (or a send in the last send): every strip gets another.
+    if (updateRows())
+    {
+        for (auto* s : strips)
+            s->refresh();
+        for (auto* s : extraStrips)
+            s->refresh();
+        relayoutStrips();
+        if (onLayoutChanged)
+            onLayoutChanged();
+    }
+
     busComp.refresh();
     consolePanel.refresh();
     refreshConsoleBox();
@@ -1854,7 +2131,7 @@ void MixerPanel::resized()
     // Narrow strips are the same strips, drawn smaller.
     const auto scale = stripScale();
     const auto stripW = (int) std::ceil (ChannelStrip::stripWidth * scale);
-    const auto minimumHeight = (int) std::ceil (ChannelStrip::minimumHeightFor (showsConsole()) * scale);
+    const auto minimumHeight = (int) std::ceil (stripMinimumHeight() * scale);
 
     // Everything scrolls up and down together if the pane is shorter than a strip.
     outer.setBounds (area);

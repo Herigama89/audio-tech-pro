@@ -16,7 +16,10 @@ namespace
     constexpr int cellWidth = 92, cellHeight = 84, headerHeight = 22, margin = 10, curveHeight = 200, optionsHeight = 26;
 
     // A classic console strip's colours: the panel, its print, and the knob caps.
-    const juce::Colour panelColour { 0xff8d9497 }, panelDark { 0xff6f7679 }, print { 0xff111315 };
+    // (The panel and its print follow the theme: the studio skin's console grey, or the flat skin's dark panel.)
+    juce::Colour panelColour() { return theme::imageSkin() ? theme::stripFace : theme::panel; }
+    juce::Colour headingBand() { return theme::imageSkin() ? theme::stripFace.darker (0.9f) : theme::toolbarDark; }
+    juce::Colour headingText() { return theme::imageSkin() ? juce::Colours::white : theme::accent.brighter (0.3f); }
     const juce::Colour capRed { 0xffc23b30 }, capGreen { 0xff3d8a4c }, capBlue { 0xff2f5ea3 }, capBrown { 0xff4a3426 },
                        capBlack { 0xff1e1f21 }, capGrey { 0xff9c9fa2 }, capWhite { 0xffe8e6df };
 
@@ -249,8 +252,10 @@ void ConsoleStripWindow::resized()
 
 void ConsoleStripWindow::paint (juce::Graphics& g)
 {
-    // A classic console strip's grey panel
-    g.fillAll (panelColour);
+    // A classic console strip's grey panel (or the flat skin's panel)
+    const auto print = theme::imageSkin() ? theme::stripInk : theme::text;
+    g.fillAll (panelColour());
+    if (theme::imageSkin())
     {
         juce::Random grain (7);
         for (int yy = 0; yy < getHeight(); yy += 2)
@@ -285,9 +290,9 @@ void ConsoleStripWindow::paint (juce::Graphics& g)
     // Section headings: white print on a dark band, as on the console
     for (const auto& s : sections)
     {
-        g.setColour (panelDark.darker (0.5f));
+        g.setColour (headingBand());
         g.fillRect (s.area.withTrimmedBottom (3));
-        g.setColour (juce::Colours::white);
+        g.setColour (headingText());
         g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
         g.drawText (s.name, s.area.withTrimmedBottom (3).withTrimmedLeft (6), juce::Justification::centredLeft, false);
     }
@@ -298,8 +303,8 @@ void ConsoleStripWindow::paint (juce::Graphics& g)
         const auto kb = c->knob->getBounds().toFloat();
         const auto centre = kb.getCentre();
         const auto radius = kb.getWidth() * 0.5f + 3.0f;
-        g.setColour (print.withAlpha (0.75f));
-        for (int i = 0; i <= 10; ++i)
+        g.setColour (print.withAlpha (theme::imageSkin() ? 0.75f : 0.0f));   // (the flat skin's knobs have their own ring)
+        for (int i = 0; i <= 10 && theme::imageSkin(); ++i)
         {
             const auto a = juce::degreesToRadians (-140.0f + 28.0f * (float) i);
             const auto len = (i == 0 || i == 5 || i == 10) ? 5.0f : 3.0f;

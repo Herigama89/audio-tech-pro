@@ -5,6 +5,22 @@
 namespace riff
 {
 
+/** A slider with a right-click menu (Logic's: automation, MIDI Learn, default) instead of a drag. */
+class MenuSlider : public juce::Slider
+{
+public:
+    std::function<void()> onMenu;
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        menuClick = e.mods.isPopupMenu() && onMenu != nullptr;
+        if (menuClick) onMenu(); else juce::Slider::mouseDown (e);
+    }
+    void mouseDrag (const juce::MouseEvent& e) override { if (! menuClick) juce::Slider::mouseDrag (e); }
+    void mouseUp (const juce::MouseEvent& e) override   { if (! std::exchange (menuClick, false)) juce::Slider::mouseUp (e); }
+private:
+    bool menuClick = false;
+};
+
 /** A floating window for a plugin's editor or the synth controls. */
 class EditorWindow final : public juce::DocumentWindow
 {
@@ -81,7 +97,7 @@ private:
     struct Knob
     {
         juce::String id;
-        juce::Slider slider;
+        MenuSlider slider;
         juce::Label label;
     };
 

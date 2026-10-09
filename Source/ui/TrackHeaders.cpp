@@ -6,6 +6,7 @@
 #include "../AppInfo.h"
 #include "../engine/AutomationWriter.h"
 #include "RoutingMenu.h"
+#include "ControlMenu.h"
 #include "TrackIcons.h"
 
 namespace riff
@@ -147,6 +148,23 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
             w->begin (track[ids::id].toString(), model::panParam, panKnob.getValue());
     };
     panKnob.onDragEnd = [this] { if (auto* w = AutomationWriter::current()) w->end (track[ids::id].toString(), model::panParam); };
+
+    // Right-click: Logic's control menu (automation, MIDI Learn, default).
+    auto controlMenu = [this] (juce::Slider& control, const juce::String& param, const juce::String& name, double resetValue)
+    {
+        controlmenu::Target t;
+        t.project = track.getParent();
+        t.owner = track[ids::id].toString();
+        t.param = param;
+        t.name = name;
+        t.um = &undoManager;
+        t.value = [this, param] { return param == model::volumeParam ? (double) track.getProperty (ids::volume, 1.0)
+                                                                     : (double) track.getProperty (ids::pan, 0.0); };
+        t.reset = [&control, resetValue] { control.setValue (resetValue, juce::sendNotificationSync); };
+        controlmenu::show (control, t);
+    };
+    volumeSlider.onRightClick = [this, controlMenu] (const juce::MouseEvent&) { controlMenu (volumeSlider, model::volumeParam, "Volume", 0.0); };
+    panKnob.onRightClick = [this, controlMenu] (const juce::MouseEvent&) { controlMenu (panKnob, model::panParam, "Pan", 0.0); };
     panKnob.onValueChange = [this]
     {
         if (auto* w = AutomationWriter::current(); w != nullptr && w->move (track[ids::id].toString(), model::panParam, panKnob.getValue()))

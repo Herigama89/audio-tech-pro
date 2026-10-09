@@ -52,19 +52,23 @@ public:
     /** The fader and pan show what the automation is doing at `time` (unless you're holding them). */
     void followAutomation (double time);
 
-    static constexpr int numSlots = 6;
-    static constexpr int numSends = 2;
+    /** Insert slots and sends: at least the defaults; when they fill up, more appear (as in Logic). */
+    static constexpr int defaultInserts = 6, maxInserts = 15, defaultSends = 2, maxSends = 8;
+    static constexpr int insertRowHeight = 17, sendRowHeight = 25;
     static constexpr int stripWidth = 74;
     static constexpr float artScale = (float) stripWidth / strip::artWidth;
     static constexpr int topHeight = (int) (strip::artHeight * artScale);   // the artwork's part
     static constexpr int nameHeight = 26;
     static constexpr int automationRow = 18;
     static constexpr int ioRow = 17;   // the Input slot (above the inserts) and the Output slot (below the sends)
-    static constexpr int minimumHeight = topHeight + 6 + 2 * ioRow + numSlots * 17 + 6 + numSends * 18 + ioRow + automationRow + 100 + 20 + nameHeight;
+    static constexpr int minimumHeightFor (bool console, int inserts, int sends)
+    {
+        return (console ? topHeight : compactTopHeight) + 6 + 2 * ioRow + inserts * insertRowHeight + 6 + sends * sendRowHeight
+             + ioRow + automationRow + 100 + 20 + nameHeight;
+    }
 
     /** Without the console section (EQ and Dynamics hidden, as in Logic): number, EQ/DYN tags, pan, mute and solo. */
     static constexpr int compactTopHeight = 92;
-    static int minimumHeightFor (bool console) { return minimumHeight - (console ? 0 : topHeight - compactTopHeight); }
 
     /** The height of the top section in the mode the mixer is in. */
     int topSection() const;
@@ -126,7 +130,28 @@ private:
 
     juce::OwnedArray<juce::TextButton> slots;
     juce::OwnedArray<juce::TextButton> sendButtons;
-    juce::OwnedArray<juce::Slider> sendLevels;
+    juce::OwnedArray<strip::PointerKnob> sendLevels;
+    std::map<juce::String, double> sendStart;   // the other selected tracks' send levels (dB) when a drag began
+    std::map<juce::String, double> panStart;
+    double panDragStart = 0.0, sendDragStart = 0.0;
+    int insertRows() const;
+    int sendRows() const;
+
+    /** Logic's channel format button: one circle for mono, two for stereo. */
+    struct FormatButton final : juce::Button
+    {
+        FormatButton() : juce::Button ("Format") {}
+        void paintButton (juce::Graphics&, bool over, bool down) override;
+        bool stereo = true;
+    };
+    FormatButton formatButton;
+    bool isStereo() const;
+    void toggleFormat();
+
+    /** The selected tracks an edit here goes to (this one alone if it isn't selected). */
+    juce::Array<juce::ValueTree> acting() const;
+    void showControlMenu (juce::Slider& control, const juce::String& param, const juce::String& name,
+                          std::function<void()> reset, const juce::String& learn = {});
     strip::Fader fader;
     LevelMeter meter { "" };
     juce::Label dbLabel;
@@ -220,6 +245,14 @@ public:
 
     const juce::StringArray& getSelectedTrackIds() const noexcept { return selectedTrackIds; }
 
+    /** How many insert slots and sends every strip shows: the defaults, or one more than the fullest strip uses. */
+    int insertRows() const noexcept { return rows.first; }
+    int sendRows() const noexcept { return rows.second; }
+    static std::pair<int, int> rowsFor (const juce::ValueTree& project);
+
+    /** The strips' height (unscaled) with the rows they show now. */
+    int stripMinimumHeight() const { return ChannelStrip::minimumHeightFor (showsConsole(), rows.first, rows.second); }
+
     /** Highlights the selected tracks' strips and scrolls the main one into view. */
     void setSelectedTracks (const juce::StringArray& trackIds, const juce::String& mainTrackId);
 
@@ -285,6 +318,8 @@ private:
     MasterBusCompressorPanel busComp;
     BusCompConsolePanel consolePanel;
     bool needsRebuild = false;
+    std::pair<int, int> rows { ChannelStrip::defaultInserts, ChannelStrip::defaultSends };
+    bool updateRows();
     juce::String selectedTrackId;
     juce::StringArray selectedTrackIds;
     juce::Array<ChannelStrip*> extraStrips;

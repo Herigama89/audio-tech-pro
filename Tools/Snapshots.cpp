@@ -487,6 +487,14 @@ public:
             pump (main, 30);
             save (panel, "theme-panel.png");
 
+            {
+                // The channel EQ window in the flat skin.
+                auto t0 = main.project.getChild (0);
+                ConsoleStripWindow eq (t0, main.undoManager, [] (float*, int) { return 0; }, [] { return 48000.0; });
+                pump (main, 30);
+                save (eq, "flat-strip-window.png");
+            }
+
             theme::Settings warm { theme::Skin::flat, -175.0f, 1.2f, 0.0f, 0.1f, 0.0f, 30.0f, 1.0f, 1.0f };
             main.applyTheme (warm);
             main.showMixer();

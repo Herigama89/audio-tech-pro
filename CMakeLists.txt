@@ -130,6 +130,8 @@ set(RIFF_UI_SOURCES
     Source/MainAssistant.cpp
     Source/MainExtras.cpp
     Source/MainScreenRecording.cpp
+    Source/ui/PluginHostPanel.cpp
+    Source/ui/StartupSplash.cpp
     Source/MainAudioDevices.cpp
     Source/ui/Theme.cpp
     Source/ui/ConsoleLook.cpp

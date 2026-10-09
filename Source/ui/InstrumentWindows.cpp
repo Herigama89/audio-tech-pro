@@ -1,4 +1,5 @@
 #include "InstrumentWindows.h"
+#include "ControlMenu.h"
 #include "Theme.h"
 #include "../model/Project.h"
 #include "../engine/BuiltInEffects.h"
@@ -182,6 +183,19 @@ EffectPanel::EffectPanel (juce::ValueTree i, juce::UndoManager& um)
                 if (auto* w = AutomationWriter::current())
                     w->move (owner(), param(), k->slider.getValue());
                 insert.setProperty (juce::Identifier (k->id), k->slider.getValue(), &undoManager);
+            };
+            k->slider.onMenu = [this, k, owner, param, name = juce::String (p.name), def = (double) p.defaultValue]
+            {
+                const auto info2 = findBuiltInEffect (insert[ids::effect].toString());
+                controlmenu::Target t;
+                t.project = insert.getParent().getParent().getParent();
+                t.owner = owner();
+                t.param = param();
+                t.name = (info2 != nullptr ? info2->name + " " : juce::String()) + name;
+                t.um = &undoManager;
+                t.value = [k] { return k->slider.getValue(); };
+                t.reset = [k, def] { k->slider.setValue (def, juce::sendNotificationSync); };
+                controlmenu::show (k->slider, t);
             };
             addAndMakeVisible (k->slider);
 

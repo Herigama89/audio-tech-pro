@@ -24,9 +24,12 @@ inline juce::Array<juce::ValueTree> linkedTracks (const juce::ValueTree& project
 {
     juce::Array<juce::ValueTree> result;
     juce::Array<juce::ValueTree> start { track };
+    // The other selected channels join in, but only channels of the same sort: a bus's fader
+    // never moves track faders (or the other way round), and a VCA only moves VCAs.
+    const auto sortOf = [] (const juce::ValueTree& t) { return model::isVcaTrack (t) ? 2 : model::isBusTrack (t) ? 1 : 0; };
     if (selectedIds.contains (track[ids::id].toString()))
         for (const auto& id : selectedIds)
-            if (auto t = model::findById (project, id); t.isValid())
+            if (auto t = model::findById (project, id); t.isValid() && sortOf (t) == sortOf (track))
                 start.addIfNotAlreadyThere (t);
 
     for (const auto& t : start)
@@ -36,6 +39,20 @@ inline juce::Array<juce::ValueTree> linkedTracks (const juce::ValueTree& project
             for (const auto& member : model::groupMembers (project, t))
                 result.addIfNotAlreadyThere (member);
     }
+    return result;
+}
+
+/** The tracks an edit on `track` applies to, as in Logic: every selected channel when this one is
+    selected (inserts, sends, pan, input, output...), else just this one. VCAs only join VCAs. */
+inline juce::Array<juce::ValueTree> actingTracks (const juce::ValueTree& project, const juce::ValueTree& track,
+                                                  const juce::StringArray& selectedIds)
+{
+    juce::Array<juce::ValueTree> result { track };
+    if (! track.isValid() || ! selectedIds.contains (track[ids::id].toString()))
+        return result;
+    for (const auto& id : selectedIds)
+        if (auto t = model::findById (project, id); t.isValid() && model::isVcaTrack (t) == model::isVcaTrack (track))
+            result.addIfNotAlreadyThere (t);
     return result;
 }
 

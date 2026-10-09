@@ -2,6 +2,7 @@
 #include "MainComponent.h"
 #include "ui/ConsoleLook.h"
 #include "ui/Theme.h"
+#include "ui/StartupSplash.h"
 #include "AppInfo.h"
 #include <BinaryData.h>
 
@@ -26,25 +27,43 @@ public:
         }
         juce::LookAndFeel::setDefaultLookAndFeel (&look);
 
-        // The logo while the app starts (click it to close it sooner).
-        {
-            const auto logo = juce::ImageCache::getFromMemory (BinaryData::Logo_png, BinaryData::Logo_pngSize);
-            if (logo.isValid())
-            {
-                const auto width = 720;
-                auto* splash = new juce::SplashScreen (getApplicationName(),
-                                                       logo.rescaled (width, width * logo.getHeight() / logo.getWidth(),
-                                                                      juce::Graphics::highResamplingQuality),
-                                                       true);
-                splash->deleteAfterDelay (juce::RelativeTime::seconds (2.5), true);
-            }
-        }
-
+        // The main window is built (hidden) while the logo shows for at least five seconds and new
+        // plugins are scanned; then it opens.
         mainWindow = std::make_unique<MainWindow> (getApplicationName());
+        auto* main = dynamic_cast<riff::MainComponent*> (mainWindow->getContentComponent());
+
+        auto logo = juce::ImageCache::getFromMemory (BinaryData::Logo_png, BinaryData::Logo_pngSize);
+        if (logo.isValid())
+            logo = logo.rescaled (720, 720 * logo.getHeight() / logo.getWidth(), juce::Graphics::highResamplingQuality);
+
+        if (main == nullptr)
+        {
+            mainWindow->setVisible (true);
+            return;
+        }
+        splash = std::make_unique<riff::StartupSplash> (logo, main->getPluginFormats(), main->getKnownPlugins(), main->pluginScanCrashFile(), [this]
+        {
+            juce::MessageManager::callAsync ([this]
+            {
+                if (auto* m = mainWindow != nullptr ? dynamic_cast<riff::MainComponent*> (mainWindow->getContentComponent()) : nullptr)
+                    m->saveKnownPlugins();
+                splash.reset();
+                if (mainWindow != nullptr)
+                {
+                    mainWindow->setVisible (true);
+                    mainWindow->toFront (true);
+                }
+            });
+        });
+        splash->addToDesktop (juce::ComponentPeer::windowAppearsOnTaskbar);
+        splash->centreWithSize (splash->getWidth(), splash->getHeight());
+        splash->setVisible (true);
+        splash->toFront (true);
     }
 
     void shutdown() override
     {
+        splash = nullptr;
         mainWindow = nullptr;
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
     }
@@ -82,7 +101,7 @@ private:
             }
 
             centreWithSize (getWidth(), getHeight());
-            setVisible (true);
+            // (shown when the start-up logo and plugin scan are done)
         }
 
         void closeButtonPressed() override
@@ -96,6 +115,7 @@ private:
 
     riff::ConsoleLook look;   // the whole app's look; outlives every window
     std::unique_ptr<MainWindow> mainWindow;
+    std::unique_ptr<riff::StartupSplash> splash;
 };
 
 START_JUCE_APPLICATION (RiffApplication)

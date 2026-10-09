@@ -113,6 +113,7 @@ namespace riff::ids
     RIFF_DECLARE_ID (velLow)           // TRACK (MIDI): Vel Limit, softest and hardest notes that play
     RIFF_DECLARE_ID (velHigh)
     RIFF_DECLARE_ID (noTranspose)      // TRACK (MIDI): transpose leaves it alone (drums)
+    RIFF_DECLARE_ID (channelFormat)    // TRACK: "mono" or "stereo" (unset: stereo)
     RIFF_DECLARE_ID (drumTune)         // TRACK (Drum Kit): semitones
     RIFF_DECLARE_ID (drumDecay)        // TRACK (Drum Kit): 0.3 .. 3
     RIFF_DECLARE_ID (samplerFile)      // TRACK (Sampler): the sound

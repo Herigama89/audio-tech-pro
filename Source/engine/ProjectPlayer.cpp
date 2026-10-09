@@ -246,6 +246,8 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         t.audible = ! (bool) track[ids::mute] && ! model::vcaMutes (project, track) && (! anySolo || soloed (track));
         t.vcaGain = (float) model::vcaGainOf (project, track);
         t.width = (float) juce::jlimit (0.0, 2.0, (double) track.getProperty (ids::panWidth, 1.0));
+        if (! model::isStereoChannel (track))
+            t.width = 0.0f;   // a mono channel: both sides summed, then panned
         if (const auto out = busIndex.find (track[ids::output].toString()); out != busIndex.end() && ! model::isBusTrack (track))
             t.outputBus = out->second;
 

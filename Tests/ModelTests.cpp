@@ -836,3 +836,29 @@ TEST_CASE ("Region and Track parameters shape the notes as they play", "[model][
     auto [s5, l5, p5, v5] = shape (1.0, 0.4, 60, 100, played);
     CHECK (p5 == 60);
 }
+
+#include "ui/RoutingMenu.h"
+
+TEST_CASE ("A bus fader never moves track faders; edits go to every selected channel", "[model][mixer]")
+{
+    auto project = model::createProject();
+    auto a = model::addTrack (project, "A", nullptr);
+    auto b = model::addTrack (project, "B", nullptr);
+    auto bus = model::addTrack (project, "Bus 1", nullptr, -1, model::busKind);
+    auto vca = model::addTrack (project, "VCA", nullptr, -1, model::vcaKind);
+    const juce::StringArray everything { a[ids::id].toString(), b[ids::id].toString(), bus[ids::id].toString(), vca[ids::id].toString() };
+
+    // Volume: the bus moves alone, a track moves the other selected tracks.
+    const auto fromBus = routing::linkedTracks (project, bus, everything, "Volume");
+    CHECK (fromBus.size() == 1);
+    CHECK (fromBus.contains (bus));
+    const auto fromTrack = routing::linkedTracks (project, a, everything, "Volume");
+    CHECK (fromTrack.size() == 2);
+    CHECK_FALSE (fromTrack.contains (bus));
+
+    // Inserts, sends, pan: every selected channel (but not the VCA); nothing else when it isn't selected.
+    const auto acting = routing::actingTracks (project, a, everything);
+    CHECK (acting.size() == 3);
+    CHECK_FALSE (acting.contains (vca));
+    CHECK (routing::actingTracks (project, a, { b[ids::id].toString() }).size() == 1);
+}

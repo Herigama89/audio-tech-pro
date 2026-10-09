@@ -272,7 +272,7 @@ void Inspector::resized()
 
     // ...then the two strips, as tall as the rest (their faders grow with it).
     stripView.setBounds (area);
-    const auto minStrip = ChannelStrip::minimumHeightFor (mixer.showsConsole());
+    const auto minStrip = mixer.stripMinimumHeight();
     const auto stripHeight = juce::jmax (area.getHeight(), minStrip);
     stripHolder.setSize (area.getWidth() - (stripHeight > area.getHeight() ? stripView.getScrollBarThickness() : 0), stripHeight);
     auto strips = stripHolder.getLocalBounds().reduced (4, 0);

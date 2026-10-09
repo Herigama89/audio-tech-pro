@@ -31,6 +31,13 @@ juce::Point<float> DragSlider::handlePosition() const
 
 void DragSlider::mouseDown (const juce::MouseEvent& e)
 {
+    menuClick = false;
+    if (e.mods.isPopupMenu() && onRightClick)
+    {
+        menuClick = true;
+        onRightClick (e);
+        return;
+    }
     if (e.mods.isPopupMenu() || ! isEnabled())
     {
         Slider::mouseDown (e);
@@ -56,6 +63,8 @@ void DragSlider::mouseDown (const juce::MouseEvent& e)
 
 void DragSlider::mouseDrag (const juce::MouseEvent& e)
 {
+    if (menuClick)
+        return;
     if (! dragging)
     {
         Slider::mouseDrag (e);
@@ -71,6 +80,11 @@ void DragSlider::mouseDrag (const juce::MouseEvent& e)
 
 void DragSlider::mouseUp (const juce::MouseEvent& e)
 {
+    if (menuClick)
+    {
+        menuClick = false;
+        return;
+    }
     if (! dragging)
     {
         Slider::mouseUp (e);

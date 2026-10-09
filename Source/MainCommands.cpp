@@ -57,6 +57,7 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::deleteMarker:    info.setActive (project.getChildWithName (ids::MARKERS).getChildWithProperty (ids::id, timeline.selectedMarkerId).isValid()); break;
         case commands::joinRegions:     info.setActive (timeline.selectedRegionTrees().size() > 1 && ! recording); break;
         case commands::duplicateTrack:
+        case commands::createTrackStack:
         case commands::createFolderStack:
         case commands::createSummingStack:
         case commands::newVca:          info.setActive (track.isValid() && ! recording); break;
@@ -92,6 +93,13 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::hideTrack:       info.setActive (track.isValid()); break;
         case commands::trackColours:    info.setActive (track.isValid()); break;
         case commands::toggleInspector: info.setTicked (inspector.isVisible()); break;
+        case commands::toggleControlBar: info.setTicked (showControlBar); break;
+        case commands::toggleToolbar:   info.setTicked (showToolbarRow); info.setActive (showControlBar); break;
+        case commands::toggleStatusBar: info.setTicked (showStatusBar); break;
+        case commands::toggleMeters:    info.setTicked (showMeters); break;
+        case commands::toggleTrackHeaders: info.setTicked (showTrackHeaders); break;
+        case commands::showLibrary:     info.setTicked (libraryPanel != nullptr && libraryPanel->isVisible()); break;
+        case commands::showSmartControls: info.setTicked (smartControls != nullptr && smartControls->isVisible()); break;
         case commands::recordScreen:    info.setTicked (screenRecorder != nullptr && screenRecorder->isRecording());
                                         if (screenRecorder != nullptr && screenRecorder->isRecording())
                                             info.shortName = "Stop Screen Recording";
@@ -226,6 +234,32 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::showHiddenTracks:       timeline.showHiddenTracks = ! timeline.showHiddenTracks; timeline.changed(); break;
         case commands::trackColours:           headers.showColoursForSelection(); break;
         case commands::toggleInspector:        toggleInspector(); break;
+        case commands::createTrackStack:       showCreateStackDialog(); break;
+        case commands::toggleControlBar:       setPanelShown ("viewControlBar", showControlBar, ! showControlBar); break;
+        case commands::toggleToolbar:          setPanelShown ("viewToolbar", showToolbarRow, ! showToolbarRow); break;
+        case commands::toggleStatusBar:        setPanelShown ("viewStatusBar", showStatusBar, ! showStatusBar); break;
+        case commands::toggleMeters:           setPanelShown ("viewMeters", showMeters, ! showMeters); break;
+        case commands::toggleTrackHeaders:     setPanelShown ("viewTrackHeaders", showTrackHeaders, ! showTrackHeaders); break;
+        case commands::showAllPanels:
+        case commands::hideAllPanels:
+        {
+            // Logic's "everything around the tracks": the Inspector, bars, meters, Smart Controls and the Library.
+            const bool show = info.commandID == commands::showAllPanels;
+            if (inspector.isVisible() != show)
+                toggleInspector();
+            if (! show && libraryPanel != nullptr && libraryPanel->isVisible())
+                commandManager.invokeDirectly (commands::showLibrary, false);
+            if ((smartControls != nullptr && smartControls->isVisible()) != show)
+                commandManager.invokeDirectly (commands::showSmartControls, false);
+            for (auto [key, flag] : { std::pair<const char*, bool*> { "viewControlBar", &showControlBar }, { "viewToolbar", &showToolbarRow },
+                                      { "viewStatusBar", &showStatusBar }, { "viewMeters", &showMeters } })
+            {
+                *flag = show;
+                appProperties.getUserSettings()->setValue (key, show);
+            }
+            applyPanelVisibility();
+            break;
+        }
         case commands::selectPreviousTrack:    selectAdjacentTrack (-1); break;
         case commands::selectNextTrack:        selectAdjacentTrack (1); break;
 
@@ -282,7 +316,7 @@ bool MainComponent::perform (const InvocationInfo& info)
 //==============================================================================
 juce::StringArray MainComponent::getMenuBarNames()
 {
-    return { "File", "Edit", "Track", "Navigate", "Record", "Mix", "View" };
+    return { "File", "Edit", "Track", "Navigate", "Record", "Mix", "View", "Window" };
 }
 
 juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
@@ -329,7 +363,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             menu.addSeparator();
             add ({ commands::newDrummerTrack, commands::newBassPlayerTrack, commands::newKeysPlayerTrack });
             menu.addSeparator();
-            add ({ commands::createFolderStack, commands::createSummingStack, commands::freezeTracks });
+            add ({ commands::createTrackStack, commands::createFolderStack, commands::createSummingStack, commands::freezeTracks });
             menu.addSeparator();
             add ({ commands::generateMidi, commands::bounceInPlace });
             menu.addSeparator();
@@ -359,21 +393,41 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             break;
 
         case 5:
-            add ({ commands::showMixer, commands::signalFlow });
+            add ({ commands::showMixer, commands::openMixerWindow, commands::signalFlow });
             menu.addSeparator();
-            add ({ commands::groupSettings, commands::ioLabels });
+            add ({ commands::newAuxBus, commands::newVca, commands::createFolderStack, commands::createSummingStack });
+            menu.addSeparator();
+            add ({ commands::groupSettings, commands::ioLabels, commands::controllerAssignments });
             menu.addSeparator();
             add ({ commands::scanPlugins });
             break;
 
         case 6:
-            add ({ commands::toggleInspector, commands::showSmartControls, commands::showLibrary, commands::showLoopBrowser, commands::undoHistory, commands::eventList, commands::liveLoops });
+            // As in Logic: show or hide each panel of the main window.
+            add ({ commands::toggleControlBar, commands::toggleToolbar, commands::toggleInspector, commands::showSmartControls,
+                   commands::showLibrary, commands::showMixer, commands::showPianoRoll, commands::showLoopBrowser,
+                   commands::toggleTrackHeaders, commands::toggleMeters, commands::toggleStatusBar });
+            menu.addSeparator();
+            add ({ commands::showAllPanels, commands::hideAllPanels });
+            menu.addSeparator();
+            add ({ commands::undoHistory, commands::eventList, commands::liveLoops });
+            menu.addSeparator();
             add ({ commands::openMixerWindow, commands::openEditorWindow, commands::themeSettings });
-            add ({ commands::showPianoRoll, commands::zoomIn, commands::zoomOut, commands::zoomVerticalIn, commands::zoomVerticalOut });
+            menu.addSeparator();
+            add ({ commands::zoomIn, commands::zoomOut, commands::zoomVerticalIn, commands::zoomVerticalOut });
             menu.addSeparator();
             add ({ commands::showAssistant, commands::recordScreen });
             menu.addSeparator();
             add ({ commands::preferences, commands::keyCommands, commands::controllerAssignments, commands::audioSettings, commands::combineInterfaces });
+            break;
+
+        case 7:
+            // Logic's Window menu: the windows you can open beside the main one.
+            add ({ commands::openMixerWindow, commands::openEditorWindow });
+            menu.addSeparator();
+            add ({ commands::eventList, commands::undoHistory, commands::liveLoops, commands::signalFlow });
+            menu.addSeparator();
+            add ({ commands::keyCommands, commands::controllerAssignments, commands::audioSettings, commands::themeSettings });
             break;
 
         default:
@@ -825,6 +879,29 @@ void MainComponent::createStackFromSelection (bool summing)
     auto main = model::createTrackStack (project, tracks, summing, &undoManager);
     timeline.selectOnly (main[ids::id].toString());
     timeline.changed();
+}
+
+void MainComponent::showCreateStackDialog()
+{
+    // Logic's Create Track Stack: choose the kind.
+    const auto count = timeline.selectedTrackIds().size();
+    if (count == 0)
+        return;
+    auto* w = new juce::AlertWindow ("Create Track Stack",
+                                     juce::String (count) + (count == 1 ? " track" : " tracks") + " go into the stack.\n\n"
+                                     "Folder Stack: the main track is a fader on top of theirs (like a VCA): it turns them all up or down "
+                                     "together, and their own faders stay as they are.\n\n"
+                                     "Summing Stack: the tracks play into an aux bus (the main track). Its fader sets the bus's level only; "
+                                     "the tracks' own faders stay independent.",
+                                     juce::MessageBoxIconType::NoIcon);
+    w->addButton ("Summing Stack", 2, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton ("Folder Stack", 1);
+    w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([safe = juce::Component::SafePointer<MainComponent> (this)] (int result)
+    {
+        if (safe != nullptr && result > 0)
+            safe->createStackFromSelection (result == 2);
+    }), true);
 }
 
 void MainComponent::newVcaForSelection()

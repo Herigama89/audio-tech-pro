@@ -54,6 +54,9 @@ public:
     /** What a control should show at a time: the live value, else the curve (unless Off), else its own value. */
     double displayedValue (const juce::ValueTree& track, const juce::String& param, double time) const;
 
+    /** The time automation is written at right now (the playhead, in seconds). */
+    double timeNow() const { return now(); }
+
     /** Test hook: the time "now" (otherwise the engine's playhead). */
     std::function<double()> clock;
 

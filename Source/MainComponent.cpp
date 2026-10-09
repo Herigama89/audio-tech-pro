@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "ui/PluginHostPanel.h"
 #include "ui/ToolIcons.h"
 #include "ui/PluginPicker.h"
 #include "model/Project.h"
@@ -19,7 +20,7 @@ namespace riff
 
 namespace
 {
-    constexpr int toolbarHeight = 100;    // two rows: display row, transport row
+    constexpr int fullToolbarHeight = 100;    // two rows: display row, transport row
     constexpr int toolbarTopRow = 50;
     constexpr int headerWidth = 232;
     constexpr int scrollBarSize = 12;
@@ -33,7 +34,8 @@ MainComponent::MainComponent (bool openAudioDevice)
     for (auto* b : std::initializer_list<juce::Button*> { &fileButton, &undoButton, &redoButton, &addTrackButton, &settingsButton,
                                                           &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
                                                           &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton, &replaceButton,
-                                                          &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton, &screenButton })
+                                                          &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton, &screenButton,
+                                                          &inspectorButton, &libraryButton, &smartButton })
     {
         b->setWantsKeyboardFocus (false); // keep Space for play/stop
         addAndMakeVisible (b);
@@ -59,6 +61,12 @@ MainComponent::MainComponent (bool openAudioDevice)
     bind (mixerButton, commands::showMixer);
     bind (editorButton, commands::showPianoRoll);
     bind (keysButton, commands::keyCommands);
+    bind (inspectorButton, commands::toggleInspector);
+    bind (libraryButton, commands::showLibrary);
+    bind (smartButton, commands::showSmartControls);
+    inspectorButton.setTooltip ("Inspector (I): the selected region and track, and its channel strips");
+    libraryButton.setTooltip ("Library (Y): patches and sounds for the selected track");
+    smartButton.setTooltip ("Smart Controls (B): the main knobs of the selected track");
     bind (generateButton, commands::generateMidi);
     bind (claudeButton, commands::showAssistant);
     bind (screenButton, commands::recordScreen);
@@ -397,6 +405,15 @@ MainComponent::MainComponent (bool openAudioDevice)
     createAssistant();
     if (appProperties.getUserSettings()->getBoolValue ("inspector", true))
         toggleInspector();
+    {
+        auto* settings = appProperties.getUserSettings();
+        showControlBar = settings->getBoolValue ("viewControlBar", true);
+        showToolbarRow = settings->getBoolValue ("viewToolbar", true);
+        showStatusBar = settings->getBoolValue ("viewStatusBar", true);
+        showMeters = settings->getBoolValue ("viewMeters", true);
+        showTrackHeaders = settings->getBoolValue ("viewTrackHeaders", true);
+        applyPanelVisibility();
+    }
     screenRecorder = ScreenRecorder::create();
 
     setWantsKeyboardFocus (true);
@@ -583,6 +600,40 @@ MainComponent::~MainComponent()
 //==============================================================================
 // Layout
 //==============================================================================
+int MainComponent::barHeight() const
+{
+    return showControlBar ? (showToolbarRow ? fullToolbarHeight : toolbarTopRow) : 0;
+}
+
+void MainComponent::setPanelShown (const juce::String& key, bool& flag, bool shown)
+{
+    flag = shown;
+    appProperties.getUserSettings()->setValue (key, shown);
+    applyPanelVisibility();
+}
+
+void MainComponent::applyPanelVisibility()
+{
+    // The control bar's two rows
+    for (auto* c : std::initializer_list<juce::Component*> { &fileButton, &undoButton, &redoButton, &addTrackButton, &settingsButton,
+                                                            &masterSlider, &masterCaption, &positionLabel, &clockLabel, &tempoLabel,
+                                                            &tempoCaption, &signatureLabel })
+        c->setVisible (showControlBar);
+    for (auto* c : std::initializer_list<juce::Component*> { &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
+                                                            &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton,
+                                                            &replaceButton, &mixerButton, &editorButton, &keysButton, &generateButton,
+                                                            &claudeButton, &screenButton, &inspectorButton, &libraryButton, &smartButton,
+                                                            &toolBox, &snapBox, &dragBox })
+        c->setVisible (showControlBar && showToolbarRow);
+    statusLabel.setVisible (showStatusBar);
+    inputMeter.setVisible (showMeters);
+    outputMeter.setVisible (showMeters);
+    headers.setVisible (showTrackHeaders);
+    resized();
+    repaint();
+    commandManager.commandStatusChanged();
+}
+
 juce::Rectangle<int> MainComponent::lcdBounds() const
 {
     return juce::Rectangle<int> (560, 42).withCentre ({ getWidth() / 2, toolbarTopRow / 2 + 1 });
@@ -591,18 +642,20 @@ juce::Rectangle<int> MainComponent::lcdBounds() const
 void MainComponent::paint (juce::Graphics& g)
 {
     g.fillAll (theme::background);
+    if (! showControlBar)
+        return;   // View > Hide Control Bar
 
     // Navy control bar
-    const auto bar = getLocalBounds().removeFromTop (toolbarHeight).toFloat();
+    const auto bar = getLocalBounds().removeFromTop (barHeight()).toFloat();
     g.setGradientFill (juce::ColourGradient (theme::toolbar.brighter (0.08f), 0.0f, bar.getY(),
                                              theme::toolbarDark, 0.0f, bar.getBottom(), false));
     g.fillRect (bar);
-    g.setColour (juce::Colours::black.withAlpha (0.25f));
+    g.setColour (juce::Colours::black.withAlpha (showToolbarRow ? 0.25f : 0.0f));
     g.fillRect (0, toolbarTopRow, getWidth(), 1);
     g.setColour (juce::Colours::white.withAlpha (0.05f));
     g.fillRect (0, toolbarTopRow + 1, getWidth(), 1);
     g.setColour (juce::Colours::black);
-    g.fillRect (0, toolbarHeight - 1, getWidth(), 1);
+    g.fillRect (0, barHeight() - 1, getWidth(), 1);
 
     // The display
     const auto lcd = lcdBounds().toFloat();
@@ -637,7 +690,8 @@ void MainComponent::paint (juce::Graphics& g)
     // Captions under the keys
     for (auto* b : std::initializer_list<juce::Button*> { &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
                                                           &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton, &replaceButton,
-                                                          &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton, &screenButton })
+                                                          &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton, &screenButton,
+                                                          &inspectorButton, &libraryButton, &smartButton })
     {
         g.setColour (b->getToggleState() ? theme::cream : theme::text.withAlpha (0.78f));
         g.drawText (b->getName(), b->getBounds().translated (0, b->getHeight() + 1).withHeight (13).expanded (8, 0),
@@ -648,7 +702,7 @@ void MainComponent::paint (juce::Graphics& g)
 void MainComponent::resized()
 {
     auto area = getLocalBounds();
-    auto toolbar = area.removeFromTop (toolbarHeight);
+    auto toolbar = area.removeFromTop (barHeight());
 
     // Row 1: file and edit keys | the display | master volume and audio
     {
@@ -692,9 +746,14 @@ void MainComponent::resized()
             x += keyWidth + gap + (c == &recordButton ? 14 : 0);
         }
 
-        generateButton.setBounds (18, row.getY(), keyWidth, keyHeight);
-        claudeButton.setBounds (18 + keyWidth + gap + 4, row.getY(), keyWidth, keyHeight);
-        screenButton.setBounds (18 + 2 * (keyWidth + gap + 4), row.getY(), keyWidth, keyHeight);
+        // Logic's view keys at the left: Library, Inspector, Smart Controls; then Generate, Claude, Screen.
+        int lx = 14;
+        for (auto* c : { (juce::Component*) &libraryButton, (juce::Component*) &inspectorButton, (juce::Component*) &smartButton,
+                         (juce::Component*) &generateButton, (juce::Component*) &claudeButton, (juce::Component*) &screenButton })
+        {
+            c->setBounds (lx, row.getY(), keyWidth, keyHeight);
+            lx += keyWidth + gap + (c == &smartButton ? 12 : 4);
+        }
 
         // Tool, Snap and Drag, between those keys and the transport (when there's room)
         {
@@ -703,7 +762,7 @@ void MainComponent::resized()
             int boxX = boxes.getX();
             for (auto [box, w] : { std::pair { &toolBox, 96 }, std::pair { &snapBox, 74 }, std::pair { &dragBox, 88 } })
             {
-                box->setVisible (boxX + w < transportLeft - 12);
+                box->setVisible (showControlBar && showToolbarRow && boxX + w < transportLeft - 12);
                 box->setBounds (boxX, boxes.getY(), w, boxes.getHeight());
                 boxX += w + 4;
             }
@@ -718,7 +777,7 @@ void MainComponent::resized()
     }
 
     // Status line
-    statusLabel.setBounds (area.removeFromBottom (statusHeight).reduced (10, 0));
+    statusLabel.setBounds (showStatusBar ? area.removeFromBottom (statusHeight).reduced (10, 0) : juce::Rectangle<int>());
 
     // The Claude panel down the right side
     if (assistantPanel != nullptr && assistantPanel->isVisible())
@@ -744,7 +803,7 @@ void MainComponent::resized()
     }
     else if (mixerInPane())
     {
-        const auto fallback = juce::jmax (200, juce::jmin (area.getHeight() - 100, ChannelStrip::minimumHeightFor (mixer.showsConsole()) + MixerPanel::headerHeight + 40,
+        const auto fallback = juce::jmax (200, juce::jmin (area.getHeight() - 100, mixer.stripMinimumHeight() + MixerPanel::headerHeight + 40,
                                                          (int) (getHeight() * 0.8)));
         const auto h = mixerPaneHeight > 0 ? mixerPaneHeight : fallback;
         mixer.setBounds (area.removeFromBottom (juce::jlimit (150, juce::jmax (150, area.getHeight() - 60), h)));
@@ -752,13 +811,13 @@ void MainComponent::resized()
     }
 
     // Meters on the right
-    auto meters = area.removeFromRight (meterWidth).reduced (8, 10);
+    auto meters = showMeters ? area.removeFromRight (meterWidth).reduced (8, 10) : juce::Rectangle<int>();
     inputMeter.setBounds (meters.removeFromLeft (meters.getWidth() / 2 - 2));
     meters.removeFromLeft (4);
     outputMeter.setBounds (meters);
 
     // Headers | tracks area + scroll bars
-    headers.setBounds (area.removeFromLeft (headerWidth).withTrimmedBottom (scrollBarSize));
+    headers.setBounds (showTrackHeaders ? area.removeFromLeft (headerWidth).withTrimmedBottom (scrollBarSize) : juce::Rectangle<int>());
     vScroll.setBounds (area.removeFromRight (scrollBarSize).withTrimmedTop (TimelineState::rulerHeight).withTrimmedBottom (scrollBarSize));
     hScroll.setBounds (area.removeFromBottom (scrollBarSize));
     canvas.setBounds (area);
@@ -1759,6 +1818,9 @@ void MainComponent::timerCallback()
     mixer.setMasterLevels (levels.outL, levels.outR);
     mixerButton.setToggleState (mixer.isVisible(), juce::dontSendNotification);
     editorButton.setToggleState (pianoRoll.isVisible(), juce::dontSendNotification);
+    inspectorButton.setToggleState (inspector.isVisible(), juce::dontSendNotification);
+    libraryButton.setToggleState (libraryPanel != nullptr && libraryPanel->isVisible(), juce::dontSendNotification);
+    smartButton.setToggleState (smartControls != nullptr && smartControls->isVisible(), juce::dontSendNotification);
 
     // (While the song renders offline, the playhead races ahead: keep showing where it was.)
     const bool offline = engine.isRenderingOffline();
@@ -1768,7 +1830,7 @@ void MainComponent::timerCallback()
 
     const bool playing = engine.isPlaying() && ! offline;
     if (playing != playButton.getToggleState() || engine.isRecording() != recordButton.getToggleState())
-        repaint (0, toolbarTopRow, getWidth(), toolbarHeight - toolbarTopRow);   // the captions under the keys
+        repaint (0, toolbarTopRow, getWidth(), fullToolbarHeight - toolbarTopRow);   // the captions under the keys
     playButton.setToggleState (playing, juce::dontSendNotification);
     recordButton.setToggleState (engine.isRecording(), juce::dontSendNotification);
     clickButton.setToggleState ((bool) project[ids::metronome], juce::dontSendNotification);
@@ -2083,11 +2145,9 @@ void MainComponent::openInstrumentWindow (const juce::ValueTree& track)
             return;
         }
 
-        if (auto* editor = plugin->createEditorAndMakeActive())
-            editorWindows[id] = std::make_unique<EditorWindow> (title + ": " + plugin->getName(), editor,
-                                                                editor->isResizable(), closer);
-        else
-            showError ("No window", plugin->getName() + " doesn't have its own window.");
+        // The plugin's face under a header (Editor / Controls, and its parameters for MIDI Learn).
+        auto* host = new PluginHostPanel (*plugin, plugin->createEditorAndMakeActive(), { project, id, {}, &undoManager });
+        editorWindows[id] = std::make_unique<EditorWindow> (title + ": " + plugin->getName(), host, host->isResizableHost(), closer);
         return;
     }
 
@@ -2096,6 +2156,18 @@ void MainComponent::openInstrumentWindow (const juce::ValueTree& track)
     editorWindows[id] = std::make_unique<EditorWindow> (title + ": " + name,
                                                         new SynthPanel (track, undoManager, kind == "drums" || kind == "sampler" ? kind : juce::String ("synth")),
                                                         false, closer);
+}
+
+juce::File MainComponent::pluginScanCrashFile()
+{
+    return appProperties.getUserSettings()->getFile().getSiblingFile ("PluginScanCrashes.txt");
+}
+
+void MainComponent::saveKnownPlugins()
+{
+    if (auto xml = rack.getKnownPlugins().createXml())
+        appProperties.getUserSettings()->setValue ("knownPlugins", xml.get());
+    appProperties.saveIfNeeded();
 }
 
 void MainComponent::showPluginScanner()
@@ -2169,13 +2241,23 @@ void MainComponent::toggleMixer()
 void MainComponent::showEffectMenu (const juce::String& owner, int slot, juce::ValueTree existing, juce::Component& target)
 {
     // Puts the chosen effect in the slot (replacing what's there), as one undo step.
-    auto place = [this, owner, slot, existing] (std::function<juce::ValueTree (juce::ValueTree chain, int index)> make)
+    // With several channels selected (and this one among them), every one of them gets it, in the same slot (as in Logic).
+    juce::StringArray owners { owner };
+    if (auto track = model::findById (project, owner); track.isValid())
+        for (const auto& t : routing::actingTracks (project, track, timeline.selectedTrackIds()))
+            owners.addIfNotAlreadyThere (t[ids::id].toString());
+
+    auto place = [this, owner, owners, slot, existing] (std::function<juce::ValueTree (juce::ValueTree chain, int index)> make)
     {
         undoManager.beginNewTransaction (existing.isValid() ? "Replace effect" : "Add effect");
-        auto chain = model::chainFor (project, owner);
+        const auto targetSlot = existing.isValid() ? model::insertSlot (existing) : slot;
+        for (const auto& other : owners)
+            if (other != owner)
+                model::placeInsert (model::chainFor (project, other), targetSlot, make, &undoManager);
 
         // It goes in the slot you clicked, and stays there (as in Logic), even with empty slots above it.
-        auto insert = model::placeInsert (chain, existing.isValid() ? model::insertSlot (existing) : slot, make, &undoManager);
+        auto chain = model::chainFor (project, owner);
+        auto insert = model::placeInsert (chain, targetSlot, make, &undoManager);
 
         // Open its window (plugins need a moment to load).
         juce::Timer::callAfterDelay (insert[ids::kind].toString() == model::pluginKind ? 600 : 50,
@@ -2269,11 +2351,9 @@ void MainComponent::openInsertWindow (const juce::ValueTree& insert)
             return;
         }
 
-        if (auto* editor = plugin->createEditorAndMakeActive())
-            editorWindows[id] = std::make_unique<EditorWindow> (where + ": " + plugin->getName(), editor,
-                                                                editor->isResizable(), closer);
-        else
-            showError ("No window", plugin->getName() + " doesn't have its own window.");
+        // As in Logic: a header over the plugin's own face with Editor / Controls and its parameters' automation.
+        auto* host = new PluginHostPanel (*plugin, plugin->createEditorAndMakeActive(), { project, owner, id, &undoManager });
+        editorWindows[id] = std::make_unique<EditorWindow> (where + ": " + plugin->getName(), host, host->isResizableHost(), closer);
         return;
     }
 

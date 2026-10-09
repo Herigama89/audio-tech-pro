@@ -26,6 +26,9 @@ namespace riff::strip
         void mouseUp (const juce::MouseEvent&) override;
         void mouseDoubleClick (const juce::MouseEvent&) override;
 
+        /** Right-click (or Control-click): the control's menu (see ControlMenu.h), when set. */
+        std::function<void (const juce::MouseEvent&)> onRightClick;
+
     protected:
         /** How many pixels of mouse travel take it from one end to the other. */
         virtual float dragTravel() const;
@@ -34,7 +37,7 @@ namespace riff::strip
         bool dragsVertically() const;
 
     private:
-        bool dragging = false;
+        bool dragging = false, menuClick = false;
         float lastDelta = 0.0f;
         double proportion = 0.0;
     };
