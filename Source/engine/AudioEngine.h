@@ -190,6 +190,9 @@ public:
                                 std::function<bool (double)> progress);
     void endOfflineRender();
 
+    /** The MIDI that arrived from your devices since the last call (message thread). */
+    std::vector<juce::MidiMessage> takeIncomingMidi();
+
     /** The recording format: 16, 24 or 32 (float) bits. */
     void setRecordBitDepth (int bits) noexcept { recordBitDepth = (bits == 16 || bits == 32) ? bits : 24; }
     int getRecordBitDepth() const noexcept { return recordBitDepth; }
@@ -301,6 +304,11 @@ private:
     juce::AbstractFifo liveFifo { liveFifoSize };
     std::array<LiveEvent, liveFifoSize> liveEvents {};
     juce::SpinLock liveProducerLock;
+
+    // What your MIDI devices send, for the message thread (step input, controller assignments).
+    juce::AbstractFifo incomingFifo { liveFifoSize };
+    std::array<LiveEvent, liveFifoSize> incomingEvents {};
+    juce::SpinLock incomingLock;
 
     // Recorded MIDI: the audio thread produces, the message thread consumes.
     static constexpr int recordFifoSize = 32768;

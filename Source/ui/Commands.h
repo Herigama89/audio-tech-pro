@@ -33,7 +33,8 @@ namespace riff::commands
         consolidateProject = 0x2701, revertToBackup, recoverAutosave, exportStems, bounceInPlace, importTracks,
         trimStartToPlayhead = 0x2801, trimEndToPlayhead, loopRegions, regionGain, removeFades,
         createFolderStack = 0x2901, createSummingStack, freezeTracks, newVca,
-        toggleAutopunch = 0x2a01, toggleReplace, toggleMidiMerge, undoHistory, preferences, saveAsTemplate, newAlternative, eventList
+        toggleAutopunch = 0x2a01, toggleReplace, toggleMidiMerge, undoHistory, preferences, saveAsTemplate, newAlternative, eventList,
+        controllerAssignments
     };
 
     struct Info

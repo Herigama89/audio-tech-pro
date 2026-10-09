@@ -23,6 +23,24 @@ PianoRoll::PianoRoll (juce::UndoManager& um, AudioEngine& e)
     quantizeButton.onClick = [this] { quantizeSelection(); };
     closeButton.onClick = [this] { if (onClose) onClose(); };
 
+    stepButton.setClickingTogglesState (true);
+    stepButton.setTooltip ("Step input: play notes on your MIDI keyboard to enter them one grid step after another "
+                           "(a chord goes in together), starting at the playhead. Rest moves on without a note.");
+    stepButton.setColour (juce::TextButton::buttonOnColourId, theme::accent);
+    stepButton.onClick = [this]
+    {
+        stepHeld = 0;
+        if (stepButton.getToggleState() && region.isValid())
+            stepContent = juce::jmax ((double) region[ids::offset],
+                                      snapContent (engine.getPlayheadSeconds() - (double) region[ids::start] + (double) region[ids::offset], quantizeGrid()));
+    };
+    restButton.onClick = [this] { if (isStepInputOn()) advanceStep(); };
+    for (auto* b : { &stepButton, &restButton })
+    {
+        b->setWantsKeyboardFocus (false);
+        addAndMakeVisible (b);
+    }
+
     scaleButton.setTooltip ("Scale Quantize: move notes outside the song's key onto the nearest note of its scale");
     scaleButton.onClick = [this] { scaleQuantizeSelection(); };
     transformButton.setTooltip ("MIDI Transform: humanize, fixed velocity, crescendo, legato, double or half speed, transpose, reverse");
@@ -260,6 +278,10 @@ void PianoRoll::resized()
     gridBox.setBounds (header.removeFromRight (70));
     header.removeFromRight (4);
     quantizeButton.setBounds (header.removeFromRight (76));
+    header.removeFromRight (10);
+    restButton.setBounds (header.removeFromRight (46));
+    header.removeFromRight (4);
+    stepButton.setBounds (header.removeFromRight (64));
     titleLabel.setBounds (header);
 }
 
@@ -659,6 +681,41 @@ void PianoRoll::quantizeSelection()
     const auto swing = strengthBox.getSelectedId() == 4 ? 0.3 : strengthBox.getSelectedId() == 5 ? 0.6 : 0.0;
     model::quantizeNotesTo (selectedOrAllNotes(), quantizeGrid(), strength, swing,
                             (double) region[ids::start] - (double) region[ids::offset], &undoManager);
+}
+
+void PianoRoll::advanceStep()
+{
+    stepContent += quantizeGrid();
+
+    // Past the region's end: it grows.
+    const double offset = region[ids::offset];
+    if (stepContent > offset + (double) region[ids::length])
+        region.setProperty (ids::length, stepContent - offset, &undoManager);
+
+    engine.setPlayheadSeconds ((double) region[ids::start] + stepContent - offset);
+    repaint();
+}
+
+void PianoRoll::stepInput (const juce::MidiMessage& message)
+{
+    if (! isStepInputOn())
+        return;
+
+    if (message.isNoteOn())
+    {
+        if (stepHeld == 0)
+            undoManager.beginNewTransaction ("Step input");
+        ++stepHeld;
+        auto note = model::addNote (region, message.getNoteNumber(), stepContent, quantizeGrid() * 0.95, message.getVelocity(), &undoManager);
+        selection = { note };
+        repaint();
+    }
+    else if (message.isNoteOff() && stepHeld > 0)
+    {
+        // The chord is finished when every key is up: then the next step.
+        if (--stepHeld == 0)
+            advanceStep();
+    }
 }
 
 void PianoRoll::scaleQuantizeSelection()

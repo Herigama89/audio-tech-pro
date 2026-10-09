@@ -88,6 +88,7 @@ const std::vector<Info>& all()
         { zoomVerticalOut,        "Zoom Vertical Out",          "View",      "Make every track shorter" },
         { undoHistory,            "Undo History...",            "View",      "Every edit you can undo; click one to go back (or forward) to it" },
         { preferences,            "Settings...",                "View",      "Autosave, backups, recording format and more" },
+        { controllerAssignments,  "Controller Assignments...",  "View",      "The knobs and faders on your MIDI controller that move tracks (right-click a track > Learn MIDI Controller to add one)" },
         { eventList,              "Event List",                 "View",      "The selected MIDI region's notes and controllers as a list you can edit" },
         { keyCommands,            "Key Commands...",            "View",      "Show and edit the key commands" },
         { audioSettings,          "Audio Settings...",          "View",      "Choose the audio interface, sample rate and buffer size" },

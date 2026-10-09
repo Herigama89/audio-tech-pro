@@ -134,6 +134,11 @@ private:
     void saveAsTemplate();
     void newAlternative();
     void showEventList();
+    void showControllerAssignments();
+    void handleIncomingMidi();
+    juce::ValueTree learningTrack;      // MIDI Learn: waiting for a controller for this track's...
+    juce::String learningParam;         // ... parameter
+    std::map<juce::String, bool> lastSwitchState;   // mute/solo assignments: pressed or not
     void addTemplateAndAlternativeItems (juce::PopupMenu& menu);
     juce::File templatesFolder() const;
     int autosaveMinutes = 2;

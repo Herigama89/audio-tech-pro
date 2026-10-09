@@ -356,3 +356,113 @@ void MainComponent::showEventList()
 }
 
 } // namespace riff
+
+namespace riff
+{
+
+//==============================================================================
+// MIDI from your devices: step input and controller assignments
+//==============================================================================
+void MainComponent::handleIncomingMidi()
+{
+    for (const auto& message : engine.takeIncomingMidi())
+    {
+        // Step input in the piano roll.
+        if ((message.isNoteOn() || message.isNoteOff()) && pianoRoll.isVisible() && pianoRoll.isStepInputOn())
+        {
+            pianoRoll.stepInput (message);
+            continue;
+        }
+
+        if (! message.isController())
+            continue;
+
+        const auto channel = message.getChannel(), cc = message.getControllerNumber(), value = message.getControllerValue();
+        auto assignments = project.getChildWithName (ids::ASSIGNMENTS);
+
+        // Learning: this controller now drives the chosen parameter (replacing what it drove before).
+        if (learningTrack.isValid())
+        {
+            if (! assignments.isValid())
+            {
+                assignments = juce::ValueTree (ids::ASSIGNMENTS);
+                project.appendChild (assignments, nullptr);
+            }
+            for (int i = assignments.getNumChildren(); --i >= 0;)
+                if ((int) assignments.getChild (i)[ids::channel] == channel && (int) assignments.getChild (i)[ids::cc] == cc)
+                    assignments.removeChild (i, nullptr);
+
+            juce::ValueTree a (ids::ASSIGN);
+            a.setProperty (ids::channel, channel, nullptr);
+            a.setProperty (ids::cc, cc, nullptr);
+            a.setProperty (ids::target, learningTrack[ids::id].toString(), nullptr);
+            a.setProperty (ids::param, learningParam, nullptr);
+            assignments.appendChild (a, nullptr);
+            statusLabel.setText ("CC " + juce::String (cc) + " (channel " + juce::String (channel) + ") now moves "
+                                     + learningTrack[ids::name].toString() + " " + learningParam + ".", juce::dontSendNotification);
+            learningTrack = {};
+            markDirty();
+            continue;
+        }
+
+        for (const auto& a : assignments)
+        {
+            if ((int) a[ids::channel] != channel || (int) a[ids::cc] != cc)
+                continue;
+            auto track = model::findById (project, a[ids::target].toString());
+            if (! track.isValid())
+                continue;
+
+            const auto param = a[ids::param].toString();
+            const auto trackId = track[ids::id].toString();
+            if (param == "volume")
+            {
+                // The fader's own curve: -60 dB (silence) .. +6 dB, with -12 dB in the middle.
+                juce::NormalisableRange<double> range (-60.0, 6.0);
+                range.setSkewForCentre (-12.0);
+                const auto db = range.convertFrom0to1 (value / 127.0);
+                const auto gain = db <= -59.9 ? 0.0 : juce::Decibels::decibelsToGain (db);
+                if (! automation.move (trackId, model::volumeParam, gain))
+                    track.setProperty (ids::volume, gain, nullptr);
+            }
+            else if (param == "pan")
+            {
+                const auto pan = juce::jlimit (-1.0, 1.0, value / 63.5 - 1.0);
+                if (! automation.move (trackId, model::panParam, pan))
+                    track.setProperty (ids::pan, pan, nullptr);
+            }
+            else if (param == "mute" || param == "solo")
+            {
+                // A button: each press toggles.
+                const auto key = trackId + param;
+                const bool pressed = value >= 64;
+                if (pressed && ! lastSwitchState[key])
+                {
+                    const auto& id = param == "mute" ? ids::mute : ids::solo;
+                    track.setProperty (id, ! (bool) track[id], nullptr);
+                }
+                lastSwitchState[key] = pressed;
+            }
+        }
+    }
+}
+
+void MainComponent::showControllerAssignments()
+{
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Controller assignments (click one to remove it)");
+    auto assignments = project.getChildWithName (ids::ASSIGNMENTS);
+    for (int i = 0; i < assignments.getNumChildren(); ++i)
+    {
+        const auto a = assignments.getChild (i);
+        const auto track = model::findById (project, a[ids::target].toString());
+        menu.addItem ("CC " + a[ids::cc].toString() + " ch " + a[ids::channel].toString() + "  ->  "
+                          + (track.isValid() ? track[ids::name].toString() : juce::String ("(deleted track)")) + " " + a[ids::param].toString(),
+                      [assignments, a]() mutable { assignments.removeChild (a, nullptr); });
+    }
+    if (assignments.getNumChildren() == 0)
+        menu.addItem ("None yet: right-click a track or a strip's fader > Learn MIDI Controller", false, false, [] {});
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&settingsButton));
+}
+
+} // namespace riff

@@ -377,6 +377,13 @@ MainComponent::MainComponent (bool openAudioDevice)
     setSize (1440, 920);
     automation.makeCurrent();
     routing::toggleFreeze = [this] (juce::ValueTree track) { toggleFreeze (track); };
+    routing::learnController = [this] (juce::ValueTree track, juce::String param)
+    {
+        learningTrack = track;
+        learningParam = param;
+        statusLabel.setText ("MIDI Learn: move a knob, fader or button on your controller for " + track[ids::name].toString()
+                                 + " " + param + ".", juce::dontSendNotification);
+    };
     mixer.onOpenStripWindow = [this] (juce::ValueTree track)
     {
         const auto id = "strip-window:" + track[ids::id].toString();
@@ -1612,6 +1619,8 @@ void MainComponent::timerCallback()
         automation.tick();
         headers.followAutomation (engine.getPlayheadSeconds());
     }
+
+    handleIncomingMidi();
 
     // Autosave every two minutes while there are unsaved changes.
     if (const auto now = juce::Time::getMillisecondCounter();

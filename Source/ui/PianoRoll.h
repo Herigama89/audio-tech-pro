@@ -41,6 +41,10 @@ public:
 
     void quantizeSelection();
 
+    /** Step input (the Step In key on): notes you play go in one after another, a grid step each. */
+    bool isStepInputOn() const { return stepButton.getToggleState() && region.isValid(); }
+    void stepInput (const juce::MidiMessage& message);
+
 private:
     enum class Drag { none, move, resize, keyboard, rubberBand, velocity, controller };
 
@@ -92,6 +96,10 @@ private:
 
     juce::TextButton quantizeButton { "Quantize" }, closeButton { "Close" }, scaleButton { "Scale Q" }, transformButton { "Transform" };
     juce::ComboBox gridBox, strengthBox, laneBox;
+    juce::TextButton stepButton { "Step In" }, restButton { "Rest" };
+    double stepContent = 0.0;     // where the next step goes (content time)
+    int stepHeld = 0;
+    void advanceStep();
     juce::Label titleLabel;
 
     double pixelsPerSecond = 160.0;

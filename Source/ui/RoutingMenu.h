@@ -9,6 +9,9 @@ namespace riff::routing
 /** Set by the main window: freezes or unfreezes a track (rendering takes a moment, with progress). */
 inline std::function<void (juce::ValueTree track)> toggleFreeze;
 
+/** Set by the main window: the next controller you move on a MIDI device controls this (MIDI Learn). */
+inline std::function<void (juce::ValueTree track, juce::String param)> learnController;
+
 /** Set by the main window: makes a track stack from the selected tracks. */
 inline std::function<void (bool summing)> createStack;
 
@@ -36,10 +39,11 @@ inline juce::Array<juce::ValueTree> linkedTracks (const juce::ValueTree& project
 inline void addRoutingItems (juce::PopupMenu& menu, juce::ValueTree project, juce::ValueTree track, juce::UndoManager& um)
 {
     const auto trackId = track[ids::id].toString();
-    const bool isBus = model::isBusTrack (track), isVca = model::isVcaTrack (track);
+    const bool isBus = model::isBusTrack (track), isVcaFlag = model::isVcaTrack (track);
+    const auto isVca = [isVcaFlag] { return isVcaFlag; };
 
     // Output: the main output or a bus.
-    if (! isBus && ! isVca)
+    if (! isBus && ! isVca())
     {
         juce::PopupMenu output;
         const auto current = track[ids::output].toString();
@@ -108,6 +112,16 @@ inline void addRoutingItems (juce::PopupMenu& menu, juce::ValueTree project, juc
         menu.addSubMenu ("VCA", vcas);
     }
 
+    // MIDI Learn
+    if (learnController)
+    {
+        juce::PopupMenu learn;
+        for (auto param : { "volume", "pan", "mute", "solo" })
+            learn.addItem (juce::String (param).substring (0, 1).toUpperCase() + juce::String (param).substring (1),
+                           [t = track, p = juce::String (param)] { learnController (t, p); });
+        menu.addSubMenu ("Learn MIDI Controller", learn);
+    }
+
     // Track stacks
     menu.addSeparator();
     if (createStack)
@@ -123,7 +137,7 @@ inline void addRoutingItems (juce::PopupMenu& menu, juce::ValueTree project, juc
         });
 
     // Freeze
-    if (! isBus && ! isVca && toggleFreeze)
+    if (! isBus && ! isVca() && toggleFreeze)
         menu.addItem ((bool) track[ids::frozen] ? "Unfreeze Track" : "Freeze Track", [t = track] { toggleFreeze (t); });
 }
 

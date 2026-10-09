@@ -208,6 +208,7 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::saveAsTemplate:         saveAsTemplate(); break;
         case commands::newAlternative:         newAlternative(); break;
         case commands::eventList:              showEventList(); break;
+        case commands::controllerAssignments:  showControllerAssignments(); break;
 
         case commands::showMixer:              toggleMixer(); break;
         case commands::showPianoRoll:          togglePianoRoll(); break;
@@ -318,7 +319,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             menu.addSeparator();
             add ({ commands::showAssistant, commands::recordScreen });
             menu.addSeparator();
-            add ({ commands::preferences, commands::keyCommands, commands::audioSettings, commands::combineInterfaces });
+            add ({ commands::preferences, commands::keyCommands, commands::controllerAssignments, commands::audioSettings, commands::combineInterfaces });
             break;
 
         default:

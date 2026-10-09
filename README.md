@@ -300,7 +300,8 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [x] Track stacks (folder: one fader, mute, solo; summing: an aux bus; fold them away with the triangle), track freeze
 - [x] Marker track: double-click to add or rename, drag to move, click to go there, right-click to set the cycle or delete; Create Marker (Option+'), next/previous marker (Option+. / Option+,)
 - [x] Time signature and key in the display (click to change); the MIDI generator starts in the song's key
-- [ ] Tempo track with tempo changes, time signature and key changes along the song, arrangement markers
+- [x] Tempo track with tempo changes (double-click the Tempo lane; drag a change sideways to move it, up/down for its BPM)
+- [ ] Time signature and key changes along the song, arrangement markers; MIDI regions following tempo changes
 - [x] Bounce in place (Ctrl+B), export all tracks as audio files (stems, Shift+Cmd+E), import tracks from other projects
 
 **Editing in the tracks area**
@@ -335,7 +336,7 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 **Recording and MIDI**
 - [x] Audio and MIDI recording, punch in/out, cycle recording with take folders, count-in, metronome
 - [x] Autopunch (punch locators in the ruler), Replace mode, MIDI merge
-- [ ] Step input, MIDI learn and controller assignments
+- [x] Step input (Step In in the piano roll), MIDI Learn and controller assignments (volume, pan, mute, solo)
 
 **Project and file**
 - [x] Autosave (every 2 minutes, with recovery after a crash), project backups (Revert to Backup), consolidate (collect audio into the project)

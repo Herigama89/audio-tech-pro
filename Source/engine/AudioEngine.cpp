@@ -74,6 +74,41 @@ void AudioEngine::enableAllMidiInputs()
 void AudioEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)
 {
     sendLiveMidi (message);
+
+    // A copy for the message thread.
+    if (message.getRawDataSize() <= 3 && ! message.isActiveSense() && ! message.isMidiClock())
+    {
+        const juce::SpinLock::ScopedLockType lock (incomingLock);
+        if (incomingFifo.getFreeSpace() > 0)
+        {
+            const auto scope = incomingFifo.write (1);
+            auto& e = incomingEvents[(size_t) (scope.blockSize1 > 0 ? scope.startIndex1 : scope.startIndex2)];
+            e.size = message.getRawDataSize();
+            for (int i = 0; i < e.size; ++i)
+                e.data[i] = message.getRawData()[i];
+        }
+    }
+}
+
+std::vector<juce::MidiMessage> AudioEngine::takeIncomingMidi()
+{
+    std::vector<juce::MidiMessage> messages;
+    const auto ready = incomingFifo.getNumReady();
+    if (ready <= 0)
+        return messages;
+    const auto scope = incomingFifo.read (ready);
+    const auto take = [this, &messages] (int start, int count)
+    {
+        for (int i = 0; i < count; ++i)
+        {
+            const auto& e = incomingEvents[(size_t) (start + i)];
+            if (e.size > 0)
+                messages.emplace_back (e.data, e.size);
+        }
+    };
+    take (scope.startIndex1, scope.blockSize1);
+    take (scope.startIndex2, scope.blockSize2);
+    return messages;
 }
 
 void AudioEngine::sendLiveMidi (const juce::MidiMessage& message) noexcept

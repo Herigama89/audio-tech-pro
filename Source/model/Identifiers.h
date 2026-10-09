@@ -58,6 +58,10 @@ namespace riff::ids
     RIFF_DECLARE_ID (MARKERS)         // after MIXER: the marker track
     RIFF_DECLARE_ID (MARKER)          // { id, name, time }
     RIFF_DECLARE_ID (TEMPO)           // after MIXER: the tempo track's changes
+    RIFF_DECLARE_ID (ASSIGNMENTS)     // after MIXER: MIDI controller assignments
+    RIFF_DECLARE_ID (ASSIGN)          // { channel, cc, target (track id or "master"), param ("volume", "pan", "mute", "solo") }
+    RIFF_DECLARE_ID (cc)
+    RIFF_DECLARE_ID (channel)
     RIFF_DECLARE_ID (TEMPOCHANGE)     // { id, beat (quarter notes from the start), bpm }
     RIFF_DECLARE_ID (beat)
     RIFF_DECLARE_ID (bpm)
