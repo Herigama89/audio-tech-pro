@@ -88,6 +88,7 @@ const std::vector<Info>& all()
         { zoomVerticalOut,        "Zoom Vertical Out",          "View",      "Make every track shorter" },
         { undoHistory,            "Undo History...",            "View",      "Every edit you can undo; click one to go back (or forward) to it" },
         { preferences,            "Settings...",                "View",      "Autosave, backups, recording format and more" },
+        { showSmartControls,      "Smart Controls",             "View",      "Eight knobs for the selected track's sound (right-click one to map it)" },
         { showLibrary,            "Library",                    "View",      "Patches: save a track's sound and put it on other tracks" },
         { showLoopBrowser,        "Loop Browser",               "View",      "Browse a folder of loops and samples: click to hear, drag onto a track" },
         { controllerAssignments,  "Controller Assignments...",  "View",      "The knobs and faders on your MIDI controller that move tracks (right-click a track > Learn MIDI Controller to add one)" },
@@ -221,6 +222,7 @@ namespace
             case toolMenu:               return { key ('t') };
             case loopRegions:            return { key ('l') };
             case showLibrary:            return { key ('y') };
+            case showSmartControls:      return { key ('b') };
             case showLoopBrowser:        return { key ('o') };
             case trimStartToPlayhead:    return { key ('[', opt) };
             case trimEndToPlayhead:      return { key (']', opt) };

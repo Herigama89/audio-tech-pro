@@ -72,6 +72,9 @@ public:
     /** Called to open a MIDI region in the piano roll. */
     std::function<void (juce::ValueTree region)> onOpenPianoRoll;
 
+    /** Called to open an audio region in the Audio File Editor. */
+    std::function<void (juce::ValueTree region)> onOpenAudioEditor;
+
 private:
     enum class DragMode { none, scrub, move, trimStart, trimEnd, cycleNew, cycleMove, automationPoint, rubberBand, pencilRegion, marker,
                           fadeIn, fadeOut, loopEnd, punch, marquee, zoomRect, solo, tempo, compSwipe };

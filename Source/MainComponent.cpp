@@ -9,6 +9,7 @@
 #include "ui/TrackPicker.h"
 #include "ui/RoutingMenu.h"
 #include "ui/ConsoleStripWindow.h"
+#include "ui/AudioEditorPanel.h"
 #include "engine/ConsolePlugins.h"
 
 namespace riff
@@ -377,6 +378,27 @@ MainComponent::MainComponent (bool openAudioDevice)
     setSize (1440, 920);
     automation.makeCurrent();
     routing::toggleFreeze = [this] (juce::ValueTree track) { toggleFreeze (track); };
+    canvas.onOpenAudioEditor = [this] (juce::ValueTree region)
+    {
+        const auto id = "audio:" + region[ids::id].toString();
+        if (auto it = editorWindows.find (id); it != editorWindows.end())
+        {
+            it->second->toFront (true);
+            return;
+        }
+        auto closer = [this, id]
+        {
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this), id]
+            {
+                if (safe != nullptr)
+                    safe->editorWindows.erase (id);
+            });
+        };
+        editorWindows[id] = std::make_unique<EditorWindow> (region[ids::name].toString() + ": Audio File Editor",
+                                                            new AudioEditorPanel (region, undoManager, engine.getFormatManager(),
+                                                                                  recordingFolder().getChildFile ("Edits")),
+                                                            true, closer);
+    };
     routing::learnController = [this] (juce::ValueTree track, juce::String param)
     {
         learningTrack = track;
@@ -636,6 +658,10 @@ void MainComponent::resized()
     // The Inspector down the left side, beside the tracks and the editors, as in Logic
     if (inspector.isVisible())
         inspector.setBounds (area.removeFromLeft (Inspector::preferredWidth));
+
+    // Smart Controls at the very bottom.
+    if (smartControls != nullptr && smartControls->isVisible())
+        smartControls->setBounds (area.removeFromBottom (150));
 
     // The editor or the mixer below the tracks, with a divider to drag (double-click it for the default size).
     paneDivider.setVisible (pianoRoll.isVisible() || mixer.isVisible());
@@ -1634,6 +1660,8 @@ void MainComponent::timerCallback()
     }
     if (inspector.isVisible())
         inspector.setTrack (project, model::findById (project, timeline.selectedTrackId)), inspector.setRegion (model::findById (project, timeline.selectedRegionId));
+    if (smartControls != nullptr && smartControls->isVisible())
+        smartControls->setTrack (project, model::findById (project, timeline.selectedTrackId));
     updateScreenRecording();
 
     if (pianoRoll.isVisible())

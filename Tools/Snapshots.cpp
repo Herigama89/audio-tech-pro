@@ -12,6 +12,7 @@
 #include "ui/ScreenRecordPanel.h"
 #include "ui/CombineInterfacesPanel.h"
 #include "ui/ConsoleStripWindow.h"
+#include "ui/AudioEditorPanel.h"
 #include <deque>
 #include "ui/ConsoleLook.h"
 
@@ -139,6 +140,16 @@ public:
             ConsoleStripWindow panel (track, main.undoManager);
             pump (main, 100);
             save (panel, "strip-window.png");
+
+            AudioEditorPanel editor (track.getChild (0), main.undoManager, main.engine.getFormatManager(), juce::File::getSpecialLocation (juce::File::tempDirectory));
+            pump (main, 400);
+            save (editor, "audio-editor.png");
+
+            main.timeline.selectOnly (track[ids::id].toString());
+            main.toggleSmartControls();
+            pump (main, 200);
+            save (main, "smart-controls.png");
+            main.toggleSmartControls();
         }
 
         {

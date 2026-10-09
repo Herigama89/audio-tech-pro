@@ -22,6 +22,7 @@
 #include "ui/ScreenRecorder.h"
 #include "ui/ScreenRecordPanel.h"
 #include "ui/LibraryPanel.h"
+#include "ui/SmartControls.h"
 #include "ui/CombineInterfacesPanel.h"
 #include "engine/AggregateDevice.h"
 #include "model/ProjectFiles.h"
@@ -138,6 +139,8 @@ private:
     void showEventList();
     void showControllerAssignments();
     void toggleLibrary (LibraryPanel::Page page);
+    void toggleSmartControls();
+    std::unique_ptr<SmartControls> smartControls;
     std::unique_ptr<LibraryPanel> libraryPanel;
     void handleIncomingMidi();
     juce::ValueTree learningTrack;      // MIDI Learn: waiting for a controller for this track's...

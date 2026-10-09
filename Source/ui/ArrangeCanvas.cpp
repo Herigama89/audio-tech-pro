@@ -1742,6 +1742,7 @@ void ArrangeCanvas::showRegionMenu (juce::ValueTree region)
     if (! model::isMidiRegion (region))
     {
         menu.addItem ("Gain...", [this, region] { showGainPopup (region); });
+        menu.addItem ("Audio File Editor (normalize, reverse, time stretch, transpose)...", [this, region] { if (onOpenAudioEditor) onOpenAudioEditor (region); });
 
         juce::PopupMenu fades;
         const auto setFades = [this, region] (double in, double out)
@@ -1894,6 +1895,8 @@ void ArrangeCanvas::mouseDoubleClick (const juce::MouseEvent& e)
     {
         if (model::isMidiRegion (region) && onOpenPianoRoll)
             onOpenPianoRoll (region);
+        else if (! model::isMidiRegion (region) && onOpenAudioEditor && ! (bool) region.getProperty (ids::takesOpen, false))
+            onOpenAudioEditor (region);
         return;
     }
 

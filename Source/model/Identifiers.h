@@ -95,6 +95,7 @@ namespace riff::ids
     RIFF_DECLARE_ID (loopEnd)
     RIFF_DECLARE_ID (transpose)        // REGION / TRACK (MIDI): semitones, applied as it plays
     RIFF_DECLARE_ID (velocityOffset)   // REGION / TRACK (MIDI): added to every note's velocity
+    RIFF_DECLARE_ID (smartControls)    // TRACK: what the eight Smart Controls knobs drive, "|"-separated
     RIFF_DECLARE_ID (automationMode)   // TRACK: "off", "read" (default), "touch", "latch", "write"
     RIFF_DECLARE_ID (metronome)
     RIFF_DECLARE_ID (armed)        // record-enabled

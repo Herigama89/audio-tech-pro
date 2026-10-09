@@ -41,6 +41,7 @@ set(RIFF_CORE_SOURCES
     Source/engine/AudioFileCache.cpp
     Source/engine/ProjectPlayer.cpp
     Source/engine/AutomationWriter.cpp
+    Source/engine/AudioEdit.cpp
     Source/engine/LatencyMeasure.cpp
     Source/engine/BuiltInSynth.cpp
     Source/engine/PluginInstrument.cpp
@@ -119,6 +120,8 @@ set(RIFF_UI_SOURCES
     Source/ui/ConsoleStripWindow.cpp
     Source/ui/EventList.cpp
     Source/ui/LibraryPanel.cpp
+    Source/ui/AudioEditorPanel.cpp
+    Source/ui/SmartControls.cpp
     Source/ui/BusCompConsolePanel.cpp
     Source/ui/StripParts.cpp
 )
@@ -179,6 +182,7 @@ if(RIFF_BUILD_TESTS)
         Tests/EditTests.cpp
         Tests/FilesTests.cpp
         Tests/AutomationWriterTests.cpp
+        Tests/AudioEditTests.cpp
         Source/ui/ScreenRecordPanel.cpp
         Source/ui/ScreenRecorder.cpp
     )

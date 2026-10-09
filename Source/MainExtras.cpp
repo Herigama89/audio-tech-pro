@@ -528,3 +528,23 @@ void MainComponent::toggleLibrary (LibraryPanel::Page page)
 }
 
 } // namespace riff
+
+namespace riff
+{
+
+void MainComponent::toggleSmartControls()
+{
+    if (smartControls == nullptr)
+    {
+        smartControls = std::make_unique<SmartControls> (undoManager,
+            [this] (const juce::String& insertId) { return effectRack.getPlugin (insertId); },
+            [this] (const juce::String& trackId) { return rack.getPlugin (trackId); });
+        smartControls->onClose = [this] { smartControls->setVisible (false); resized(); };
+        addChildComponent (*smartControls);
+    }
+    smartControls->setVisible (! smartControls->isVisible());
+    smartControls->setTrack (project, selectedTrack());
+    resized();
+}
+
+} // namespace riff

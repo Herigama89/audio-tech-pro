@@ -34,7 +34,7 @@ namespace riff::commands
         trimStartToPlayhead = 0x2801, trimEndToPlayhead, loopRegions, regionGain, removeFades,
         createFolderStack = 0x2901, createSummingStack, freezeTracks, newVca,
         toggleAutopunch = 0x2a01, toggleReplace, toggleMidiMerge, undoHistory, preferences, saveAsTemplate, newAlternative, eventList,
-        controllerAssignments, showLibrary, showLoopBrowser
+        controllerAssignments, showLibrary, showLoopBrowser, showSmartControls
     };
 
     struct Info

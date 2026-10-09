@@ -314,14 +314,16 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [x] Snap (Smart, Bar, Beat, Division, Off) and Drag modes (Overlap, No Overlap)
 - [x] Join MIDI regions (Cmd+J), mute regions (Ctrl+M), nudge (Option+Left/Right)
 - [x] Loop regions (L, or drag a region's upper right edge), X-Fade and Shuffle R/L drag modes, region gain, fades (drag the handles at a region's top corners, Shift-drag bends the curve, or the Fade tool) and equal-power crossfades, trim region start/end to playhead
-- [ ] Flex Time and Flex Pitch, time stretch, Smart Tempo, quick swipe comping refinements
+- [x] Time stretch and transpose for audio regions (in the Audio File Editor, without changing pitch / length)
+- [ ] Flex Time markers and Flex Pitch note editing, Smart Tempo
 - [ ] Marquee selection across tracks; edit with the playhead (split by locators, delete between)
 
 **Editors**
 - [x] Piano Roll: velocity lane, MIDI CC and pitch bend lanes (recorded too), quantize grid / strength / swing, Scale Quantize, MIDI Transform presets, rubber-band note selection
 - [ ] Piano Roll: Time Handles, note repeat, more Transform sets
 - [x] Event List (MIDI regions)
-- [ ] Step Editor, Score Editor, Audio Track Editor and Audio File Editor
+- [x] Audio File Editor (double-click an audio region): normalize, gain, fades, silence, reverse, invert
+- [ ] Step Editor, Score Editor, Audio Track Editor
 - [ ] Step Sequencer
 - [x] Editors open below the tracks with a resizable divider (double-click it for the default); the editor follows the selected track and region
 
@@ -345,7 +347,7 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [x] Project alternatives, project templates
 - [x] Undo History window, Settings window (autosave, backups, recording format, stop behaviour, open last project)
 - [x] Library (save a track's sound as a patch, put it on other tracks; Y) and Loop Browser (a folder of loops and samples, preview, drag onto tracks; O)
-- [ ] Smart Controls
+- [x] Smart Controls (B): eight knobs per track, mapped automatically, right-click to remap
 - [ ] Live Loops, Drummer and Session Players (instruments come last)
 
 ## Later phases
