@@ -606,3 +606,32 @@ TEST_CASE ("The tempo track: changes on beats, bars and beats follow them", "[mo
     CHECK_THAT (model::moveByBars (project, 5.0, -1), WithinAbs (4.0, 1e-9));   // inside bar 3: back to its start
     CHECK_THAT (model::moveByBars (project, 4.0, -1), WithinAbs (2.0, 1e-9));
 }
+
+TEST_CASE ("Patches keep a track's sound and put it on another track", "[model][library]")
+{
+    auto project = model::createProject();
+    auto source = model::addTrack (project, "Lead", nullptr, -1, model::instrumentKind);
+    source.setProperty (ids::synthCutoff, 900.0, nullptr);
+    source.setProperty (ids::consoleHF, 3.0, nullptr);
+    model::addBuiltinInsert (model::chainFor (project, source[ids::id]), "delay", 0, nullptr);
+    model::addNote (model::addMidiRegion (source, 0.0, 1.0, nullptr), 60, 0.0, 0.5, 100, nullptr);
+
+    const auto patch = model::makePatch (project, source);
+    CHECK (patch.getChild (0).getNumChildren() == 0);   // no regions in a patch
+
+    auto target = model::addTrack (project, "Other", nullptr, -1, model::instrumentKind);
+    model::addRegion (target, juce::File ("/tmp/x.wav"), 0.0, 1.0, nullptr);
+    model::addBuiltinInsert (model::chainFor (project, target[ids::id]), "limiter", 0, nullptr);
+    juce::UndoManager um;
+    model::applyPatch (project, target, patch, &um);
+
+    CHECK ((double) target[ids::synthCutoff] == 900.0);
+    CHECK ((double) target[ids::consoleHF] == 3.0);
+    CHECK (target[ids::name].toString() == "Other");        // its own name stays
+    CHECK (target.getNumChildren() == 1);                    // and its regions
+    const auto inserts = model::insertsOf (model::findChain (project, target[ids::id]));
+    REQUIRE (inserts.size() == 1);
+    CHECK (inserts[0][ids::effect].toString() == "delay");
+    um.undo();
+    CHECK (model::insertsOf (model::findChain (project, target[ids::id]))[0][ids::effect].toString() == "limiter");
+}

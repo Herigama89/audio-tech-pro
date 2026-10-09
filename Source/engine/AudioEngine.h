@@ -190,6 +190,11 @@ public:
                                 std::function<bool (double)> progress);
     void endOfflineRender();
 
+    /** Library preview: plays a file (decoded, up to 30 s) on its own, over everything; never recorded or exported. */
+    bool previewFile (const juce::File& file);
+    void stopPreview();
+    bool isPreviewing() const noexcept { return previewPlaying.load(); }
+
     /** The MIDI that arrived from your devices since the last call (message thread). */
     std::vector<juce::MidiMessage> takeIncomingMidi();
 
@@ -355,7 +360,14 @@ private:
     bool measuring = false;                       // only while measureMix renders
     juce::AudioBuffer<float>* stemCapture = nullptr;   // only while renderStems renders: 2 channels per slot
     bool stemBeforeFader = false;
-    int recordBitDepth = 24;                      // freezing: before the fader, pan and sends
+    int recordBitDepth = 24;
+
+    juce::SpinLock previewLock;
+    std::unique_ptr<juce::AudioBuffer<float>> previewHold;   // message thread owns it
+    juce::AudioBuffer<float>* previewBuffer = nullptr;       // what the audio thread reads (under previewLock)
+    double previewPosition = 0.0, previewStep = 1.0;
+    std::atomic<bool> previewPlaying { false };
+    void renderPreview (float* left, float* right, int n) noexcept;                      // freezing: before the fader, pan and sends
     std::vector<LevelStats> measuredTracks;       // by slot
     LevelStats measuredMaster;
     bool offlineWasAttached = false, offlineSavedPlaying = false;

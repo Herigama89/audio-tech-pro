@@ -520,6 +520,57 @@ juce::Array<juce::ValueTree> importTracks (juce::ValueTree project, const juce::
     return added;
 }
 
+juce::ValueTree makePatch (const juce::ValueTree& project, const juce::ValueTree& track)
+{
+    auto patch = createProject (track[ids::name].toString());
+    importTracks (patch, project, { track[ids::id].toString() }, nullptr);
+    // Just the sound: no regions.
+    auto copy = patch.getChild (0);
+    for (int i = copy.getNumChildren(); --i >= 0;)
+        copy.removeChild (i, nullptr);
+    return patch;
+}
+
+void applyPatch (juce::ValueTree project, juce::ValueTree track, const juce::ValueTree& patch, juce::UndoManager* um)
+{
+    const auto source = patch.getChild (0);
+    if (! source.hasType (ids::TRACK))
+        return;
+
+    const auto trackId = track[ids::id].toString();
+
+    // The sound's properties (not the track's identity, place, routing or record state).
+    static const juce::Identifier keep[] { ids::id, ids::name, ids::colour, ids::armed, ids::monitor, ids::input, ids::inputStereo,
+                                           ids::height, ids::hidden, ids::output, ids::vca, ids::group, ids::stackParent,
+                                           ids::frozen, ids::frozenFile, ids::volume, ids::pan, ids::mute, ids::solo };
+    for (int i = 0; i < source.getNumProperties(); ++i)
+    {
+        const auto name = source.getPropertyName (i);
+        if (std::find (std::begin (keep), std::end (keep), name) == std::end (keep))
+            track.setProperty (name, source[name], um);
+    }
+
+    // Its inserts and channel strip plugin replace the track's (sends stay as they are).
+    const auto sourceId = source[ids::id].toString();
+    for (const auto& [from, to] : { std::pair { sourceId, trackId }, std::pair { stripOwner (sourceId), stripOwner (trackId) } })
+    {
+        if (auto chain = findChain (project, to); chain.isValid())
+            for (const auto& insert : insertsOf (chain))
+                removeInsert (insert, um);
+
+        const auto patchChain = findChain (patch, from);
+        if (! patchChain.isValid())
+            continue;
+        auto chain = chainFor (project, to);
+        for (const auto& insert : insertsOf (patchChain))
+        {
+            auto c = insert.createCopy();
+            c.setProperty (ids::id, newId(), nullptr);
+            chain.appendChild (c, um);
+        }
+    }
+}
+
 juce::ValueTree addRecordedRegion (juce::ValueTree track, const juce::File& file, double start,
                                    double recordedLength, double latencySeconds, juce::UndoManager* um)
 {

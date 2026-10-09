@@ -90,6 +90,64 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiM
     }
 }
 
+bool AudioEngine::previewFile (const juce::File& file)
+{
+    stopPreview();
+
+    std::unique_ptr<juce::AudioFormatReader> reader (formatManager.createReaderFor (file));
+    if (reader == nullptr)
+        return false;
+
+    const auto length = (int) juce::jmin (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 30.0));
+    auto buffer = std::make_unique<juce::AudioBuffer<float>> (2, juce::jmax (1, length));
+    reader->read (buffer.get(), 0, length, 0, true, reader->numChannels > 1);
+    if (reader->numChannels == 1)
+        buffer->copyFrom (1, 0, *buffer, 0, 0, length);
+
+    const juce::SpinLock::ScopedLockType lock (previewLock);
+    previewHold = std::move (buffer);
+    previewBuffer = previewHold.get();
+    previewPosition = 0.0;
+    previewStep = reader->sampleRate / juce::jmax (1.0, sampleRate.load());
+    previewPlaying.store (true);
+    return true;
+}
+
+void AudioEngine::stopPreview()
+{
+    std::unique_ptr<juce::AudioBuffer<float>> old;
+    {
+        const juce::SpinLock::ScopedLockType lock (previewLock);
+        previewPlaying.store (false);
+        previewBuffer = nullptr;
+        old = std::move (previewHold);
+    }
+}
+
+void AudioEngine::renderPreview (float* left, float* right, int n) noexcept
+{
+    const juce::SpinLock::ScopedTryLockType lock (previewLock);
+    if (! lock.isLocked() || previewBuffer == nullptr)
+        return;
+
+    const auto length = previewBuffer->getNumSamples();
+    const auto* l = previewBuffer->getReadPointer (0);
+    const auto* r = previewBuffer->getReadPointer (1);
+    for (int i = 0; i < n; ++i)
+    {
+        const auto index = (int) previewPosition;
+        if (index + 1 >= length)
+        {
+            previewPlaying.store (false);
+            return;
+        }
+        const auto frac = (float) (previewPosition - index);
+        left[i]  += (l[index] + (l[index + 1] - l[index]) * frac) * 0.8f;
+        right[i] += (r[index] + (r[index + 1] - r[index]) * frac) * 0.8f;
+        previewPosition += previewStep;
+    }
+}
+
 std::vector<juce::MidiMessage> AudioEngine::takeIncomingMidi()
 {
     std::vector<juce::MidiMessage> messages;
@@ -896,6 +954,9 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
             if (isPlayingNow && (graph->metronome || countingIn) && ! bouncing)
                 renderClick (*graph, mixL, mixR, n);
         }
+
+        if (previewPlaying.load (std::memory_order_relaxed) && ! bouncing)
+            renderPreview (mixL, mixR, n);
 
         if (isPlayingNow)
         {

@@ -630,6 +630,8 @@ void MainComponent::resized()
     // The Claude panel down the right side
     if (assistantPanel != nullptr && assistantPanel->isVisible())
         assistantPanel->setBounds (area.removeFromRight (AssistantPanel::preferredWidth));
+    if (libraryPanel != nullptr && libraryPanel->isVisible())
+        libraryPanel->setBounds (area.removeFromRight (LibraryPanel::preferredWidth));
 
     // The Inspector down the left side, beside the tracks and the editors, as in Logic
     if (inspector.isVisible())

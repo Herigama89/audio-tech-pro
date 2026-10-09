@@ -118,6 +118,7 @@ set(RIFF_UI_SOURCES
     Source/ui/Mixer.cpp
     Source/ui/ConsoleStripWindow.cpp
     Source/ui/EventList.cpp
+    Source/ui/LibraryPanel.cpp
     Source/ui/BusCompConsolePanel.cpp
     Source/ui/StripParts.cpp
 )

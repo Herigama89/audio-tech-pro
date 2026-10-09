@@ -17,6 +17,7 @@ namespace riff
 */
 class ArrangeCanvas final : public juce::Component,
                             public juce::FileDragAndDropTarget,
+                            public juce::DragAndDropTarget,
                             private juce::ValueTree::Listener,
                             private juce::ChangeListener
 {
@@ -48,6 +49,15 @@ public:
     void fileDragMove (const juce::StringArray& files, int x, int y) override;
     void fileDragExit (const juce::StringArray& files) override;
     void filesDropped (const juce::StringArray& files, int x, int y) override;
+
+    // Files dragged from the Loop Browser ("file:<path>").
+    bool isInterestedInDragSource (const SourceDetails& details) override { return details.description.toString().startsWith ("file:"); }
+    void itemDragMove (const SourceDetails& details) override { fileDragMove ({}, details.localPosition.x, details.localPosition.y); }
+    void itemDragExit (const SourceDetails&) override { fileDragExit ({}); }
+    void itemDropped (const SourceDetails& details) override
+    {
+        filesDropped ({ details.description.toString().fromFirstOccurrenceOf ("file:", false, false) }, details.localPosition.x, details.localPosition.y);
+    }
 
     /** After regions were moved, pasted or trimmed (or deleted from `tracks`): what the Drag mode does next
         (No Overlap shortens what they cover, X-Fade crossfades, Shuffle closes the gaps). */

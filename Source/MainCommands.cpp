@@ -209,6 +209,8 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::newAlternative:         newAlternative(); break;
         case commands::eventList:              showEventList(); break;
         case commands::controllerAssignments:  showControllerAssignments(); break;
+        case commands::showLibrary:            toggleLibrary (LibraryPanel::Page::patches); break;
+        case commands::showLoopBrowser:        toggleLibrary (LibraryPanel::Page::loops); break;
 
         case commands::showMixer:              toggleMixer(); break;
         case commands::showPianoRoll:          togglePianoRoll(); break;
@@ -314,7 +316,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             break;
 
         case 6:
-            add ({ commands::toggleInspector, commands::undoHistory, commands::eventList });
+            add ({ commands::toggleInspector, commands::showLibrary, commands::showLoopBrowser, commands::undoHistory, commands::eventList });
             add ({ commands::showPianoRoll, commands::zoomIn, commands::zoomOut, commands::zoomVerticalIn, commands::zoomVerticalOut });
             menu.addSeparator();
             add ({ commands::showAssistant, commands::recordScreen });

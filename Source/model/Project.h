@@ -90,6 +90,11 @@ namespace riff::model
     juce::Array<juce::ValueTree> importTracks (juce::ValueTree project, const juce::ValueTree& source,
                                                const juce::StringArray& trackIds, juce::UndoManager* um);
 
+    /** Library patches: a track's sound (instrument, plugins, channel strip, sends to nowhere dropped) as a small
+        project of its own, and putting one onto a track (replacing its sound; its regions stay). */
+    juce::ValueTree makePatch (const juce::ValueTree& project, const juce::ValueTree& track);
+    void applyPatch (juce::ValueTree project, juce::ValueTree track, const juce::ValueTree& patch, juce::UndoManager* um);
+
     /**
         Adds a region for a finished recording.
 

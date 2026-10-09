@@ -21,6 +21,7 @@
 #include "ui/AssistantPanel.h"
 #include "ui/ScreenRecorder.h"
 #include "ui/ScreenRecordPanel.h"
+#include "ui/LibraryPanel.h"
 #include "ui/CombineInterfacesPanel.h"
 #include "engine/AggregateDevice.h"
 #include "model/ProjectFiles.h"
@@ -37,6 +38,7 @@ namespace riff
     and status line. Owns the engine, the project tree and the undo history.
 */
 class MainComponent final : public juce::Component,
+                            public juce::DragAndDropContainer,
                             public juce::ApplicationCommandTarget,
                             public juce::MenuBarModel,
                             private juce::ValueTree::Listener,
@@ -135,6 +137,8 @@ private:
     void newAlternative();
     void showEventList();
     void showControllerAssignments();
+    void toggleLibrary (LibraryPanel::Page page);
+    std::unique_ptr<LibraryPanel> libraryPanel;
     void handleIncomingMidi();
     juce::ValueTree learningTrack;      // MIDI Learn: waiting for a controller for this track's...
     juce::String learningParam;         // ... parameter

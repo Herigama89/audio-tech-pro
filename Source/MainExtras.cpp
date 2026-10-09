@@ -466,3 +466,65 @@ void MainComponent::showControllerAssignments()
 }
 
 } // namespace riff
+
+namespace riff
+{
+
+void MainComponent::toggleLibrary (LibraryPanel::Page page)
+{
+    if (libraryPanel == nullptr)
+    {
+        libraryPanel = std::make_unique<LibraryPanel> (engine, *appProperties.getUserSettings());
+        addChildComponent (*libraryPanel);
+
+        libraryPanel->onClose = [this] { libraryPanel->setVisible (false); engine.stopPreview(); resized(); };
+        libraryPanel->onLoadPatch = [this] (const juce::File& file)
+        {
+            auto track = selectedTrack();
+            if (! track.isValid())
+            {
+                showError ("Library", "Select a track first: the patch goes on it.");
+                return;
+            }
+            juce::String error;
+            const auto patch = model::load (file, error);
+            if (! patch.isValid())
+            {
+                showError ("Couldn't open the patch", error);
+                return;
+            }
+            undoManager.beginNewTransaction ("Patch: " + file.getFileNameWithoutExtension());
+            model::applyPatch (project, track, patch, &undoManager);
+        };
+        libraryPanel->onSavePatch = [this] (const juce::String& name)
+        {
+            auto track = selectedTrack();
+            if (! track.isValid())
+            {
+                showError ("Library", "Select the track whose sound you want to keep first.");
+                return;
+            }
+            rack.storePluginStates (project);
+            effectRack.storePluginStates (model::mixerOf (project));
+            LibraryPanel::patchesFolder().createDirectory();
+            const auto file = LibraryPanel::patchesFolder().getChildFile (juce::File::createLegalFileName (name) + LibraryPanel::patchExtension);
+            juce::String error;
+            if (! model::save (model::makePatch (project, track), file, error))
+                showError ("Couldn't save the patch", error);
+        };
+        libraryPanel->onAddFile = [this] (const juce::File& file)
+        {
+            canvas.importFiles ({ file.getFullPathName() }, selectedTrackIndex(), canvas.snap (engine.getPlayheadSeconds()));
+        };
+    }
+
+    const bool showing = libraryPanel->isVisible() && libraryPanel->getPage() == page;
+    libraryPanel->setVisible (! showing);
+    if (! showing)
+        libraryPanel->showPage (page);
+    else
+        engine.stopPreview();
+    resized();
+}
+
+} // namespace riff
