@@ -6,6 +6,7 @@
 #include "AudioEngine.h"
 #include "AudioFileCache.h"
 #include "DiskReadAhead.h"
+#include "RegionVariants.h"
 #include "InstrumentRack.h"
 #include "EffectRack.h"
 #include "../model/Identifiers.h"
@@ -95,6 +96,7 @@ private:
     void addParamAutomation (PlaybackGraph::Track& t, const juce::String& owner, double sampleRate,
                              const std::map<juce::String, std::shared_ptr<Effect>>& effectsById);
     juce::String liveMidiTrackId;
+    juce::String sourceOnlyTrack;   // freezing in Source Only mode: this track plays without its plugins
     bool ignoreSolo = false;
     std::map<juce::String, LiveCell> liveCells;
     juce::Array<juce::ValueTree> regionsToPlay (const juce::ValueTree& track) const;
@@ -107,8 +109,14 @@ private:
 
     DiskReadAhead readAhead { [this] { return engine.getPlayheadSeconds(); } };
 
+    RegionVariants variants;   // audio regions transposed or stretched (rendered in the background)
+
 public:
     DiskReadAhead& getReadAhead() noexcept { return readAhead; }
+    RegionVariants& getVariants() noexcept { return variants; }
+
+    /** While freezing a track in Source Only mode: it plays without its plugins and channel strip. */
+    void setSourceOnlyTrack (const juce::String& trackId) { sourceOnlyTrack = trackId; }
 };
 
 } // namespace riff

@@ -26,10 +26,13 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    static constexpr int headerHeight = 26;
+    static constexpr int headerHeight = 32;
 
     /** The menu at the top (the track's name): everything you can do to the track and its channel strip. */
     std::function<void (juce::ValueTree track, juce::Component& target)> onTrackMenu;
+
+    /** With no track selected: make one (0: audio, 1: instrument). */
+    std::function<void (int kind)> onNewTrack;
 
     /** The Inspector's own options (which boxes show), for that menu. */
     void addInspectorItems (juce::PopupMenu& menu);
@@ -56,6 +59,8 @@ private:
     };
     Divider divider;
     juce::TextButton trackMenuButton, masterMenuButton;
+    juce::Label emptyLabel;   // no track selected: what to do
+    juce::TextButton newAudioButton { "New Audio Track" }, newInstrumentButton { "New Instrument Track" };
     void updateHeaderButtons();
     int boxesWanted = -1, boxesAtDragStart = 0;   // -1: as tall as the boxes need
     juce::Viewport stripView;
@@ -71,6 +76,15 @@ private:
     juce::ValueTree region;
     ParameterBox regionBox { mixer.getUndoManager() }, trackBox { mixer.getUndoManager() };
     void buildTrackBox();
+    void buildRegionBox();
+    juce::ValueTree regionBoxTrack;   // the track the Region box was built for (its defaults)
+
+    /** The track's Flex Mode greys the region's Flex rows in or out. */
+    struct TrackWatcher final : juce::ValueTree::Listener
+    {
+        std::function<void()> onChange;
+        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier& p) override { if (p == ids::flexMode && onChange) onChange(); }
+    } trackWatcher;
     int boxesHeight() const;
 };
 

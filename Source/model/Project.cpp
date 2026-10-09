@@ -207,6 +207,7 @@ juce::ValueTree addRegion (juce::ValueTree track, const juce::File& audioFile,
     region.setProperty (ids::offset, 0.0, nullptr);
     region.setProperty (ids::length, juce::jmax (minRegionLength, length), nullptr);
     region.setProperty (ids::gain, 1.0, nullptr);
+    applyRegionDefaults (track, region);
 
     track.appendChild (region, um);
     return region;
@@ -883,9 +884,59 @@ juce::ValueTree addMidiRegion (juce::ValueTree track, double start, double lengt
     region.setProperty (ids::offset, 0.0, nullptr);
     region.setProperty (ids::length, juce::jmax (minRegionLength, length), nullptr);
     region.setProperty (ids::gain, 1.0, nullptr);
+    applyRegionDefaults (track, region);
 
     track.appendChild (region, um);
     return region;
+}
+
+juce::Identifier regionDefaultId (const juce::Identifier& property)
+{
+    return juce::Identifier ("regionDefault_" + property.toString());
+}
+
+void applyRegionDefaults (const juce::ValueTree& track, juce::ValueTree region)
+{
+    const juce::String prefix ("regionDefault_");
+    for (int i = 0; i < track.getNumProperties(); ++i)
+    {
+        const auto name = track.getPropertyName (i).toString();
+        if (name.startsWith (prefix))
+            region.setProperty (juce::Identifier (name.substring (prefix.length())), track[track.getPropertyName (i)], nullptr);
+    }
+}
+
+AudioShape audioShapeOf (const juce::ValueTree& project, const juce::ValueTree& track, const juce::ValueTree& region, double detectedBpm)
+{
+    AudioShape shape;
+    shape.semitones = (double) region.getProperty (ids::transpose, 0.0) + (double) region.getProperty (ids::fineTune, 0.0) / 100.0;
+
+    // Pitch Source: follows the key track, from the key it was in when turned on.
+    if ((bool) region[ids::pitchSource] && region.hasProperty (ids::pitchSourceKey))
+    {
+        const auto key = keyAt (project, (double) region[ids::start]).first;
+        auto shift = (key - (int) region[ids::pitchSourceKey]) % 12;
+        if (shift > 6) shift -= 12;
+        if (shift < -5) shift += 12;
+        shape.semitones += shift;
+    }
+
+    // Flex with Smart Tempo: stretched from its own tempo to the song's (where it starts).
+    const auto mode = track.getProperty (ids::flexMode, "off").toString();
+    if ((bool) region[ids::flex] && mode != "off" && region.getProperty (ids::smartTempo, "on").toString() != "off")
+    {
+        const double own = region.getProperty (ids::sourceBpm, 0.0);
+        const auto bpm = own > 0.0 ? own : detectedBpm;
+        shape.needsTempo = own <= 0.0;
+        if (bpm > 0.0)
+        {
+            const auto song = tempoMapOf (project).bpmAt ((double) region[ids::start]);
+            if (song > 0.0)
+                shape.ratio = juce::jlimit (0.25, 4.0, bpm / song);
+        }
+        shape.varispeed = mode == "speed" || mode == "varispeed";
+    }
+    return shape;
 }
 
 juce::ValueTree addNote (juce::ValueTree region, int pitch, double start, double length, int velocity, juce::UndoManager* um)

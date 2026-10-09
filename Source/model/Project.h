@@ -168,6 +168,16 @@ namespace riff::model
 
     juce::ValueTree addMidiRegion (juce::ValueTree track, double start, double length, juce::UndoManager* um);
 
+    /** Logic's "Audio Defaults" / "MIDI Defaults" Region box: a track's settings for regions made on it,
+        kept on the track as "regionDefault_<property>". New regions start with them. */
+    juce::Identifier regionDefaultId (const juce::Identifier& property);
+    void applyRegionDefaults (const juce::ValueTree& track, juce::ValueTree region);
+
+    /** How an audio region plays differently from its file (Region box: Transpose, Fine Tune,
+        Pitch Source, Flex with Smart Tempo). `detectedBpm` is the file's tempo found by Smart Tempo. */
+    struct AudioShape { double semitones = 0.0, ratio = 1.0; bool varispeed = false; bool needsTempo = false; };
+    AudioShape audioShapeOf (const juce::ValueTree& project, const juce::ValueTree& track, const juce::ValueTree& region, double detectedBpm);
+
     /** `start` is measured from the beginning of the region's content (see Identifiers.h). */
     juce::ValueTree addNote (juce::ValueTree region, int pitch, double start, double length, int velocity, juce::UndoManager* um);
     void moveNote (juce::ValueTree note, double newStart, int newPitch, juce::UndoManager* um);

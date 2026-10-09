@@ -11,6 +11,7 @@
 #include "model/Project.h"
 #include "engine/MasterBusCompressor.h"
 #include "ui/KeyCommands.h"
+#include "ui/Commands.h"
 #include "ui/GeneratorPanel.h"
 #include "ui/AssistantPanel.h"
 #include "ui/ScreenRecordPanel.h"
@@ -288,6 +289,25 @@ public:
             save (main, "inspector-wide.png");
             main.inspector.boxesWanted = -1;
             main.project.getChild (1).setProperty (ids::hidden, false, nullptr);
+
+            // An audio track with no region selected: Audio Defaults, the Toolbar row and Quick Help.
+            {
+                auto audio = model::addTrack (main.project, "Vocal", nullptr);
+                audio.setProperty (ids::flexMode, "polyphonic", nullptr);
+                main.timeline.selectOnly (audio[ids::id].toString());
+                main.timeline.selectedRegionId = {};
+                main.timeline.changed();
+                main.commandManager.invokeDirectly (commands::toggleToolbar, false);
+                main.commandManager.invokeDirectly (commands::toggleQuickHelp, false);
+                main.quickHelpBox.setText ("Snap\nWhere regions land when you move them (Smart follows the zoom).", juce::dontSendNotification);
+                pump (main, 200);
+                main.quickHelpBox.setText ("Snap\nWhere regions land when you move them (Smart follows the zoom).", juce::dontSendNotification);
+                save (main, "inspector-audio-defaults.png");
+                main.commandManager.invokeDirectly (commands::toggleQuickHelp, false);
+                main.commandManager.invokeDirectly (commands::toggleToolbar, false);
+                main.project.removeChild (audio, nullptr);
+                main.timeline.changed();
+            }
             main.toggleInspector();
 
             // Several regions selected, one muted, the Scissors tool and No Overlap.

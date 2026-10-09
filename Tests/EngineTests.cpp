@@ -2082,3 +2082,44 @@ TEST_CASE ("A mono channel sums both sides of a stereo file", "[engine]")
         CHECK_THAT (out.getSample (1, 100), WithinAbs (0.3f * 0.8f, 1e-3));
     }
 }
+
+#include "engine/RegionVariants.h"
+
+TEST_CASE ("Audio regions: transpose, fine tune and Smart Tempo shape how they play", "[engine][model]")
+{
+    auto project = model::createProject();
+    auto track = model::addTrack (project, "A", nullptr);
+    auto region = model::addRegion (track, juce::File ("/nowhere.wav"), 0.0, 2.0, nullptr);
+
+    auto shape = model::audioShapeOf (project, track, region, 0.0);
+    CHECK (shape.semitones == 0.0);
+    CHECK (shape.ratio == 1.0);
+
+    region.setProperty (ids::transpose, 2, nullptr);
+    region.setProperty (ids::fineTune, -50, nullptr);
+    CHECK_THAT (model::audioShapeOf (project, track, region, 0.0).semitones, WithinAbs (1.5, 1e-9));
+
+    // Flex with Smart Tempo: a 60 BPM file in a 120 BPM song plays twice as fast (half as long) ...
+    model::setTempo (project, 120.0, nullptr);
+    region.setProperty (ids::flex, true, nullptr);
+    CHECK (model::audioShapeOf (project, track, region, 60.0).ratio == 1.0);   // ... only with the track's Flex on
+    track.setProperty (ids::flexMode, "polyphonic", nullptr);
+    shape = model::audioShapeOf (project, track, region, 60.0);
+    CHECK_THAT (shape.ratio, WithinAbs (0.5, 1e-9));
+    CHECK_FALSE (shape.varispeed);
+    track.setProperty (ids::flexMode, "speed", nullptr);
+    CHECK (model::audioShapeOf (project, track, region, 60.0).varispeed);
+
+    // Region defaults: the track's settings for new regions.
+    track.setProperty (model::regionDefaultId (ids::loop), true, nullptr);
+    auto next = model::addRegion (track, juce::File ("/nowhere2.wav"), 4.0, 2.0, nullptr);
+    CHECK ((bool) next[ids::loop]);
+
+    // Rendering: a stretch makes it longer; Speed (varispeed) too.
+    juce::AudioBuffer<float> sine (1, 48000);
+    for (int i = 0; i < sine.getNumSamples(); ++i)
+        sine.setSample (0, i, 0.5f * std::sin ((float) i * 0.05f));
+    CHECK (std::abs (RegionVariants::render (sine, 48000.0, { 0.0, 2.0, false }).getNumSamples() - 96000) < 2000);
+    CHECK (std::abs (RegionVariants::render (sine, 48000.0, { 0.0, 2.0, true }).getNumSamples() - 96000) < 10);
+    CHECK (RegionVariants::render (sine, 48000.0, { 3.0, 1.0, false }).getNumSamples() == 48000);
+}

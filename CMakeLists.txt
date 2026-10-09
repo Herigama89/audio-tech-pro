@@ -41,6 +41,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/clap/include)
 
 set(RIFF_CORE_SOURCES
     Source/engine/ClapFormat.cpp
+    Source/engine/RegionVariants.cpp
     Source/model/Project.cpp
     Source/model/Generator.cpp
     Source/model/ProjectFiles.cpp

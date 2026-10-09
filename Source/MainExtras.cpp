@@ -1049,3 +1049,89 @@ void MainComponent::showLocalMenu (int which, juce::Component& target)
 }
 
 } // namespace riff
+
+namespace riff
+{
+
+void MainComponent::toggleNotepad()
+{
+    if (notepadPanel == nullptr)
+    {
+        notepadPanel = std::make_unique<NotepadPanel>();
+        addChildComponent (*notepadPanel);
+    }
+    notepadPanel->setProject (project);
+    notepadPanel->setVisible (! notepadPanel->isVisible());
+    resized();
+}
+
+void MainComponent::toggleBrowser()
+{
+    if (browserPanel == nullptr)
+    {
+        browserPanel = std::make_unique<BrowserPanel> (engine.getFormatManager().getWildcardForAllFormats());
+        browserPanel->onAddFile = [this] (const juce::File& file)
+        {
+            canvas.importFiles ({ file.getFullPathName() }, selectedTrackIndex(), canvas.snap (engine.getPlayheadSeconds()));
+        };
+        addChildComponent (*browserPanel);
+    }
+    browserPanel->setVisible (! browserPanel->isVisible());
+    resized();
+}
+
+void MainComponent::updateQuickHelp()
+{
+    // Logic's Quick Help: what's under the mouse, explained (from its tooltip).
+    if (! quickHelpShown)
+        return;
+    auto* under = juce::Desktop::getInstance().getMainMouseSource().getComponentUnderMouse();
+    if (under == lastHelpTarget)
+        return;
+    lastHelpTarget = under;
+    juce::String text;
+    juce::String name;
+    for (auto* c = under; c != nullptr && text.isEmpty(); c = c->getParentComponent())
+        if (auto* client = dynamic_cast<juce::TooltipClient*> (c))
+        {
+            text = client->getTooltip();
+            name = c->getName().isNotEmpty() ? c->getName() : c->getTitle();
+            if (auto* b = dynamic_cast<juce::Button*> (c); b != nullptr && name.isEmpty())
+                name = b->getButtonText();
+        }
+    if (text.isEmpty())
+        text = "Quick Help: point at anything to see what it does.";
+    quickHelpBox.setText ((name.isNotEmpty() && ! text.startsWith (name) ? name + "\n" : juce::String()) + text, juce::dontSendNotification);
+    quickHelpBox.toFront (false);
+}
+
+void MainComponent::zoomToFit (bool horizontally, bool vertically)
+{
+    if (horizontally)
+    {
+        const auto length = juce::jmax (8.0, model::projectEnd (project) + 2.0);
+        timeline.pixelsPerSecond = juce::jlimit (TimelineState::minPixelsPerSecond, TimelineState::maxPixelsPerSecond,
+                                                 (double) juce::jmax (100, canvas.getWidth() - 20) / length);
+        timeline.scrollSeconds = 0.0;
+    }
+    if (vertically)
+    {
+        const auto count = juce::jmax (1, model::numTracks (project));
+        const auto h = juce::jlimit (TimelineState::minTrackHeight, TimelineState::maxTrackHeight,
+                                     (canvas.getHeight() - TimelineState::rulerHeight - 4) / count);
+        for (int i = 0; i < model::numTracks (project); ++i)
+            project.getChild (i).setProperty (ids::height, h, nullptr);
+        timeline.scrollY = 0;
+    }
+    timeline.changed();
+    syncZoomSliders();
+}
+
+void MainComponent::syncZoomSliders()
+{
+    horizontalZoom.setValue (std::log (timeline.pixelsPerSecond), juce::dontSendNotification);
+    if (model::numTracks (project) > 0)
+        verticalZoom.setValue (timeline.heightOf (0), juce::dontSendNotification);
+}
+
+} // namespace riff

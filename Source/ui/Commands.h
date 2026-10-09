@@ -38,7 +38,8 @@ namespace riff::commands
         splitByLocators = 0x2b01, cutSectionBetweenLocators, insertSilenceBetweenLocators, repeatSectionBetweenLocators, groupSettings, ioLabels, signalFlow,
         newDrummerTrack = 0x2c01, newBassPlayerTrack, newKeysPlayerTrack, liveLoops,
         openMixerWindow = 0x2d01, openEditorWindow, themeSettings,
-        toggleControlBar = 0x2e01, toggleToolbar, toggleStatusBar, toggleMeters, toggleTrackHeaders, showAllPanels, hideAllPanels, createTrackStack
+        toggleControlBar = 0x2e01, toggleToolbar, toggleStatusBar, toggleMeters, toggleTrackHeaders, showAllPanels, hideAllPanels, createTrackStack,
+        showNotepad = 0x2f01, showBrowser, toggleQuickHelp, waveformZoom, zoomToFitAll
     };
 
     struct Info

@@ -37,10 +37,25 @@ Inspector::Inspector (MixerPanel& m)
     for (auto* b : { &trackMenuButton, &masterMenuButton })
     {
         b->setWantsKeyboardFocus (false);
-        b->setColour (juce::TextButton::buttonColourId, theme::toolbarDark);
-        b->setColour (juce::TextButton::textColourOffId, theme::text);
+        b->setColour (juce::TextButton::buttonColourId, theme::slotDark.brighter (0.15f));
+        b->setColour (juce::TextButton::textColourOffId, juce::Colours::white);
         addAndMakeVisible (b);
     }
+
+    // With no track selected, say so (and offer to make one) instead of an empty panel.
+    emptyLabel.setText ("No track selected.\n\nClick a track to see its Region and Track settings and its channel strip here, "
+                        "or make one:", juce::dontSendNotification);
+    emptyLabel.setJustificationType (juce::Justification::topLeft);
+    emptyLabel.setColour (juce::Label::textColourId, theme::text);
+    emptyLabel.setFont (juce::FontOptions (13.0f));
+    holder.addChildComponent (emptyLabel);
+    for (auto* b : { &newAudioButton, &newInstrumentButton })
+    {
+        b->setWantsKeyboardFocus (false);
+        holder.addChildComponent (b);
+    }
+    newAudioButton.onClick = [this] { if (onNewTrack) onNewTrack (0); };
+    newInstrumentButton.onClick = [this] { if (onNewTrack) onNewTrack (1); };
     trackMenuButton.setTooltip ("The track's menu: mute, solo, record, automation, colour, icon, routing, groups, stacks, mono/stereo, freeze, channel strip settings, and what the Inspector shows");
     trackMenuButton.onClick = [this]
     {
@@ -86,13 +101,17 @@ void Inspector::addInspectorItems (juce::PopupMenu& menu)
 void Inspector::updateHeaderButtons()
 {
     const auto arrow = juce::String::fromUTF8 (" \xe2\x96\xbe");
-    trackMenuButton.setButtonText ((track.isValid() ? track[ids::name].toString() : juce::String ("No track")) + arrow);
+    auto name = track.isValid() ? track[ids::name].toString() : juce::String ("No track");
+    if (name.length() > 11)
+        name = name.substring (0, 10).trimEnd() + juce::String::fromUTF8 ("\xe2\x80\xa6");   // (the full name is in the menu)
+    trackMenuButton.setButtonText (name + arrow);
     trackMenuButton.setEnabled (true);
     masterMenuButton.setButtonText ("Stereo Out" + arrow);
 }
 
 Inspector::~Inspector()
 {
+    track.removeListener (&trackWatcher);
     clear();
 }
 
@@ -114,8 +133,11 @@ void Inspector::setTrack (juce::ValueTree newProject, juce::ValueTree newTrack)
     }
 
     clear();
+    track.removeListener (&trackWatcher);
     project = newProject;
     track = newTrack;
+    track.addListener (&trackWatcher);
+    trackWatcher.onChange = [this] { regionBox.refresh(); };
 
     if (project.isValid())
     {
@@ -131,9 +153,48 @@ void Inspector::setTrack (juce::ValueTree newProject, juce::ValueTree newTrack)
     }
 
     buildTrackBox();
+    buildRegionBox();
     updateHeaderButtons();
     resized();
     repaint();
+}
+
+namespace
+{
+    /** The Track box's icon: the track's picture on a blue key (click for the others). */
+    struct IconKey final : juce::Button
+    {
+        IconKey() : juce::Button ("Icon") {}
+        int icon = 0;
+        void paintButton (juce::Graphics& g, bool over, bool down) override
+        {
+            const auto r = getLocalBounds().toFloat().withWidth (juce::jmin ((float) getWidth(), 40.0f)).reduced (1.0f);
+            g.setColour (theme::accent.withMultipliedBrightness (down ? 0.8f : over ? 1.15f : 1.0f));
+            g.fillRoundedRectangle (r, 5.0f);
+            icons::draw (g, icon > 0 ? icon : 9, r.reduced (r.getHeight() * 0.22f), juce::Colours::white);
+        }
+    };
+
+    juce::String channelName (const juce::ValueTree& project, const juce::ValueTree& track)
+    {
+        // Logic's channel names: Audio 1, Inst 1, Aux 1, VCA 1 (numbered by kind).
+        const auto kindOf = [] (const juce::ValueTree& t)
+        {
+            return model::isVcaTrack (t) ? juce::String ("VCA") : model::isBusTrack (t) ? juce::String ("Aux")
+                 : model::isInstrumentTrack (t) ? juce::String ("Inst") : juce::String ("Audio");
+        };
+        int n = 0;
+        for (const auto& t : project)
+            if (t.hasType (ids::TRACK) && kindOf (t) == kindOf (track))
+            {
+                ++n;
+                if (t == track)
+                    break;
+            }
+        return kindOf (track) + " " + juce::String (n);
+    }
+
+    juce::String capitalised (const juce::String& s) { return s.substring (0, 1).toUpperCase() + s.substring (1); }
 }
 
 void Inspector::buildTrackBox()
@@ -146,33 +207,78 @@ void Inspector::buildTrackBox()
     auto t = track;
     auto p = project;
     trackBox.reset ("Track: " + track[ids::name].toString(), track);
+    const bool vca = model::isVcaTrack (track), bus = model::isBusTrack (track), inst = model::isInstrumentTrack (track);
 
-    // The track's icon (as in Logic's Track box)
-    trackBox.addMenu ("Icon", [t] { const int i = t.getProperty (ids::icon, 0); return i > 0 ? icons::names()[i - 1] : juce::String ("None"); },
-                      [t, &um] (juce::Component& target) mutable
+    // Icon, as in Logic: the picture on a key; click it for the others.
     {
-        juce::PopupMenu menu;
-        menu.addItem ("None", true, (int) t.getProperty (ids::icon, 0) == 0, [t, &um]() mutable { um.beginNewTransaction ("Icon"); t.setProperty (ids::icon, 0, &um); });
-        for (int i = 0; i < icons::names().size(); ++i)
-            menu.addItem (icons::names()[i], true, (int) t.getProperty (ids::icon, 0) == i + 1,
-                          [t, &um, i]() mutable { um.beginNewTransaction ("Icon"); t.setProperty (ids::icon, i + 1, &um); });
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
-    });
+        auto* key = new IconKey();
+        key->onClick = [t, &um, key]() mutable
+        {
+            juce::PopupMenu menu;
+            for (int i = 0; i < icons::names().size(); ++i)
+                menu.addItem (icons::names()[i], true, (int) t.getProperty (ids::icon, 0) == i,
+                              [t, &um, i]() mutable { um.beginNewTransaction ("Icon"); t.setProperty (ids::icon, i, &um); });
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (key));
+        };
+        trackBox.addComponent ("Icon", key, 36, [key, t] { key->icon = t.getProperty (ids::icon, 0); key->repaint(); });
+    }
 
-    if (! model::isVcaTrack (track))
-        trackBox.addMenu ("Automation", [t] { const auto m = AutomationWriter::modeOf (t); return m.substring (0, 1).toUpperCase() + m.substring (1); },
+    trackBox.addText ("Channel", [t, p] { return channelName (p, t); });
+
+    if (! bus && ! vca)
+    {
+        trackBox.addMenu ("Freeze Mode", [t] { return t.getProperty (ids::freezeMode, "preFader").toString() == "sourceOnly" ? juce::String ("Source Only") : juce::String ("Pre Fader"); },
+                          [t, &um] (juce::Component& target) mutable
+        {
+            juce::PopupMenu menu;
+            const auto mode = t.getProperty (ids::freezeMode, "preFader").toString();
+            for (auto [value, name] : { std::pair { "preFader", "Pre Fader" }, std::pair { "sourceOnly", "Source Only" } })
+                menu.addItem (name, true, mode == value, [t, &um, v = juce::String (value)]() mutable
+                {
+                    um.beginNewTransaction ("Freeze Mode");
+                    t.setProperty (ids::freezeMode, v, &um);
+                });
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+        });
+        trackBox.addSwitch ("Q-Reference", ids::qReference, true);
+    }
+
+    if (! inst && ! vca)
+        trackBox.addMenu ("Flex Mode", [t] { const auto m = t.getProperty (ids::flexMode, "off").toString(); return capitalised (m); },
+                          [t, &um] (juce::Component& target) mutable
+        {
+            juce::PopupMenu menu;
+            const auto mode = t.getProperty (ids::flexMode, "off").toString();
+            for (auto m : { "off", "monophonic", "slicing", "rhythmic", "polyphonic", "speed", "varispeed" })
+            {
+                if (juce::String (m) == "monophonic")
+                    menu.addSeparator();
+                menu.addItem (capitalised (m), true, mode == m, [t, &um, v = juce::String (m)]() mutable
+                {
+                    um.beginNewTransaction ("Flex Mode");
+                    t.setProperty (ids::flexMode, v, &um);
+                });
+            }
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+        });
+
+    // More: the rest of the track's settings.
+    trackBox.beginMore();
+
+    if (! vca)
+        trackBox.addMenu ("Automation", [t] { return capitalised (AutomationWriter::modeOf (t)); },
                           [t] (juce::Component& target) mutable
         {
             juce::PopupMenu menu;
             for (auto m : { "off", "read", "touch", "latch", "write" })
-                menu.addItem (juce::String (m).substring (0, 1).toUpperCase() + juce::String (m).substring (1), true,
-                              AutomationWriter::modeOf (t) == m, [t, value = juce::String (m)]() mutable { t.setProperty (ids::automationMode, value, nullptr); });
+                menu.addItem (capitalised (m), true, AutomationWriter::modeOf (t) == m,
+                              [t, value = juce::String (m)]() mutable { t.setProperty (ids::automationMode, value, nullptr); });
             menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
         });
 
     trackBox.addMenu ("Routing", [t, p]
     {
-        juce::String text = "Main";
+        juce::String text = "Stereo Out";
         if (const auto out = model::findById (p, t[ids::output].toString()); out.isValid())
             text = out[ids::name].toString();
         if (const int g = t.getProperty (ids::group, 0); g > 0)
@@ -185,12 +291,26 @@ void Inspector::buildTrackBox()
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
     });
 
-    if (! model::isVcaTrack (track))
+    if (! vca)
+    {
+        trackBox.addMenu ("Format", [t] { return model::isStereoChannel (t) ? juce::String ("Stereo") : juce::String ("Mono"); },
+                          [t, &um] (juce::Component& target) mutable
+        {
+            juce::PopupMenu menu;
+            for (bool stereo : { false, true })
+                menu.addItem (stereo ? "Stereo" : "Mono", true, model::isStereoChannel (t) == stereo, [t, &um, stereo]() mutable
+                {
+                    um.beginNewTransaction ("Channel format");
+                    model::setStereoChannel (t, stereo, &um);
+                });
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+        });
         trackBox.addNumber ("Width", ids::panWidth, 0.0, 200.0, 1.0, 100.0,
                             [] (double v) { return juce::String (juce::roundToInt (v)) + "%"; },
                             [] (double v) { return v / 100.0; }, [] (double v) { return v * 100.0; });
+    }
 
-    if (model::isInstrumentTrack (track))
+    if (inst)
     {
         const auto signedInt = [] (double v) { return (v > 0 ? "+" : "") + juce::String ((int) v); };
         const auto noteName = [] (double v) { return juce::MidiMessage::getMidiNoteName ((int) v, true, true, 3); };
@@ -205,7 +325,7 @@ void Inspector::buildTrackBox()
         trackBox.addSwitch ("No Transpose", ids::noTranspose, false);
     }
 
-    if (! model::isBusTrack (track) && ! model::isVcaTrack (track))
+    if (! bus && ! vca)
         trackBox.addSwitch ("Freeze", ids::frozen, false, [t] (bool) { if (routing::toggleFreeze) routing::toggleFreeze (t); });
 
     trackBox.resized();
@@ -213,73 +333,160 @@ void Inspector::buildTrackBox()
 
 void Inspector::setRegion (juce::ValueTree newRegion)
 {
-    if (newRegion == region)
+    if (newRegion == region && regionBoxTrack == track)
         return;
     region = newRegion;
-    regionBox.setVisible (region.isValid());
+    buildRegionBox();
+}
 
-    if (region.isValid())
+void Inspector::buildRegionBox()
+{
+    regionBoxTrack = track;
+
+    // With no region selected: the track's defaults for new regions ("Audio Defaults" / "MIDI Defaults"), as in Logic.
+    const bool defaults = ! region.isValid();
+    regionBox.setVisible (region.isValid() || track.isValid());
+    if (! regionBox.isVisible())
     {
-        auto& um = mixer.getUndoManager();
-        auto r = region;
-        regionBox.reset ("Region: " + region[ids::name].toString(), region);
-        regionBox.addSwitch ("Mute", ids::mute, false);
-        regionBox.addSwitch ("Loop", ids::loop, false, [r, &um] (bool on) mutable
-        {
-            um.beginNewTransaction ("Loop region");
+        resized();
+        return;
+    }
+
+    auto& um = mixer.getUndoManager();
+    auto r = defaults ? track : region;
+    auto p = project;
+    auto owner = defaults ? track : region.getParent();
+    const bool midi = defaults ? model::isInstrumentTrack (track) : model::isMidiRegion (region);
+    const auto id = [defaults] (const juce::Identifier& property) { return defaults ? model::regionDefaultId (property) : property; };
+
+    regionBox.reset (defaults ? (midi ? juce::String ("Region: MIDI Defaults") : juce::String ("Region: Audio Defaults"))
+                              : "Region: " + region[ids::name].toString(), r);
+
+    regionBox.addSwitch ("Mute", id (ids::mute), false);
+    if (defaults)
+        regionBox.enableLastWhen ([] { return false; });   // (a new region is never muted)
+    regionBox.addSwitch ("Loop", id (ids::loop), false, [r, &um, defaults, id] (bool on) mutable
+    {
+        um.beginNewTransaction ("Loop region");
+        if (defaults)
+            r.setProperty (id (ids::loop), on, &um);
+        else
             model::setLoop (r, on, &um);
+    });
+
+    // Quantize and Q-Swing (MIDI regions as they play)
+    struct Grid { const char* name; double beats; };
+    static const Grid grids[] { { "Off", 0.0 }, { "1/4 Note", 1.0 }, { "1/8 Note", 0.5 }, { "1/16 Note", 0.25 }, { "1/32 Note", 0.125 },
+                                { "1/8 Triplet", 1.0 / 3.0 }, { "1/16 Triplet", 1.0 / 6.0 } };
+    const auto qId = id (ids::playQuantize);
+    regionBox.addMenu ("Quantize", [r, qId]
+    {
+        const double q = r.getProperty (qId, 0.0);
+        for (const auto& grid : grids)
+            if (std::abs (grid.beats - q) < 1.0e-6)
+                return juce::String (grid.name);
+        return juce::String (q, 3) + " beat";
+    }, [r, &um, qId] (juce::Component& target) mutable
+    {
+        juce::PopupMenu menu;
+        for (const auto& grid : grids)
+            menu.addItem (grid.name, true, std::abs ((double) r.getProperty (qId, 0.0) - grid.beats) < 1.0e-6,
+                          [r, &um, qId, beats = grid.beats]() mutable { um.beginNewTransaction ("Quantize"); r.setProperty (qId, beats, &um); });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+    });
+    if (! midi)
+        regionBox.enableLastWhen ([] { return false; });   // (audio: use Flex and the Audio File Editor's Flex Time)
+    regionBox.addNumber ("Q-Swing", id (ids::playSwing), 50.0, 75.0, 1.0, 50.0, [] (double v) { return juce::String ((int) v) + "%"; });
+    regionBox.enableLastWhen ([r, qId, midi] { return midi && (double) r.getProperty (qId, 0.0) > 0.0; });
+
+    const auto signedInt = [] (double v) { return std::abs (v) < 0.5 ? juce::String ("0") : (v > 0 ? "+" : "") + juce::String ((int) v); };
+    regionBox.addNumber ("Transpose", id (ids::transpose), -48.0, 48.0, 1.0, 0.0, signedInt);
+
+    if (midi)
+        regionBox.addNumber ("Velocity", id (ids::velocityOffset), -64.0, 64.0, 1.0, 0.0, signedInt);
+    else
+    {
+        regionBox.addNumber ("Fine Tune", id (ids::fineTune), -50.0, 50.0, 1.0, 0.0,
+                             [] (double v) { return std::abs (v) < 0.5 ? juce::String ("0 c") : (v > 0 ? "+" : "") + juce::String ((int) v) + " c"; });
+
+        // Pitch Source: follow the key track from the key it's in now.
+        const auto psId = id (ids::pitchSource), keyId = id (ids::pitchSourceKey);
+        regionBox.addMenu ("Pitch Source", [r, psId] { return (bool) r[psId] ? juce::String ("Key Track") : juce::String ("Off"); },
+                           [r, p, &um, psId, keyId, defaults] (juce::Component& target) mutable
+        {
+            juce::PopupMenu menu;
+            menu.addItem ("Off", true, ! (bool) r[psId], [r, &um, psId]() mutable { um.beginNewTransaction ("Pitch Source"); r.setProperty (psId, false, &um); });
+            menu.addItem ("Follow the Key Track", true, (bool) r[psId], [r, p, &um, psId, keyId, defaults]() mutable
+            {
+                um.beginNewTransaction ("Pitch Source");
+                r.setProperty (psId, true, &um);
+                if (! defaults)
+                    r.setProperty (keyId, model::keyAt (p, (double) r[ids::start]).first, &um);
+            });
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
         });
 
-        const auto delayText = [] (double v) { return std::abs (v) < 0.5 ? juce::String ("0 ms") : (v > 0 ? "+" : "") + juce::String ((int) v) + " ms"; };
-        if (model::isMidiRegion (region))
+        const auto flexId = id (ids::flex);
+        auto trackOf = [owner] { return owner; };
+        regionBox.addSwitch ("Flex", flexId, false);
+        regionBox.enableLastWhen ([trackOf] { return trackOf().getProperty (ids::flexMode, "off").toString() != "off"; });
+        const auto stId = id (ids::smartTempo);
+        regionBox.addMenu ("Smart Tempo", [r, stId] { return r.getProperty (stId, "on").toString() == "off" ? juce::String ("Off") : juce::String ("On"); },
+                           [r, &um, stId] (juce::Component& target) mutable
         {
-            // Logic's Region parameters: they change how the region plays, not its notes.
-            struct Grid { const char* name; double beats; };
-            static const Grid grids[] { { "Off", 0.0 }, { "1/4 Note", 1.0 }, { "1/8 Note", 0.5 }, { "1/16 Note", 0.25 }, { "1/32 Note", 0.125 },
-                                        { "1/8 Triplet", 1.0 / 3.0 }, { "1/16 Triplet", 1.0 / 6.0 } };
-            regionBox.addMenu ("Quantize", [r]
-            {
-                const double q = r.getProperty (ids::playQuantize, 0.0);
-                for (const auto& grid : grids)
-                    if (std::abs (grid.beats - q) < 1.0e-6)
-                        return juce::String (grid.name);
-                return juce::String (q, 3) + " beat";
-            }, [r, &um] (juce::Component& target) mutable
-            {
-                juce::PopupMenu menu;
-                for (const auto& grid : grids)
-                    menu.addItem (grid.name, true, std::abs ((double) r.getProperty (ids::playQuantize, 0.0) - grid.beats) < 1.0e-6,
-                                  [r, &um, beats = grid.beats]() mutable { um.beginNewTransaction ("Quantize"); r.setProperty (ids::playQuantize, beats, &um); });
-                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
-            });
-            regionBox.addNumber ("Q-Swing", ids::playSwing, 50.0, 75.0, 1.0, 50.0, [] (double v) { return juce::String ((int) v) + "%"; });
-            regionBox.addNumber ("Transpose", ids::transpose, -48.0, 48.0, 1.0, 0.0, [] (double v) { return (v > 0 ? "+" : "") + juce::String ((int) v); });
-            regionBox.addNumber ("Velocity", ids::velocityOffset, -64.0, 64.0, 1.0, 0.0, [] (double v) { return (v > 0 ? "+" : "") + juce::String ((int) v); });
-            regionBox.addNumber ("Dynamics", ids::playDynamics, 0.0, 200.0, 1.0, 100.0,
-                                 [] (double v) { return v < 0.5 ? juce::String ("Fixed") : juce::String ((int) v) + "%"; });
-            regionBox.addNumber ("Gate Time", ids::playGate, 10.0, 200.0, 1.0, 100.0, [] (double v) { return juce::String ((int) v) + "%"; });
-            regionBox.addNumber ("Delay", ids::playDelay, -500.0, 500.0, 1.0, 0.0, delayText);
-        }
-        else
-        {
-            regionBox.addNumber ("Gain", ids::gain, -30.0, 30.0, 0.1, 0.0,
-                                 [] (double v) { return (v > 0.05 ? "+" : "") + juce::String (v, 1) + " dB"; },
-                                 [] (double db) { return juce::Decibels::decibelsToGain (db, -96.0); },
-                                 [] (double gain) { return juce::Decibels::gainToDecibels (gain, -30.0); });
-            const auto ms = [] (double v) { return v <= 0.0 ? juce::String ("Off") : juce::String (juce::roundToInt (v)) + " ms"; };
-            regionBox.addNumber ("Fade In", ids::fadeIn, 0.0, 10000.0, 1.0, 0.0, ms,
-                                 [] (double v) { return v / 1000.0; }, [] (double v) { return v * 1000.0; });
-            regionBox.addNumber ("Fade Out", ids::fadeOut, 0.0, 10000.0, 1.0, 0.0, ms,
-                                 [] (double v) { return v / 1000.0; }, [] (double v) { return v * 1000.0; });
-            regionBox.addNumber ("Delay", ids::playDelay, -500.0, 500.0, 1.0, 0.0, delayText);
-        }
-        regionBox.resized();
+            juce::PopupMenu menu;
+            for (auto [value, name] : { std::pair { "on", "On: follow the song's tempo" }, std::pair { "off", "Off: play at its own speed" } })
+                menu.addItem (name, true, r.getProperty (stId, "on").toString() == value,
+                              [r, &um, stId, v = juce::String (value)]() mutable { um.beginNewTransaction ("Smart Tempo"); r.setProperty (stId, v, &um); });
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+        });
+        regionBox.enableLastWhen ([r, flexId, trackOf] { return (bool) r[flexId] && trackOf().getProperty (ids::flexMode, "off").toString() != "off"; });
     }
+
+    if (! midi)
+        regionBox.addNumber ("Gain", id (ids::gain), -30.0, 30.0, 0.1, 0.0,
+                             [] (double v) { return std::abs (v) < 0.05 ? juce::String ("0 dB") : (v > 0 ? "+" : "") + juce::String (v, 1) + " dB"; },
+                             [] (double db) { return juce::Decibels::decibelsToGain (db, -96.0); },
+                             [] (double gain) { return juce::Decibels::gainToDecibels (gain, -30.0); });
+
+    // More
+    regionBox.beginMore();
+    const auto delayText = [] (double v) { return std::abs (v) < 0.5 ? juce::String ("0 ms") : (v > 0 ? "+" : "") + juce::String ((int) v) + " ms"; };
+    if (midi)
+    {
+        regionBox.addNumber ("Dynamics", id (ids::playDynamics), 0.0, 200.0, 1.0, 100.0,
+                             [] (double v) { return v < 0.5 ? juce::String ("Fixed") : juce::String ((int) v) + "%"; });
+        regionBox.addNumber ("Gate Time", id (ids::playGate), 10.0, 200.0, 1.0, 100.0, [] (double v) { return juce::String ((int) v) + "%"; });
+    }
+    else
+    {
+        // Its own tempo for Smart Tempo (0: found by listening).
+        auto* variants = &mixer.getPlayer().getVariants();
+        const auto file = juce::File (r[ids::file].toString());
+        regionBox.addNumber ("Source Tempo", id (ids::sourceBpm), 0.0, 240.0, 0.1, 0.0, [variants, file, defaults] (double v)
+        {
+            if (v > 0.0)
+                return juce::String (v, 1) + " BPM";
+            const auto found = defaults ? 0.0 : variants->tempoOf (file);
+            return found > 0.0 ? "Auto (" + juce::String (found, 1) + ")" : juce::String ("Auto");
+        });
+        const auto ms = [] (double v) { return v <= 0.0 ? juce::String ("Off") : juce::String (juce::roundToInt (v)) + " ms"; };
+        regionBox.addNumber ("Fade In", id (ids::fadeIn), 0.0, 10000.0, 1.0, 0.0, ms,
+                             [] (double v) { return v / 1000.0; }, [] (double v) { return v * 1000.0; });
+        regionBox.addNumber ("Fade Out", id (ids::fadeOut), 0.0, 10000.0, 1.0, 0.0, ms,
+                             [] (double v) { return v / 1000.0; }, [] (double v) { return v * 1000.0; });
+    }
+    regionBox.addNumber ("Delay", id (ids::playDelay), -500.0, 500.0, 1.0, 0.0, delayText);
+
+    regionBox.refresh();
+    regionBox.resized();
     resized();
 }
 
 int Inspector::boxesHeight() const
 {
+    if (! track.isValid())
+        return 170;   // the "no track" message and its buttons
     int h = 0;
     for (const auto* box : { &regionBox, &trackBox })
         if (box->isVisible())
@@ -319,6 +526,8 @@ void Inspector::resized()
     for (const auto* box : { &regionBox, &trackBox })
         if (box->isVisible())
             titles += ParameterBox::titleBarHeight() + 4;
+    if (! track.isValid())
+        titles = boxes;   // the "no track" message always shows whole
     const auto top = juce::jlimit (juce::jmin (titles, boxes), juce::jmax (titles, area.getHeight() - 120), boxesWanted >= 0 ? boxesWanted : boxes);
     viewport.setBounds (area.removeFromTop (top));
     holder.setSize (viewport.getWidth() - (boxes > top ? viewport.getScrollBarThickness() : 0), boxes);
@@ -329,6 +538,17 @@ void Inspector::resized()
             box->setBounds (all.removeFromTop (box->preferredHeight()).reduced (2, 0));
             all.removeFromTop (4);
         }
+    const bool empty = ! track.isValid();
+    for (auto* c : std::initializer_list<juce::Component*> { &emptyLabel, &newAudioButton, &newInstrumentButton })
+        c->setVisible (empty);
+    if (empty)
+    {
+        auto r = holder.getLocalBounds().reduced (8, 6);
+        emptyLabel.setBounds (r.removeFromTop (96));
+        newAudioButton.setBounds (r.removeFromTop (26));
+        r.removeFromTop (6);
+        newInstrumentButton.setBounds (r.removeFromTop (26));
+    }
 
     divider.setBounds (area.removeFromTop (7));
 

@@ -9,12 +9,14 @@ ProjectPlayer::ProjectPlayer (AudioEngine& e, AudioFileCache& c, InstrumentRack*
 {
     engine.getDeviceManager().addChangeListener (this);
     cache.addChangeListener (this);   // audio finished loading in the background
+    variants.addChangeListener (this);  // a transposed or stretched region is ready
 }
 
 ProjectPlayer::~ProjectPlayer()
 {
     engine.getDeviceManager().removeChangeListener (this);
     cache.removeChangeListener (this);
+    variants.removeChangeListener (this);
     project.removeListener (this);
     cancelPendingUpdate();
 }
@@ -32,7 +34,7 @@ void ProjectPlayer::setProject (juce::ValueTree newProject)
 
 void ProjectPlayer::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
-    if (source == &cache)
+    if (source == &cache || source == &variants)
     {
         requestRebuild();   // newly loaded audio joins the song
         return;
@@ -270,6 +272,12 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         }
         t.isInstrument = model::isInstrumentTrack (track);
         t.isBus = model::isBusTrack (track);
+        if (trackId == sourceOnlyTrack)
+        {
+            t.inserts.clear();
+            t.stripPlugins.clear();
+            t.console.enabled = false;
+        }
 
         // A frozen track plays its frozen file: no instrument, plugins or strip (fader, pan and sends stay).
         if ((bool) track[ids::frozen] && ! t.isBus)
@@ -277,9 +285,13 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
             const juce::File frozenFile (track[ids::frozenFile].toString());
             if (auto audio = cache.get (frozenFile))
             {
-                t.inserts.clear();
-                t.stripPlugins.clear();
-                t.console.enabled = false;
+                // Pre Fader: the plugins are in the frozen file. Source Only: just the source is, the plugins still run.
+                if (track.getProperty (ids::freezeMode, "preFader").toString() != "sourceOnly")
+                {
+                    t.inserts.clear();
+                    t.stripPlugins.clear();
+                    t.console.enabled = false;
+                }
                 t.isInstrument = false;
 
                 PlaybackGraph::Region r;
@@ -479,7 +491,25 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
             }
 
             PlaybackGraph::Region r;
-            r.audio        = cache.get (juce::File (region[ids::file].toString()));
+            const juce::File sourceFile (region[ids::file].toString());
+
+            // Transposed, fine-tuned or stretched to the song's tempo (Region box): its rendered copy, once ready.
+            juce::File playFile = sourceFile;
+            double stretch = 1.0;
+            {
+                auto shape = model::audioShapeOf (project, track, region, 0.0);
+                if (shape.needsTempo)
+                    shape = model::audioShapeOf (project, track, region, variants.tempoOf (sourceFile));
+                const RegionVariants::Spec spec { shape.semitones, shape.ratio, shape.varispeed };
+                if (! spec.isIdentity())
+                    if (const auto rendered = variants.get (sourceFile, spec); rendered != juce::File())
+                    {
+                        playFile = rendered;
+                        stretch = shape.ratio;
+                    }
+            }
+
+            r.audio        = cache.get (playFile);
             r.start        = toSamples (juce::jmax (0.0, (double) region[ids::start] + (double) region.getProperty (ids::playDelay, 0.0) / 1000.0));   // (Delay, in the Region box)
             r.length       = toSamples (region[ids::length]);
 
@@ -489,7 +519,7 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
                 const auto fileRate = r.audio->sampleRate;
                 r.resample = std::abs (fileRate - sampleRate) > 0.5;
                 r.step = r.resample ? fileRate / sampleRate : 1.0;
-                r.sourcePosition = (double) region[ids::offset] * fileRate;
+                r.sourcePosition = (double) region[ids::offset] * stretch * fileRate;
                 r.sourceOffset = (juce::int64) std::llround (r.sourcePosition);
             }
             r.gain         = (float) (double) region.getProperty (ids::gain, 1.0);

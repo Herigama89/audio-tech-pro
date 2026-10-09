@@ -114,6 +114,15 @@ namespace riff::ids
     RIFF_DECLARE_ID (velHigh)
     RIFF_DECLARE_ID (noTranspose)      // TRACK (MIDI): transpose leaves it alone (drums)
     RIFF_DECLARE_ID (channelFormat)    // TRACK: "mono" or "stereo" (unset: stereo)
+    RIFF_DECLARE_ID (fineTune)         // REGION (audio): cents, -50 .. 50 (with transpose: the pitch it plays at)
+    RIFF_DECLARE_ID (pitchSource)      // REGION (audio): follows the key track (true), from the key it was in when turned on
+    RIFF_DECLARE_ID (pitchSourceKey)   // REGION (audio): that key's root (0..11)
+    RIFF_DECLARE_ID (flex)             // REGION (audio): Flex on (with the track's Flex Mode)
+    RIFF_DECLARE_ID (smartTempo)       // REGION (audio): "on" (adapts to the song's tempo) or "off"
+    RIFF_DECLARE_ID (sourceBpm)        // REGION (audio): its own tempo (0 / unset: found by Smart Tempo)
+    RIFF_DECLARE_ID (flexMode)         // TRACK: "off", "monophonic", "slicing", "rhythmic", "polyphonic", "speed", "varispeed"
+    RIFF_DECLARE_ID (qReference)       // TRACK: Q-Reference (its regions are the timing reference for Flex quantize)
+    RIFF_DECLARE_ID (freezeMode)       // TRACK: "preFader" (plugins and instrument) or "sourceOnly" (just the source: flex, pitch)
     RIFF_DECLARE_ID (drumTune)         // TRACK (Drum Kit): semitones
     RIFF_DECLARE_ID (drumDecay)        // TRACK (Drum Kit): 0.3 .. 3
     RIFF_DECLARE_ID (samplerFile)      // TRACK (Sampler): the sound

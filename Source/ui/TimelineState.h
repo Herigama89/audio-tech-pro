@@ -23,6 +23,7 @@ struct TimelineState : public juce::ChangeBroadcaster
     static constexpr double maxPixelsPerSecond = 2000.0;
 
     double pixelsPerSecond = 60.0;
+    float waveformZoom = 1.0f;       // Logic's Waveform Zoom: waveforms drawn taller (1, 2, 4...)
     double scrollSeconds = 0.0;      // time at the left edge of the tracks area
     int scrollY = 0;                 // pixels scrolled down in the track list
 

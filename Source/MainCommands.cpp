@@ -94,7 +94,11 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::trackColours:    info.setActive (track.isValid()); break;
         case commands::toggleInspector: info.setTicked (inspector.isVisible()); break;
         case commands::toggleControlBar: info.setTicked (showControlBar); break;
-        case commands::toggleToolbar:   info.setTicked (showToolbarRow); info.setActive (showControlBar); break;
+        case commands::toggleToolbar:   info.setTicked (showToolbarRow); break;
+        case commands::showNotepad:     info.setTicked (notepadPanel != nullptr && notepadPanel->isVisible()); break;
+        case commands::showBrowser:     info.setTicked (browserPanel != nullptr && browserPanel->isVisible()); break;
+        case commands::toggleQuickHelp: info.setTicked (quickHelpShown); break;
+        case commands::waveformZoom:    info.setTicked (timeline.waveformZoom > 1.0f); break;
         case commands::toggleStatusBar: info.setTicked (showStatusBar); break;
         case commands::toggleMeters:    info.setTicked (showMeters); break;
         case commands::toggleTrackHeaders: info.setTicked (showTrackHeaders); break;
@@ -235,8 +239,17 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::trackColours:           headers.showColoursForSelection(); break;
         case commands::toggleInspector:        toggleInspector(); break;
         case commands::createTrackStack:       showCreateStackDialog(); break;
+        case commands::showNotepad:            toggleNotepad(); break;
+        case commands::showBrowser:            toggleBrowser(); break;
+        case commands::toggleQuickHelp:        quickHelpShown = ! quickHelpShown; quickHelpBox.setVisible (quickHelpShown); quickHelpBox.toFront (false); lastHelpTarget = nullptr; updateQuickHelp(); break;
+        case commands::waveformZoom:
+            timeline.waveformZoom = timeline.waveformZoom >= 4.0f ? 1.0f : timeline.waveformZoom * 2.0f;
+            waveformZoomButton.setButtonText (timeline.waveformZoom > 1.0f ? juce::String ((int) timeline.waveformZoom) + "x" : juce::String::fromUTF8 ("\xe2\x88\xbf"));
+            canvas.repaint();
+            break;
+        case commands::zoomToFitAll:           zoomToFit (true, true); break;
         case commands::toggleControlBar:       setPanelShown ("viewControlBar", showControlBar, ! showControlBar); break;
-        case commands::toggleToolbar:          setPanelShown ("viewToolbar", showToolbarRow, ! showToolbarRow); break;
+        case commands::toggleToolbar:          setPanelShown ("viewFunctionToolbar", showToolbarRow, ! showToolbarRow); break;
         case commands::toggleStatusBar:        setPanelShown ("viewStatusBar", showStatusBar, ! showStatusBar); break;
         case commands::toggleMeters:           setPanelShown ("viewMeters", showMeters, ! showMeters); break;
         case commands::toggleTrackHeaders:     setPanelShown ("viewTrackHeaders", showTrackHeaders, ! showTrackHeaders); break;
@@ -251,7 +264,7 @@ bool MainComponent::perform (const InvocationInfo& info)
                 commandManager.invokeDirectly (commands::showLibrary, false);
             if ((smartControls != nullptr && smartControls->isVisible()) != show)
                 commandManager.invokeDirectly (commands::showSmartControls, false);
-            for (auto [key, flag] : { std::pair<const char*, bool*> { "viewControlBar", &showControlBar }, { "viewToolbar", &showToolbarRow },
+            for (auto [key, flag] : { std::pair<const char*, bool*> { "viewControlBar", &showControlBar }, { "viewFunctionToolbar", &showToolbarRow },
                                       { "viewStatusBar", &showStatusBar }, { "viewMeters", &showMeters } })
             {
                 *flag = show;
@@ -410,11 +423,13 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             menu.addSeparator();
             add ({ commands::showAllPanels, commands::hideAllPanels });
             menu.addSeparator();
+            add ({ commands::showNotepad, commands::showBrowser, commands::toggleQuickHelp });
+            menu.addSeparator();
             add ({ commands::undoHistory, commands::eventList, commands::liveLoops });
             menu.addSeparator();
             add ({ commands::openMixerWindow, commands::openEditorWindow, commands::themeSettings });
             menu.addSeparator();
-            add ({ commands::zoomIn, commands::zoomOut, commands::zoomVerticalIn, commands::zoomVerticalOut });
+            add ({ commands::zoomIn, commands::zoomOut, commands::zoomVerticalIn, commands::zoomVerticalOut, commands::zoomToFitAll, commands::waveformZoom });
             menu.addSeparator();
             add ({ commands::showAssistant, commands::recordScreen });
             menu.addSeparator();

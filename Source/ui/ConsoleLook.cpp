@@ -661,6 +661,75 @@ void IconButton::drawIcon (juce::Graphics& g, Icon icon, juce::Rectangle<float> 
             return;
         }
 
+        case Icon::quickHelp:
+        {
+            const auto b = r.reduced (r.getWidth() * 0.04f);
+            g.drawEllipse (b, juce::jmax (1.0f, r.getWidth() * 0.08f));
+            g.setFont (juce::FontOptions (b.getHeight() * 0.7f, juce::Font::bold));
+            g.drawText ("?", b, juce::Justification::centred, false);
+            return;
+        }
+
+        case Icon::toolbar:
+        {
+            // A window with a bar of keys along its top.
+            const auto b = r.reduced (r.getWidth() * 0.02f);
+            g.drawRoundedRectangle (b, 2.0f, juce::jmax (1.0f, r.getWidth() * 0.08f));
+            g.fillRect (b.withHeight (b.getHeight() * 0.3f).reduced (1.0f));
+            return;
+        }
+
+        case Icon::listEditors:
+        {
+            const auto t = juce::jmax (1.2f, r.getHeight() * 0.1f);
+            for (int i = 0; i < 4; ++i)
+            {
+                const auto y = r.getY() + r.getHeight() * (0.15f + 0.23f * (float) i);
+                g.fillEllipse (r.getX(), y - t, t * 2.0f, t * 2.0f);
+                g.fillRect (r.getX() + r.getWidth() * 0.28f, y - t * 0.5f, r.getWidth() * 0.72f, t);
+            }
+            return;
+        }
+
+        case Icon::notepad:
+        {
+            const auto b = r.reduced (r.getWidth() * 0.1f, 0.0f);
+            g.drawRoundedRectangle (b, 2.0f, juce::jmax (1.0f, r.getWidth() * 0.08f));
+            for (int i = 1; i < 4; ++i)
+                g.fillRect (b.getX() + b.getWidth() * 0.2f, b.getY() + b.getHeight() * 0.22f * (float) i, b.getWidth() * 0.6f, juce::jmax (1.0f, r.getHeight() * 0.07f));
+            return;
+        }
+
+        case Icon::loopBrowser:
+        {
+            // Logic's loop: a ring with an arrow.
+            const auto b = r.reduced (r.getWidth() * 0.08f);
+            juce::Path ring;
+            ring.addCentredArc (b.getCentreX(), b.getCentreY(), b.getWidth() * 0.5f, b.getHeight() * 0.5f, 0.0f, 0.4f, 5.6f, true);
+            g.strokePath (ring, juce::PathStrokeType (juce::jmax (1.2f, r.getWidth() * 0.09f)));
+            juce::Path head;
+            const auto x = b.getCentreX() + b.getWidth() * 0.5f * std::sin (5.6f), y = b.getCentreY() - b.getHeight() * 0.5f * std::cos (5.6f);
+            head.addTriangle (x - 3.0f, y - 3.0f, x + 3.0f, y - 1.0f, x - 1.0f, y + 3.0f);
+            g.fillPath (head);
+            return;
+        }
+
+        case Icon::browser:
+        {
+            // A folder.
+            const auto b = r.reduced (0.0f, r.getHeight() * 0.12f);
+            juce::Path folder;
+            folder.startNewSubPath (b.getX(), b.getBottom());
+            folder.lineTo (b.getX(), b.getY());
+            folder.lineTo (b.getX() + b.getWidth() * 0.4f, b.getY());
+            folder.lineTo (b.getX() + b.getWidth() * 0.5f, b.getY() + b.getHeight() * 0.2f);
+            folder.lineTo (b.getRight(), b.getY() + b.getHeight() * 0.2f);
+            folder.lineTo (b.getRight(), b.getBottom());
+            folder.closeSubPath();
+            g.strokePath (folder, juce::PathStrokeType (juce::jmax (1.0f, r.getWidth() * 0.08f)));
+            return;
+        }
+
         case Icon::keys:
         {
             const auto b = r.reduced (r.getWidth() * 0.02f);

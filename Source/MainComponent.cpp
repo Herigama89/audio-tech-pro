@@ -35,7 +35,8 @@ MainComponent::MainComponent (bool openAudioDevice)
                                                           &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
                                                           &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton, &replaceButton,
                                                           &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton, &screenButton,
-                                                          &inspectorButton, &libraryButton, &smartButton })
+                                                          &inspectorButton, &libraryButton, &smartButton, &helpButton, &toolbarButton,
+                                                          &listButton, &notesButton, &loopsButton, &browserButton })
     {
         b->setWantsKeyboardFocus (false); // keep Space for play/stop
         addAndMakeVisible (b);
@@ -64,6 +65,83 @@ MainComponent::MainComponent (bool openAudioDevice)
     bind (inspectorButton, commands::toggleInspector);
     bind (libraryButton, commands::showLibrary);
     bind (smartButton, commands::showSmartControls);
+    bind (helpButton, commands::toggleQuickHelp);
+    bind (toolbarButton, commands::toggleToolbar);
+    bind (listButton, commands::eventList);
+    bind (notesButton, commands::showNotepad);
+    bind (loopsButton, commands::showLoopBrowser);
+    bind (browserButton, commands::showBrowser);
+    helpButton.setTooltip ("Quick Help: a box that explains whatever is under the mouse");
+    toolbarButton.setTooltip ("Toolbar: a row of keys for the common edits");
+    listButton.setTooltip ("List Editors: the selected MIDI region's events as a list");
+    notesButton.setTooltip ("Notepad: notes saved with the project");
+    loopsButton.setTooltip ("Loop Browser (O)");
+    browserButton.setTooltip ("Browser (F): audio files on your computer");
+
+    // Logic's Toolbar: keys for the common edits (shown with the Toolbar key or View > Show Toolbar).
+    for (auto [id, name] : { std::pair { commands::splitAtPlayhead, "Split" }, std::pair { commands::joinRegions, "Join" },
+                             std::pair { commands::repeatRegions, "Repeat" }, std::pair { commands::quantize, "Quantize" },
+                             std::pair { commands::muteRegions, "Mute" }, std::pair { commands::loopRegions, "Loop" },
+                             std::pair { commands::setLocatorsBySelection, "Set Locators" }, std::pair { commands::nudgeLeft, "Nudge <" },
+                             std::pair { commands::nudgeRight, "Nudge >" }, std::pair { commands::bounceInPlace, "Bounce" },
+                             std::pair { commands::freezeTracks, "Freeze" }, std::pair { commands::createTrackStack, "Track Stack" },
+                             std::pair { commands::zoomToFitAll, "Zoom to Fit" } })
+    {
+        auto* key = functionKeys.add (new juce::TextButton (name));
+        key->setWantsKeyboardFocus (false);
+        for (const auto& info : commands::all())
+            if (info.id == id)
+                key->setTooltip (info.description);
+        key->onClick = [this, cid = (juce::CommandID) id] { commandManager.invokeDirectly (cid, true); };
+        addChildComponent (key);
+    }
+
+    // The bar over the tracks (as in Logic): Waveform Zoom, Zoom to Fit, and the zoom sliders.
+    waveformZoomButton.setButtonText (juce::String::fromUTF8 ("\xe2\x88\xbf"));
+    waveformZoomButton.setTooltip ("Waveform Zoom: draw the waveforms taller (click again for more, then back)");
+    waveformZoomButton.onClick = [this] { commandManager.invokeDirectly (commands::waveformZoom, true); };
+    fitVerticalButton.setButtonText (juce::String::fromUTF8 ("\xe2\x86\x95"));
+    fitVerticalButton.setTooltip ("Every track fits the height of the tracks area");
+    fitVerticalButton.onClick = [this] { zoomToFit (false, true); };
+    fitHorizontalButton.setButtonText (juce::String::fromUTF8 ("\xe2\x86\x94"));
+    fitHorizontalButton.setTooltip ("The whole song fits the width of the tracks area");
+    fitHorizontalButton.onClick = [this] { zoomToFit (true, false); };
+    for (auto* b : { &waveformZoomButton, &fitVerticalButton, &fitHorizontalButton })
+    {
+        b->setWantsKeyboardFocus (false);
+        b->setClickingTogglesState (false);
+        addAndMakeVisible (b);
+    }
+    for (auto* s : { &verticalZoom, &horizontalZoom })
+    {
+        s->setSliderStyle (juce::Slider::LinearHorizontal);
+        s->setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+        s->setWantsKeyboardFocus (false);
+        addAndMakeVisible (s);
+    }
+    verticalZoom.setTooltip ("Track height (all tracks)");
+    verticalZoom.setRange ((double) TimelineState::minTrackHeight, 240.0, 1.0);
+    verticalZoom.onValueChange = [this]
+    {
+        for (int i = 0; i < model::numTracks (project); ++i)
+            project.getChild (i).setProperty (ids::height, (int) verticalZoom.getValue(), nullptr);
+        timeline.changed();
+    };
+    horizontalZoom.setTooltip ("Horizontal zoom");
+    horizontalZoom.setRange (std::log (TimelineState::minPixelsPerSecond), std::log (TimelineState::maxPixelsPerSecond), 0.0);
+    horizontalZoom.onValueChange = [this]
+    {
+        zoomHorizontally (std::exp (horizontalZoom.getValue()) / timeline.pixelsPerSecond);
+    };
+
+    quickHelpBox.setColour (juce::Label::backgroundColourId, juce::Colour (0xf0202024));
+    quickHelpBox.setColour (juce::Label::outlineColourId, theme::accent.withAlpha (0.6f));
+    quickHelpBox.setColour (juce::Label::textColourId, theme::text);
+    quickHelpBox.setFont (juce::FontOptions (13.0f));
+    quickHelpBox.setJustificationType (juce::Justification::topLeft);
+    quickHelpBox.setBorderSize ({ 8, 10, 8, 10 });
+    quickHelpBox.setInterceptsMouseClicks (false, false);
+    addChildComponent (quickHelpBox);
     inspectorButton.setTooltip ("Inspector (I): the selected region and track, and its channel strips");
     libraryButton.setTooltip ("Library (Y): patches and sounds for the selected track");
     smartButton.setTooltip ("Smart Controls (B): the main knobs of the selected track");
@@ -229,6 +307,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     canvas.onSplit = [this] { splitAtPlayhead(); };
     mixer.onLayoutChanged = [this] { inspector.resized(); };
     inspector.onTrackMenu = [this] (juce::ValueTree t, juce::Component& target) { showInspectorTrackMenu (t, target); };
+    inspector.onNewTrack = [this] (int kind) { commandManager.invokeDirectly (kind == 0 ? commands::newAudioTrack : commands::newInstrumentTrack, false); };
 
     // Logic's local menu bar over the track headers.
     {
@@ -425,7 +504,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     {
         auto* settings = appProperties.getUserSettings();
         showControlBar = settings->getBoolValue ("viewControlBar", true);
-        showToolbarRow = settings->getBoolValue ("viewToolbar", true);
+        showToolbarRow = settings->getBoolValue ("viewFunctionToolbar", false);
         showStatusBar = settings->getBoolValue ("viewStatusBar", true);
         showMeters = settings->getBoolValue ("viewMeters", true);
         showTrackHeaders = settings->getBoolValue ("viewTrackHeaders", true);
@@ -619,7 +698,7 @@ MainComponent::~MainComponent()
 //==============================================================================
 int MainComponent::barHeight() const
 {
-    return showControlBar ? (showToolbarRow ? fullToolbarHeight : toolbarTopRow) : 0;
+    return showControlBar ? fullToolbarHeight : 0;
 }
 
 void MainComponent::setPanelShown (const juce::String& key, bool& flag, bool shown)
@@ -640,8 +719,8 @@ void MainComponent::applyPanelVisibility()
                                                             &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton,
                                                             &replaceButton, &mixerButton, &editorButton, &keysButton, &generateButton,
                                                             &claudeButton, &screenButton, &inspectorButton, &libraryButton, &smartButton,
-                                                            &toolBox, &snapBox, &dragBox })
-        c->setVisible (showControlBar && showToolbarRow);
+                                                            &helpButton, &toolbarButton, &listButton, &notesButton, &loopsButton, &browserButton })
+        c->setVisible (showControlBar);
     statusLabel.setVisible (showStatusBar);
     inputMeter.setVisible (showMeters);
     outputMeter.setVisible (showMeters);
@@ -659,6 +738,27 @@ juce::Rectangle<int> MainComponent::lcdBounds() const
 void MainComponent::paint (juce::Graphics& g)
 {
     g.fillAll (theme::background);
+
+    // The Toolbar row and the bar over the tracks
+    for (auto area : { functionBarArea, tracksBarArea })
+        if (! area.isEmpty())
+        {
+            g.setColour (theme::toolbarDark);
+            g.fillRect (area);
+            g.setColour (juce::Colours::black);
+            g.fillRect (area.removeFromBottom (1));
+        }
+    if (! tracksBarArea.isEmpty())
+    {
+        g.setColour (theme::text.withAlpha (0.75f));
+        g.setFont (juce::FontOptions (12.0f));
+        g.drawText ("Snap:", snapBox.getBounds().translated (-38, 0).withWidth (36), juce::Justification::centredRight, false);
+        g.drawText ("Drag:", dragBox.getBounds().translated (-36, 0).withWidth (34), juce::Justification::centredRight, false);
+        g.setFont (juce::FontOptions (14.0f));
+        g.drawText (juce::String::fromUTF8 ("\xe2\x86\x95"), verticalZoom.getBounds().translated (-16, 0).withWidth (14), juce::Justification::centred, false);
+        g.drawText (juce::String::fromUTF8 ("\xe2\x86\x94"), horizontalZoom.getBounds().translated (-16, 0).withWidth (14), juce::Justification::centred, false);
+    }
+
     if (! showControlBar)
         return;   // View > Hide Control Bar
 
@@ -667,7 +767,7 @@ void MainComponent::paint (juce::Graphics& g)
     g.setGradientFill (juce::ColourGradient (theme::toolbar.brighter (0.08f), 0.0f, bar.getY(),
                                              theme::toolbarDark, 0.0f, bar.getBottom(), false));
     g.fillRect (bar);
-    g.setColour (juce::Colours::black.withAlpha (showToolbarRow ? 0.25f : 0.0f));
+    g.setColour (juce::Colours::black.withAlpha (0.25f));
     g.fillRect (0, toolbarTopRow, getWidth(), 1);
     g.setColour (juce::Colours::white.withAlpha (0.05f));
     g.fillRect (0, toolbarTopRow + 1, getWidth(), 1);
@@ -697,18 +797,12 @@ void MainComponent::paint (juce::Graphics& g)
     g.drawText ("TIME", juce::Rectangle<float> ((float) clockLabel.getX(), captionY, (float) clockLabel.getWidth(), 11.0f),
                 juce::Justification::centred, false);
 
-    // Captions under the Tool, Snap and Drag menus
-    g.setFont (juce::FontOptions (11.0f));
-    g.setColour (theme::text.withAlpha (0.78f));
-    for (auto [box, name] : { std::pair { &toolBox, "Tool" }, std::pair { &snapBox, "Snap" }, std::pair { &dragBox, "Drag" } })
-        if (box->isVisible())
-            g.drawText (name, box->getBounds().translated (0, box->getHeight() + 4).withHeight (13), juce::Justification::centred, false);
-
     // Captions under the keys
     for (auto* b : std::initializer_list<juce::Button*> { &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
                                                           &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton, &replaceButton,
                                                           &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton, &screenButton,
-                                                          &inspectorButton, &libraryButton, &smartButton })
+                                                          &inspectorButton, &libraryButton, &smartButton, &helpButton, &toolbarButton,
+                                                          &listButton, &notesButton, &loopsButton, &browserButton })
     {
         g.setColour (b->getToggleState() ? theme::cream : theme::text.withAlpha (0.78f));
         g.drawText (b->getName(), b->getBounds().translated (0, b->getHeight() + 1).withHeight (13).expanded (8, 0),
@@ -763,33 +857,37 @@ void MainComponent::resized()
             x += keyWidth + gap + (c == &recordButton ? 14 : 0);
         }
 
-        // Logic's view keys at the left: Library, Inspector, Smart Controls; then Generate, Claude, Screen.
+        // Logic's keys at the left: Library, Inspector, Quick Help, Toolbar | Smart Controls, Mixer, Editors.
         int lx = 14;
-        for (auto* c : { (juce::Component*) &libraryButton, (juce::Component*) &inspectorButton, (juce::Component*) &smartButton,
-                         (juce::Component*) &generateButton, (juce::Component*) &claudeButton, (juce::Component*) &screenButton })
+        for (auto* c : { (juce::Component*) &libraryButton, (juce::Component*) &inspectorButton, (juce::Component*) &helpButton,
+                         (juce::Component*) &toolbarButton, (juce::Component*) &smartButton, (juce::Component*) &mixerButton,
+                         (juce::Component*) &editorButton })
         {
             c->setBounds (lx, row.getY(), keyWidth, keyHeight);
-            lx += keyWidth + gap + (c == &smartButton ? 12 : 4);
+            lx += keyWidth + gap + (c == &toolbarButton ? 14 : 0);
         }
 
-        // Tool, Snap and Drag, between those keys and the transport (when there's room)
-        {
-            auto boxes = juce::Rectangle<int> (screenButton.getRight() + 14, row.getY() + 2, 0, keyHeight - 6);
-            const auto transportLeft = getWidth() / 2 - ((int) 9 * (keyWidth + gap) + 14) / 2;
-            int boxX = boxes.getX();
-            for (auto [box, w] : { std::pair { &toolBox, 96 }, std::pair { &snapBox, 74 }, std::pair { &dragBox, 88 } })
-            {
-                box->setVisible (showControlBar && showToolbarRow && boxX + w < transportLeft - 12);
-                box->setBounds (boxX, boxes.getY(), w, boxes.getHeight());
-                boxX += w + 4;
-            }
-        }
-
-        x = getWidth() - 12 - 3 * keyWidth - 2 * gap;
-        for (auto* c : { (juce::Component*) &mixerButton, (juce::Component*) &editorButton, (juce::Component*) &keysButton })
+        // ...and at the right: List Editors, Notepad, Loop Browser, Browser | Generate, Claude, Screen, Keys.
+        x = getWidth() - 12 - keyWidth;
+        for (auto* c : { (juce::Component*) &keysButton, (juce::Component*) &screenButton, (juce::Component*) &claudeButton,
+                         (juce::Component*) &generateButton, (juce::Component*) &browserButton, (juce::Component*) &loopsButton,
+                         (juce::Component*) &notesButton, (juce::Component*) &listButton })
         {
             c->setBounds (x, row.getY(), keyWidth, keyHeight);
-            x += keyWidth + gap;
+            x -= keyWidth + gap + (c == &generateButton ? 14 : 0);
+        }
+    }
+
+    // Logic's Toolbar: a row of edit keys (when shown).
+    functionBarArea = showToolbarRow ? area.removeFromTop (functionBarHeight) : juce::Rectangle<int>();
+    {
+        auto row = functionBarArea.reduced (12, 5);
+        for (auto* key : functionKeys)
+        {
+            key->setVisible (showToolbarRow);
+            const auto w = juce::jmax (58, key->getBestWidthForHeight (row.getHeight()) + 10);
+            key->setBounds (row.removeFromLeft (w));
+            row.removeFromLeft (4);
         }
     }
 
@@ -801,6 +899,10 @@ void MainComponent::resized()
         assistantPanel->setBounds (area.removeFromRight (AssistantPanel::preferredWidth));
     if (libraryPanel != nullptr && libraryPanel->isVisible())
         libraryPanel->setBounds (area.removeFromRight (LibraryPanel::preferredWidth));
+    if (notepadPanel != nullptr && notepadPanel->isVisible())
+        notepadPanel->setBounds (area.removeFromRight (NotepadPanel::preferredWidth));
+    if (browserPanel != nullptr && browserPanel->isVisible())
+        browserPanel->setBounds (area.removeFromRight (BrowserPanel::preferredWidth));
 
     // The Inspector down the left side, beside the tracks and the editors, as in Logic
     if (inspector.isVisible())
@@ -827,6 +929,37 @@ void MainComponent::resized()
         paneDivider.setBounds (area.removeFromBottom (6));
     }
 
+    // The bar over the tracks, as in Logic: Edit, Functions, View and the tool on the left;
+    // Snap, Drag, Waveform Zoom, Zoom to Fit and the zoom sliders on the right.
+    tracksBarArea = area.removeFromTop (tracksBarHeight);
+    {
+        auto bar = tracksBarArea.reduced (6, 4);
+        for (auto [b, w] : { std::pair { &localEditButton, 54 }, std::pair { &localFunctionsButton, 86 }, std::pair { &localViewButton, 58 } })
+        {
+            b->setVisible (true);
+            b->setBounds (bar.removeFromLeft (w));
+            bar.removeFromLeft (2);
+        }
+        bar.removeFromLeft (10);
+        toolBox.setBounds (bar.removeFromLeft (110));
+        toolBox.setVisible (true);
+
+        auto right = [&bar] (juce::Component& c, int w, int gapAfter = 6) { c.setBounds (bar.removeFromRight (w)); bar.removeFromRight (gapAfter); };
+        right (horizontalZoom, 90, 2);
+        bar.removeFromRight (16);   // (the <-> mark)
+        right (verticalZoom, 90, 2);
+        bar.removeFromRight (16);   // (the up-down mark)
+        right (fitHorizontalButton, 26, 2);
+        right (fitVerticalButton, 26, 8);
+        right (waveformZoomButton, 30, 12);
+        right (dragBox, 116, 2);
+        bar.removeFromRight (36);   // "Drag:"
+        right (snapBox, 104, 2);
+        bar.removeFromRight (38);   // "Snap:"
+        for (auto* c : { (juce::Component*) &snapBox, (juce::Component*) &dragBox })
+            c->setVisible (true);
+    }
+
     // Meters on the right
     auto meters = showMeters ? area.removeFromRight (meterWidth).reduced (8, 10) : juce::Rectangle<int>();
     inputMeter.setBounds (meters.removeFromLeft (meters.getWidth() / 2 - 2));
@@ -838,17 +971,7 @@ void MainComponent::resized()
     vScroll.setBounds (area.removeFromRight (scrollBarSize).withTrimmedTop (TimelineState::rulerHeight).withTrimmedBottom (scrollBarSize));
     hScroll.setBounds (area.removeFromBottom (scrollBarSize));
     canvas.setBounds (area);
-
-    // Edit, Functions and View over the headers, level with the bar ruler.
-    {
-        auto bar = headers.getBounds().withHeight (TimelineState::barRulerHeight).reduced (4, 4);
-        for (auto [b, w] : { std::pair { &localEditButton, 52 }, std::pair { &localFunctionsButton, 82 }, std::pair { &localViewButton, 56 } })
-        {
-            b->setVisible (showTrackHeaders);
-            b->setBounds (bar.removeFromLeft (w));
-            b->toFront (false);
-        }
-    }
+    quickHelpBox.setBounds (juce::Rectangle<int> (canvas.getX() + 10, canvas.getBottom() - 112, juce::jmin (360, canvas.getWidth() - 20), 100));
 
     updateScrollBars();
 }
@@ -901,6 +1024,8 @@ void MainComponent::setProject (juce::ValueTree newProject, const juce::File& fi
 
     closePianoRoll();
     editorWindows.clear();
+    if (notepadPanel != nullptr)
+        notepadPanel->setProject (newProject);
     engine.stop();
     engine.setPlayheadSeconds (0.0);
 
@@ -1804,6 +1929,9 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 void MainComponent::timerCallback()
 {
     updateLiveMidiTrack();
+    updateQuickHelp();
+    if (! verticalZoom.isMouseButtonDown() && ! horizontalZoom.isMouseButtonDown())
+        syncZoomSliders();
 
     // Automation: passes start with playback (Write mode) and go into the project when it stops.
     if (! engine.isRenderingOffline())
@@ -2661,6 +2789,7 @@ void MainComponent::bounceInPlace()
     const auto slot = player.slotOf (track[ids::id].toString());
     if (slot < 0)
     {
+        player.setSourceOnlyTrack ({});
         player.setIgnoreSolo (false);
         player.rebuildNow();
         return;
@@ -2742,8 +2871,11 @@ void MainComponent::toggleFreeze (juce::ValueTree track)
     const auto file = recordingFolder().getChildFile ("Freeze Files")
                           .getNonexistentChildFile (juce::File::createLegalFileName (track[ids::name].toString() + " Freeze"), ".wav", false);
 
-    // Everything plays (solo ignored); the frozen part is what comes out of the plugins, before the fader.
+    // Everything plays (solo ignored); the frozen part is what comes out of the plugins, before the fader
+    // (Freeze Mode Source Only: what comes out before the plugins).
     player.setIgnoreSolo (true);
+    if (track.getProperty (ids::freezeMode, "preFader").toString() == "sourceOnly")
+        player.setSourceOnlyTrack (track[ids::id].toString());
     player.rebuildNow();
     const auto slot = player.slotOf (track[ids::id].toString());
     if (slot < 0)
@@ -2769,6 +2901,7 @@ void MainComponent::toggleFreeze (juce::ValueTree track)
             if (safe == nullptr)
                 return;
             safe->player.setIgnoreSolo (false);
+            safe->player.setSourceOnlyTrack ({});
             if (error.isEmpty())
                 if (auto t = model::findById (safe->project, trackId); t.isValid())
                 {

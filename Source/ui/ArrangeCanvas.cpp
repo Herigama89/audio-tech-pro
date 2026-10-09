@@ -677,7 +677,7 @@ void ArrangeCanvas::paintTakeLanes (juce::Graphics& g, const juce::ValueTree& re
             const auto tEnd = offset + (x1 - lane.getX()) / timeline.pixelsPerSecond;
             g.setColour (juce::Colours::white.withAlpha (0.75f));
             thumb.drawChannels (g, juce::Rectangle<float> (x0, lane.getY() + 1.0f, x1 - x0, lane.getHeight() - 2.0f).toNearestInt(),
-                                tStart, tEnd, (float) (double) region.getProperty (ids::gain, 1.0));
+                                tStart, tEnd, (float) (double) region.getProperty (ids::gain, 1.0) * timeline.waveformZoom);
         }
 
         g.setColour (juce::Colours::white.withAlpha (0.85f));
@@ -1000,7 +1000,7 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
 
             g.setColour (colour.brighter (0.75f).withAlpha (0.95f));
             thumb.drawChannels (g, juce::Rectangle<float> (x0, body.getY(), x1 - x0, body.getHeight()).toNearestInt(),
-                                tStart, tEnd, (float) (double) region.getProperty (ids::gain, 1.0));
+                                tStart, tEnd, (float) (double) region.getProperty (ids::gain, 1.0) * timeline.waveformZoom);
         }
     }
 

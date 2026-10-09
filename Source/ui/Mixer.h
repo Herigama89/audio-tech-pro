@@ -273,6 +273,7 @@ public:
     void pluginsChanged() { triggerAsyncUpdate(); }
 
     EffectRack& getEffects() noexcept { return effects; }
+    ProjectPlayer& getPlayer() noexcept { return player; }
     juce::ValueTree getProject() const { return project; }
 
     static constexpr int headerHeight = 28;

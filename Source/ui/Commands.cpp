@@ -66,8 +66,13 @@ const std::vector<Info>& all()
         { openMixerWindow,        "Open Mixer Window",          "View",      "The mixer in a window of its own (resize it, put it on another screen)" },
         { openEditorWindow,       "Open Editor Window",         "View",      "The piano roll (and the other region editors) in a window of its own" },
         { themeSettings,          "Theme...",                   "View",      "The skin (studio grey or flat dark) and its colours: hue, lightness, contrast, text, accent, meters, grid" },
+        { showNotepad,            "Notepad",                    "View",      "Project notes: lyrics, ideas, what to fix (saved with the project)" },
+        { showBrowser,            "Browser",                    "View",      "Find audio files on your computer and put them on the selected track" },
+        { toggleQuickHelp,        "Quick Help",                 "View",      "A box that explains whatever is under the mouse" },
+        { waveformZoom,           "Waveform Zoom",              "View",      "Draw the waveforms taller, to see quiet parts (click again for more, then back)" },
+        { zoomToFitAll,           "Zoom to Fit",                "View",      "The whole song across the tracks area, and every track fitting the height" },
         { toggleControlBar,       "Show Control Bar",           "View",      "The bar along the top (display, transport, tools): show or hide it" },
-        { toggleToolbar,          "Show Toolbar",               "View",      "The second row of the control bar (transport, tools and view keys)" },
+        { toggleToolbar,          "Show Toolbar",               "View",      "A row of keys for the common edits (split, join, repeat, quantize, bounce, freeze...)" },
         { toggleStatusBar,        "Show Status Bar",            "View",      "The line of hints along the bottom" },
         { toggleMeters,           "Show Input and Output Meters", "View",    "The meters to the right of the tracks" },
         { toggleTrackHeaders,     "Show Track Headers",         "View",      "The track names, buttons and faders at the left of the tracks" },
@@ -233,6 +238,9 @@ namespace
             case zoomVerticalIn:         return { key (KeyPress::downKey, cmd) };
             case zoomVerticalOut:        return { key (KeyPress::upKey, cmd) };
             case toggleInspector:        return { key ('i') };
+            case showNotepad:            return { key ('p', opt | cmd) };
+            case showBrowser:            return { key ('f') };
+            case zoomToFitAll:           return { key ('z') };
             case cutRegions:             return { key ('x', cmd) };
             case copyRegions:            return { key ('c', cmd) };
             case pasteRegions:           return { key ('v', cmd) };

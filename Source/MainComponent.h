@@ -22,6 +22,7 @@
 #include "ui/ScreenRecorder.h"
 #include "ui/ScreenRecordPanel.h"
 #include "ui/LibraryPanel.h"
+#include "ui/SidePanels.h"
 #include "ui/SmartControls.h"
 #include "ui/CombineInterfacesPanel.h"
 #include "engine/AggregateDevice.h"
@@ -298,9 +299,34 @@ private:
     IconButton inspectorButton { "Inspector", IconButton::Icon::inspector, juce::Colour (0xff5a9cff) };
     IconButton libraryButton   { "Library", IconButton::Icon::library, juce::Colour (0xff5a9cff) };
     IconButton smartButton     { "Smart",   IconButton::Icon::smartControls, juce::Colour (0xff5a9cff) };
+    IconButton helpButton      { "Help",    IconButton::Icon::quickHelp, juce::Colour (0xff5a9cff) };
+    IconButton toolbarButton   { "Toolbar", IconButton::Icon::toolbar, juce::Colour (0xff5a9cff) };
+    IconButton listButton      { "Lists",   IconButton::Icon::listEditors, juce::Colour (0xff5a9cff) };
+    IconButton notesButton     { "Notes",   IconButton::Icon::notepad, juce::Colour (0xff5a9cff) };
+    IconButton loopsButton     { "Loops",   IconButton::Icon::loopBrowser, juce::Colour (0xff5a9cff) };
+    IconButton browserButton   { "Browser", IconButton::Icon::browser, juce::Colour (0xff5a9cff) };
+
+    // Logic's Toolbar (a row of edit keys) and the bar over the tracks (menus, tool, snap, drag, zoom)
+    juce::OwnedArray<juce::TextButton> functionKeys;
+    juce::Rectangle<int> functionBarArea, tracksBarArea;
+    juce::TextButton waveformZoomButton, fitVerticalButton, fitHorizontalButton;
+    juce::Slider verticalZoom, horizontalZoom;
+    static constexpr int functionBarHeight = 34, tracksBarHeight = 30;
+    void zoomToFit (bool horizontally, bool vertically);
+    void syncZoomSliders();
+
+    // Quick Help, Notepad and Browser
+    bool quickHelpShown = false;
+    juce::Label quickHelpBox;
+    juce::Component* lastHelpTarget = nullptr;
+    void updateQuickHelp();
+    std::unique_ptr<NotepadPanel> notepadPanel;
+    std::unique_ptr<BrowserPanel> browserPanel;
+    void toggleNotepad();
+    void toggleBrowser();
 
     // View > Show / Hide (kept between sessions)
-    bool showControlBar = true, showToolbarRow = true, showStatusBar = true, showMeters = true, showTrackHeaders = true;
+    bool showControlBar = true, showToolbarRow = false, showStatusBar = true, showMeters = true, showTrackHeaders = true;
     int barHeight() const;
     void setPanelShown (const juce::String& key, bool& flag, bool shown);
     void applyPanelVisibility();
