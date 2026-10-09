@@ -91,6 +91,8 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::saveProject:            saveProject(); break;
         case commands::saveProjectAs:          saveProjectAs(); break;
         case commands::importAudio:            importAudio(); break;
+        case commands::consolidateProject:     consolidate(); break;
+        case commands::revertToBackup:         showBackups(); break;
         case commands::exportSong:             exportSong(); break;
 
         case commands::undo:                   undo(); break;
@@ -203,7 +205,9 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         case 0:
             add ({ commands::newProject, commands::openProject });
             menu.addSeparator();
-            add ({ commands::saveProject, commands::saveProjectAs });
+            add ({ commands::saveProject, commands::saveProjectAs, commands::revertToBackup });
+            menu.addSeparator();
+            add ({ commands::consolidateProject });
             menu.addSeparator();
             add ({ commands::importAudio, commands::exportSong });
             break;

@@ -364,6 +364,12 @@ MainComponent::MainComponent (bool openAudioDevice)
 
     if (startupError.isNotEmpty())
         showError ("Audio device problem", startupError);
+    else if (openAudioDevice)
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this)]
+        {
+            if (safe != nullptr)
+                safe->offerRecovery();
+        });
 }
 
 MainComponent::~MainComponent()
@@ -672,8 +678,8 @@ void MainComponent::confirmDiscardChanges (std::function<void()> then)
 
     messageBox = juce::NativeMessageBox::showScopedAsync (options, [this, then] (int result)
     {
-        if (result == 1)       saveProject (then);   // Save
-        else if (result == 2)  then();               // Don't Save
+        if (result == 1)       saveProject (then);                  // Save
+        else if (result == 2)  { removeAutosave(); then(); }        // Don't Save
     });                                              // 0: Cancel
 }
 
@@ -707,6 +713,34 @@ void MainComponent::openProject()
             }
 
             loaded.setProperty (ids::name, file.getFileNameWithoutExtension(), nullptr);
+
+            // A newer autosave (the app closed before saving): offer it.
+            if (const auto autosaved = model::files::newerAutosave (file); autosaved.existsAsFile())
+            {
+                messageBox = juce::AlertWindow::showScopedAsync (
+                    juce::MessageBoxOptions::makeOptionsYesNo (juce::MessageBoxIconType::QuestionIcon, "Recover unsaved changes?",
+                        "There's an autosave of \"" + file.getFileNameWithoutExtension() + "\" from "
+                            + autosaved.getLastModificationTime().formatted ("%H:%M on %d %b")
+                            + ", newer than the last save. Open the autosaved version?",
+                        "Open Autosave", "Open Last Save", this),
+                    [this, loaded, file, autosaved] (int result)
+                    {
+                        if (result == 1)
+                        {
+                            juce::String err;
+                            if (auto recovered = model::load (autosaved, err); recovered.isValid())
+                            {
+                                recovered.setProperty (ids::name, file.getFileNameWithoutExtension(), nullptr);
+                                setProject (recovered, file);
+                                markDirty();
+                                return;
+                            }
+                        }
+                        setProject (loaded, file);
+                    });
+                return;
+            }
+
             setProject (loaded, file);
         });
     });
@@ -724,6 +758,9 @@ void MainComponent::saveProject (std::function<void()> then)
     rack.storePluginStates (project);
     effectRack.storePluginStates (model::mixerOf (project));
 
+    // The version on disk becomes a backup before it's replaced.
+    model::files::makeBackup (projectFile);
+
     juce::String error;
     if (! model::save (project, projectFile, error))
     {
@@ -732,6 +769,7 @@ void MainComponent::saveProject (std::function<void()> then)
     }
 
     dirty = false;
+    removeAutosave();   // saved: the autosave isn't needed
     updateTitle();
 
     if (then)
@@ -773,12 +811,142 @@ void MainComponent::showError (const juce::String& title, const juce::String& me
 
 void MainComponent::markDirty()
 {
+    changedSinceAutosave = true;
     if (! dirty)
     {
         dirty = true;
         updateTitle();
     }
     updateScrollBars();
+}
+
+//==============================================================================
+// Autosave, backups, Consolidate
+//==============================================================================
+void MainComponent::autosave()
+{
+    if (! changedSinceAutosave || engine.isRecording() || engine.isRenderingOffline())
+        return;
+
+    rack.storePluginStates (project);
+    effectRack.storePluginStates (model::mixerOf (project));
+
+    const auto file = model::files::autosaveFileFor (projectFile, project[ids::name].toString(), sessionId);
+    if (currentAutosave != file)
+        removeAutosave();   // e.g. the project was saved under a new name
+
+    file.getParentDirectory().createDirectory();
+    juce::String error;
+    if (model::save (project, file, error))
+    {
+        currentAutosave = file;
+        changedSinceAutosave = false;
+    }
+}
+
+void MainComponent::removeAutosave()
+{
+    if (currentAutosave != juce::File())
+        currentAutosave.deleteFile();
+    currentAutosave = juce::File();
+    if (projectFile != juce::File())
+        model::files::autosaveFileFor (projectFile, {}, {}).deleteFile();
+    changedSinceAutosave = dirty;
+}
+
+void MainComponent::offerRecovery()
+{
+    // An untitled project's autosave left behind: the app closed before it was saved.
+    const auto leftovers = model::files::leftoverUntitledAutosaves();
+    if (leftovers.isEmpty())
+        return;
+
+    const auto newest = leftovers.getFirst();
+    messageBox = juce::AlertWindow::showScopedAsync (
+        juce::MessageBoxOptions::makeOptionsYesNoCancel (juce::MessageBoxIconType::QuestionIcon, "Recover your last session?",
+            "Audio Tech Pro closed before \"" + newest.getFileNameWithoutExtension().upToLastOccurrenceOf (" ", false, false)
+                + "\" was saved. Its autosave is from " + newest.getLastModificationTime().formatted ("%H:%M on %d %b") + ".",
+            "Recover", "Delete It", "Later", this),
+        [this, leftovers] (int result)
+        {
+            if (result == 1)
+            {
+                juce::String error;
+                if (auto recovered = model::load (leftovers.getFirst(), error); recovered.isValid())
+                {
+                    setProject (recovered, {});
+                    leftovers.getFirst().deleteFile();
+                    markDirty();
+                    autosave();   // safe again straight away, under this session
+                }
+                else
+                {
+                    showError ("Couldn't recover", error);
+                }
+            }
+            else if (result == 2)
+            {
+                for (const auto& f : leftovers)
+                    f.deleteFile();
+            }
+        });
+}
+
+void MainComponent::consolidate()
+{
+    if (projectFile == juce::File())
+    {
+        showError ("Save the project first", "Consolidate copies the audio into the project's folder, so the project needs one. Save it, then try again.");
+        return;
+    }
+
+    undoManager.beginNewTransaction ("Consolidate");
+    juce::String error;
+    const auto copied = model::files::consolidate (project, projectFile, &undoManager, error);
+    saveProject();
+    statusLabel.setText (copied == 0 ? juce::String ("Everything was already in the project folder")
+                                     : "Copied " + juce::String (copied) + (copied == 1 ? " audio file" : " audio files") + " into Audio Files",
+                         juce::dontSendNotification);
+    if (error.isNotEmpty())
+        showError ("Consolidate", error);
+}
+
+void MainComponent::showBackups()
+{
+    if (projectFile == juce::File())
+    {
+        showError ("No backups yet", "Backups are made each time you save a project.");
+        return;
+    }
+
+    const auto backups = model::files::backupsOf (projectFile);
+    if (backups.isEmpty())
+    {
+        showError ("No backups yet", "A backup is made each time you save over the project, so there's one after your second save.");
+        return;
+    }
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Revert to the version saved at");
+    for (const auto& b : backups)
+        menu.addItem (b.getFileNameWithoutExtension().fromFirstOccurrenceOf (projectFile.getFileNameWithoutExtension() + " ", false, false)
+                          .replaceFirstOccurrenceOf (" ", ",  ").replace (".", ":"), [this, b]
+        {
+            confirmDiscardChanges ([this, b]
+            {
+                juce::String error;
+                auto loaded = model::load (b, error);
+                if (! loaded.isValid())
+                {
+                    showError ("Couldn't open the backup", error);
+                    return;
+                }
+                loaded.setProperty (ids::name, projectFile.getFileNameWithoutExtension(), nullptr);
+                setProject (loaded, projectFile);   // saving will put it back in place of the current version
+                markDirty();
+            });
+        });
+    menu.showMenuAsync (juce::PopupMenu::Options());
 }
 
 void MainComponent::updateTitle()
@@ -1253,6 +1421,14 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 void MainComponent::timerCallback()
 {
     updateLiveMidiTrack();
+
+    // Autosave every two minutes while there are unsaved changes.
+    if (const auto now = juce::Time::getMillisecondCounter(); now - lastAutosaveMs > 120000)
+    {
+        lastAutosaveMs = now;
+        if (changedSinceAutosave)
+            autosave();
+    }
     if (inspector.isVisible())
         inspector.setTrack (project, model::findById (project, timeline.selectedTrackId));
     updateScreenRecording();

@@ -32,6 +32,7 @@ endif()
 set(RIFF_CORE_SOURCES
     Source/model/Project.cpp
     Source/model/Generator.cpp
+    Source/model/ProjectFiles.cpp
     Source/engine/AggregateDevice.cpp
     Source/ai/ClaudeApi.cpp
     Source/ai/Assistant.cpp
@@ -171,6 +172,7 @@ if(RIFF_BUILD_TESTS)
         Tests/DeviceTests.cpp
         Tests/ViewTests.cpp
         Tests/EditTests.cpp
+        Tests/FilesTests.cpp
         Source/ui/ScreenRecordPanel.cpp
         Source/ui/ScreenRecorder.cpp
     )

@@ -11,6 +11,8 @@ const std::vector<Info>& all()
         { openProject,            "Open...",                    "File",      "Open a saved project" },
         { saveProject,            "Save",                       "File",      "Save the project" },
         { saveProjectAs,          "Save As...",                 "File",      "Save the project under a new name" },
+        { consolidateProject,     "Consolidate Project...",     "File",      "Copy every audio file the project uses into its folder (Audio Files), so it's all in one place" },
+        { revertToBackup,         "Revert to Backup...",        "File",      "Open one of the backups made each time you saved" },
         { importAudio,            "Import Audio File...",       "File",      "Put audio files on the selected track at the playhead" },
         { exportSong,             "Bounce Song to WAV...",      "File",      "Export the song, or the cycle range, to a WAV file" },
 

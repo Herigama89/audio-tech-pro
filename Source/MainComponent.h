@@ -22,6 +22,7 @@
 #include "ui/ScreenRecordPanel.h"
 #include "ui/CombineInterfacesPanel.h"
 #include "engine/AggregateDevice.h"
+#include "model/ProjectFiles.h"
 #include "engine/ScreenAudioTap.h"
 #include "ai/Assistant.h"
 #include "ai/AssistantTools.h"
@@ -203,6 +204,17 @@ private:
     juce::ValueTree project;
     juce::File projectFile;
     bool dirty = false;
+
+    // Autosave: every couple of minutes while there are unsaved changes
+    juce::String sessionId = juce::Uuid().toString().substring (0, 8);
+    bool changedSinceAutosave = false;
+    juce::uint32 lastAutosaveMs = 0;
+    juce::File currentAutosave;
+    void autosave();
+    void removeAutosave();
+    void offerRecovery();
+    void consolidate();
+    void showBackups();
     juce::String startupError;
 
     // --- View -----------------------------------------------------------------

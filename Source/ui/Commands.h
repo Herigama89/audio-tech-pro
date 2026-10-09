@@ -29,7 +29,8 @@ namespace riff::commands
         // Edit (added later; ids kept stable for saved key mappings)
         cutRegions = 0x2501, copyRegions, pasteRegions, selectAllRegions, repeatRegions, joinRegions, muteRegions,
         nudgeLeft, nudgeRight, toolMenu,
-        createMarker = 0x2601, nextMarker, previousMarker, deleteMarker
+        createMarker = 0x2601, nextMarker, previousMarker, deleteMarker,
+        consolidateProject = 0x2701, revertToBackup, recoverAutosave
     };
 
     struct Info
