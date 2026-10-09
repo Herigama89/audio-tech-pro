@@ -283,6 +283,48 @@ Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderC
 - [ ] The Audio Tech Pro plugin suite
 - [ ] CLAP hosting
 
+## Logic Pro parity checklist
+
+Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
+
+**Tracks area and track headers**
+- [x] Resize a track by dragging the lower edge of its header (Option-drag: every track); Zoom Vertical In/Out (Cmd+Down / Cmd+Up)
+- [x] One track selection shared by the tracks area and the mixer (click a strip to select its track; the mixer follows)
+- [ ] Select several tracks (Shift / Cmd-click) and act on all of them (mute, solo, delete, colour, arm)
+- [ ] Reorder tracks by dragging headers; double-click to rename; track colours and icons
+- [ ] Track stacks (folder and summing stacks), hide tracks (H), track freeze
+- [ ] Inspector (I): the selected track's region and track parameters and its channel strip on the left
+- [ ] Global tracks: arrangement markers, markers, tempo track with tempo changes, time signature and key changes
+- [ ] Bounce in place, export tracks as audio files (stems), import tracks from other projects
+
+**Editing in the tracks area**
+- [ ] Tool menu (T): pointer, pencil, eraser, text, scissors, glue, solo, mute, zoom, fade, automation, marquee
+- [ ] Copy, cut, paste, duplicate (Cmd+D), repeat (Cmd+R), loop regions, snap modes and drag modes (overlap, no overlap, X-fade, shuffle)
+- [ ] Region gain, fades and crossfades, nudging, trim to playhead, join, mute regions
+- [ ] Flex Time and Flex Pitch, time stretch, Smart Tempo, quick swipe comping refinements
+- [ ] Marquee selection across tracks; edit with the playhead (split by locators, delete between)
+
+**Editors**
+- [ ] Piano Roll: velocity lane, MIDI CC / pitch bend automation, Time Handles, scale quantize, note repeat, MIDI transform functions
+- [ ] Step Editor, Event List, Score Editor, Audio Track Editor and Audio File Editor
+- [ ] Step Sequencer
+- [ ] Editors open below the tracks with a resizable divider; the editor follows the selected track and region
+
+**Mixer**
+- [ ] Resizable mixer, narrow/wide strips, filters (audio, instrument, aux, bus, input, output, master/VCA)
+- [ ] Groups (linked volume, mute, solo, selection), VCA faders, I/O labels, stereo panner modes
+- [ ] Channel EQ display on the strip, signal flow view, track automation modes (Read, Touch, Latch, Write)
+- [x] Inserts, sends (pre/post), aux buses, master bus compressor, console channel strips
+
+**Recording and MIDI**
+- [x] Audio and MIDI recording, punch in/out, cycle recording with take folders, count-in, metronome
+- [ ] Autopunch, replace mode, multi-track recording settings, MIDI merge/overdub, step input, MIDI learn and controller assignments
+
+**Project and file**
+- [ ] Autosave and project backups, project alternatives, project templates, consolidate (collect audio into the project)
+- [ ] Undo History window, preferences window, Library and loop browser, Smart Controls
+- [ ] Live Loops, Drummer and Session Players (instruments come last)
+
 ## Later phases
 
 - **Phase 4:** Drums and loops. Step sequencer and a tempo-synced loop browser.

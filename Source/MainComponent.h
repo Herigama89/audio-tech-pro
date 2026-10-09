@@ -150,6 +150,9 @@ private:
     juce::ValueTree selectedTrack() const;
     void toggleTrackFlag (const juce::Identifier& flag, const juce::String& undoName);
     void selectAdjacentTrack (int delta);
+    void scrollToTrack (int index);
+    void zoomVertically (int steps);
+    void selectTrackFromMixer (const juce::String& trackId);
     void moveByBars (int bars);
     void quantizeSelection();
     void setLocatorsBySelection();

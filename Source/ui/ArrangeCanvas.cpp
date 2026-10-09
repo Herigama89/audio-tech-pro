@@ -71,14 +71,14 @@ void ArrangeCanvas::paint (juce::Graphics& g)
     for (int i = 0; i < numTracks; ++i)
     {
         const auto top = timeline.trackTop (i);
-        if (top + TimelineState::trackHeight < TimelineState::rulerHeight || top > getHeight())
+        if (top + timeline.heightOf (i) < TimelineState::rulerHeight || top > getHeight())
             continue;
 
         const auto track = project.getChild (i);
         const bool selected = timeline.selectedTrackId == track[ids::id].toString();
 
         g.setColour (selected ? theme::selection.withAlpha (0.6f) : (i % 2 == 0 ? theme::laneA : theme::laneB));
-        g.fillRect (0, top, getWidth(), TimelineState::trackHeight);
+        g.fillRect (0, top, getWidth(), timeline.heightOf (i));
     }
 
     paintGrid (g);
@@ -108,7 +108,7 @@ void ArrangeCanvas::paint (juce::Graphics& g)
             g.setColour (theme::dimText.withAlpha (0.6f));
             g.setFont (juce::FontOptions (12.0f));
             g.drawText ("Aux bus: tracks reach it through sends in the mixer", 12, timeline.trackTop (i),
-                        getWidth() - 24, TimelineState::trackHeight, juce::Justification::centredLeft);
+                        getWidth() - 24, timeline.heightOf (i), juce::Justification::centredLeft);
         }
     }
 
@@ -121,14 +121,14 @@ void ArrangeCanvas::paint (juce::Graphics& g)
         const auto top = newTrack ? timeline.trackTop (numTracks) : timeline.trackTop (dropHighlightTrack);
 
         g.setColour (theme::accent.withAlpha (0.15f));
-        g.fillRect (0, top, getWidth(), TimelineState::trackHeight);
+        g.fillRect (0, top, getWidth(), timeline.heightOf (newTrack ? numTracks : dropHighlightTrack));
         g.setColour (theme::accent);
-        g.drawRect (0, top, getWidth(), TimelineState::trackHeight, 2);
+        g.drawRect (0, top, getWidth(), timeline.heightOf (newTrack ? numTracks : dropHighlightTrack), 2);
 
         if (newTrack)
         {
             g.setFont (juce::FontOptions (13.0f));
-            g.drawText ("New track", 12, top, 200, TimelineState::trackHeight, juce::Justification::centredLeft);
+            g.drawText ("New track", 12, top, 200, timeline.heightOf (numTracks), juce::Justification::centredLeft);
         }
     }
 
@@ -301,7 +301,7 @@ void ArrangeCanvas::paintLiveTakes (juce::Graphics& g)
         const auto start = take.startSeconds >= 0.0 ? take.startSeconds : engine.getPlayheadSeconds();
         const auto x = timeline.timeToX (start);
         const auto w = juce::jmax (2.0f, (float) (take.lengthSeconds * timeline.pixelsPerSecond));
-        const juce::Rectangle<float> r (x, (float) timeline.trackTop (index) + 3.0f, w, (float) TimelineState::trackHeight - 6.0f);
+        const juce::Rectangle<float> r (x, (float) timeline.trackTop (index) + 3.0f, w, (float) timeline.heightOf (index) - 6.0f);
 
         g.setColour (theme::danger.withAlpha (0.3f));
         g.fillRoundedRectangle (r, 4.0f);
@@ -336,14 +336,14 @@ float ArrangeCanvas::valueToY (double value, const model::ParamRange& range, int
         norm = range.max > range.min ? (value - range.min) / (range.max - range.min) : 0.5;
 
     const auto top = (float) timeline.trackTop (trackIndex) + 6.0f;
-    const auto height = (float) TimelineState::trackHeight - 12.0f;
+    const auto height = (float) timeline.heightOf (trackIndex) - 12.0f;
     return top + (1.0f - (float) juce::jlimit (0.0, 1.0, norm)) * height;
 }
 
 double ArrangeCanvas::yToValue (float y, const model::ParamRange& range, int trackIndex) const
 {
     const auto top = (float) timeline.trackTop (trackIndex) + 6.0f;
-    const auto height = (float) TimelineState::trackHeight - 12.0f;
+    const auto height = (float) timeline.heightOf (trackIndex) - 12.0f;
     const auto norm = juce::jlimit (0.0, 1.0, 1.0 - (double) ((y - top) / height));
 
     if (range.decibels)
@@ -358,7 +358,7 @@ double ArrangeCanvas::yToValue (float y, const model::ParamRange& range, int tra
 void ArrangeCanvas::paintAutomation (juce::Graphics& g, const juce::ValueTree& track, int trackIndex)
 {
     const auto top = (float) timeline.trackTop (trackIndex);
-    const auto lane = juce::Rectangle<float> (0.0f, top, (float) getWidth(), (float) TimelineState::trackHeight);
+    const auto lane = juce::Rectangle<float> (0.0f, top, (float) getWidth(), (float) timeline.heightOf (trackIndex));
     if (lane.getBottom() < (float) TimelineState::rulerHeight)
         return;
 
@@ -457,7 +457,7 @@ juce::Rectangle<float> ArrangeCanvas::regionBounds (const juce::ValueTree& regio
 {
     const auto x = timeline.timeToX (region[ids::start]);
     const auto w = (float) ((double) region[ids::length] * timeline.pixelsPerSecond);
-    return { x, (float) timeline.trackTop (trackIndex) + 3.0f, juce::jmax (2.0f, w), (float) TimelineState::trackHeight - 6.0f };
+    return { x, (float) timeline.trackTop (trackIndex) + 3.0f, juce::jmax (2.0f, w), (float) timeline.heightOf (trackIndex) - 6.0f };
 }
 
 void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& region, int trackIndex)
@@ -869,7 +869,7 @@ void ArrangeCanvas::mouseWheelMove (const juce::MouseEvent& e, const juce::Mouse
 
         timeline.scrollSeconds = juce::jmax (0.0, timeline.scrollSeconds - dx * pixelsPerUnit / timeline.pixelsPerSecond);
 
-        const auto contentHeight = (model::numTracks (project) + 1) * TimelineState::trackHeight;
+        const auto contentHeight = timeline.contentHeight();
         const auto maxScrollY = juce::jmax (0, contentHeight - (getHeight() - TimelineState::rulerHeight));
         timeline.scrollY = juce::jlimit (0, maxScrollY, timeline.scrollY - juce::roundToInt (dy * pixelsPerUnit));
     }

@@ -37,6 +37,10 @@ public:
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
 
+    /** Shown highlighted: the track selected in the tracks area too. */
+    void setSelected (bool shouldBeSelected);
+    bool isSelected() const noexcept { return selected; }
+
     /** Console mode: follow knobs turned in the plugin's own window. */
     void syncFromPlugin();
 
@@ -50,6 +54,16 @@ public:
 
 private:
     bool isMaster() const { return ! track.isValid(); }
+
+    /** Selects the track on any click on the strip (its knobs and fader included). */
+    struct SelectOnClick final : juce::MouseListener
+    {
+        explicit SelectOnClick (ChannelStrip& s) : strip (s) {}
+        void mouseDown (const juce::MouseEvent& e) override;
+        ChannelStrip& strip;
+    };
+    SelectOnClick selectOnClick { *this };
+    bool selected = false;
     bool hasSends() const;
     juce::ValueTree insertAt (int slot) const;
     juce::ValueTree sendAt (int index) const;
@@ -150,6 +164,12 @@ public:
 
     std::function<void()> onClose;
 
+    /** A strip was clicked: select its track everywhere. */
+    std::function<void (const juce::String& trackId)> onSelectTrack;
+
+    /** Highlights the selected track's strip and scrolls it into view. */
+    void setSelectedTrack (const juce::String& trackId);
+
     void paint (juce::Graphics& g) override;
     void resized() override;
 
@@ -203,6 +223,7 @@ private:
     MasterBusCompressorPanel busComp;
     BusCompConsolePanel consolePanel;
     bool needsRebuild = false;
+    juce::String selectedTrackId;
 };
 
 } // namespace riff

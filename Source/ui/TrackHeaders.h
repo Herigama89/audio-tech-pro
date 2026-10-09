@@ -25,8 +25,16 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent& e) override;
+    void mouseMove (const juce::MouseEvent& e) override;
+    void mouseDrag (const juce::MouseEvent& e) override;
+    void mouseUp (const juce::MouseEvent& e) override;
+    void mouseExit (const juce::MouseEvent& e) override;
+
+    /** The strip along the bottom edge that resizes the track (Option: every track). */
+    static constexpr int resizeEdge = 6;
 
 private:
+    bool isOnResizeEdge (const juce::MouseEvent& e) const;
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { refresh(); }
     void refresh();
     void select();
@@ -44,6 +52,8 @@ private:
     InstrumentMenuFn instrumentMenu;
     bool isInstrument = false, isBus = false;
     bool lastClickWasPopup = false; // buttons also "click" on right-click; those open menus instead
+    bool resizing = false, resizingAll = false;
+    int heightAtDragStart = 0;
     juce::TextButton muteButton { "M" }, soloButton { "S" }, armButton { "R" }, monitorButton { "I" }, automationButton { "A" };
     juce::TextButton instrumentButton;
     juce::Slider volumeSlider, panKnob;

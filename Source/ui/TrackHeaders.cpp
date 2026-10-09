@@ -198,7 +198,13 @@ void TrackHeader::paint (juce::Graphics& g)
 
 void TrackHeader::resized()
 {
-    auto area = getLocalBounds().withTrimmedLeft (numberWidth + 6).withTrimmedRight (8).withTrimmedBottom (1);
+    auto area = getLocalBounds().withTrimmedLeft (numberWidth + 6).withTrimmedRight (8).withTrimmedBottom (resizeEdge);
+
+    // Short tracks show just the name and keys, as in Logic.
+    const bool roomy = getHeight() >= 64;
+    volumeSlider.setVisible (roomy);
+    panKnob.setVisible (roomy);
+    instrumentButton.setVisible (roomy && isInstrument);
 
     auto top = area.removeFromTop (36).withTrimmedTop (8).withHeight (20);
     for (auto* b : { &automationButton, &monitorButton, &armButton, &soloButton, &muteButton })
@@ -224,8 +230,60 @@ void TrackHeader::resized()
     volumeSlider.setBounds (bottom);
 }
 
+bool TrackHeader::isOnResizeEdge (const juce::MouseEvent& e) const
+{
+    return e.eventComponent == this && e.y >= getHeight() - resizeEdge;
+}
+
+void TrackHeader::mouseMove (const juce::MouseEvent& e)
+{
+    setMouseCursor (isOnResizeEdge (e) ? juce::MouseCursor::UpDownResizeCursor : juce::MouseCursor::NormalCursor);
+}
+
+void TrackHeader::mouseExit (const juce::MouseEvent&)
+{
+    if (! resizing)
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+}
+
+void TrackHeader::mouseDrag (const juce::MouseEvent& e)
+{
+    if (! resizing)
+        return;
+
+    const auto h = juce::jlimit (TimelineState::minTrackHeight, TimelineState::maxTrackHeight,
+                                 heightAtDragStart + e.getDistanceFromDragStartY());
+    auto project = track.getParent();
+
+    // Height is a view setting: saved with the project, but not an undo step.
+    if (resizingAll)
+    {
+        for (auto t : project)
+            if (t.hasType (ids::TRACK))
+                t.setProperty (ids::height, h, nullptr);
+    }
+    else
+    {
+        track.setProperty (ids::height, h, nullptr);
+    }
+    timeline.changed();
+}
+
+void TrackHeader::mouseUp (const juce::MouseEvent&)
+{
+    resizing = false;
+}
+
 void TrackHeader::mouseDown (const juce::MouseEvent& e)
 {
+    if (! e.mods.isPopupMenu() && isOnResizeEdge (e))
+    {
+        resizing = true;
+        resizingAll = e.mods.isAltDown();
+        heightAtDragStart = getHeight();
+        return;
+    }
+
     lastClickWasPopup = e.mods.isPopupMenu();
     select();
 
@@ -423,7 +481,7 @@ void TrackHeaderList::resized()
     content.setBounds (getLocalBounds().withTrimmedTop (TimelineState::rulerHeight));
 
     for (int i = 0; i < headers.size(); ++i)
-        headers[i]->setBounds (0, timeline.trackTop (i) - TimelineState::rulerHeight, getWidth(), TimelineState::trackHeight);
+        headers[i]->setBounds (0, timeline.trackTop (i) - TimelineState::rulerHeight, getWidth(), timeline.heightOf (i));
 }
 
 void TrackHeaderList::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)

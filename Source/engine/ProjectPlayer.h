@@ -6,6 +6,7 @@
 #include "AudioFileCache.h"
 #include "InstrumentRack.h"
 #include "EffectRack.h"
+#include "../model/Identifiers.h"
 
 namespace riff
 {
@@ -46,7 +47,11 @@ public:
     std::unique_ptr<PlaybackGraph> buildGraph (double sampleRate);
 
 private:
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { triggerAsyncUpdate(); }
+    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier& p) override
+    {
+        if (p != ids::height && p != ids::showAutomation && p != ids::automationParam)   // view settings: nothing to hear
+            triggerAsyncUpdate();
+    }
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override             { triggerAsyncUpdate(); }
     void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override      { triggerAsyncUpdate(); }
     void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override              { triggerAsyncUpdate(); }

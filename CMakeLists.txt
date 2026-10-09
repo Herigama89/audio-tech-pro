@@ -170,6 +170,7 @@ if(RIFF_BUILD_TESTS)
         Tests/AssistantTests.cpp
         Tests/ScreenRecordingTests.cpp
         Tests/DeviceTests.cpp
+        Tests/ViewTests.cpp
         Source/ui/ScreenRecordPanel.cpp
         Source/ui/ScreenRecorder.cpp
     )

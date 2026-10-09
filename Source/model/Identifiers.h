@@ -130,6 +130,7 @@ namespace riff::ids
     RIFF_DECLARE_ID (param)
     RIFF_DECLARE_ID (time)
     RIFF_DECLARE_ID (value)
+    RIFF_DECLARE_ID (height)          // TRACK: its height in the tracks area (pixels; view only)
     RIFF_DECLARE_ID (showAutomation)
     RIFF_DECLARE_ID (automationParam)
 

@@ -37,6 +37,9 @@ namespace
 ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     : owner (o), project (p), track (t)
 {
+    if (track.isValid())
+        addMouseListener (&selectOnClick, true);
+
     if (! isMaster())
     {
         // EQ and Dynamics knobs on the artwork
@@ -423,6 +426,21 @@ void ChannelStrip::showConsoleMenu()
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
 
+void ChannelStrip::SelectOnClick::mouseDown (const juce::MouseEvent&)
+{
+    if (strip.owner.onSelectTrack && ! strip.isMaster())
+        strip.owner.onSelectTrack (strip.track[ids::id].toString());
+}
+
+void ChannelStrip::setSelected (bool shouldBeSelected)
+{
+    if (selected != shouldBeSelected)
+    {
+        selected = shouldBeSelected;
+        repaint();
+    }
+}
+
 void ChannelStrip::mouseDown (const juce::MouseEvent& e)
 {
     // Right-click anywhere in the console section (knobs, lamps, the metal around them).
@@ -783,6 +801,17 @@ void ChannelStrip::paint (juce::Graphics& g)
     g.setColour (juce::Colours::black.withAlpha (0.45f));
     g.drawRect (plate, 1.0f);
 
+    // The selected track: a lit name plate with a gold frame, as Logic lights the selected strip.
+    if (selected)
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.22f));
+        g.fillRect (plate);
+        g.setColour (theme::gold);
+        g.drawRect (plate.expanded (1.0f), 2.0f);
+        g.setColour (theme::gold.withAlpha (0.9f));
+        g.drawRect (bounds.toFloat().reduced (1.0f), 2.0f);
+    }
+
     const auto name = isMaster() ? juce::String ("Master") : track[ids::name].toString();
     g.setColour (plateColour.getPerceivedBrightness() > 0.55f ? ink : juce::Colours::white);
     g.setFont (juce::FontOptions (14.0f));
@@ -1134,6 +1163,28 @@ void MixerPanel::handleAsyncUpdate()
         masterStrip->refresh();
 }
 
+void MixerPanel::setSelectedTrack (const juce::String& trackId)
+{
+    selectedTrackId = trackId;
+
+    for (auto* s : strips)
+    {
+        const bool on = s->getTrack()[ids::id].toString() == trackId;
+        s->setSelected (on);
+
+        // Scroll it into view.
+        if (on)
+        {
+            const auto x = s->getX(), right = s->getRight();
+            const auto viewX = viewport.getViewPositionX(), viewW = viewport.getViewWidth();
+            if (x < viewX)
+                viewport.setViewPosition (x, viewport.getViewPositionY());
+            else if (right > viewX + viewW)
+                viewport.setViewPosition (right - viewW, viewport.getViewPositionY());
+        }
+    }
+}
+
 void MixerPanel::rebuild()
 {
     strips.clear();
@@ -1142,6 +1193,7 @@ void MixerPanel::rebuild()
         if (track.hasType (ids::TRACK))
         {
             auto* strip = strips.add (new ChannelStrip (*this, project, track));
+            strip->setSelected (track[ids::id].toString() == selectedTrackId);
             strip->setComponentID ("strip" + juce::String (strips.size() - 1));
             stripHolder.addAndMakeVisible (strip);
         }

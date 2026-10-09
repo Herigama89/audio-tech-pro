@@ -46,6 +46,8 @@ const std::vector<Info>& all()
         { showPianoRoll,          "Piano Roll",                 "View",      "Open the selected MIDI region in the piano roll, or close it" },
         { zoomIn,                 "Zoom In",                    "View",      "Zoom in horizontally" },
         { zoomOut,                "Zoom Out",                   "View",      "Zoom out horizontally" },
+        { zoomVerticalIn,         "Zoom Vertical In",           "View",      "Make every track taller" },
+        { zoomVerticalOut,        "Zoom Vertical Out",          "View",      "Make every track shorter" },
         { keyCommands,            "Key Commands...",            "View",      "Show and edit the key commands" },
         { audioSettings,          "Audio Settings...",          "View",      "Choose the audio interface, sample rate and buffer size" },
         { calibrateLatency,       "Calibrate Recording Latency...", "View",  "Measure the round trip of your interface" },
@@ -150,6 +152,8 @@ namespace
             case showPianoRoll:          return { key ('p'), key ('e') };
             case zoomIn:                 return { key (KeyPress::rightKey, cmd) };
             case zoomOut:                return { key (KeyPress::leftKey, cmd) };
+            case zoomVerticalIn:         return { key (KeyPress::downKey, cmd) };
+            case zoomVerticalOut:        return { key (KeyPress::upKey, cmd) };
             case keyCommands:            return { key ('k', opt) };
             case audioSettings:          return { key (',', cmd) };
             case calibrateLatency:       return {};
@@ -205,6 +209,8 @@ namespace
             case showPianoRoll:          return { key ('=', macCtrl) };            // MIDI Editor
             case zoomIn:                 return { key (']', cmd) };
             case zoomOut:                return { key ('[', cmd) };
+            case zoomVerticalIn:         return { key (']', opt | cmd) };
+            case zoomVerticalOut:        return { key ('[', opt | cmd) };
             default:                     return appKeys (id);
         }
     }
@@ -312,6 +318,8 @@ namespace
             case showPianoRoll:          return { key (KeyPress::returnKey) };     // Open/Close Editor
             case zoomIn:                 return { key ('h') };
             case zoomOut:                return { key ('g') };
+            case zoomVerticalIn:         return { key ('h', shift) };
+            case zoomVerticalOut:        return { key ('g', shift) };
             default:                     return appKeys (id);
         }
     }

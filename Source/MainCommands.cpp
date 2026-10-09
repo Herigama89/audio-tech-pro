@@ -110,6 +110,8 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::showPianoRoll:          togglePianoRoll(); break;
         case commands::zoomIn:                 zoomHorizontally (1.5); break;
         case commands::zoomOut:                zoomHorizontally (1.0 / 1.5); break;
+        case commands::zoomVerticalIn:         zoomVertically (1); break;
+        case commands::zoomVerticalOut:        zoomVertically (-1); break;
         case commands::keyCommands:            showKeyCommands(); break;
         case commands::generateMidi:           showGenerator(); break;
         case commands::showAssistant:          toggleAssistant(); break;
@@ -188,7 +190,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             break;
 
         case 6:
-            add ({ commands::showPianoRoll, commands::zoomIn, commands::zoomOut });
+            add ({ commands::showPianoRoll, commands::zoomIn, commands::zoomOut, commands::zoomVerticalIn, commands::zoomVerticalOut });
             menu.addSeparator();
             add ({ commands::showAssistant, commands::recordScreen });
             menu.addSeparator();
@@ -371,14 +373,45 @@ void MainComponent::selectAdjacentTrack (int delta)
     timeline.selectedTrackId = project.getChild (next)[ids::id].toString();
     timeline.selectedRegionId = {};
 
-    // Keep it on screen.
-    const auto top = next * TimelineState::trackHeight;
+    scrollToTrack (next);
+    timeline.changed();
+}
+
+void MainComponent::scrollToTrack (int index)
+{
+    // Keep it on screen (positions without the scroll).
+    const auto top = timeline.trackTop (index) + timeline.scrollY - TimelineState::rulerHeight;
+    const auto height = timeline.heightOf (index);
     const auto visible = canvas.getHeight() - TimelineState::rulerHeight;
     if (top < timeline.scrollY)
         timeline.scrollY = top;
-    else if (top + TimelineState::trackHeight > timeline.scrollY + visible)
-        timeline.scrollY = top + TimelineState::trackHeight - visible;
+    else if (top + height > timeline.scrollY + visible)
+        timeline.scrollY = juce::jmax (0, top + height - visible);
+}
 
+void MainComponent::selectTrackFromMixer (const juce::String& trackId)
+{
+    const auto track = model::findById (project, trackId);
+    if (! track.isValid() || timeline.selectedTrackId == trackId)
+        return;
+
+    timeline.selectedTrackId = trackId;
+    timeline.selectedRegionId = {};
+    scrollToTrack (project.indexOf (track));
+    timeline.changed();
+}
+
+void MainComponent::zoomVertically (int steps)
+{
+    // Every track a step taller (or shorter), keeping their differences, as Logic's Zoom Vertical does.
+    for (int i = 0; i < model::numTracks (project); ++i)
+    {
+        auto track = project.getChild (i);
+        const auto h = timeline.heightOf (i);
+        const auto next = juce::jlimit (TimelineState::minTrackHeight, TimelineState::maxTrackHeight,
+                                        juce::roundToInt (h * std::pow (1.25, steps)));
+        track.setProperty (ids::height, next, nullptr);
+    }
     timeline.changed();
 }
 

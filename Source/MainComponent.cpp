@@ -230,6 +230,7 @@ MainComponent::MainComponent (bool openAudioDevice)
         showEffectMenu (owner, slot, existing, target);
     };
     mixer.onClose = [this] { closeMixer(); };
+    mixer.onSelectTrack = [this] (const juce::String& id) { selectTrackFromMixer (id); };
     addChildComponent (mixer);
     headers.inputNames = [this] { return engine.getActiveInputChannelNames(); };
     waveforms.onChange = [this] { canvas.repaint(); };
@@ -525,7 +526,7 @@ void MainComponent::updateScrollBars()
     hScroll.setCurrentRange (timeline.scrollSeconds, visibleSeconds, juce::dontSendNotification);
 
     const auto visibleHeight = canvas.getHeight() - TimelineState::rulerHeight;
-    const auto contentHeight = juce::jmax ((model::numTracks (project) + 1) * TimelineState::trackHeight,
+    const auto contentHeight = juce::jmax (timeline.contentHeight(),
                                            timeline.scrollY + visibleHeight);
     vScroll.setRangeLimits (0.0, contentHeight, juce::dontSendNotification);
     vScroll.setCurrentRange (timeline.scrollY, visibleHeight, juce::dontSendNotification);
@@ -573,6 +574,7 @@ void MainComponent::setProject (juce::ValueTree newProject, const juce::File& fi
 
     project.removeListener (this);
     project = newProject;
+    timeline.project = project;
     projectFile = file;
     project.addListener (this);
 
@@ -1110,6 +1112,7 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
     if (source == &timeline)
     {
+        mixer.setSelectedTrack (timeline.selectedTrackId);   // one selection, as in Logic
         updateScrollBars();
         commandManager.commandStatusChanged(); // the selection changed what the Track commands act on
     }

@@ -181,6 +181,17 @@ public:
             pump (main, 200);
             save (main, "generated-melody.png");
             main.closePianoRoll();
+
+            // Resized tracks, and one selection shared with the mixer.
+            main.project.getChild (0).setProperty (ids::height, 140, nullptr);
+            main.project.getChild (1).setProperty (ids::height, 40, nullptr);
+            main.selectTrackFromMixer (main.project.getChild (2)[ids::id].toString());
+            main.showMixer();
+            pump (main, 300);
+            save (main, "tracks-resized-mixer.png");
+            main.closeMixer();
+            pump (main, 200);
+            save (main, "tracks-resized.png");
         }
 
         // The Claude panel, with a scripted conversation (no network): real tools on the generated song.
