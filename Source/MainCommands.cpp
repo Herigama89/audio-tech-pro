@@ -114,6 +114,7 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::generateMidi:           showGenerator(); break;
         case commands::showAssistant:          toggleAssistant(); break;
         case commands::recordScreen:           toggleScreenRecording(); break;
+        case commands::combineInterfaces:      showCombineInterfaces(); break;
         case commands::audioSettings:          showAudioSettings(); break;
         case commands::calibrateLatency:       showLatencyCalibration(); break;
         case commands::scanPlugins:            showPluginScanner(); break;
@@ -191,7 +192,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             menu.addSeparator();
             add ({ commands::showAssistant, commands::recordScreen });
             menu.addSeparator();
-            add ({ commands::keyCommands, commands::audioSettings });
+            add ({ commands::keyCommands, commands::audioSettings, commands::combineInterfaces });
             break;
 
         default:

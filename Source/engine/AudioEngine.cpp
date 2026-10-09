@@ -35,11 +35,16 @@ AudioEngine::~AudioEngine()
     delete currentGraph.exchange (nullptr);
 }
 
-juce::String AudioEngine::initialise()
+juce::String AudioEngine::initialise (const juce::XmlElement* savedState)
 {
-    // Stereo in + stereo out; fall back to output only if input can't open
-    // (no input device, or microphone permission denied).
-    auto error = deviceManager.initialiseWithDefaultDevices (2, 2);
+    // The device you used last time, or stereo in + stereo out on the default one;
+    // output only if input can't open (no input device, or microphone permission denied).
+    juce::String error = "no saved device";
+    if (savedState != nullptr)
+        error = deviceManager.initialise (2, 2, savedState, true);
+
+    if (error.isNotEmpty())
+        error = deviceManager.initialiseWithDefaultDevices (2, 2);
 
     if (error.isNotEmpty())
         error = deviceManager.initialiseWithDefaultDevices (0, 2);
@@ -557,10 +562,12 @@ juce::StringArray AudioEngine::getActiveInputChannelNames()
     {
         const auto all = device->getInputChannelNames();
         const auto active = device->getActiveInputChannels();
+        const bool labelled = device->getName() == labelledDevice;
 
         for (int i = 0; i < all.size(); ++i)
             if (active[i])
-                names.add (all[i].isNotEmpty() ? all[i] : "Input " + juce::String (i + 1));
+                names.add (labelled && inputLabels[i].isNotEmpty() ? inputLabels[i]
+                                                                   : (all[i].isNotEmpty() ? all[i] : "Input " + juce::String (i + 1)));
     }
 
     return names;

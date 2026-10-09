@@ -38,7 +38,18 @@ public:
     ~AudioEngine() override;
 
     /** Opens the default devices. Returns an error message, or empty on success. */
-    juce::String initialise();
+    /** Opens the audio device: the one in `savedState` (from saveDeviceState) if it's still there, else the default. */
+    juce::String initialise (const juce::XmlElement* savedState = nullptr);
+
+    /** The device choice to remember between sessions (device, rate, buffer size, active channels). */
+    std::unique_ptr<juce::XmlElement> saveDeviceState() const { return deviceManager.createStateXml(); }
+
+    /** Names to show for a device's input channels (e.g. the interfaces a combined device is made of). */
+    void setInputChannelLabels (const juce::String& deviceName, const juce::StringArray& labels)
+    {
+        labelledDevice = deviceName;
+        inputLabels = labels;
+    }
 
     juce::AudioDeviceManager& getDeviceManager() noexcept { return deviceManager; }
     juce::AudioFormatManager& getFormatManager() noexcept { return formatManager; }
@@ -306,6 +317,8 @@ private:
     static float rmsOf (const float* left, const float* right, int n) noexcept;
     std::array<std::atomic<float>, PlaybackGraph::maxTracks * 2> trackPeaks {};
     std::atomic<bool> bouncing { false };
+    juce::String labelledDevice;
+    juce::StringArray inputLabels;
     std::atomic<ScreenAudioTap*> screenTap { nullptr };
     bool measuring = false;                       // only while measureMix renders
     std::vector<LevelStats> measuredTracks;       // by slot

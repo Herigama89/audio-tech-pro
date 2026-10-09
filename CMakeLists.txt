@@ -32,6 +32,7 @@ endif()
 set(RIFF_CORE_SOURCES
     Source/model/Project.cpp
     Source/model/Generator.cpp
+    Source/engine/AggregateDevice.cpp
     Source/ai/ClaudeApi.cpp
     Source/ai/Assistant.cpp
     Source/ai/AssistantTools.cpp
@@ -97,6 +98,7 @@ set(RIFF_UI_SOURCES
     Source/MainCommands.cpp
     Source/MainAssistant.cpp
     Source/MainScreenRecording.cpp
+    Source/MainAudioDevices.cpp
     Source/ui/Theme.cpp
     Source/ui/ConsoleLook.cpp
     Source/ui/Commands.cpp
@@ -105,6 +107,7 @@ set(RIFF_UI_SOURCES
     Source/ui/AssistantPanel.cpp
     Source/ui/ScreenRecorder.cpp
     Source/ui/ScreenRecordPanel.cpp
+    Source/ui/CombineInterfacesPanel.cpp
     Source/ui/TrackHeaders.cpp
     Source/ui/ArrangeCanvas.cpp
     Source/ui/LatencyCalibrator.cpp
@@ -166,6 +169,7 @@ if(RIFF_BUILD_TESTS)
         Tests/GeneratorTests.cpp
         Tests/AssistantTests.cpp
         Tests/ScreenRecordingTests.cpp
+        Tests/DeviceTests.cpp
         Source/ui/ScreenRecordPanel.cpp
         Source/ui/ScreenRecorder.cpp
     )

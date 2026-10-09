@@ -295,7 +295,21 @@ MainComponent::MainComponent (bool openAudioDevice)
 
     // --- Start ------------------------------------------------------------------
     if (openAudioDevice)
-        startupError = engine.initialise();
+    {
+        // Combined interfaces are made again before the device opens, so it can be chosen.
+        aggregateSetup = aggregate::Setup::fromString (appProperties.getUserSettings()->getValue ("combinedInterfaces"));
+        juce::String combineError;
+        if (aggregateSetup.isActive())
+            combineError = aggregate::create (aggregateSetup);
+
+        const auto saved = appProperties.getUserSettings()->getXmlValue ("audioDevice");
+        startupError = engine.initialise (saved.get());
+        updateInputLabels();
+
+        if (combineError.isNotEmpty() && startupError.isEmpty())
+            startupError = "Your interfaces couldn't be combined: " + combineError
+                           + "\n\nUsing one interface for now. Plug the other in and choose Combine Audio Interfaces again.";
+    }
     else
         engine.prepare (48000.0, 512);
     setProject (model::createProject(), {});
@@ -326,6 +340,7 @@ MainComponent::~MainComponent()
     generatorWindow.reset();
     assistantSettingsWindow.reset();
     screenRecordWindow.reset();
+    combineWindow.reset();
     engine.setScreenAudioTap (nullptr);
     screenRecorder.reset();
     if (mixMeasureJob != nullptr)
@@ -1121,6 +1136,8 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
     }
     else
     {
+        if (source == &engine.getDeviceManager())
+            saveDeviceState();
         statusLabel.setText (deviceStatusText(), juce::dontSendNotification);
     }
 }
@@ -1696,6 +1713,7 @@ void MainComponent::showAudioMenu()
     juce::PopupMenu menu;
     menu.addItem ("Audio device settings...", [this] { showAudioSettings(); });
     menu.addItem ("Calibrate recording latency...", [this] { showLatencyCalibration(); });
+    menu.addCommandItem (&commandManager, commands::combineInterfaces);
     menu.addSeparator();
     menu.addCommandItem (&commandManager, commands::keyCommands);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&settingsButton));
@@ -1727,7 +1745,7 @@ void MainComponent::showLatencyCalibration()
 void MainComponent::showAudioSettings()
 {
     auto selector = std::make_unique<juce::AudioDeviceSelectorComponent> (
-        engine.getDeviceManager(), 0, 2, 2, 2, true, false, true, false);
+        engine.getDeviceManager(), 0, 256, 2, 256, true, false, true, false);
     selector->setSize (520, 460);
 
     juce::DialogWindow::LaunchOptions options;

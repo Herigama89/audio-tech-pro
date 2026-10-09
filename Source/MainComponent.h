@@ -19,6 +19,8 @@
 #include "ui/AssistantPanel.h"
 #include "ui/ScreenRecorder.h"
 #include "ui/ScreenRecordPanel.h"
+#include "ui/CombineInterfacesPanel.h"
+#include "engine/AggregateDevice.h"
 #include "engine/ScreenAudioTap.h"
 #include "ai/Assistant.h"
 #include "ai/AssistantTools.h"
@@ -125,6 +127,12 @@ private:
     void showGenerator();
     void toggleAssistant();
     void toggleScreenRecording();
+    void showCombineInterfaces();
+    juce::String combineInterfaces (const aggregate::Setup& setup);
+    void separateInterfaces();
+    juce::String useAudioDevice (const juce::String& name, int numInputsToEnable);
+    void updateInputLabels();
+    void saveDeviceState();
     void startScreenRecording (const ScreenRecordSettings& settings);
     void stopScreenRecording (const juce::String& failure = {});
     void updateScreenRecording();
@@ -236,6 +244,10 @@ private:
     std::unique_ptr<AssistantPanel> assistantPanel;
     std::unique_ptr<EditorWindow> assistantSettingsWindow;
     std::unique_ptr<juce::Thread> mixMeasureJob;
+
+    // Several interfaces as one
+    aggregate::Setup aggregateSetup;
+    std::unique_ptr<EditorWindow> combineWindow;
 
     // Screen recording
     std::unique_ptr<ScreenRecorder> screenRecorder;

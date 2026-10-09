@@ -10,6 +10,7 @@
 #include "ui/GeneratorPanel.h"
 #include "ui/AssistantPanel.h"
 #include "ui/ScreenRecordPanel.h"
+#include "ui/CombineInterfacesPanel.h"
 #include <deque>
 #include "ui/ConsoleLook.h"
 
@@ -254,6 +255,19 @@ public:
             save (main, "screen-recording-toolbar.png");
             main.screenButton.setName ("Screen");
             main.screenButton.setToggleState (false, juce::dontSendNotification);
+        }
+
+        {
+            juce::Array<aggregate::Interface> fake;
+            fake.add ({ "quantum", "Quantum HD 2", 20, 24, true });
+            fake.add ({ "ssl", "SSL 2 MKII", 2, 2, true });
+            fake.add ({ "builtin", "MacBook Pro Speakers", 0, 2, false });
+            aggregate::Setup s;
+            s.uids = { "quantum", "ssl" };
+            s.clockUid = "quantum";
+            CombineInterfacesPanel panel (s, true, [fake] { return fake; }, {}, {});
+            pump (main, 50);
+            save (panel, "combine-interfaces.png");
         }
 
         {
