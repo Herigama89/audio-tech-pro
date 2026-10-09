@@ -115,6 +115,7 @@ set(RIFF_UI_SOURCES
     Source/ui/PianoRoll.cpp
     Source/ui/InstrumentWindows.cpp
     Source/ui/Mixer.cpp
+    Source/ui/ConsoleStripWindow.cpp
     Source/ui/BusCompConsolePanel.cpp
     Source/ui/StripParts.cpp
 )

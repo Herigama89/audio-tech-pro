@@ -113,6 +113,20 @@ void Biquad::setHighShelf (double rate, double freq, double gainDb, double q)
                (A + 1) - (A - 1) * cw + s, 2 * ((A - 1) - (A + 1) * cw), (A + 1) - (A - 1) * cw - s);
 }
 
+void Biquad::setHighPass (double rate, double freq, double q)
+{
+    const auto w = juce::MathConstants<double>::twoPi * clampFreq (freq, rate) / rate;
+    const auto cw = std::cos (w), alpha = std::sin (w) / (2.0 * q);
+    normalise (*this, (1 + cw) / 2, -(1 + cw), (1 + cw) / 2, 1 + alpha, -2 * cw, 1 - alpha);
+}
+
+void Biquad::setLowPass (double rate, double freq, double q)
+{
+    const auto w = juce::MathConstants<double>::twoPi * clampFreq (freq, rate) / rate;
+    const auto cw = std::cos (w), alpha = std::sin (w) / (2.0 * q);
+    normalise (*this, (1 - cw) / 2, 1 - cw, (1 - cw) / 2, 1 + alpha, -2 * cw, 1 - alpha);
+}
+
 void Biquad::setPeak (double rate, double freq, double gainDb, double q)
 {
     const auto A = std::pow (10.0, gainDb / 40.0);

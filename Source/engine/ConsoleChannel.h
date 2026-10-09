@@ -28,15 +28,33 @@ public:
         float hf = 0.0f, hmf = 0.0f, lmf = 0.0f, lf = 0.0f;   // dB
         float dynamics = 0.0f;                               // 0 (off) .. 10
 
+        // The full strip (its window). The defaults sound exactly like the knobs alone.
+        float inputDb = 0.0f, outputDb = 0.0f;
+        float hpf = 0.0f, lpf = 0.0f;                        // Hz, 0 = off
+        float hfFreq = 8000.0f, hmfFreq = 2500.0f, lmfFreq = 400.0f, lfFreq = 100.0f;
+        float hmfQ = 1.0f, lmfQ = 1.0f;
+        bool hfBell = false, lfBell = false;
+        float compRatio = 0.0f;                              // 0: auto, from the Dynamics knob
+        float compRelease = 0.15f;                           // seconds
+        bool compFast = false;
+        float gateThreshold = -80.0f, gateRange = 20.0f, gateRelease = 0.25f;   // dB, dB, s (-80: off)
+        bool gateExpander = false;
+
         bool operator== (const Settings&) const = default;
+
+        bool gateOn() const noexcept { return gateThreshold > -79.9f; }
 
         /** True if it would change the sound at all. */
         bool isActive() const noexcept
         {
             return enabled && (std::abs (hf) > 0.01f || std::abs (hmf) > 0.01f || std::abs (lmf) > 0.01f
-                                || std::abs (lf) > 0.01f || (dynEnabled && dynamics > 0.01f));
+                                || std::abs (lf) > 0.01f || (dynEnabled && (dynamics > 0.01f || gateOn()))
+                                || std::abs (inputDb) > 0.01f || std::abs (outputDb) > 0.01f || hpf > 0.0f || lpf > 0.0f);
         }
     };
+
+    /** The EQ and filters' combined response at a frequency, dB (for the strip window's curve). */
+    static double responseDb (const Settings& s, double frequency, double sampleRate = 48000.0);
 
     /** Reads a TRACK's console settings. */
     static Settings fromTrack (const juce::ValueTree& track);
@@ -59,8 +77,8 @@ private:
 
     Settings settings;
     double sampleRate = 48000.0;
-    Biquad hfFilter, hmfFilter, lmfFilter, lfFilter;
-    float envelopeDb = 0.0f;
+    Biquad hfFilter, hmfFilter, lmfFilter, lfFilter, hpf1, hpf2, lpf1;
+    float envelopeDb = 0.0f, gateGainDb = 0.0f;
     bool filtersValid = false;
 };
 

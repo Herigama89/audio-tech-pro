@@ -1,5 +1,7 @@
 #pragma once
 
+#include <complex>
+
 #include "Effect.h"
 #include <array>
 #include <atomic>
@@ -59,7 +61,19 @@ struct Biquad
     void setLowShelf (double rate, double freq, double gainDb, double q = 0.707);
     void setHighShelf (double rate, double freq, double gainDb, double q = 0.707);
     void setPeak (double rate, double freq, double gainDb, double q);
+    void setHighPass (double rate, double freq, double q = 0.707);
+    void setLowPass (double rate, double freq, double q = 0.707);
     void reset() noexcept { z1 = {}; z2 = {}; }
+
+    /** The filter's gain at a frequency, in dB (for drawing EQ curves). */
+    double magnitudeDb (double freq, double rate) const noexcept
+    {
+        const auto w = juce::MathConstants<double>::twoPi * freq / rate;
+        const std::complex<double> z = std::polar (1.0, -w), z2c = z * z;
+        const auto num = (double) b0 + (double) b1 * z + (double) b2 * z2c;
+        const auto den = 1.0 + (double) a1 * z + (double) a2 * z2c;
+        return 20.0 * std::log10 (juce::jmax (1.0e-9, std::abs (num / den)));
+    }
 
     inline float process (float x, int ch) noexcept
     {

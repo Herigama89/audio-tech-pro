@@ -152,7 +152,27 @@ namespace riff::ids
     RIFF_DECLARE_ID (collapsed)       // TRACK (a stack's main track): its tracks are folded away
     RIFF_DECLARE_ID (frozen)          // TRACK: plays frozenFile instead of its regions and plugins
     RIFF_DECLARE_ID (frozenFile)
-    RIFF_DECLARE_ID (stripIn)         // TRACK: the whole channel strip (built-in or plugin) in
+    RIFF_DECLARE_ID (stripIn)
+    // The built-in channel strip's full controls (its window), besides consoleHF/HMF/LMF/LF/Dynamics:
+    RIFF_DECLARE_ID (consoleInput)        // dB trim
+    RIFF_DECLARE_ID (consoleOutput)       // dB trim
+    RIFF_DECLARE_ID (consoleHPF)          // Hz, 0 = off
+    RIFF_DECLARE_ID (consoleLPF)          // Hz, 0 = off
+    RIFF_DECLARE_ID (consoleHFFreq)
+    RIFF_DECLARE_ID (consoleHFBell)
+    RIFF_DECLARE_ID (consoleHMFFreq)
+    RIFF_DECLARE_ID (consoleHMFQ)
+    RIFF_DECLARE_ID (consoleLMFFreq)
+    RIFF_DECLARE_ID (consoleLMFQ)
+    RIFF_DECLARE_ID (consoleLFFreq)
+    RIFF_DECLARE_ID (consoleLFBell)
+    RIFF_DECLARE_ID (consoleCompRatio)    // 0 = auto (follows the Dynamics knob)
+    RIFF_DECLARE_ID (consoleCompRelease)  // seconds
+    RIFF_DECLARE_ID (consoleCompFast)     // fast attack
+    RIFF_DECLARE_ID (consoleGateThreshold)   // dB, -80 = off
+    RIFF_DECLARE_ID (consoleGateRange)    // dB
+    RIFF_DECLARE_ID (consoleGateRelease)  // seconds
+    RIFF_DECLARE_ID (consoleGateExpander) // expander (gentle) instead of gate         // TRACK: the whole channel strip (built-in or plugin) in
     RIFF_DECLARE_ID (hidden)          // TRACK: hidden in the tracks area (Logic's Hide; it still plays)
     RIFF_DECLARE_ID (height)          // TRACK: its height in the tracks area (pixels; view only)
     RIFF_DECLARE_ID (showAutomation)

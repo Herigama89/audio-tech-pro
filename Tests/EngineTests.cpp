@@ -1243,6 +1243,37 @@ TEST_CASE ("The console EQ and Dynamics", "[console]")
         CHECK (sinePeakThrough (c, 1000.0) == 0.25f);
     }
 
+    SECTION ("the full strip: filters, a moved band, trims and the gate")
+    {
+        s.hpf = 200.0f;
+        c.setSettings (s);
+        CHECK (s.isActive());
+        CHECK (juce::Decibels::gainToDecibels (sinePeakThrough (c, 50.0) / 0.25f) < -20.0f);
+        CHECK (std::abs (juce::Decibels::gainToDecibels (sinePeakThrough (c, 2000.0) / 0.25f)) < 1.0f);
+
+        s.hpf = 0.0f;
+        s.hmf = 10.0f;
+        s.hmfFreq = 1000.0f;
+        c.setSettings (s);
+        c.reset();
+        CHECK (juce::Decibels::gainToDecibels (sinePeakThrough (c, 1000.0) / 0.25f) > 9.0f);
+        CHECK_THAT (ConsoleChannel::responseDb (s, 1000.0), WithinAbs (10.0, 0.2));
+
+        s.hmf = 0.0f;
+        s.outputDb = -6.0f;
+        c.setSettings (s);
+        c.reset();
+        CHECK_THAT (juce::Decibels::gainToDecibels (sinePeakThrough (c, 1000.0) / 0.25f), WithinAbs (-6.0f, 0.1f));
+
+        // A gate well above the signal closes by its range.
+        s.outputDb = 0.0f;
+        s.gateThreshold = -3.0f;
+        s.gateRange = 30.0f;
+        c.setSettings (s);
+        c.reset();
+        CHECK (juce::Decibels::gainToDecibels (sinePeakThrough (c, 1000.0) / 0.25f) < -25.0f);
+    }
+
     SECTION ("each band boosts its own range")
     {
         s.lf = 12.0f;

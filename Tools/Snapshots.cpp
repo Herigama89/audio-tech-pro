@@ -11,6 +11,7 @@
 #include "ui/AssistantPanel.h"
 #include "ui/ScreenRecordPanel.h"
 #include "ui/CombineInterfacesPanel.h"
+#include "ui/ConsoleStripWindow.h"
 #include <deque>
 #include "ui/ConsoleLook.h"
 
@@ -127,6 +128,18 @@ public:
         pump (main, 200);
         save (main, "pianoroll.png");
         main.closePianoRoll();
+
+        {
+            auto track = main.project.getChild (1);
+            track.setProperty (ids::consoleHF, 4.0, nullptr);
+            track.setProperty (ids::consoleLMF, -5.0, nullptr);
+            track.setProperty (ids::consoleLMFFreq, 300.0, nullptr);
+            track.setProperty (ids::consoleHPF, 80.0, nullptr);
+            track.setProperty (ids::consoleDynamics, 4.0, nullptr);
+            ConsoleStripWindow panel (track, main.undoManager);
+            pump (main, 100);
+            save (panel, "strip-window.png");
+        }
 
         {
             KeyCommandsPanel panel (*main.commandManager.getKeyMappings(), "Logic Pro", {});

@@ -37,6 +37,7 @@ public:
     void resized() override;
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
 
     /** Shown highlighted: the track selected in the tracks area too. */
     void setSelected (bool shouldBeSelected);
@@ -175,6 +176,9 @@ public:
     std::function<void (const juce::String& owner, int slot, juce::ValueTree existing, juce::Component& target)> onChooseEffect;
 
     std::function<void()> onClose;
+
+    /** Open a track's channel strip in full, in its own window (the built-in strip; a plugin opens its own). */
+    std::function<void (juce::ValueTree track)> onOpenStripWindow;
 
     /** A strip was clicked: select its track everywhere. */
     std::function<void (const juce::String& trackId, juce::ModifierKeys mods)> onSelectTrack;

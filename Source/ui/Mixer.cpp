@@ -450,6 +450,8 @@ void ChannelStrip::showConsoleMenu()
 
     if (insert.isValid())
         menu.addItem ("Open plugin window", [this, insert] { if (owner.onOpenInsert) owner.onOpenInsert (insert); });
+    else
+        menu.addItem ("Open channel strip window (all controls)...", [this] { if (owner.onOpenStripWindow) owner.onOpenStripWindow (track); });
 
     // This strip: built-in or a plugin
     const auto& candidates = owner.getStripCandidates();
@@ -545,6 +547,20 @@ void ChannelStrip::mouseDown (const juce::MouseEvent& e)
         routing::addRoutingItems (menu, project, track, owner.getUndoManager());
         menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
     }
+}
+
+void ChannelStrip::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    // Double-click the console section's panel: the whole strip in its own window.
+    if (isMaster() || isVca() || e.eventComponent != this || e.y >= topHeight)
+        return;
+    if (auto insert = stripInsert(); insert.isValid())
+    {
+        if (owner.onOpenInsert)
+            owner.onOpenInsert (insert);
+    }
+    else if (owner.onOpenStripWindow)
+        owner.onOpenStripWindow (track);
 }
 
 juce::Rectangle<int> ChannelStrip::fromArt (float x, float y, float w, float h) const

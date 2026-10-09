@@ -277,7 +277,8 @@ Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderC
 - [x] Console mode for the master: your UA SSL G Bus Compressor plugin, with a hardware-style face
 - [x] Console mode for the strips: your UA SSL 4000 E channel strip plugin driven from each strip's console section
 - [x] Console strips, part 2a: an IN key on every strip (bypasses the whole channel strip, a plugin stays loaded)
-- [ ] Console strips, part 2b: every 4000 E control in a separate strip window that opens from the strip (as in LUNA): filters, EQ frequencies, Q and bell switches, compressor, gate/expander, input and output
+- [x] Console strips, part 2b: every control of the built-in strip in its own window, as LUNA does (double-click the strip's top, or right-click > Open channel strip window): input/output trims, HPF/LPF, EQ frequencies, Qs and bell switches, compressor ratio/release/fast attack, gate/expander, and the EQ curve
+- [ ] (was) every 4000 E control in a separate strip window that opens from the strip (as in LUNA): filters, EQ frequencies, Q and bell switches, compressor, gate/expander, input and output
 - [x] Claude AI assistant (with your own API key): controls the DAW, writes MIDI, measures and advises on the mix, answers questions
 - [x] Screen recording of the app (or the whole screen) with the mix's sound and an optional mic, up to 4K (Mac)
 - [x] Several audio interfaces at once: Combine Audio Interfaces makes one device from them, with a clock and drift correction (Mac)
@@ -326,7 +327,8 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [x] Groups 1-8 (linked volume, mute, solo), VCA faders, track outputs into buses (right-click a strip's fader or a track header)
 - [ ] Group settings window, I/O labels, stereo panner modes
 - [x] Track automation modes (Off, Read, Touch, Latch, Write) on every strip and in the A menu; fader and pan moves are written while playing
-- [ ] Channel EQ display on the strip, signal flow view; writing plugin knob moves as automation
+- [x] Channel EQ curve (in the strip window)
+- [ ] Signal flow view; writing plugin knob moves as automation
 - [x] Inserts, sends (pre/post), aux buses, master bus compressor, console channel strips
 
 **Recording and MIDI**

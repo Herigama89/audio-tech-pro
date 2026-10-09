@@ -8,6 +8,7 @@
 #include "ui/KeyCommands.h"
 #include "ui/TrackPicker.h"
 #include "ui/RoutingMenu.h"
+#include "ui/ConsoleStripWindow.h"
 #include "engine/ConsolePlugins.h"
 
 namespace riff
@@ -368,6 +369,25 @@ MainComponent::MainComponent (bool openAudioDevice)
     setSize (1440, 920);
     automation.makeCurrent();
     routing::toggleFreeze = [this] (juce::ValueTree track) { toggleFreeze (track); };
+    mixer.onOpenStripWindow = [this] (juce::ValueTree track)
+    {
+        const auto id = "strip-window:" + track[ids::id].toString();
+        if (auto it = editorWindows.find (id); it != editorWindows.end())
+        {
+            it->second->toFront (true);
+            return;
+        }
+        auto closer = [this, id]
+        {
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this), id]
+            {
+                if (safe != nullptr)
+                    safe->editorWindows.erase (id);
+            });
+        };
+        editorWindows[id] = std::make_unique<EditorWindow> (track[ids::name].toString() + ": Channel Strip",
+                                                            new ConsoleStripWindow (track, undoManager), false, closer);
+    };
     routing::createStack = [this] (bool summing) { createStackFromSelection (summing); };
     TrackHeader::pluginParameterNames = [this] (const juce::String& insertId)
     {
