@@ -1,21 +1,21 @@
-#include "ClapFormat.h"
-
-#include <clap/clap.h>
-#include <map>
-#include <mutex>
-
-#if JUCE_MAC
+// System headers first, before JUCE's (whose names they'd otherwise clash with).
+#if __APPLE__
  #include <objc/runtime.h>
  #include <objc/message.h>
- #include <CoreGraphics/CoreGraphics.h>
 #endif
 
-#if JUCE_WINDOWS
+#if defined (_WIN32)
  #ifndef NOMINMAX
   #define NOMINMAX
  #endif
  #include <windows.h>
 #endif
+
+#include "ClapFormat.h"
+
+#include <clap/clap.h>
+#include <map>
+#include <mutex>
 
 namespace riff
 {
@@ -597,10 +597,10 @@ private:
             auto* self = static_cast<Host*> (h->host_data);
             if (self->owner == nullptr)
                 return;
-            juce::MessageManager::callAsync ([owner = self->owner, alive = std::weak_ptr<bool> (self->owner->alive), fn]
+            juce::MessageManager::callAsync ([instance = self->owner, guard = std::weak_ptr<bool> (self->owner->alive), fn]
             {
-                if (auto a = alive.lock(); a != nullptr && *a)
-                    fn (*owner);
+                if (auto a = guard.lock(); a != nullptr && *a)
+                    fn (*instance);
             });
         }
     };
@@ -948,9 +948,10 @@ private:
         window.api = api();
        #if JUCE_MAC
         // An empty NSView of our own for the plugin to put its view in.
-        const CGRect frame = CGRectMake (0, 0, getWidth(), getHeight());
+        struct Frame { double x, y, width, height; };   // NSRect's layout on 64-bit Macs
+        const Frame frame { 0.0, 0.0, (double) getWidth(), (double) getHeight() };
         auto allocated = ((id (*) (id, SEL)) objc_msgSend) ((id) objc_getClass ("NSView"), sel_registerName ("alloc"));
-        view = ((id (*) (id, SEL, CGRect)) objc_msgSend) (allocated, sel_registerName ("initWithFrame:"), frame);
+        view = ((id (*) (id, SEL, Frame)) objc_msgSend) (allocated, sel_registerName ("initWithFrame:"), frame);
         holder.setView (view);
         window.cocoa = view;
        #else
