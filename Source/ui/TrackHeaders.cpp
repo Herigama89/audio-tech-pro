@@ -6,6 +6,7 @@
 #include "../AppInfo.h"
 #include "../engine/AutomationWriter.h"
 #include "RoutingMenu.h"
+#include "TrackIcons.h"
 
 namespace riff
 {
@@ -222,7 +223,16 @@ void TrackHeader::paint (juce::Graphics& g)
 
     g.setColour (theme::ink);
     g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
-    g.drawText (juce::String (track.getParent().indexOf (track) + 1), number.withTrimmedLeft (4), juce::Justification::centred, false);
+    const int icon = track.getProperty (ids::icon, 0);
+    if (icon > 0 && getHeight() >= 56)
+    {
+        g.drawText (juce::String (track.getParent().indexOf (track) + 1), number.withTrimmedLeft (4).withHeight (getHeight() / 2 + 4),
+                    juce::Justification::centred, false);
+        icons::draw (g, icon, number.withTrimmedLeft (4).toFloat().withTrimmedTop ((float) getHeight() * 0.5f + 2.0f).withSizeKeepingCentre (16.0f, 16.0f),
+                     theme::ink.withAlpha (0.85f));
+    }
+    else
+        g.drawText (juce::String (track.getParent().indexOf (track) + 1), number.withTrimmedLeft (4), juce::Justification::centred, false);
 
     // The track's colour, as a tab on the left edge
     g.setColour (model::trackColour (track));
@@ -576,6 +586,17 @@ void TrackHeader::showMenu()
         menu.addItem ("Choose input...", [this] { showInputMenu(); });
     menu.addItem ("Rename", [this] { nameLabel.showEditor(); });
     menu.addItem ("Colour...", [this] { showColours(); });
+    {
+        juce::PopupMenu iconMenu;
+        const int current = track.getProperty (ids::icon, 0);
+        for (int i = 0; i < icons::names().size(); ++i)
+            iconMenu.addItem (icons::names()[i], true, current == i, [this, i]
+            {
+                undoManager.beginNewTransaction ("Track icon");
+                track.setProperty (ids::icon, i, &undoManager);
+            });
+        menu.addSubMenu ("Icon", iconMenu);
+    }
     menu.addSeparator();
     routing::addRoutingItems (menu, track.getParent(), track, undoManager);
     menu.addSeparator();

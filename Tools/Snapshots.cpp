@@ -462,7 +462,9 @@ private:
         auto keys = model::addTrack (project, "Keys", um, -1, model::instrumentKind);
         auto midi = model::addMidiRegion (keys, 4.36, 8.72, um);
         model::setLoop (midi, true, um);
-        model::addTempoChange (project, 32.0, 96.0, um);   // a slower last section, on the tempo track
+        model::addTempoChange (project, 32.0, 96.0, um);
+        for (int i = 0; i < 6 && i < model::numTracks (project); ++i)
+            project.getChild (i).setProperty (ids::icon, std::array<int, 6> { 1, 4, 4, 3, 2, 2 }[(size_t) i], nullptr);   // a slower last section, on the tempo track
         const int chord[] = { 60, 64, 67, 71, 62, 65, 69, 72 };
         for (int bar = 0; bar < 4; ++bar)
             for (int n = 0; n < 4; ++n)

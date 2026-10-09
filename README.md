@@ -298,12 +298,13 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [x] Hide tracks (Ctrl+H hides and selects the next; H shows or leaves out hidden tracks)
 - [x] Inspector (I): the selected track's channel strip and the Stereo Out on the left
 - [x] Inspector: Region box (mute, loop, gain, fades, MIDI transpose and velocity) and Track box (automation mode, routing, transpose, velocity, freeze)
-- [ ] Track icons
+- [x] Track icons (right-click a track > Icon)
 - [x] Track stacks (folder: one fader, mute, solo; summing: an aux bus; fold them away with the triangle), track freeze
 - [x] Marker track: double-click to add or rename, drag to move, click to go there, right-click to set the cycle or delete; Create Marker (Option+'), next/previous marker (Option+. / Option+,)
 - [x] Time signature and key in the display (click to change); the MIDI generator starts in the song's key
 - [x] Tempo track with tempo changes (double-click the Tempo lane; drag a change sideways to move it, up/down for its BPM)
-- [ ] Time signature and key changes along the song, arrangement markers; MIDI regions following tempo changes
+- [x] Time signature changes (right-click the Tempo lane); MIDI regions, markers and locators follow tempo changes
+- [ ] Key changes along the song, arrangement markers
 - [x] Bounce in place (Ctrl+B), export all tracks as audio files (stems, Shift+Cmd+E), import tracks from other projects
 
 **Editing in the tracks area**
@@ -323,7 +324,8 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [ ] Piano Roll: Time Handles, note repeat, more Transform sets
 - [x] Event List (MIDI regions)
 - [x] Audio File Editor (double-click an audio region): normalize, gain, fades, silence, reverse, invert
-- [ ] Step Editor, Score Editor, Audio Track Editor
+- [x] Score view and Step Editor (the View menu in the editor's header)
+- [ ] Audio Track Editor, editing in the score
 - [ ] Step Sequencer
 - [x] Editors open below the tracks with a resizable divider (double-click it for the default); the editor follows the selected track and region
 
@@ -334,7 +336,8 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [ ] Group settings window, I/O labels, stereo panner modes
 - [x] Track automation modes (Off, Read, Touch, Latch, Write) on every strip and in the A menu; fader and pan moves are written while playing
 - [x] Channel EQ curve (in the strip window)
-- [ ] Signal flow view; writing plugin knob moves as automation
+- [x] Writing plugin knob moves (built-in and hosted) as automation
+- [ ] Signal flow view
 - [x] Inserts, sends (pre/post), aux buses, master bus compressor, console channel strips
 
 **Recording and MIDI**
