@@ -50,6 +50,7 @@ const std::vector<Info>& all()
         { audioSettings,          "Audio Settings...",          "View",      "Choose the audio interface, sample rate and buffer size" },
         { calibrateLatency,       "Calibrate Recording Latency...", "View",  "Measure the round trip of your interface" },
         { scanPlugins,            "Plug-in Manager...",         "View",      "Scan for VST3 and Audio Unit plugins" },
+        { recordScreen,           "Record Screen...",           "View",      "Record the app (or the whole screen) to a video with the mix's sound; again to stop" },
         { showAssistant,          "Claude Assistant",           "View",      "Show or hide the Claude panel: ask questions, or tell it what to do" },
     };
 

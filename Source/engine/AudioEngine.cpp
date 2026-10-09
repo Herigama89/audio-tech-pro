@@ -808,6 +808,9 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
             if (auto* outR = outputs[1]) juce::FloatVectorOperations::copy (outR + offset, mixR, n);
         }
 
+        if (auto* tap = screenTap.load (std::memory_order_acquire); tap != nullptr && ! bouncing.load())
+            tap->push (mixL, mixR, n, inputs, numInputs, offset);
+
         storeMax (peakOutL, mixBuffer.getMagnitude (0, 0, n));
         storeMax (peakOutR, mixBuffer.getMagnitude (1, 0, n));
 

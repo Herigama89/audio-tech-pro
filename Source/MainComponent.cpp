@@ -27,7 +27,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     for (auto* b : std::initializer_list<juce::Button*> { &fileButton, &undoButton, &redoButton, &addTrackButton, &settingsButton,
                                                           &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
                                                           &recordButton, &cycleButton, &countInButton, &clickButton,
-                                                          &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton })
+                                                          &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton, &screenButton })
     {
         b->setWantsKeyboardFocus (false); // keep Space for play/stop
         addAndMakeVisible (b);
@@ -51,6 +51,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     bind (keysButton, commands::keyCommands);
     bind (generateButton, commands::generateMidi);
     bind (claudeButton, commands::showAssistant);
+    bind (screenButton, commands::recordScreen);
     bind (undoButton, commands::undo);
     bind (redoButton, commands::redo);
     stopButton.onClick = [this]
@@ -89,6 +90,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     mixerButton.setTooltip ("Mixer (X)");
     editorButton.setTooltip ("Piano roll for the selected MIDI region (P)");
     keysButton.setTooltip ("Key commands (Option+K)");
+    screenButton.setTooltip ("Record the screen with the mix's sound (click again to stop)");
     claudeButton.setTooltip ("Claude: ask questions about your project, or tell it what to do");
     generateButton.setTooltip ("MIDI Generator: drums, bass, chords and a melody in a genre's style");
     addTrackButton.setTooltip ("New audio track, instrument track or aux bus");
@@ -299,6 +301,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     setProject (model::createProject(), {});
     statusLabel.setText (deviceStatusText(), juce::dontSendNotification);
     createAssistant();
+    screenRecorder = ScreenRecorder::create();
 
     setWantsKeyboardFocus (true);
     setSize (1440, 920);
@@ -322,6 +325,9 @@ MainComponent::~MainComponent()
     keyCommandsWindow.reset();
     generatorWindow.reset();
     assistantSettingsWindow.reset();
+    screenRecordWindow.reset();
+    engine.setScreenAudioTap (nullptr);
+    screenRecorder.reset();
     if (mixMeasureJob != nullptr)
         mixMeasureJob->stopThread (10000);
     assistantPanel.reset();
@@ -402,7 +408,7 @@ void MainComponent::paint (juce::Graphics& g)
     g.setFont (juce::FontOptions (11.0f));
     for (auto* b : std::initializer_list<juce::Button*> { &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
                                                           &recordButton, &cycleButton, &countInButton, &clickButton,
-                                                          &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton })
+                                                          &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton, &screenButton })
     {
         g.setColour (b->getToggleState() ? theme::cream : theme::text.withAlpha (0.78f));
         g.drawText (b->getName(), b->getBounds().translated (0, b->getHeight() + 1).withHeight (13).expanded (8, 0),
@@ -457,6 +463,7 @@ void MainComponent::resized()
 
         generateButton.setBounds (18, row.getY(), keyWidth, keyHeight);
         claudeButton.setBounds (18 + keyWidth + gap + 4, row.getY(), keyWidth, keyHeight);
+        screenButton.setBounds (18 + 2 * (keyWidth + gap + 4), row.getY(), keyWidth, keyHeight);
 
         x = getWidth() - 12 - 3 * keyWidth - 2 * gap;
         for (auto* c : { (juce::Component*) &mixerButton, (juce::Component*) &editorButton, (juce::Component*) &keysButton })
@@ -1121,6 +1128,7 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 void MainComponent::timerCallback()
 {
     updateLiveMidiTrack();
+    updateScreenRecording();
 
     if (pianoRoll.isVisible())
         pianoRoll.repaint();

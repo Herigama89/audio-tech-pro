@@ -496,6 +496,19 @@ void IconButton::drawIcon (juce::Graphics& g, Icon icon, juce::Rectangle<float> 
             return;
         }
 
+        case Icon::screen:
+        {
+            // A monitor with a recording dot.
+            const auto b = r.withTrimmedBottom (r.getHeight() * 0.24f);
+            g.drawRoundedRectangle (b.reduced (0.5f), 2.0f, juce::jmax (1.2f, r.getWidth() * 0.09f));
+            g.fillRect (r.getCentreX() - r.getWidth() * 0.06f, b.getBottom(), r.getWidth() * 0.12f, r.getHeight() * 0.12f);
+            g.fillRect (r.getCentreX() - r.getWidth() * 0.26f, r.getBottom() - r.getHeight() * 0.08f, r.getWidth() * 0.52f, r.getHeight() * 0.08f);
+            const auto d = b.getHeight() * 0.42f;
+            g.setColour (juce::Colour (0xffd8352d));
+            g.fillEllipse (b.getCentreX() - d * 0.5f, b.getCentreY() - d * 0.5f, d, d);
+            return;
+        }
+
         case Icon::chat:
         {
             // A speech bubble with three dots.

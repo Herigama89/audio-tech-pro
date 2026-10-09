@@ -9,6 +9,7 @@
 #include "ui/KeyCommands.h"
 #include "ui/GeneratorPanel.h"
 #include "ui/AssistantPanel.h"
+#include "ui/ScreenRecordPanel.h"
 #include <deque>
 #include "ui/ConsoleLook.h"
 
@@ -236,6 +237,23 @@ public:
             main.removeChildComponent (main.assistantPanel.get());
             main.assistantPanel.reset();
             main.assistant.reset();   // (the fake transport goes out of scope)
+        }
+
+        {
+            ScreenRecordSettings s;
+            s.folder = ScreenRecordSettings::defaultFolder();
+            s.withMic = true;
+            ScreenRecordPanel panel (s, { "Mic/Inst 1", "Mic/Inst 2", "Line 3", "Line 4" }, {}, {});
+            pump (main, 50);
+            save (panel, "screen-record.png");
+
+            // The Screen key while recording (as the timer shows it).
+            main.screenButton.setName ("1:07");
+            main.screenButton.setToggleState (true, juce::dontSendNotification);
+            pump (main, 50);
+            save (main, "screen-recording-toolbar.png");
+            main.screenButton.setName ("Screen");
+            main.screenButton.setToggleState (false, juce::dontSendNotification);
         }
 
         {

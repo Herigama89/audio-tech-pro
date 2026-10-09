@@ -96,12 +96,15 @@ set(RIFF_UI_SOURCES
     Source/MainComponent.cpp
     Source/MainCommands.cpp
     Source/MainAssistant.cpp
+    Source/MainScreenRecording.cpp
     Source/ui/Theme.cpp
     Source/ui/ConsoleLook.cpp
     Source/ui/Commands.cpp
     Source/ui/KeyCommands.cpp
     Source/ui/GeneratorPanel.cpp
     Source/ui/AssistantPanel.cpp
+    Source/ui/ScreenRecorder.cpp
+    Source/ui/ScreenRecordPanel.cpp
     Source/ui/TrackHeaders.cpp
     Source/ui/ArrangeCanvas.cpp
     Source/ui/LatencyCalibrator.cpp
@@ -162,6 +165,9 @@ if(RIFF_BUILD_TESTS)
         Tests/ConsoleTests.cpp
         Tests/GeneratorTests.cpp
         Tests/AssistantTests.cpp
+        Tests/ScreenRecordingTests.cpp
+        Source/ui/ScreenRecordPanel.cpp
+        Source/ui/ScreenRecorder.cpp
     )
 
     target_include_directories(AudioTechProTests PRIVATE Source)
@@ -169,7 +175,7 @@ if(RIFF_BUILD_TESTS)
 
     # Tests compare exact silence (0.0f) on purpose.
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        set_source_files_properties(Tests/ModelTests.cpp Tests/EngineTests.cpp Tests/GeneratorTests.cpp Tests/AssistantTests.cpp
+        set_source_files_properties(Tests/ModelTests.cpp Tests/EngineTests.cpp Tests/GeneratorTests.cpp Tests/AssistantTests.cpp Tests/ScreenRecordingTests.cpp
             PROPERTIES COMPILE_OPTIONS -Wno-float-equal)
     endif()
 
@@ -189,6 +195,11 @@ endif()
 
 # Hosting Audio Units needs CoreAudioKit (for the generic plugin view).
 if(APPLE)
+    # Screen recording (ScreenCaptureKit is weak-linked: the rest of the app runs on older macOS)
+    target_sources(AudioTechPro PRIVATE Source/ui/ScreenRecorder_mac.mm)
+    set_source_files_properties(Source/ui/ScreenRecorder_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    target_link_libraries(AudioTechPro PRIVATE "-framework AVFoundation" "-framework CoreMedia" "-framework CoreVideo"
+                                               "-weak_framework ScreenCaptureKit")
     target_link_libraries(AudioTechPro PRIVATE "-framework CoreAudioKit")
     if(TARGET AudioTechProTests)
         target_link_libraries(AudioTechProTests PRIVATE "-framework CoreAudioKit")
@@ -209,6 +220,8 @@ if(RIFF_BUILD_SNAPSHOTS)
     target_compile_definitions(Snapshots PRIVATE ${RIFF_DEFINITIONS} JUCE_MODAL_LOOPS_PERMITTED=1)
     target_link_libraries(Snapshots PRIVATE AudioTechProData juce::juce_gui_extra juce::juce_audio_utils juce::juce_dsp)
     if(APPLE)
-        target_link_libraries(Snapshots PRIVATE "-framework CoreAudioKit")
+        target_sources(Snapshots PRIVATE Source/ui/ScreenRecorder_mac.mm)
+        target_link_libraries(Snapshots PRIVATE "-framework CoreAudioKit" "-framework AVFoundation" "-framework CoreMedia"
+                                                "-framework CoreVideo" "-weak_framework ScreenCaptureKit")
     endif()
 endif()

@@ -17,6 +17,9 @@
 #include "ui/ConsoleLook.h"
 #include "ui/GeneratorPanel.h"
 #include "ui/AssistantPanel.h"
+#include "ui/ScreenRecorder.h"
+#include "ui/ScreenRecordPanel.h"
+#include "engine/ScreenAudioTap.h"
 #include "ai/Assistant.h"
 #include "ai/AssistantTools.h"
 #include "model/Generator.h"
@@ -121,6 +124,10 @@ private:
     void showKeyCommands();
     void showGenerator();
     void toggleAssistant();
+    void toggleScreenRecording();
+    void startScreenRecording (const ScreenRecordSettings& settings);
+    void stopScreenRecording (const juce::String& failure = {});
+    void updateScreenRecording();
     void showAssistantSettings();
     void createAssistant();
     ai::AppHooks makeAssistantHooks();
@@ -152,6 +159,7 @@ private:
     void markDirty();
 
     // --- Engine and model ---------------------------------------------------
+    ScreenAudioTap screenTap;   // (before the engine, which may hold it while recording)
     AudioEngine engine;
     AudioFileCache fileCache { engine.getFormatManager(), true };   // decodes in the background
     bool wasLoadingAudio = false;
@@ -186,6 +194,7 @@ private:
     IconButton editorButton    { "Editor",  IconButton::Icon::pianoRoll, juce::Colour (0xff5a9cff) };
     IconButton keysButton      { "Keys",    IconButton::Icon::keys };
     IconButton generateButton  { "Generate", IconButton::Icon::generate, juce::Colour (0xffd3ae55) };
+    IconButton screenButton    { "Screen",  IconButton::Icon::screen, juce::Colour (0xffd8352d) };
     IconButton claudeButton    { "Claude",  IconButton::Icon::chat,  juce::Colour (0xffd97757) };
 
     juce::Label positionLabel, clockLabel, tempoLabel, tempoCaption { {}, "BPM" },
@@ -227,6 +236,12 @@ private:
     std::unique_ptr<AssistantPanel> assistantPanel;
     std::unique_ptr<EditorWindow> assistantSettingsWindow;
     std::unique_ptr<juce::Thread> mixMeasureJob;
+
+    // Screen recording
+    std::unique_ptr<ScreenRecorder> screenRecorder;
+    std::unique_ptr<EditorWindow> screenRecordWindow;
+    juce::Time screenRecordStartedAt;
+    bool screenRecordStarting = false;
     double recordingOffsetMs = 0.0;
 
     // The cycle as it was when recording started (it can't change while recording).

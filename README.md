@@ -134,6 +134,7 @@ Edit, Track, Navigate, Record, Mix, View.
 | Cycle (loop) | Drag in the **top half of the ruler** to set the range. Click the bar, press **C**, or use **Cycle** to turn it on or off. |
 | Generate MIDI | Click **Generate** (top left) or choose **Track > Generate MIDI...**. Pick a genre, key, length and parts, then **Generate**. New instrument tracks appear at the playhead's bar. **Try another** replaces the last take with a new one. Drums use General MIDI notes (kick 36, snare 38, hats 42/46), so load any drum plugin on the Drums track. |
 | Ask Claude | Click **Claude** (top left) or choose **View > Claude Assistant**. The first time, paste your Anthropic API key (from console.anthropic.com) in **Settings**. Then type what you want: "set the tempo to 92 and loop bars 5 to 8", "write a sad piano progression in F minor", "add a reverb bus for the vocals", "analyze my mix", or any question about the app. Everything Claude changes in one go is one **Undo**. Right-click a message to copy it. **New chat** starts over. |
+| Record the screen | Click **Screen** (top left) or **View > Record Screen...**. Choose the app's windows or the whole screen, the size (up to 4K), 30 or 60 fps, and the sound: the mix, or the mix plus a mic input (the mic goes only into the video). Click **Screen** again to stop; the MP4 is saved in Movies > Audio Tech Pro unless you choose another folder. The first time, allow Audio Tech Pro under System Settings > Privacy & Security > Screen & System Audio Recording, then reopen the app. |
 | Loop recording | Turn Cycle on and record. Each pass becomes a take. Click a take folder's name bar (or right-click it, then **Takes**) to switch takes, or choose **Keep only this take**. |
 | Count-in | **Count** gives one bar of click before recording starts. |
 | Latency calibration | **Audio > Calibrate recording latency...** Connect a cable from output 1 to an input and click **Measure**. The app stores the difference from the driver's reported latency and applies it to every recording. |
@@ -276,7 +277,7 @@ Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderC
 - [x] Console mode for the strips: your UA SSL 4000 E channel strip plugin driven from each strip's console section
 - [ ] Console strips, part 2: an IN key on every strip (bypasses the whole channel strip plugin, keeps it loaded), and every 4000 E control in a separate strip window that opens from the strip (as in LUNA): filters, EQ frequencies, Q and bell switches, compressor, gate/expander, input and output
 - [x] Claude AI assistant (with your own API key): controls the DAW, writes MIDI, measures and advises on the mix, answers questions
-- [ ] Screen recording of the app with its audio, up to 4K (Mac)
+- [x] Screen recording of the app (or the whole screen) with the mix's sound and an optional mic, up to 4K (Mac)
 - [ ] Several audio interfaces at once (aggregate device)
 - [ ] The Audio Tech Pro plugin suite
 - [ ] CLAP hosting

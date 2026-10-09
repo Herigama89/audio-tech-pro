@@ -9,6 +9,7 @@
 #include "BuiltInEffects.h"
 #include "MasterBusCompressor.h"
 #include "MixAnalysis.h"
+#include "ScreenAudioTap.h"
 #include <optional>
 
 namespace riff
@@ -49,6 +50,10 @@ public:
     void play() noexcept                      { playing.store (true); }
     void stop() noexcept                      { playing.store (false); }
     bool isPlaying() const noexcept           { return playing.load(); }
+    /** Screen recording: every block of the output (and the inputs) also goes to this tap; nullptr stops it.
+        The tap must outlive the engine or be removed first. */
+    void setScreenAudioTap (ScreenAudioTap* tap) noexcept { screenTap.store (tap, std::memory_order_release); }
+
     /** True while an export or a mix measurement renders the song offline. */
     bool isRenderingOffline() const noexcept  { return bouncing.load(); }
     double getPlayheadSeconds() const noexcept;
@@ -301,6 +306,7 @@ private:
     static float rmsOf (const float* left, const float* right, int n) noexcept;
     std::array<std::atomic<float>, PlaybackGraph::maxTracks * 2> trackPeaks {};
     std::atomic<bool> bouncing { false };
+    std::atomic<ScreenAudioTap*> screenTap { nullptr };
     bool measuring = false;                       // only while measureMix renders
     std::vector<LevelStats> measuredTracks;       // by slot
     LevelStats measuredMaster;

@@ -23,7 +23,7 @@ namespace riff::commands
         // Transport (Logic calls this menu "Record" and "Navigate")
         play = 0x2301, record, goToStart, rewindBar, forwardBar, toggleCycle, toggleMetronome, toggleCountIn,
         // View / window
-        showMixer = 0x2401, showPianoRoll, zoomIn, zoomOut, keyCommands, audioSettings, calibrateLatency, scanPlugins, showAssistant
+        showMixer = 0x2401, showPianoRoll, zoomIn, zoomOut, keyCommands, audioSettings, calibrateLatency, scanPlugins, showAssistant, recordScreen
     };
 
     struct Info
