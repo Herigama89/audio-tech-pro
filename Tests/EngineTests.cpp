@@ -1621,3 +1621,70 @@ TEST_CASE ("Importing tracks from another project brings their regions, plugins,
     REQUIRE (sends.size() == 1);
     CHECK (sends[0][ids::target].toString() == added[0][ids::id].toString());
 }
+
+TEST_CASE ("Fades shape a region, and a looped region repeats", "[engine][fades]")
+{
+    Fixture f;
+    const auto wav = writeConstantWav (f.temp.dir.getChildFile ("a.wav"), 48000.0, 48000, 0.5f);
+    auto track = model::addTrack (f.project, "A", nullptr);
+    auto region = model::addRegion (track, wav, 0.0, 0.5, nullptr);   // 24000 samples
+    model::setFade (region, true, 0.1, nullptr);    // 4800 samples, straight
+    model::setFade (region, false, 0.1, nullptr);
+    f.player.setProject (f.project);
+    f.engine.setPlayheadSeconds (0.0);
+    f.engine.play();
+
+    auto out = renderLeft (f.engine, 48000);
+    CHECK_THAT (out[0], WithinAbs (0.0f, 1e-4));
+    CHECK_THAT (out[2400], WithinAbs (0.5f * 0.8f * 0.5f, 2e-3));      // halfway up
+    CHECK_THAT (out[12000], WithinAbs (0.5f * 0.8f, 1e-4));            // full in the middle
+    CHECK_THAT (out[24000 - 2400], WithinAbs (0.5f * 0.8f * 0.5f, 2e-3));
+    CHECK (std::abs (out[30000]) < 1e-6f);
+
+    // Looping (no fades): it plays again from 0.5 s, up to the loop end at 0.9 s.
+    region.setProperty (ids::fadeIn, 0.0, nullptr);
+    region.setProperty (ids::fadeOut, 0.0, nullptr);
+    region.setProperty (ids::loop, true, nullptr);
+    region.setProperty (ids::loopEnd, 0.9, nullptr);
+    f.player.rebuildNow();
+    f.engine.setPlayheadSeconds (0.0);
+    out = renderLeft (f.engine, 48000);
+    CHECK_THAT (out[30000], WithinAbs (0.5f * 0.8f, 1e-4));
+    CHECK_THAT (out[43000], WithinAbs (0.5f * 0.8f, 1e-4));
+    CHECK (std::abs (out[43300]) < 1e-6f);
+    CHECK_THAT (model::projectEnd (f.project), WithinAbs (0.9, 1e-9));
+}
+
+TEST_CASE ("Crossfades, shuffle and loops in the model", "[model][fades]")
+{
+    auto project = model::createProject();
+    auto track = model::addTrack (project, "A", nullptr);
+    auto a = model::addRegion (track, juce::File ("/tmp/a.wav"), 0.0, 2.0, nullptr);
+    auto b = model::addRegion (track, juce::File ("/tmp/b.wav"), 1.5, 2.0, nullptr);
+
+    model::createCrossfades (b, nullptr);
+    CHECK_THAT ((double) a[ids::fadeOut], WithinAbs (0.5, 1e-9));
+    CHECK_THAT ((double) b[ids::fadeIn], WithinAbs (0.5, 1e-9));
+    CHECK_THAT ((double) b[ids::fadeInCurve], WithinAbs (0.5, 1e-9));
+    // Equal power: the two halves add up to the same power all through the crossfade.
+    for (double x : { 0.1, 0.3, 0.5, 0.9 })
+        CHECK_THAT (std::pow (model::fadeGain (x, 0.5), 2.0) + std::pow (model::fadeGain (1.0 - x, 0.5), 2.0), WithinAbs (1.0, 1e-9));
+
+    // Trimming keeps the fades inside the region.
+    model::trimRegionEnd (a, 0.3, 10.0, nullptr);
+    CHECK ((double) a[ids::fadeOut] <= 0.3 + 1e-9);
+
+    // Shuffle left closes the gaps.
+    auto c = model::addRegion (track, juce::File ("/tmp/c.wav"), 8.0, 1.0, nullptr);
+    model::shuffleTrack (track, true, nullptr);
+    CHECK_THAT ((double) b[ids::start], WithinAbs (0.3, 1e-9));
+    CHECK_THAT ((double) c[ids::start], WithinAbs (2.3, 1e-9));
+
+    // Looping goes up to the next region.
+    model::setLoop (b, true, nullptr);
+    CHECK_THAT (model::loopEndOf (b), WithinAbs (2.3, 1e-9));
+    c.setProperty (ids::start, 20.0, nullptr);
+    CHECK_THAT (model::loopEndOf (b), WithinAbs (2.3, 1e-9));   // the loop end set when it started looping
+    model::setLoop (b, false, nullptr);
+    CHECK_THAT (model::loopEndOf (b), WithinAbs (2.3, 1e-9));
+}

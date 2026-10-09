@@ -79,13 +79,13 @@ struct TimelineState : public juce::ChangeBroadcaster
     }
 
     // --- Tools, snap and drag modes (Logic's tool menu and the Snap / Drag menus) ---------
-    enum class Tool { pointer, pencil, eraser, scissors, glue, mute };
+    enum class Tool { pointer, pencil, eraser, scissors, glue, mute, fade };
     Tool tool = Tool::pointer;
 
     enum class Snap { smart, bar, beat, division, off };
     Snap snapMode = Snap::smart;
 
-    enum class Drag { overlap, noOverlap };
+    enum class Drag { overlap, noOverlap, xfade, shuffleRight, shuffleLeft };
     Drag dragMode = Drag::overlap;
 
     /** Show hidden tracks (Logic's H): they're drawn dimmed instead of left out. */

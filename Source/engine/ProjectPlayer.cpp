@@ -258,37 +258,45 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
                 if (! model::isMidiRegion (region) || model::isRegionMuted (region))
                     continue;
 
-                PlaybackGraph::Region r;
-                r.start  = toSamples (region[ids::start]);
-                r.length = toSamples (region[ids::length]);
-
+                // A looped region plays again and again, up to its loop end.
                 const double regionStart = region[ids::start];
+                const double regionLength = region[ids::length];
                 const double offset = region[ids::offset];
-                const double windowEnd = offset + (double) region[ids::length];
+                const auto playEnd = model::loopEndOf (region);
 
-                for (const auto& note : region)
+                for (double repeatStart = regionStart; repeatStart < playEnd - 1.0e-6 && regionLength > 0.0; repeatStart += regionLength)
                 {
-                    if (! note.hasType (ids::NOTE))
-                        continue;
+                    const auto windowLength = juce::jmin (regionLength, playEnd - repeatStart);
+                    const double windowEnd = offset + windowLength;
 
-                    // Notes play only if they start inside the region's window.
-                    const double noteStart = note[ids::start];
-                    if (noteStart < offset || noteStart >= windowEnd)
-                        continue;
+                    PlaybackGraph::Region r;
+                    r.start  = toSamples (repeatStart);
+                    r.length = toSamples (windowLength);
 
-                    const double noteEnd = juce::jmin (noteStart + (double) note[ids::length], windowEnd);
+                    for (const auto& note : region)
+                    {
+                        if (! note.hasType (ids::NOTE))
+                            continue;
 
-                    PlaybackGraph::Note n;
-                    n.start    = toSamples (regionStart + noteStart - offset);
-                    n.end      = juce::jmax (n.start + 1, toSamples (regionStart + noteEnd - offset));
-                    n.pitch    = (juce::uint8) juce::jlimit (0, 127, (int) note[ids::pitch]);
-                    n.velocity = (juce::uint8) juce::jlimit (1, 127, (int) note[ids::velocity]);
-                    r.notes.push_back (n);
+                        // Notes play only if they start inside the region's window.
+                        const double noteStart = note[ids::start];
+                        if (noteStart < offset || noteStart >= windowEnd)
+                            continue;
+
+                        const double noteEnd = juce::jmin (noteStart + (double) note[ids::length], windowEnd);
+
+                        PlaybackGraph::Note n;
+                        n.start    = toSamples (repeatStart + noteStart - offset);
+                        n.end      = juce::jmax (n.start + 1, toSamples (repeatStart + noteEnd - offset));
+                        n.pitch    = (juce::uint8) juce::jlimit (0, 127, (int) note[ids::pitch]);
+                        n.velocity = (juce::uint8) juce::jlimit (1, 127, (int) note[ids::velocity]);
+                        r.notes.push_back (n);
+                    }
+
+                    std::sort (r.notes.begin(), r.notes.end(),
+                               [] (const auto& a, const auto& b) { return a.start < b.start; });
+                    t.regions.push_back (std::move (r));
                 }
-
-                std::sort (r.notes.begin(), r.notes.end(),
-                           [] (const auto& a, const auto& b) { return a.start < b.start; });
-                t.regions.push_back (std::move (r));
             }
 
             graph->tracks.push_back (std::move (t));
@@ -317,8 +325,36 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
             }
             r.gain         = (float) (double) region.getProperty (ids::gain, 1.0);
 
-            if (r.audio != nullptr && r.length > 0)
+            // Fades, kept inside the region.
+            const auto fadeIn  = juce::jmax (0.0, (double) region.getProperty (ids::fadeIn, 0.0));
+            const auto fadeOut = juce::jmax (0.0, (double) region.getProperty (ids::fadeOut, 0.0));
+            r.fadeIn  = juce::jmin (r.length, toSamples (fadeIn));
+            r.fadeOut = juce::jmin (r.length - r.fadeIn, toSamples (fadeOut));
+            r.fadeInCurve  = (float) (double) region.getProperty (ids::fadeInCurve, 0.0);
+            r.fadeOutCurve = (float) (double) region.getProperty (ids::fadeOutCurve, 0.0);
+
+            if (r.audio == nullptr || r.length <= 0)
+                continue;
+
+            if (! (bool) region.getProperty (ids::loop, false))
+            {
                 t.regions.push_back (std::move (r));
+                continue;
+            }
+
+            // A looped region repeats up to its loop end (the last time cut short).
+            const auto playEnd = juce::jmax (r.start + r.length, toSamples (model::loopEndOf (region)));
+            const auto regionLength = r.length;
+            for (auto repeatStart = r.start; repeatStart < playEnd; repeatStart += regionLength)
+            {
+                auto copy = r;
+                copy.start = repeatStart;
+                copy.length = juce::jmin (regionLength, playEnd - repeatStart);
+                if (copy.length < regionLength)
+                    copy.fadeOut = 0;
+                if (copy.length > 0)
+                    t.regions.push_back (std::move (copy));
+            }
         }
 
         graph->tracks.push_back (std::move (t));

@@ -651,8 +651,80 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
         }
     }
 
+    // Fades: the faded part darkened above its curve, with a handle at the top corner.
+    if (! isMidi)
+    {
+        const auto body = bounds.withTrimmedTop ((float) regionHeader);
+        const auto drawFade = [&] (bool fadeIn)
+        {
+            const double seconds = region.getProperty (fadeIn ? ids::fadeIn : ids::fadeOut, 0.0);
+            if (seconds <= 0.0)
+                return;
+            const double curve = region.getProperty (fadeIn ? ids::fadeInCurve : ids::fadeOutCurve, 0.0);
+            const auto w = juce::jmin (body.getWidth(), (float) (seconds * timeline.pixelsPerSecond));
+            const auto x0 = fadeIn ? body.getX() : body.getRight() - w;
+
+            juce::Path shade, line;
+            shade.startNewSubPath (x0, body.getY());
+            const int steps = juce::jlimit (2, 64, (int) w / 3);
+            for (int i = 0; i <= steps; ++i)
+            {
+                const auto f = (float) i / (float) steps;
+                const auto gain = (float) model::fadeGain (fadeIn ? f : 1.0f - f, curve);
+                const juce::Point<float> p { x0 + f * w, body.getBottom() - gain * body.getHeight() };
+                shade.lineTo (p);
+                if (i == 0) line.startNewSubPath (p); else line.lineTo (p);
+            }
+            shade.lineTo (x0 + w, body.getY());
+            shade.closeSubPath();
+            g.setColour (juce::Colours::black.withAlpha (0.45f));
+            g.fillPath (shade);
+            g.setColour (juce::Colours::white.withAlpha (0.85f));
+            g.strokePath (line, juce::PathStrokeType (1.2f));
+        };
+        drawFade (true);
+        drawFade (false);
+
+        if (selected)
+        {
+            g.setColour (juce::Colours::white);
+            const auto inX = body.getX() + (float) ((double) region.getProperty (ids::fadeIn, 0.0) * timeline.pixelsPerSecond);
+            const auto outX = body.getRight() - (float) ((double) region.getProperty (ids::fadeOut, 0.0) * timeline.pixelsPerSecond);
+            g.fillEllipse (inX - 3.0f, body.getY() - 3.0f, 6.0f, 6.0f);
+            g.fillEllipse (outX - 3.0f, body.getY() - 3.0f, 6.0f, 6.0f);
+        }
+
+        const double gain = region.getProperty (ids::gain, 1.0);
+        if (std::abs (gain - 1.0) > 1.0e-4 && bounds.getWidth() > 60.0f)
+        {
+            g.setColour (juce::Colour (0xff15161a));
+            g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+            const auto db = juce::Decibels::gainToDecibels (gain, -96.0);
+            g.drawText ((db > 0 ? "+" : "") + juce::String (db, 1) + " dB", header.reduced (5.0f, 0.0f), juce::Justification::centredRight, false);
+        }
+    }
+
     g.setColour (selected ? juce::Colours::white : base.darker (0.8f));
     g.drawRoundedRectangle (bounds.reduced (0.5f), 3.0f, selected ? 2.0f : 1.0f);
+
+    // A looped region's repeats: lighter copies of its outline, up to the loop end.
+    if ((bool) region.getProperty (ids::loop, false))
+    {
+        const double length = region[ids::length];
+        const auto loopEnd = model::loopEndOf (region);
+        for (double t = model::regionEnd (region); t < loopEnd - 1.0e-6 && length > 0.0; t += length)
+        {
+            const auto x = timeline.timeToX (t);
+            const auto w = (float) (juce::jmin (length, loopEnd - t) * timeline.pixelsPerSecond);
+            if (x > (float) getWidth())
+                break;
+            const juce::Rectangle<float> ghost { x, bounds.getY(), w, bounds.getHeight() };
+            g.setColour (colour.withAlpha (0.28f));
+            g.fillRoundedRectangle (ghost.reduced (0.5f, 0.0f), 3.0f);
+            g.setColour (colour.withAlpha (0.7f));
+            g.drawRoundedRectangle (ghost.reduced (1.0f), 3.0f, 1.0f);
+        }
+    }
 }
 
 //==============================================================================
@@ -789,17 +861,11 @@ void ArrangeCanvas::mouseDown (const juce::MouseEvent& e)
     if (model::numTakes (region) > 0 && e.position.y < regionBounds (region, trackIndex).getY() + 16.0f)
         clickedTakeHeader = true;
 
-    const auto bounds = regionBounds (region, trackIndex);
-    const bool wideEnough = bounds.getWidth() > edgeGrab * 3.0f;
+    dragMode = edgeActionAt (region, trackIndex, e.position);
 
-    if (wideEnough && e.position.x - bounds.getX() < edgeGrab)
-        dragMode = DragMode::trimStart;
-    else if (wideEnough && bounds.getRight() - e.position.x < edgeGrab)
-        dragMode = DragMode::trimEnd;
-    else
-        dragMode = DragMode::move;
-
-    undoManager.beginNewTransaction (dragMode == DragMode::move ? (e.mods.isAltDown() ? "Copy region" : "Move region") : "Trim region");
+    undoManager.beginNewTransaction (dragMode == DragMode::move ? (e.mods.isAltDown() ? "Copy region" : "Move region")
+                                     : dragMode == DragMode::fadeIn || dragMode == DragMode::fadeOut ? "Fade"
+                                     : dragMode == DragMode::loopEnd ? "Loop region" : "Trim region");
 
     if (dragMode == DragMode::move)
         startMove (e, region);
@@ -808,6 +874,87 @@ void ArrangeCanvas::mouseDown (const juce::MouseEvent& e)
     dragOriginalStart = region[ids::start];
     dragMouseDownTime = timeline.xToTime ((float) e.x);
     dragSourceLength = fileCache.getLengthSeconds (juce::File (region[ids::file].toString()));
+}
+
+ArrangeCanvas::DragMode ArrangeCanvas::edgeActionAt (const juce::ValueTree& region, int trackIndex, juce::Point<float> pos) const
+{
+    const auto bounds = regionBounds (region, trackIndex);
+    const bool wideEnough = bounds.getWidth() > edgeGrab * 3.0f;
+    const bool audio = ! model::isMidiRegion (region);
+    const auto body = bounds.withTrimmedTop ((float) regionHeader);
+
+    // Fade handles: the top corners of the body, where the fade currently ends (audio).
+    if (audio && std::abs (pos.y - body.getY()) <= 5.0f)
+    {
+        const auto inX = body.getX() + (float) ((double) region.getProperty (ids::fadeIn, 0.0) * timeline.pixelsPerSecond);
+        const auto outX = body.getRight() - (float) ((double) region.getProperty (ids::fadeOut, 0.0) * timeline.pixelsPerSecond);
+        if (std::abs (pos.x - inX) <= 6.0f && pos.x < bounds.getCentreX())
+            return DragMode::fadeIn;
+        if (std::abs (pos.x - outX) <= 6.0f && pos.x >= bounds.getCentreX())
+            return DragMode::fadeOut;
+    }
+
+    if (wideEnough && pos.x - bounds.getX() < edgeGrab)
+        return DragMode::trimStart;
+
+    if (wideEnough && bounds.getRight() - pos.x < edgeGrab)
+        return pos.y < body.getCentreY() && pos.y > body.getY() + 5.0f ? DragMode::loopEnd   // upper half: loop, as in Logic
+                                                                        : DragMode::trimEnd;
+    return DragMode::move;
+}
+
+void ArrangeCanvas::applyDragMode (const juce::Array<juce::ValueTree>& regions, juce::Array<juce::ValueTree> tracks)
+{
+    using Drag = TimelineState::Drag;
+    switch (timeline.dragMode)
+    {
+        case Drag::noOverlap:
+            for (const auto& r : regions)
+                if (r.getParent().isValid())
+                    model::clearOverlaps (r, [this] (const juce::ValueTree& other)
+                                          { return fileCache.getLengthSeconds (juce::File (other[ids::file].toString())); }, &undoManager);
+            break;
+
+        case Drag::xfade:
+            for (const auto& r : regions)
+                if (r.getParent().isValid() && ! model::isMidiRegion (r))
+                    model::createCrossfades (r, &undoManager);
+            break;
+
+        case Drag::shuffleLeft:
+        case Drag::shuffleRight:
+            for (const auto& r : regions)
+                if (r.getParent().isValid())
+                    tracks.addIfNotAlreadyThere (r.getParent());
+            for (auto& t : tracks)
+                if (t.getParent().isValid())
+                    model::shuffleTrack (t, timeline.dragMode == Drag::shuffleLeft, &undoManager);
+            break;
+
+        case Drag::overlap:
+            break;
+    }
+}
+
+void ArrangeCanvas::showGainPopup (juce::ValueTree region)
+{
+    auto slider = std::make_unique<juce::Slider> (juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight);
+    slider->setRange (-30.0, 30.0, 0.1);
+    slider->setTextValueSuffix (" dB");
+    slider->setValue (juce::Decibels::gainToDecibels ((double) region.getProperty (ids::gain, 1.0), -30.0), juce::dontSendNotification);
+    slider->setDoubleClickReturnValue (true, 0.0);
+    slider->setSize (260, 32);
+    auto regions = timeline.selectedRegionTrees();
+    if (! regions.contains (region))
+        regions = { region };
+    undoManager.beginNewTransaction ("Region gain");
+    slider->onValueChange = [this, regions, s = slider.get()]
+    {
+        for (auto r : regions)
+            r.setProperty (ids::gain, juce::Decibels::decibelsToGain (s->getValue(), -96.0), &undoManager);
+    };
+    const auto where = regionBounds (region, project.indexOf (region.getParent())).toNearestInt();
+    juce::CallOutBox::launchAsynchronously (std::move (slider), localAreaToGlobal (where), nullptr);
 }
 
 void ArrangeCanvas::mouseDrag (const juce::MouseEvent& e)
@@ -854,6 +1001,36 @@ void ArrangeCanvas::mouseDrag (const juce::MouseEvent& e)
         case DragMode::trimEnd:
             model::trimRegionEnd (dragRegion, maybeSnap (timeline.xToTime ((float) e.x)), dragSourceLength, &undoManager);
             break;
+
+        case DragMode::fadeIn:
+        case DragMode::fadeOut:
+        {
+            if (! dragRegion.isValid())
+                break;
+            const auto t = timeline.xToTime ((float) e.x);
+            const bool in = dragMode == DragMode::fadeIn;
+            // Shift-drag bends the curve instead.
+            if (e.mods.isShiftDown())
+            {
+                const auto curve = juce::jlimit (-1.0, 1.0, (double) (e.getDistanceFromDragStartY()) / -60.0);
+                dragRegion.setProperty (in ? ids::fadeInCurve : ids::fadeOutCurve, curve, &undoManager);
+                break;
+            }
+            model::setFade (dragRegion, in, in ? t - (double) dragRegion[ids::start] : model::regionEnd (dragRegion) - t, &undoManager);
+            break;
+        }
+
+        case DragMode::loopEnd:
+        {
+            if (! dragRegion.isValid() || e.getDistanceFromDragStart() < 3)
+                break;
+            const auto end = maybeSnap (timeline.xToTime ((float) e.x));
+            const bool loops = end > model::regionEnd (dragRegion) + 1.0e-3;
+            dragRegion.setProperty (ids::loop, loops, &undoManager);
+            if (loops)
+                dragRegion.setProperty (ids::loopEnd, end, &undoManager);
+            break;
+        }
 
         case DragMode::cycleNew:
         {
@@ -910,12 +1087,21 @@ void ArrangeCanvas::mouseUp (const juce::MouseEvent& e)
     if (dragMode == DragMode::move && wasClick && dragRegion.isValid() && ! e.mods.isShiftDown())
         timeline.selectOnlyRegion (dragRegion[ids::id].toString());
 
-    // No Overlap: moved regions shorten (or remove) what they now cover.
-    if (dragMode == DragMode::move && ! wasClick && timeline.dragMode == TimelineState::Drag::noOverlap)
+    // The Drag mode: No Overlap, X-Fade or Shuffle (moved regions also leave a gap on the tracks they came from).
+    if (dragMode == DragMode::move && ! wasClick)
+    {
+        juce::Array<juce::ValueTree> moved, from;
         for (const auto& d : dragged)
-            if (d.region.getParent().isValid())
-                model::clearOverlaps (d.region, [this] (const juce::ValueTree& r)
-                                      { return fileCache.getLengthSeconds (juce::File (r[ids::file].toString())); }, &undoManager);
+        {
+            moved.add (d.region);
+            from.addIfNotAlreadyThere (project.getChild (d.trackIndex));
+        }
+        applyDragMode (moved, from);
+    }
+    else if ((dragMode == DragMode::trimStart || dragMode == DragMode::trimEnd) && ! wasClick && dragRegion.isValid())
+    {
+        applyDragMode ({ dragRegion }, {});
+    }
 
     if (dragMode == DragMode::pencilRegion && dragRegion.isValid() && onOpenPianoRoll)
         onOpenPianoRoll (dragRegion);
@@ -1016,7 +1202,6 @@ void ArrangeCanvas::updateRubberBand (const juce::MouseEvent& e)
 
 void ArrangeCanvas::useTool (const juce::MouseEvent& e, juce::ValueTree region, int trackIndex)
 {
-    juce::ignoreUnused (trackIndex);
     auto selection = timeline.selectedRegionTrees();
     if (! selection.contains (region))
         selection = { region };
@@ -1050,6 +1235,25 @@ void ArrangeCanvas::useTool (const juce::MouseEvent& e, juce::ValueTree region, 
                 onMuteRegions();
             break;
 
+        case TimelineState::Tool::fade:
+        {
+            if (model::isMidiRegion (region))
+                break;
+            const auto b = regionBounds (region, trackIndex);
+            const bool in = e.position.x < b.getCentreX();
+            if (e.mods.isAltDown())   // Option-click removes the fade
+            {
+                undoManager.beginNewTransaction ("Remove fade");
+                for (auto& r : selection)
+                    r.setProperty (in ? ids::fadeIn : ids::fadeOut, 0.0, &undoManager);
+                break;
+            }
+            undoManager.beginNewTransaction ("Fade");
+            dragRegion = region;
+            dragMode = in ? DragMode::fadeIn : DragMode::fadeOut;
+            break;
+        }
+
         case TimelineState::Tool::pointer:
         case TimelineState::Tool::pencil:
             break;
@@ -1065,6 +1269,44 @@ void ArrangeCanvas::showRegionMenu (juce::ValueTree region)
     if (model::isMidiRegion (region))
         menu.addItem ("Join", timeline.selectedRegionTrees().size() > 1, false, [this] { if (onJoin) onJoin(); });
     menu.addItem (model::isRegionMuted (region) ? "Unmute" : "Mute", [this] { if (onMuteRegions) onMuteRegions(); });
+    menu.addItem ("Loop", true, (bool) region.getProperty (ids::loop, false), [this, region]
+    {
+        undoManager.beginNewTransaction ("Loop region");
+        const bool on = ! (bool) region.getProperty (ids::loop, false);
+        auto regions = timeline.selectedRegionTrees();
+        if (! regions.contains (region))
+            regions = { region };
+        for (auto r : regions)
+            model::setLoop (r, on, &undoManager);
+    });
+
+    if (! model::isMidiRegion (region))
+    {
+        menu.addItem ("Gain...", [this, region] { showGainPopup (region); });
+
+        juce::PopupMenu fades;
+        const auto setFades = [this, region] (double in, double out)
+        {
+            undoManager.beginNewTransaction ("Fade");
+            auto regions = timeline.selectedRegionTrees();
+            if (! regions.contains (region))
+                regions = { region };
+            for (auto r : regions)
+            {
+                if (in >= 0.0)  model::setFade (r, true, in, &undoManager);
+                if (out >= 0.0) model::setFade (r, false, out, &undoManager);
+            }
+        };
+        for (auto ms : { 10, 50, 250, 1000 })
+            fades.addItem ("Fade in " + juce::String (ms) + " ms", [setFades, ms] { setFades (ms / 1000.0, -1.0); });
+        fades.addSeparator();
+        for (auto ms : { 10, 50, 250, 1000 })
+            fades.addItem ("Fade out " + juce::String (ms) + " ms", [setFades, ms] { setFades (-1.0, ms / 1000.0); });
+        fades.addSeparator();
+        fades.addItem ("Remove fades", [setFades] { setFades (0.0, 0.0); });
+        menu.addSubMenu ("Fades", fades);
+    }
+
     menu.addSeparator();
     menu.addItem ("Delete", [this] { if (onDelete) onDelete(); });
 
@@ -1192,15 +1434,21 @@ void ArrangeCanvas::mouseMove (const juce::MouseEvent& e)
         case TimelineState::Tool::scissors: newCursor = region.isValid() ? juce::MouseCursor::IBeamCursor : juce::MouseCursor::NormalCursor; break;
         case TimelineState::Tool::glue:
         case TimelineState::Tool::mute:     newCursor = region.isValid() ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor; break;
+        case TimelineState::Tool::fade:     newCursor = region.isValid() ? juce::MouseCursor::CrosshairCursor : juce::MouseCursor::NormalCursor; break;
         case TimelineState::Tool::pointer:  break;
     }
 
     if (region.isValid() && (timeline.tool == TimelineState::Tool::pointer || timeline.tool == TimelineState::Tool::pencil))
     {
-        const auto b = regionBounds (region, trackIndex);
-        if (b.getWidth() > edgeGrab * 3.0f
-            && (e.position.x - b.getX() < edgeGrab || b.getRight() - e.position.x < edgeGrab))
-            newCursor = juce::MouseCursor::LeftRightResizeCursor;
+        switch (edgeActionAt (region, trackIndex, e.position))
+        {
+            case DragMode::trimStart:
+            case DragMode::trimEnd:  newCursor = juce::MouseCursor::LeftRightResizeCursor; break;
+            case DragMode::fadeIn:
+            case DragMode::fadeOut:  newCursor = juce::MouseCursor::CrosshairCursor; break;
+            case DragMode::loopEnd:  newCursor = juce::MouseCursor::UpDownLeftRightResizeCursor; break;
+            default: break;
+        }
     }
 
     setMouseCursor (newCursor);

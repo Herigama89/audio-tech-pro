@@ -689,6 +689,7 @@ void AudioEngine::prepare (double newSampleRate, int)
     sampleRate.store (newSampleRate);
 
     trackBuffer.setSize (2, maxBlockSize);
+    regionBuffer.setSize (2, maxBlockSize);
     mixBuffer.setSize (2, maxBlockSize);
     directBuffer.setSize (2, maxBlockSize);
     busBuffer.setSize (PlaybackGraph::maxBuses * 2, maxBlockSize);
@@ -1104,29 +1105,59 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
 
                 const auto& source = region.audio->buffer;
                 const auto destOffset = (int) (from - blockStart);
+                const auto count = (int) (to - from);
 
+                // Fades: render into a scratch buffer, shape it, then add it in.
+                const auto positionInRegion = from - region.start;
+                const bool fading = region.hasFades()
+                                    && (positionInRegion < region.fadeIn || (to - region.start) > region.length - region.fadeOut);
+                float* dL = tL + destOffset;
+                float* dR = tR + destOffset;
+                if (fading)
+                {
+                    dL = regionBuffer.getWritePointer (0);
+                    dR = regionBuffer.getWritePointer (1);
+                    juce::FloatVectorOperations::clear (dL, count);
+                    juce::FloatVectorOperations::clear (dR, count);
+                }
+
+                bool rendered = false;
                 if (region.resample)
                 {
                     // Another sample rate: convert on the fly, reading at fractional positions.
-                    const auto position = region.sourcePosition + (double) (from - region.start) * region.step;
-                    if (position >= (double) source.getNumSamples())
-                        continue;
+                    const auto position = region.sourcePosition + (double) positionInRegion * region.step;
+                    if (position < (double) source.getNumSamples())
+                    {
+                        resampler::addResampled (source, position, region.step, region.gain, dL, dR, count);
+                        rendered = true;
+                    }
+                }
+                else
+                {
+                    const auto sourceStart = region.sourceOffset + positionInRegion;
+                    const auto available = (juce::int64) source.getNumSamples() - sourceStart;
 
-                    resampler::addResampled (source, position, region.step, region.gain, tL + destOffset, tR + destOffset, (int) (to - from));
-                    anyAudio = true;
-                    continue;
+                    if (sourceStart >= 0 && available > 0)
+                    {
+                        const auto num = (int) juce::jmin ((juce::int64) count, available);
+                        juce::FloatVectorOperations::addWithMultiply (dL, source.getReadPointer (0, (int) sourceStart), region.gain, num);
+                        juce::FloatVectorOperations::addWithMultiply (dR, source.getReadPointer (1, (int) sourceStart), region.gain, num);
+                        rendered = true;
+                    }
                 }
 
-                const auto sourceStart = region.sourceOffset + (from - region.start);
-                const auto available = (juce::int64) source.getNumSamples() - sourceStart;
-
-                if (sourceStart < 0 || available <= 0)
+                if (! rendered)
                     continue;
 
-                const auto count = (int) juce::jmin (to - from, available);
-
-                juce::FloatVectorOperations::addWithMultiply (tL + destOffset, source.getReadPointer (0, (int) sourceStart), region.gain, count);
-                juce::FloatVectorOperations::addWithMultiply (tR + destOffset, source.getReadPointer (1, (int) sourceStart), region.gain, count);
+                if (fading)
+                {
+                    for (int i = 0; i < count; ++i)
+                    {
+                        const auto g = region.fadeGainAt (positionInRegion + i);
+                        tL[destOffset + i] += dL[i] * g;
+                        tR[destOffset + i] += dR[i] * g;
+                    }
+                }
                 anyAudio = true;
             }
         }

@@ -13,7 +13,8 @@
                synthWave, synthCutoff, synthResonance, synthAttack, synthDecay, synthSustain,
                synthRelease, synthGain, consoleIn, consoleHF, consoleHMF, consoleLMF, consoleLF,
                consoleDynamics }
-        REGION { id, name, file, start, offset, length, gain, activeTake?, midi? }
+        REGION { id, name, file, start, offset, length, gain, activeTake?, midi?,
+                 fadeIn, fadeOut, fadeInCurve, fadeOutCurve, loop, loopEnd }
           TAKE { id, name, file, offset }       (only in take folders from loop recording;
                                                  the region's file/offset mirror the active take)
           NOTE { pitch, start, length, velocity }   (only in MIDI regions)
@@ -72,6 +73,12 @@ namespace riff::ids
     RIFF_DECLARE_ID (offset)
     RIFF_DECLARE_ID (length)
     RIFF_DECLARE_ID (gain)
+    RIFF_DECLARE_ID (fadeIn)       // REGION: seconds
+    RIFF_DECLARE_ID (fadeOut)
+    RIFF_DECLARE_ID (fadeInCurve)  // -1 (slow start) .. 0 (straight) .. +1 (fast start); 0.5 is equal power
+    RIFF_DECLARE_ID (fadeOutCurve)
+    RIFF_DECLARE_ID (loop)         // REGION: repeats until loopEnd (or the next region)
+    RIFF_DECLARE_ID (loopEnd)
     RIFF_DECLARE_ID (metronome)
     RIFF_DECLARE_ID (armed)        // record-enabled
     RIFF_DECLARE_ID (monitor)      // hear the input through the track while armed

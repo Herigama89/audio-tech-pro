@@ -308,7 +308,7 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [x] Select several regions (Shift-click, or drag a rectangle); move them together; Option-drag copies
 - [x] Snap (Smart, Bar, Beat, Division, Off) and Drag modes (Overlap, No Overlap)
 - [x] Join MIDI regions (Cmd+J), mute regions (Ctrl+M), nudge (Option+Left/Right)
-- [ ] Loop regions, X-Fade and Shuffle drag modes, region gain, fades and crossfades, trim to playhead
+- [x] Loop regions (L, or drag a region's upper right edge), X-Fade and Shuffle R/L drag modes, region gain, fades (drag the handles at a region's top corners, Shift-drag bends the curve, or the Fade tool) and equal-power crossfades, trim region start/end to playhead
 - [ ] Flex Time and Flex Pitch, time stretch, Smart Tempo, quick swipe comping refinements
 - [ ] Marquee selection across tracks; edit with the playhead (split by locators, delete between)
 

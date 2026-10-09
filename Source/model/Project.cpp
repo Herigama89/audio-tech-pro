@@ -210,6 +210,21 @@ void moveRegion (juce::ValueTree region, juce::ValueTree targetTrack, double new
     region.setProperty (ids::start, juce::jmax (0.0, newStart), um);
 }
 
+namespace
+{
+    /** Fades never reach past the region (after it's been shortened). */
+    void clampFades (juce::ValueTree region, juce::UndoManager* um)
+    {
+        const double length = region[ids::length];
+        const double in = region.getProperty (ids::fadeIn, 0.0), out = region.getProperty (ids::fadeOut, 0.0);
+        if (in + out <= length)
+            return;
+        const auto scale = length / (in + out);
+        if (in > 0.0)  region.setProperty (ids::fadeIn, in * scale, um);
+        if (out > 0.0) region.setProperty (ids::fadeOut, out * scale, um);
+    }
+}
+
 void trimRegionStart (juce::ValueTree region, double newStart, double sourceLength, juce::UndoManager* um)
 {
     juce::ignoreUnused (sourceLength);
@@ -229,6 +244,7 @@ void trimRegionStart (juce::ValueTree region, double newStart, double sourceLeng
     shiftOffsets (region, newStart - start, um);
     region.setProperty (ids::start, newStart, um);
     region.setProperty (ids::length, end - newStart, um);
+    clampFades (region, um);
 }
 
 void trimRegionEnd (juce::ValueTree region, double newEnd, double sourceLength, juce::UndoManager* um)
@@ -240,6 +256,7 @@ void trimRegionEnd (juce::ValueTree region, double newEnd, double sourceLength, 
     newEnd = juce::jlimit (start + minRegionLength, juce::jmax (start + minRegionLength, maxEnd), newEnd);
 
     region.setProperty (ids::length, newEnd - start, um);
+    clampFades (region, um);
 }
 
 juce::ValueTree splitRegion (juce::ValueTree region, double time, juce::UndoManager* um)
@@ -260,7 +277,15 @@ juce::ValueTree splitRegion (juce::ValueTree region, double time, juce::UndoMana
     for (auto take : right)
         take.setProperty (ids::id, newId(), nullptr);
 
+    // The fade in stays on the left part, the fade out and the loop go with the right.
+    right.removeProperty (ids::fadeIn, nullptr);
+    region.removeProperty (ids::fadeOut, um);
+    region.removeProperty (ids::loop, um);
+    region.removeProperty (ids::loopEnd, um);
+
     region.setProperty (ids::length, time - start, um);
+    clampFades (region, um);
+    clampFades (right, nullptr);
     parent.addChild (right, parent.indexOf (region) + 1, um);
     return right;
 }
@@ -1185,8 +1210,112 @@ double projectEnd (const juce::ValueTree& project)
     for (const auto& track : project)
         if (track.hasType (ids::TRACK))
             for (const auto& region : track)
-            end = juce::jmax (end, regionEnd (region));
+                end = juce::jmax (end, loopEndOf (region));
     return end;
+}
+
+void setFade (juce::ValueTree region, bool fadeIn, double seconds, juce::UndoManager* um)
+{
+    const double length = region[ids::length];
+    const double other = region.getProperty (fadeIn ? ids::fadeOut : ids::fadeIn, 0.0);
+    seconds = juce::jlimit (0.0, juce::jmax (0.0, length - other), seconds);
+    region.setProperty (fadeIn ? ids::fadeIn : ids::fadeOut, seconds, um);
+}
+
+double loopEndOf (const juce::ValueTree& region)
+{
+    const auto end = regionEnd (region);
+    if (! (bool) region.getProperty (ids::loop, false))
+        return end;
+
+    auto loopEnd = juce::jmax (end, (double) region.getProperty (ids::loopEnd, end));
+    const double start = region[ids::start];
+    for (const auto& other : region.getParent())
+        if (other != region && other.hasType (ids::REGION) && (double) other[ids::start] >= end - 1.0e-9
+            && (double) other[ids::start] > start)
+            loopEnd = juce::jmin (loopEnd, juce::jmax (end, (double) other[ids::start]));
+    return loopEnd;
+}
+
+void setLoop (juce::ValueTree region, bool shouldLoop, juce::UndoManager* um)
+{
+    region.setProperty (ids::loop, shouldLoop, um);
+    if (! shouldLoop)
+        return;
+
+    const auto end = regionEnd (region);
+    auto loopEnd = end + 3.0 * (double) region[ids::length];
+    for (const auto& other : region.getParent())
+        if (other != region && other.hasType (ids::REGION) && (double) other[ids::start] >= end - 1.0e-9)
+            loopEnd = juce::jmin (loopEnd, (double) other[ids::start]);
+    region.setProperty (ids::loopEnd, juce::jmax (end, loopEnd), um);
+}
+
+void createCrossfades (const juce::ValueTree& region, juce::UndoManager* um)
+{
+    auto track = region.getParent();
+    if (! track.isValid())
+        return;
+
+    const double start = region[ids::start];
+    const auto end = regionEnd (region);
+
+    for (auto other : track)
+    {
+        if (other == region || ! other.hasType (ids::REGION))
+            continue;
+
+        const double oStart = other[ids::start];
+        const auto oEnd = regionEnd (other);
+        const auto overlapStart = juce::jmax (start, oStart), overlapEnd = juce::jmin (end, oEnd);
+        if (overlapEnd - overlapStart < 0.001)
+            continue;
+
+        // Only an overlap at one end of each is a crossfade (not one region inside another).
+        auto earlier = start < oStart ? region : other;
+        auto later   = start < oStart ? other : region;
+        if (regionEnd (earlier) >= regionEnd (later))
+            continue;
+
+        const auto length = overlapEnd - overlapStart;
+        earlier.setProperty (ids::fadeOut, length, um);
+        earlier.setProperty (ids::fadeOutCurve, 0.5, um);
+        later.setProperty (ids::fadeIn, length, um);
+        later.setProperty (ids::fadeInCurve, 0.5, um);
+    }
+}
+
+void shuffleTrack (juce::ValueTree track, bool towardsLeft, juce::UndoManager* um)
+{
+    juce::Array<juce::ValueTree> regions;
+    for (const auto& r : track)
+        if (r.hasType (ids::REGION))
+            regions.add (r);
+    if (regions.size() < 2)
+        return;
+
+    std::sort (regions.begin(), regions.end(), [] (const juce::ValueTree& a, const juce::ValueTree& b)
+               { return (double) a[ids::start] < (double) b[ids::start]; });
+
+    if (towardsLeft)
+    {
+        auto position = loopEndOf (regions.getFirst());
+        for (int i = 1; i < regions.size(); ++i)
+        {
+            regions.getReference (i).setProperty (ids::start, position, um);
+            position = loopEndOf (regions[i]);
+        }
+    }
+    else
+    {
+        auto position = (double) regions.getLast()[ids::start];
+        for (int i = regions.size() - 1; --i >= 0;)
+        {
+            const auto span = loopEndOf (regions[i]) - (double) regions[i][ids::start];
+            position = juce::jmax (0.0, position - span);
+            regions.getReference (i).setProperty (ids::start, position, um);
+        }
+    }
 }
 
 juce::Colour trackColour (const juce::ValueTree& track)

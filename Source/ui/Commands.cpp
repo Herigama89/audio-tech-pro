@@ -34,6 +34,11 @@ const std::vector<Info>& all()
         { muteRegions,            "Mute Regions",               "Edit",      "Mute or unmute the selected regions" },
         { nudgeLeft,              "Nudge Left",                 "Edit",      "Move the selected regions a 16th note earlier" },
         { nudgeRight,             "Nudge Right",                "Edit",      "Move the selected regions a 16th note later" },
+        { trimStartToPlayhead,    "Trim Region Start to Playhead", "Edit",   "Move the selected regions' start to the playhead" },
+        { trimEndToPlayhead,      "Trim Region End to Playhead", "Edit",     "Move the selected regions' end to the playhead" },
+        { loopRegions,            "Loop Regions",               "Edit",      "Repeat the selected regions up to the next region (drag the upper right edge to set how far)" },
+        { regionGain,             "Region Gain...",             "Edit",      "Turn the selected audio regions up or down" },
+        { removeFades,            "Remove Fades",               "Edit",      "Take the fades off the selected regions" },
         { toolMenu,               "Tool Menu",                  "Edit",      "Choose a tool: pointer, pencil, eraser, scissors, glue, mute" },
 
         { newAudioTrack,          "New Audio Track",            "Track",     "Add an audio track" },
@@ -194,6 +199,9 @@ namespace
             case nudgeLeft:              return { key (KeyPress::leftKey, opt) };
             case nudgeRight:             return { key (KeyPress::rightKey, opt) };
             case toolMenu:               return { key ('t') };
+            case loopRegions:            return { key ('l') };
+            case trimStartToPlayhead:    return { key ('[', opt) };
+            case trimEndToPlayhead:      return { key (']', opt) };
             case createMarker:           return { key ('\'', opt) };
             case nextMarker:             return { key ('.', opt) };
             case previousMarker:         return { key (',', opt) };

@@ -46,7 +46,12 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::repeatRegions:
         case commands::muteRegions:
         case commands::nudgeLeft:
-        case commands::nudgeRight:      info.setActive (region.isValid() && ! recording); break;
+        case commands::nudgeRight:
+        case commands::trimStartToPlayhead:
+        case commands::trimEndToPlayhead:
+        case commands::loopRegions:
+        case commands::regionGain:
+        case commands::removeFades:     info.setActive (region.isValid() && ! recording); break;
         case commands::pasteRegions:    info.setActive (! clipboardRegions.isEmpty() && track.isValid() && ! recording); break;
         case commands::deleteMarker:    info.setActive (project.getChildWithName (ids::MARKERS).getChildWithProperty (ids::id, timeline.selectedMarkerId).isValid()); break;
         case commands::joinRegions:     info.setActive (timeline.selectedRegionTrees().size() > 1 && ! recording); break;
@@ -97,6 +102,20 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::consolidateProject:     consolidate(); break;
         case commands::revertToBackup:         showBackups(); break;
         case commands::exportSong:             exportSong(); break;
+        case commands::trimStartToPlayhead:    trimSelectedToPlayhead (true); break;
+        case commands::trimEndToPlayhead:      trimSelectedToPlayhead (false); break;
+        case commands::loopRegions:            loopSelectedRegions(); break;
+        case commands::regionGain:             if (auto r = model::findById (project, timeline.selectedRegionId); r.isValid()) canvas.showGainPopup (r); break;
+        case commands::removeFades:
+        {
+            undoManager.beginNewTransaction ("Remove fades");
+            for (auto r : timeline.selectedRegionTrees())
+            {
+                r.setProperty (ids::fadeIn, 0.0, &undoManager);
+                r.setProperty (ids::fadeOut, 0.0, &undoManager);
+            }
+            break;
+        }
         case commands::exportStems:            exportStems(); break;
         case commands::bounceInPlace:          bounceInPlace(); break;
         case commands::importTracks:           importTracksFromProject(); break;
@@ -227,6 +246,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             menu.addSeparator();
             add ({ commands::splitAtPlayhead, commands::repeatRegions, commands::joinRegions, commands::muteRegions,
                    commands::nudgeLeft, commands::nudgeRight, commands::quantize });
+            menu.addSeparator();
+            add ({ commands::trimStartToPlayhead, commands::trimEndToPlayhead, commands::loopRegions, commands::regionGain, commands::removeFades });
             menu.addSeparator();
             add ({ commands::toolMenu });
             break;
@@ -647,6 +668,39 @@ void MainComponent::muteSelectedRegions()
         r.setProperty (ids::mute, value, &undoManager);
 }
 
+void MainComponent::trimSelectedToPlayhead (bool start)
+{
+    const auto time = engine.getPlayheadSeconds();
+    undoManager.beginNewTransaction (start ? "Trim region start" : "Trim region end");
+    juce::Array<juce::ValueTree> trimmed;
+    for (auto r : timeline.selectedRegionTrees())
+    {
+        if (time <= (double) r[ids::start] + model::minRegionLength && ! start)
+            continue;
+        if (time >= model::regionEnd (r) - model::minRegionLength && start)
+            continue;
+        const auto sourceLength = fileCache.getLengthSeconds (juce::File (r[ids::file].toString()));
+        if (start)
+            model::trimRegionStart (r, time, sourceLength, &undoManager);
+        else
+            model::trimRegionEnd (r, time, sourceLength, &undoManager);
+        trimmed.add (r);
+    }
+    canvas.applyDragMode (trimmed, {});
+}
+
+void MainComponent::loopSelectedRegions()
+{
+    const auto regions = timeline.selectedRegionTrees();
+    if (regions.isEmpty())
+        return;
+    const auto main = model::findById (project, timeline.selectedRegionId);
+    const bool on = ! (bool) (main.isValid() ? main : regions.getFirst()).getProperty (ids::loop, false);
+    undoManager.beginNewTransaction (on ? "Loop regions" : "Stop looping regions");
+    for (auto r : regions)
+        model::setLoop (r, on, &undoManager);
+}
+
 void MainComponent::nudgeSelectedRegions (int direction)
 {
     const auto regions = timeline.selectedRegionTrees();
@@ -679,12 +733,7 @@ void MainComponent::duplicateSelectedTrack()
 
 void MainComponent::applyNoOverlap (const juce::Array<juce::ValueTree>& regions)
 {
-    if (timeline.dragMode != TimelineState::Drag::noOverlap)
-        return;
-    for (const auto& r : regions)
-        if (r.getParent().isValid())
-            model::clearOverlaps (r, [this] (const juce::ValueTree& other)
-                                  { return fileCache.getLengthSeconds (juce::File (other[ids::file].toString())); }, &undoManager);
+    canvas.applyDragMode (regions, {});
 }
 
 void MainComponent::showToolMenu()
@@ -694,7 +743,7 @@ void MainComponent::showToolMenu()
     menu.addSectionHeader ("Tool");
     const std::pair<Tool, const char*> tools[] {
         { Tool::pointer, "Pointer" }, { Tool::pencil, "Pencil (draw MIDI regions)" }, { Tool::eraser, "Eraser" },
-        { Tool::scissors, "Scissors" }, { Tool::glue, "Glue (join)" }, { Tool::mute, "Mute" } };
+        { Tool::scissors, "Scissors" }, { Tool::glue, "Glue (join)" }, { Tool::mute, "Mute" }, { Tool::fade, "Fade" } };
     for (const auto& [tool, name] : tools)
         menu.addItem (name, true, timeline.tool == tool, [this, t = tool] { setTool (t); });
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());

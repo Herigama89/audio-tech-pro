@@ -48,6 +48,13 @@ public:
     void fileDragExit (const juce::StringArray& files) override;
     void filesDropped (const juce::StringArray& files, int x, int y) override;
 
+    /** After regions were moved, pasted or trimmed (or deleted from `tracks`): what the Drag mode does next
+        (No Overlap shortens what they cover, X-Fade crossfades, Shuffle closes the gaps). */
+    void applyDragMode (const juce::Array<juce::ValueTree>& regions, juce::Array<juce::ValueTree> tracks);
+
+    /** Region gain, as a slider in a pop-up. */
+    void showGainPopup (juce::ValueTree region);
+
     /** Called when the user scrolls or zooms with the wheel (so scrollbars can update). */
     std::function<void()> onViewChanged;
 
@@ -55,7 +62,11 @@ public:
     std::function<void (juce::ValueTree region)> onOpenPianoRoll;
 
 private:
-    enum class DragMode { none, scrub, move, trimStart, trimEnd, cycleNew, cycleMove, automationPoint, rubberBand, pencilRegion, marker };
+    enum class DragMode { none, scrub, move, trimStart, trimEnd, cycleNew, cycleMove, automationPoint, rubberBand, pencilRegion, marker,
+                          fadeIn, fadeOut, loopEnd };
+
+    /** What a press at `pos` on a region would do with the pointer: trim, fade, loop or move. */
+    DragMode edgeActionAt (const juce::ValueTree& region, int trackIndex, juce::Point<float> pos) const;
 
     void paintMarkers (juce::Graphics& g);
     juce::ValueTree markerAt (float x) const;

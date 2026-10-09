@@ -52,6 +52,30 @@ namespace riff::model
         `sourceLength` gives an audio region's file length (0 if unknown). */
     void clearOverlaps (const juce::ValueTree& region, std::function<double (const juce::ValueTree&)> sourceLength, juce::UndoManager* um);
 
+    // --- Fades, crossfades, loops, shuffle --------------------------------------
+    /** A fade's gain at x (0..1 through the fade, rising): straight for curve 0, equal power at 0.5. */
+    inline double fadeGain (double x, double curve)
+    {
+        x = juce::jlimit (0.0, 1.0, x);
+        return std::pow (x, std::pow (2.0, -2.0 * juce::jlimit (-1.0, 1.0, curve)));
+    }
+
+    /** Sets a region's fade in (or out) length in seconds, kept inside the region. */
+    void setFade (juce::ValueTree region, bool fadeIn, double seconds, juce::UndoManager* um);
+
+    /** Where a looped region stops repeating (its own end when it doesn't loop): its loop end,
+        or the next region on the track if that comes first. */
+    double loopEndOf (const juce::ValueTree& region);
+
+    /** Turns looping on (repeating up to the next region, or three more times) or off. */
+    void setLoop (juce::ValueTree region, bool shouldLoop, juce::UndoManager* um);
+
+    /** X-Fade drag mode: where the region overlaps others on its track, both fade (equal power) over the overlap. */
+    void createCrossfades (const juce::ValueTree& region, juce::UndoManager* um);
+
+    /** Shuffle drag modes: the track's regions close up, in order, against the first (left) or the last (right). */
+    void shuffleTrack (juce::ValueTree track, bool towardsLeft, juce::UndoManager* um);
+
     /** A muted region stays on screen but doesn't play. */
     inline bool isRegionMuted (const juce::ValueTree& region) { return region.getProperty (ids::mute, false); }
 

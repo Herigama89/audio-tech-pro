@@ -124,6 +124,8 @@ private:
     void showFileMenu();
     void exportSong();
     void exportStems();
+    void trimSelectedToPlayhead (bool start);
+    void loopSelectedRegions();
     void bounceInPlace();
     void importTracksFromProject();
     void showMixer();

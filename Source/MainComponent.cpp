@@ -55,17 +55,18 @@ MainComponent::MainComponent (bool openAudioDevice)
     bind (screenButton, commands::recordScreen);
 
     // Tool, Snap and Drag, as in Logic's tracks area
-    toolBox.addItemList ({ "Pointer", "Pencil", "Eraser", "Scissors", "Glue", "Mute" }, 1);
+    toolBox.addItemList ({ "Pointer", "Pencil", "Eraser", "Scissors", "Glue", "Mute", "Fade" }, 1);
     toolBox.setSelectedId (1, juce::dontSendNotification);
-    toolBox.setTooltip ("Tool (T): pointer, pencil (draws MIDI regions), eraser, scissors, glue (joins), mute");
+    toolBox.setTooltip ("Tool (T): pointer, pencil (draws MIDI regions), eraser, scissors, glue (joins), mute, fade (drag at a region's start or end; Option-click removes)");
     toolBox.onChange = [this] { setTool ((TimelineState::Tool) (toolBox.getSelectedId() - 1)); };
     snapBox.addItemList ({ "Smart", "Bar", "Beat", "Division", "Off" }, 1);
     snapBox.setSelectedId (1, juce::dontSendNotification);
     snapBox.setTooltip ("Snap: where regions land when you move them (Smart follows the zoom). Hold Cmd to move freely.");
     snapBox.onChange = [this] { timeline.snapMode = (TimelineState::Snap) (snapBox.getSelectedId() - 1); };
-    dragBox.addItemList ({ "Overlap", "No Overlap" }, 1);
+    dragBox.addItemList ({ "Overlap", "No Overlap", "X-Fade", "Shuffle R", "Shuffle L" }, 1);
     dragBox.setSelectedId (1, juce::dontSendNotification);
-    dragBox.setTooltip ("Drag: Overlap lets regions lie on top of each other; No Overlap shortens what they cover.");
+    dragBox.setTooltip ("Drag: Overlap lets regions lie on top of each other; No Overlap shortens what they cover; "
+                       "X-Fade crossfades where they overlap; Shuffle closes the gaps (to the right or the left).");
     dragBox.onChange = [this] { timeline.dragMode = (TimelineState::Drag) (dragBox.getSelectedId() - 1); };
     for (auto* box : { &toolBox, &snapBox, &dragBox })
     {
@@ -1089,8 +1090,13 @@ void MainComponent::deleteSelection()
         return;
 
     undoManager.beginNewTransaction (regions.size() > 1 ? "Delete regions" : "Delete region");
+    juce::Array<juce::ValueTree> tracks;
     for (auto region : regions)
+    {
+        tracks.addIfNotAlreadyThere (region.getParent());
         model::deleteRegion (region, &undoManager);
+    }
+    canvas.applyDragMode ({}, tracks);   // Shuffle closes the gaps
     timeline.selectOnlyRegion ({});
     timeline.changed();
 }

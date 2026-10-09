@@ -78,6 +78,21 @@ struct PlaybackGraph
         bool resample = false;          // the file's rate differs from the engine's
         juce::int64 length = 0;     // engine samples
         float gain = 1.0f;
+        juce::int64 fadeIn = 0, fadeOut = 0;      // engine samples
+        float fadeInCurve = 0.0f, fadeOutCurve = 0.0f;
+
+        bool hasFades() const noexcept { return fadeIn > 0 || fadeOut > 0; }
+
+        /** The fades' gain at a sample position inside the region (as model::fadeGain). */
+        float fadeGainAt (juce::int64 position) const noexcept
+        {
+            float g = 1.0f;
+            if (position < fadeIn)
+                g *= std::pow ((float) position / (float) fadeIn, std::exp2 (-2.0f * fadeInCurve));
+            if (const auto fromEnd = length - position; fromEnd <= fadeOut && fadeOut > 0)
+                g *= std::pow (juce::jmax (0.0f, (float) fromEnd / (float) fadeOut), std::exp2 (-2.0f * fadeOutCurve));
+            return g;
+        }
     };
 
     struct Track

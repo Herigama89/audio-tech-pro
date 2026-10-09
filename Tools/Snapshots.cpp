@@ -415,13 +415,20 @@ private:
             auto track = model::addTrack (project, s.name, um);
             const auto file = makeAudio (juce::String (s.name).removeCharacters (" "), s.length, s.pitch, s.density, seed++);
             auto region = model::addRegion (track, file, s.start, s.length * 0.45, um);
-            model::addRegion (track, file, s.start + s.length * 0.5, s.length * 0.5, um);
+            auto second = model::addRegion (track, file, s.start + s.length * 0.5, s.length * 0.5, um);
+            if (seed == 3)   // the guitars: a fade in and a fade out
+            {
+                model::setFade (region, true, 2.0, um);
+                model::setFade (second, false, 3.0, um);
+                second.setProperty (ids::gain, 0.7, um);
+            }
             juce::ignoreUnused (region);
         }
 
         // An instrument with a MIDI region.
         auto keys = model::addTrack (project, "Keys", um, -1, model::instrumentKind);
         auto midi = model::addMidiRegion (keys, 4.36, 8.72, um);
+        model::setLoop (midi, true, um);
         const int chord[] = { 60, 64, 67, 71, 62, 65, 69, 72 };
         for (int bar = 0; bar < 4; ++bar)
             for (int n = 0; n < 4; ++n)
