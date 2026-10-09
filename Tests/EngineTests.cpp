@@ -1840,3 +1840,23 @@ TEST_CASE ("The metronome follows the tempo track", "[engine][tempo]")
     CHECK (loudNear (72000) < 0.001f);
     CHECK (loudNear (96000) > 0.05f);
 }
+
+TEST_CASE ("Region and track transpose and velocity apply as MIDI plays", "[engine][midi]")
+{
+    auto project = model::createProject();
+    auto track = model::addTrack (project, "Keys", nullptr, -1, model::instrumentKind);
+    auto region = model::addMidiRegion (track, 0.0, 2.0, nullptr);
+    model::addNote (region, 60, 0.0, 0.5, 100, nullptr);
+    region.setProperty (ids::transpose, 12, nullptr);
+    track.setProperty (ids::transpose, -2, nullptr);
+    region.setProperty (ids::velocityOffset, 40, nullptr);
+
+    Fixture f;
+    f.player.setProject (project);
+    auto graph = f.player.buildGraph (48000.0);
+    REQUIRE (graph->tracks.size() == 1);
+    REQUIRE (graph->tracks[0].regions.size() == 1);
+    const auto& note = graph->tracks[0].regions[0].notes.at (0);
+    CHECK (note.pitch == 70);
+    CHECK (note.velocity == 127);   // capped
+}

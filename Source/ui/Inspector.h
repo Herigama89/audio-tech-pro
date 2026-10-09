@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "Mixer.h"
+#include "ParameterBox.h"
 
 namespace riff
 {
@@ -19,6 +20,9 @@ public:
     /** Shows this track's strip (rebuilt only when the track changes). */
     void setTrack (juce::ValueTree project, juce::ValueTree track);
 
+    /** The Region box shows this region's parameters (or nothing). */
+    void setRegion (juce::ValueTree region);
+
     void paint (juce::Graphics&) override;
     void resized() override;
 
@@ -33,6 +37,10 @@ private:
     juce::Viewport viewport;
     juce::Component holder;
     std::unique_ptr<ChannelStrip> trackStrip, masterStrip;
+    juce::ValueTree region;
+    ParameterBox regionBox { mixer.getUndoManager() }, trackBox { mixer.getUndoManager() };
+    void buildTrackBox();
+    int boxesHeight() const;
 };
 
 } // namespace riff

@@ -213,6 +213,8 @@ public:
             main.project.getChild (3).setProperty (ids::colour, model::trackPalette()[13].toString(), nullptr);
             main.project.getChild (1).setProperty (ids::hidden, true, nullptr);
             main.timeline.changed();
+            main.timeline.selectedRegionId = main.project.getChild (2).getChild (0)[ids::id].toString();
+            main.timeline.changed();
             main.toggleInspector();
             pump (main, 300);
             save (main, "inspector-multiselect.png");

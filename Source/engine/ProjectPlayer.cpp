@@ -320,6 +320,10 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
                 if (! model::isMidiRegion (region) || model::isRegionMuted (region))
                     continue;
 
+                // Transpose and velocity from the Inspector (region and track add up).
+                const int transpose = (int) region.getProperty (ids::transpose, 0) + (int) track.getProperty (ids::transpose, 0);
+                const int velocityOffset = (int) region.getProperty (ids::velocityOffset, 0) + (int) track.getProperty (ids::velocityOffset, 0);
+
                 // A looped region plays again and again, up to its loop end.
                 const double regionStart = region[ids::start];
                 const double regionLength = region[ids::length];
@@ -350,8 +354,8 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
                         PlaybackGraph::Note n;
                         n.start    = toSamples (repeatStart + noteStart - offset);
                         n.end      = juce::jmax (n.start + 1, toSamples (repeatStart + noteEnd - offset));
-                        n.pitch    = (juce::uint8) juce::jlimit (0, 127, (int) note[ids::pitch]);
-                        n.velocity = (juce::uint8) juce::jlimit (1, 127, (int) note[ids::velocity]);
+                        n.pitch    = (juce::uint8) juce::jlimit (0, 127, (int) note[ids::pitch] + transpose);
+                        n.velocity = (juce::uint8) juce::jlimit (1, 127, (int) note[ids::velocity] + velocityOffset);
                         r.notes.push_back (n);
                     }
 

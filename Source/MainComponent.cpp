@@ -1631,7 +1631,7 @@ void MainComponent::timerCallback()
             autosave();
     }
     if (inspector.isVisible())
-        inspector.setTrack (project, model::findById (project, timeline.selectedTrackId));
+        inspector.setTrack (project, model::findById (project, timeline.selectedTrackId)), inspector.setRegion (model::findById (project, timeline.selectedRegionId));
     updateScreenRecording();
 
     if (pianoRoll.isVisible())

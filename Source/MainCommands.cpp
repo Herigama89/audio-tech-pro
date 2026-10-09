@@ -814,7 +814,7 @@ void MainComponent::toggleInspector()
 {
     inspector.setVisible (! inspector.isVisible());
     if (inspector.isVisible())
-        inspector.setTrack (project, model::findById (project, timeline.selectedTrackId));
+        inspector.setTrack (project, model::findById (project, timeline.selectedTrackId)), inspector.setRegion (model::findById (project, timeline.selectedRegionId));
     else
         inspector.setTrack ({}, {});
     appProperties.getUserSettings()->setValue ("inspector", inspector.isVisible());
