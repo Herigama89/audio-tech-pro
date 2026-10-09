@@ -1,6 +1,7 @@
 #include "InstrumentRack.h"
 #include "../model/Project.h"
 #include "BuiltInInstruments.h"
+#include "ClapFormat.h"
 
 namespace riff
 {
@@ -8,6 +9,7 @@ namespace riff
 InstrumentRack::InstrumentRack()
 {
     juce::addDefaultFormatsToManager (formatManager); // VST3, plus Audio Units on macOS
+    formatManager.addFormat (std::make_unique<ClapPluginFormat>());
     sampleFormats.registerBasicFormats();
 }
 

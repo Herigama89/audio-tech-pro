@@ -29,7 +29,11 @@ endif()
 # ---------------------------------------------------------------------------
 # Sources shared by the app and the tests (model + engine; no UI)
 # ---------------------------------------------------------------------------
+# CLAP plugin hosting: the CLAP SDK headers (MIT), vendored.
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/clap/include)
+
 set(RIFF_CORE_SOURCES
+    Source/engine/ClapFormat.cpp
     Source/model/Project.cpp
     Source/model/Generator.cpp
     Source/model/ProjectFiles.cpp
@@ -187,6 +191,7 @@ if(RIFF_BUILD_TESTS)
         Tests/FilesTests.cpp
         Tests/AutomationWriterTests.cpp
         Tests/AudioEditTests.cpp
+        Tests/ClapTests.cpp
         Source/ui/ScreenRecordPanel.cpp
         Source/ui/ScreenRecorder.cpp
     )
@@ -194,9 +199,15 @@ if(RIFF_BUILD_TESTS)
     target_include_directories(AudioTechProTests PRIVATE Source)
     target_compile_definitions(AudioTechProTests PRIVATE ${RIFF_DEFINITIONS})
 
+    # Two tiny CLAP plugins the tests load.
+    add_library(TestClapPlugins MODULE Tests/clap/TestClapPlugins.cpp)
+    set_target_properties(TestClapPlugins PROPERTIES PREFIX "" SUFFIX ".clap" CXX_VISIBILITY_PRESET hidden)
+    add_dependencies(AudioTechProTests TestClapPlugins)
+    target_compile_definitions(AudioTechProTests PRIVATE TEST_CLAP_PATH="$<TARGET_FILE:TestClapPlugins>")
+
     # Tests compare exact silence (0.0f) on purpose.
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        set_source_files_properties(Tests/ModelTests.cpp Tests/EngineTests.cpp Tests/GeneratorTests.cpp Tests/AssistantTests.cpp Tests/ScreenRecordingTests.cpp Tests/EditTests.cpp
+        set_source_files_properties(Tests/ClapTests.cpp Tests/ModelTests.cpp Tests/EngineTests.cpp Tests/GeneratorTests.cpp Tests/AssistantTests.cpp Tests/ScreenRecordingTests.cpp Tests/EditTests.cpp
             PROPERTIES COMPILE_OPTIONS -Wno-float-equal)
     endif()
 

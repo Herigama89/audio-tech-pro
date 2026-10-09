@@ -252,7 +252,7 @@ Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderC
 - [x] Piano roll: draw, move, resize, delete, quantize, keyboard preview
 - [x] MIDI keyboard input (hot-plug), live playing, MIDI recording (merging on cycle)
 - [x] VST3 and Audio Unit instrument hosting: scanning, plugin windows, settings saved in the project
-- [ ] CLAP hosting (needs our own CLAP host layer; JUCE doesn't host CLAP)
+- [x] CLAP hosting: our own CLAP host layer (scanned with VST3/AU; instruments and effects, parameters, automation, state, latency, plugin windows)
 - [x] Velocity editing, pitch bend and controllers in the piano roll
 - [x] A sampler instrument (one sound across the keyboard: root key, attack, release)
 
@@ -265,7 +265,7 @@ Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderC
 - [x] Aux buses and sends (pre/post fader); buses are solo-safe
 - [x] Automation of volume, pan and built-in effect parameters
 - [x] Plugin delay compensation across tracks and buses; recordings account for it too
-- [ ] CLAP instruments and effects (next)
+- [x] CLAP instruments and effects
 - [x] Automation of plugin parameters (built-in and hosted, from the A menu), and faders and pan knobs that follow automation
 
 ## Audio Tech Pro features
@@ -283,7 +283,7 @@ Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderC
 - [x] Screen recording of the app (or the whole screen) with the mix's sound and an optional mic, up to 4K (Mac)
 - [x] Several audio interfaces at once: Combine Audio Interfaces makes one device from them, with a clock and drift correction (Mac)
 - [ ] The Audio Tech Pro plugin suite
-- [ ] CLAP hosting
+- [x] CLAP hosting
 
 ## Logic Pro parity checklist
 
