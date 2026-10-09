@@ -3,6 +3,7 @@
 //     Snapshots <output folder>
 
 #include "../Source/ui/LiveLoopsGrid.h"
+#include "../Source/ui/ToolIcons.h"
 #include <JuceHeader.h>
 #include "MainComponent.h"
 #include "model/Project.h"
@@ -397,6 +398,28 @@ public:
             save (grid, "live-loops.png");
             main.player.clearLiveCells();
             main.project.removeChild (main.project.getChildWithName (ids::LIVELOOPS), nullptr);
+        }
+
+        {
+            // The tool icons, as in the menus.
+            struct Sheet final : juce::Component
+            {
+                void paint (juce::Graphics& g) override
+                {
+                    g.fillAll (theme::panel);
+                    int x = 8;
+                    for (const auto tool : toolicons::all)
+                    {
+                        toolicons::draw (g, tool, juce::Rectangle<float> ((float) x, 8.0f, 28.0f, 28.0f), theme::text);
+                        g.setColour (theme::text);
+                        g.setFont (juce::FontOptions (10.0f));
+                        g.drawText (toolicons::name (tool), x - 10, 40, 48, 12, juce::Justification::centred);
+                        x += 52;
+                    }
+                }
+            } sheet;
+            sheet.setSize (52 * 11 + 8, 58);
+            save (sheet, "tool-icons.png", 2.0f);
         }
 
         {

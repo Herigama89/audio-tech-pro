@@ -2,6 +2,7 @@
 // the menu bar. (Split from MainComponent.cpp to keep that file readable.)
 
 #include "MainComponent.h"
+#include "ui/ToolIcons.h"
 #include "model/Project.h"
 #include "ui/Commands.h"
 #include "ui/KeyCommands.h"
@@ -836,17 +837,37 @@ void MainComponent::applyNoOverlap (const juce::Array<juce::ValueTree>& regions)
     canvas.applyDragMode (regions, {});
 }
 
-void MainComponent::showToolMenu()
+void MainComponent::showToolMenu (bool withShortcuts)
 {
-    using Tool = TimelineState::Tool;
+    // Logic's Tool menu: every tool with its icon. Right-clicking an empty part of the
+    // tracks area adds the everyday edits under it.
     juce::PopupMenu menu;
-    menu.addSectionHeader ("Tool");
-    const std::pair<Tool, const char*> tools[] {
-        { Tool::pointer, "Pointer" }, { Tool::pencil, "Pencil (draw MIDI regions)" }, { Tool::eraser, "Eraser" },
-        { Tool::scissors, "Scissors" }, { Tool::glue, "Glue (join)" }, { Tool::mute, "Mute" }, { Tool::fade, "Fade" },
-        { Tool::marquee, "Marquee" }, { Tool::zoom, "Zoom" }, { Tool::solo, "Solo" }, { Tool::text, "Text (rename)" } };
-    for (const auto& [tool, name] : tools)
-        menu.addItem (name, true, timeline.tool == tool, [this, t = tool] { setTool (t); });
+    menu.addSectionHeader ("Tools");
+    for (const auto tool : toolicons::all)
+    {
+        juce::PopupMenu::Item item (juce::String (toolicons::name (tool)) + "    (" + toolicons::hint (tool) + ")");
+        item.image = toolicons::drawable (tool, theme::text);
+        item.isTicked = timeline.tool == tool;
+        item.action = [this, t = tool] { setTool (t); };
+        menu.addItem (std::move (item));
+    }
+
+    if (withShortcuts)
+    {
+        menu.addSeparator();
+        menu.addCommandItem (&commandManager, commands::pasteRegions);
+        menu.addCommandItem (&commandManager, commands::selectAllRegions);
+        menu.addCommandItem (&commandManager, commands::undo);
+        menu.addCommandItem (&commandManager, commands::redo);
+        menu.addSeparator();
+        menu.addCommandItem (&commandManager, commands::newAudioTrack);
+        menu.addCommandItem (&commandManager, commands::newInstrumentTrack);
+        menu.addCommandItem (&commandManager, commands::importAudio);
+        menu.addSeparator();
+        menu.addCommandItem (&commandManager, commands::createMarker);
+        menu.addCommandItem (&commandManager, commands::setLocatorsBySelection);
+        menu.addCommandItem (&commandManager, commands::toggleCycle);
+    }
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
 }
 

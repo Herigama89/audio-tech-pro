@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "ui/ToolIcons.h"
 #include "model/Project.h"
 #include "ui/Theme.h"
 #include "AppInfo.h"
@@ -62,7 +63,15 @@ MainComponent::MainComponent (bool openAudioDevice)
     bind (screenButton, commands::recordScreen);
 
     // Tool, Snap and Drag, as in Logic's tracks area
-    toolBox.addItemList ({ "Pointer", "Pencil", "Eraser", "Scissors", "Glue", "Mute", "Fade", "Marquee", "Zoom", "Solo", "Text" }, 1);
+    // Each tool with its icon (the box shows the chosen tool's icon too).
+    for (const auto tool : toolicons::all)
+    {
+        juce::PopupMenu::Item item (toolicons::name (tool));
+        item.itemID = (int) tool + 1;
+        item.image = toolicons::drawable (tool, theme::text);
+        toolBox.getRootMenu()->addItem (std::move (item));
+    }
+    toolBox.getProperties().set ("atpToolIcons", true);
     toolBox.setSelectedId (1, juce::dontSendNotification);
     toolBox.setTooltip ("Tool (T): pointer, pencil (draws MIDI regions), eraser, scissors, glue (joins), mute, fade (drag at a region's start or end; Option-click removes), "
                         "marquee (select a stretch of time on tracks; Delete removes it, Cmd+T splits at its edges), zoom (click or drag; Option-click zooms out), "
@@ -209,6 +218,8 @@ MainComponent::MainComponent (bool openAudioDevice)
     canvas.onViewChanged = [this] { updateScrollBars(); };
     canvas.onOpenPianoRoll = [this] (juce::ValueTree region) { openPianoRoll (region); };
     canvas.onSplit = [this] { splitAtPlayhead(); };
+    canvas.commandManager = &commandManager;
+    canvas.onEmptyAreaMenu = [this] { showToolMenu (true); };
     canvas.onDelete = [this] { deleteSelection(); };
     canvas.onRepeat = [this] { repeatSelectedRegions(); };
     canvas.onJoin = [this] { joinSelectedRegions(); };
@@ -661,7 +672,7 @@ void MainComponent::resized()
             auto boxes = juce::Rectangle<int> (screenButton.getRight() + 14, row.getY() + 2, 0, keyHeight - 6);
             const auto transportLeft = getWidth() / 2 - ((int) 9 * (keyWidth + gap) + 14) / 2;
             int boxX = boxes.getX();
-            for (auto [box, w] : { std::pair { &toolBox, 84 }, std::pair { &snapBox, 80 }, std::pair { &dragBox, 94 } })
+            for (auto [box, w] : { std::pair { &toolBox, 112 }, std::pair { &snapBox, 80 }, std::pair { &dragBox, 94 } })
             {
                 box->setVisible (boxX + w < transportLeft - 12);
                 box->setBounds (boxX, boxes.getY(), w, boxes.getHeight());

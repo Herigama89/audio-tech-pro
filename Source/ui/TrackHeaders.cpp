@@ -35,12 +35,12 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
     instrumentButton.setVisible (isInstrument);
     nameLabel.setEditable (false, true, false);
     nameLabel.setFont (juce::FontOptions (14.0f, juce::Font::bold));
-    nameLabel.setColour (juce::Label::textColourId, theme::ink);
-    nameLabel.setColour (juce::Label::textWhenEditingColourId, theme::ink);
-    nameLabel.setColour (juce::Label::backgroundWhenEditingColourId, theme::cream.brighter (0.3f));
-    nameLabel.setColour (juce::TextEditor::textColourId, theme::ink);
-    nameLabel.setColour (juce::TextEditor::highlightColourId, theme::gold.withAlpha (0.5f));
-    nameLabel.setColour (juce::CaretComponent::caretColourId, theme::ink);
+    nameLabel.setColour (juce::Label::textColourId, theme::stripInk);
+    nameLabel.setColour (juce::Label::textWhenEditingColourId, theme::stripInk);
+    nameLabel.setColour (juce::Label::backgroundWhenEditingColourId, theme::stripFace.brighter (0.3f));
+    nameLabel.setColour (juce::TextEditor::textColourId, theme::stripInk);
+    nameLabel.setColour (juce::TextEditor::highlightColourId, theme::knobArc.withAlpha (0.5f));
+    nameLabel.setColour (juce::CaretComponent::caretColourId, theme::stripInk);
     nameLabel.onTextChange = [this]
     {
         undoManager.beginNewTransaction ("Rename track");
@@ -130,6 +130,7 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
     addAndMakeVisible (volumeSlider);
 
     look::knob (panKnob, look::Knob::black, false);
+    look::onLight (panKnob);
     panKnob.setScrollWheelEnabled (false);
     panKnob.setRange (-1.0, 1.0, 0.01);
     panKnob.setDoubleClickReturnValue (true, 0.0);
@@ -223,19 +224,27 @@ void TrackHeader::paint (juce::Graphics& g)
     const bool selected = timeline.isTrackSelected (track[ids::id].toString());
     auto area = getLocalBounds();
 
-    // Cream body
-    const auto body = selected ? theme::cream.brighter (0.12f) : theme::cream;
-    g.setGradientFill (juce::ColourGradient (body.brighter (0.05f), 0.0f, 0.0f, body.darker (0.04f), 0.0f, (float) getHeight(), false));
+    // The grey channel face, as on the mixer strips (a little lighter when selected)
+    const auto body = selected ? theme::stripFace.brighter (0.12f) : theme::stripFace;
+    g.setGradientFill (juce::ColourGradient (body.brighter (0.05f), 0.0f, 0.0f, body.darker (0.06f), 0.0f, (float) getHeight(), false));
     g.fillRect (area);
+    {
+        juce::Random grain (track[ids::id].toString().hashCode());
+        for (int y = 0; y < getHeight(); y += 2)
+        {
+            g.setColour ((grain.nextBool() ? juce::Colours::white : juce::Colours::black).withAlpha (0.018f + grain.nextFloat() * 0.02f));
+            g.fillRect (numberWidth, y, getWidth() - numberWidth, 1);
+        }
+    }
 
-    // Number column: gold when selected
+    // Number column: steel blue when selected
     auto number = area.removeFromLeft (numberWidth);
-    g.setColour (selected ? theme::gold : theme::creamShade);
+    g.setColour (selected ? theme::knobArc : theme::stripFaceLow);
     g.fillRect (number);
-    g.setColour (theme::creamDeep);
+    g.setColour (theme::stripEdge);
     g.fillRect (number.getRight() - 1, 0, 1, getHeight());
 
-    g.setColour (theme::ink);
+    g.setColour (selected ? juce::Colours::white : theme::stripInk);
     g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
     const int icon = track.getProperty (ids::icon, 0);
     if (icon > 0 && getHeight() >= 56)
@@ -243,7 +252,7 @@ void TrackHeader::paint (juce::Graphics& g)
         g.drawText (juce::String (track.getParent().indexOf (track) + 1), number.withTrimmedLeft (4).withHeight (getHeight() / 2 + 4),
                     juce::Justification::centred, false);
         icons::draw (g, icon, number.withTrimmedLeft (4).toFloat().withTrimmedTop ((float) getHeight() * 0.5f + 2.0f).withSizeKeepingCentre (16.0f, 16.0f),
-                     theme::ink.withAlpha (0.85f));
+                     (selected ? juce::Colours::white : theme::stripInk).withAlpha (0.85f));
     }
     else
         g.drawText (juce::String (track.getParent().indexOf (track) + 1), number.withTrimmedLeft (4), juce::Justification::centred, false);
@@ -262,7 +271,7 @@ void TrackHeader::paint (juce::Graphics& g)
         kind = "Frozen";
     if (const int group = track.getProperty (ids::group, 0); group > 0)
         kind << (kind.isEmpty() ? "" : "  ") << "G" << group;
-    g.setColour ((bool) track[ids::frozen] ? theme::accent : theme::inkDim);
+    g.setColour ((bool) track[ids::frozen] ? theme::knobArc.darker (0.3f) : theme::stripInkDim);
     g.drawText (kind, nameLabel.getBounds().translated (3, 18).withHeight (12), juce::Justification::centredLeft, false);
 
     // A stack's main track: a disclosure triangle to fold its tracks away. Its tracks: a line in the number column.
@@ -274,12 +283,12 @@ void TrackHeader::paint (juce::Graphics& g)
             tri.addTriangle (r.getX() + 3.0f, r.getY(), r.getX() + 3.0f, r.getBottom(), r.getRight() - 1.0f, r.getCentreY());
         else
             tri.addTriangle (r.getX(), r.getY() + 2.0f, r.getRight(), r.getY() + 2.0f, r.getCentreX(), r.getBottom());
-        g.setColour (theme::ink);
+        g.setColour (theme::stripInk);
         g.fillPath (tri);
     }
     else if (track[ids::stackParent].toString().isNotEmpty())
     {
-        g.setColour (theme::ink.withAlpha (0.5f));
+        g.setColour (theme::stripInk.withAlpha (0.5f));
         g.fillRect (numberWidth - 6, 0, 2, getHeight());
     }
 
@@ -288,15 +297,15 @@ void TrackHeader::paint (juce::Graphics& g)
     {
         g.setColour (juce::Colours::black.withAlpha (0.25f));
         g.fillRect (getLocalBounds().withTrimmedLeft (numberWidth));
-        g.setColour (theme::ink);
+        g.setColour (theme::stripInk);
         g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
         g.drawText ("H", number.withTrimmedTop (getHeight() - 18), juce::Justification::centred, false);
     }
 
     // Divider
-    g.setColour (theme::creamDeep.darker (0.15f));
+    g.setColour (theme::stripEdge.darker (0.3f));
     g.fillRect (0, getHeight() - 1, getWidth(), 1);
-    g.setColour (juce::Colours::white.withAlpha (0.35f));
+    g.setColour (juce::Colours::white.withAlpha (0.5f));
     g.fillRect (numberWidth, 0, getWidth() - numberWidth, 1);
 }
 

@@ -120,6 +120,12 @@ public:
     /** Region commands the window's menus and keys run too. */
     std::function<void()> onSplit, onDelete, onRepeat, onJoin, onMuteRegions;
 
+    /** Right-click on an empty part of the tracks area: the tool menu and everyday edits. */
+    std::function<void()> onEmptyAreaMenu;
+
+    /** For the right-click menus: they list the app's commands with their keys. */
+    juce::ApplicationCommandManager* commandManager = nullptr;
+
 private:
 
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { repaint(); }

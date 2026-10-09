@@ -35,6 +35,11 @@ public:
                         int thumbStartPosition, int thumbSize, bool isMouseOver, bool isMouseDown) override;
 
     void drawPopupMenuBackground (juce::Graphics&, int width, int height) override;
+
+    // The Tool box shows the chosen tool's icon before its name.
+    void drawComboBox (juce::Graphics&, int width, int height, bool isButtonDown, int buttonX, int buttonY,
+                       int buttonW, int buttonH, juce::ComboBox&) override;
+    void positionComboBoxText (juce::ComboBox&, juce::Label&) override;
     void drawTooltip (juce::Graphics&, const juce::String& text, int width, int height) override;
 };
 
@@ -67,9 +72,12 @@ namespace look
         `proportion` is 0..1; `fromCentre` lights from 0.5.
     */
     void drawNeonKnob (juce::Graphics&, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
-                       juce::Colour ring, bool fromCentre, bool enabled = true);
+                       juce::Colour ring, bool fromCentre, bool enabled = true, bool onLightPanel = false);
 
-    /** A dark fader cap with grip ridges and a white line across its middle. */
+    /** True if the component was marked as sitting on a light panel. */
+    bool isOnLight (const juce::Component&);
+
+    /** A light grey fader cap with grip ridges and a dark line across its middle. */
     void drawFaderCap (juce::Graphics&, juce::Rectangle<float> cap, bool vertical);
 
     /** Draws a raised key; used by the look and by custom buttons. */

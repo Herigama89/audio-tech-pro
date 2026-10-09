@@ -21,7 +21,7 @@ void PointerKnob::paint (juce::Graphics& g)
     const auto params = getRotaryParameters();
     look::drawNeonKnob (g, getLocalBounds().toFloat(), (float) valueToProportionOfLength (getValue()),
                         params.startAngleRadians, params.endAngleRadians, pointer,
-                        getMinimum() < 0.0 && getMaximum() > 0.0, isEnabled());
+                        getMinimum() < 0.0 && getMaximum() > 0.0, isEnabled(), look::isOnLight (*this));
 }
 
 //==============================================================================
@@ -71,7 +71,7 @@ DisplaySlider::DisplaySlider()
 void DisplaySlider::paint (juce::Graphics& g)
 {
     const auto r = getLocalBounds().toFloat();
-    g.setColour (juce::Colour (0xffe9e6dc));
+    g.setColour (look::isOnLight (*this) ? theme::stripInk : juce::Colour (0xffe9e6dc));
     g.setFont (juce::FontOptions (r.getHeight() * 0.56f));
     g.drawText (getTextFromValue (getValue()), r, juce::Justification::centred, false);
 }

@@ -99,8 +99,8 @@ private:
     // On the artwork: cream, blue, cream and red EQ knobs, the grey Dynamics knob
     // Neon-ring encoders: blue for the EQ, white-blue for the Dynamics
     strip::PointerKnob hfKnob { theme::neon }, hmfKnob { theme::neon }, lmfKnob { theme::neon }, lfKnob { theme::neon }, dynKnob { theme::knobCream };
-    strip::LampKey consoleInButton { "EQ in", theme::neon }, dynInButton { "Dynamics in", theme::neon };
-    strip::CreamKey muteButton { "M", theme::mute }, soloButton { "S", theme::solo }, stripInButton { "IN", theme::neon };
+    strip::LampKey consoleInButton { "EQ in", theme::knobArc }, dynInButton { "Dynamics in", theme::knobArc };
+    strip::CreamKey muteButton { "M", theme::mute }, soloButton { "S", theme::solo }, stripInButton { "IN", theme::knobArc };
     strip::DisplaySlider panKnob;
     juce::Label dynLabel;
 

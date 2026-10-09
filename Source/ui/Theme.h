@@ -30,8 +30,8 @@ namespace riff::theme
     inline const juce::Colour mute       { 0xffe2463f };   // backlit red
     inline const juce::Colour solo       { 0xfff2c94e };   // backlit yellow
     inline const juce::Colour danger     { 0xffe2463f };
-    inline const juce::Colour meterGreen { 0xff2f8cff };   // meters are blue (low and mid)
-    inline const juce::Colour meterAmber { 0xff7fd3ff };   // ... cyan near the top
+    inline const juce::Colour meterGreen { 0xff45c25a };   // meters: green, then yellow near the top
+    inline const juce::Colour meterAmber { 0xffe8c53c };
 
     // --- Key and header surfaces (were cream; now dark rubber) ----------------
     inline const juce::Colour cream      { 0xff3b3d41 };
@@ -53,6 +53,16 @@ namespace riff::theme
     inline const juce::Colour consoleShade { 0xff27282b };
     inline const juce::Colour consoleDark  { 0xff141516 };
     inline const juce::Colour slotDark     { 0xff18191b };   // insert slots, small displays
+
+    // --- The studio-grey channel face (mixer strips, track headers) -------------
+    inline const juce::Colour stripFace    { 0xffb7bbbf };   // light brushed grey
+    inline const juce::Colour stripFaceLow { 0xffa5a9ad };
+    inline const juce::Colour stripEdge    { 0xff6a6e72 };
+    inline const juce::Colour stripInk     { 0xff101214 };   // black print on the face
+    inline const juce::Colour stripInkDim  { 0xff3c4044 };
+    inline const juce::Colour stripSlot    { 0xff383c40 };   // dark insert / send / name slots
+    inline const juce::Colour stripSlotOn  { 0xff2c3034 };
+    inline const juce::Colour knobArc      { 0xff4a7aa6 };   // the thin value ring round a knob
 
     // --- Displays ------------------------------------------------------------
     inline const juce::Colour lcd        { 0xff0b0c0e };

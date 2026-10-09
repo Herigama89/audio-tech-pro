@@ -95,7 +95,7 @@ private:
     void muteSelectedRegions();
     void nudgeSelectedRegions (int direction);
     void duplicateSelectedTrack();
-    void showToolMenu();
+    void showToolMenu (bool withShortcuts = false);
     void setTool (TimelineState::Tool tool);
     void applyNoOverlap (const juce::Array<juce::ValueTree>& regions);
 

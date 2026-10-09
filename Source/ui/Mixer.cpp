@@ -94,7 +94,11 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
 
         // The two displays under Dynamics: its amount, and pan (drag sideways)
         dynLabel.setJustificationType (juce::Justification::centred);
-        dynLabel.setColour (juce::Label::textColourId, juce::Colour (0xffe9e6dc));
+        dynLabel.setColour (juce::Label::textColourId, theme::stripInk);
+
+        // The knobs sit on the light grey face.
+        for (auto* k : std::initializer_list<juce::Component*> { &hfKnob, &hmfKnob, &lmfKnob, &lfKnob, &dynKnob, &panKnob })
+            look::onLight (*k);
         dynLabel.setInterceptsMouseClicks (false, false);
         addAndMakeVisible (dynLabel);
         dynLabel.setVisible (! isVca());
@@ -151,6 +155,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
 
         auto* s = sendLevels.add (new juce::Slider());
         look::knob (*s, look::Knob::black, false);
+        look::onLight (*s);
         s->setRange (minDb, 6.0, 0.1);
         s->setSkewFactorFromMidPoint (-12.0);
         s->setDoubleClickReturnValue (true, 0.0);
@@ -709,8 +714,8 @@ void ChannelStrip::refresh()
         const auto bus = model::findById (project, send[ids::target].toString());
         sendButtons[i]->setButtonText (bus.isValid() ? (bus[ids::name].toString() + ((bool) send[ids::pre] ? " (pre)" : ""))
                                                      : juce::String ("Send"));
-        sendButtons[i]->setColour (juce::TextButton::textColourOffId, bus.isValid() ? theme::text : theme::dimText);
-        sendButtons[i]->setColour (juce::TextButton::buttonColourId, bus.isValid() ? juce::Colour (0xff3a4a3f) : theme::slotDark);
+        sendButtons[i]->setColour (juce::TextButton::textColourOffId, bus.isValid() ? juce::Colours::white : juce::Colour (0xffd6d9dc));
+        sendButtons[i]->setColour (juce::TextButton::buttonColourId, bus.isValid() ? theme::stripSlotOn : theme::stripSlot);
         sendLevels[i]->setEnabled (bus.isValid());
         sendLevels[i]->setValue (gainToDb (send.getProperty (ids::level, 0.0)), juce::dontSendNotification);
     }
@@ -724,14 +729,14 @@ void ChannelStrip::refresh()
         {
             const bool off = insert[ids::bypass];
             b->setButtonText (insertName (insert));
-            b->setColour (juce::TextButton::buttonColourId, off ? theme::slotDark : juce::Colour (0xff35466e));
-            b->setColour (juce::TextButton::textColourOffId, off ? theme::dimText : theme::text);
+            b->setColour (juce::TextButton::buttonColourId, off ? theme::stripSlot : theme::stripSlotOn);
+            b->setColour (juce::TextButton::textColourOffId, off ? juce::Colour (0xff8d9196) : juce::Colours::white);
         }
         else
         {
             b->setButtonText ({});
-            b->setColour (juce::TextButton::buttonColourId, theme::slotDark);
-            b->setColour (juce::TextButton::textColourOffId, theme::dimText);
+            b->setColour (juce::TextButton::buttonColourId, theme::stripSlot);
+            b->setColour (juce::TextButton::textColourOffId, juce::Colour (0xffd6d9dc));
         }
     }
 
@@ -798,19 +803,30 @@ void ChannelStrip::paint (juce::Graphics& g)
     const auto bounds = getLocalBounds();
     const auto w = (float) getWidth();
 
-    // The strip: dark charcoal, a touch lighter at the top (the channel controls).
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2f3134), 0.0f, 0.0f, juce::Colour (0xff232427), 0.0f, (float) getHeight(), false));
-    g.fillRect (bounds);
-    if (! isMaster())
+    // The strip: a light grey brushed face, lit a touch from the left.
     {
-        const auto top = juce::Rectangle<float> (2.0f, 2.0f, w - 4.0f, (float) topHeight - 4.0f);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff36383c), 0.0f, top.getY(), juce::Colour (0xff2a2b2e), 0.0f, top.getBottom(), false));
-        g.fillRoundedRectangle (top, 3.0f);
-        g.setColour (juce::Colours::black.withAlpha (0.55f));
-        g.drawRoundedRectangle (top, 3.0f, 1.0f);
+        juce::ColourGradient face (theme::stripFace.brighter (0.06f), 0.0f, 0.0f, theme::stripFaceLow, w, 0.0f, false);
+        face.addColour (0.35, theme::stripFace);
+        g.setGradientFill (face);
+        g.fillRect (bounds);
+
+        // Brushed grain: faint horizontal lines.
+        juce::Random grain (getOwnerId().hashCode());
+        for (int y = 0; y < getHeight(); y += 2)
+        {
+            g.setColour ((grain.nextBool() ? juce::Colours::white : juce::Colours::black).withAlpha (0.018f + grain.nextFloat() * 0.02f));
+            g.fillRect (0, y, getWidth(), 1);
+        }
+
+        // Shade towards the bottom, and a raised edge at the top.
+        g.setGradientFill (juce::ColourGradient (juce::Colours::transparentBlack, 0.0f, (float) getHeight() * 0.55f,
+                                                 juce::Colours::black.withAlpha (0.08f), 0.0f, (float) getHeight(), false));
+        g.fillRect (bounds);
+        g.setColour (juce::Colours::white.withAlpha (0.45f));
+        g.fillRect (1, 0, getWidth() - 3, 1);
     }
 
-    const auto text = theme::text, dim = theme::dimText;
+    const auto text = theme::stripInk, dim = theme::stripInkDim;
     {
         juce::Graphics::ScopedSaveState state (g);
         g.addTransform (juce::AffineTransform::scale (artScale));
@@ -848,8 +864,17 @@ void ChannelStrip::paint (juce::Graphics& g)
                 g.drawText (spot.freq, juce::Rectangle<float> (131.0f, c.y + 2.0f, 62.0f, 22.0f), juce::Justification::centredLeft, false);
             }
 
+            // The channel number, top left (as printed on a console)
+            if (! isVca())
+            {
+                g.setColour (text);
+                g.setFont (juce::FontOptions (30.0f, juce::Font::bold));
+                g.drawText (juce::String (track.getParent().indexOf (track) + 1), juce::Rectangle<float> (14.0f, 74.0f, 60.0f, 32.0f),
+                            juce::Justification::centredLeft, false);
+            }
+
             // Console mode: which strip this is
-            g.setColour (pluginMode ? theme::neon : dim);
+            g.setColour (pluginMode ? theme::knobArc.darker (0.3f) : dim);
             g.setFont (juce::FontOptions (19.0f, juce::Font::bold));
             g.drawText (pluginMode ? (stripInstance() != nullptr ? "PLUG" : "...") : juce::String ("EQ"),
                         juce::Rectangle<float> (64.0f, 30.0f, 76.0f, 40.0f), juce::Justification::centredRight, false);
@@ -857,9 +882,9 @@ void ChannelStrip::paint (juce::Graphics& g)
             g.drawText ("DYN", juce::Rectangle<float> (90.0f, 440.0f, 50.0f, 34.0f), juce::Justification::centredRight, false);
 
             // Section line, then Dynamics
-            g.setColour (juce::Colours::black.withAlpha (0.7f));
+            g.setColour (juce::Colours::black.withAlpha (0.35f));
             g.fillRect (10.0f, 659.0f, strip::artWidth - 20.0f, 2.0f);
-            g.setColour (juce::Colours::white.withAlpha (0.08f));
+            g.setColour (juce::Colours::white.withAlpha (0.5f));
             g.fillRect (10.0f, 661.0f, strip::artWidth - 20.0f, 1.5f);
             g.setColour (text);
             g.setFont (juce::FontOptions (30.0f));
@@ -886,44 +911,43 @@ void ChannelStrip::paint (juce::Graphics& g)
         }
     }
 
-    // The level display
+    // The level display: a dark window in the face
     {
         const auto r = dbLabel.getBounds().toFloat();
-        g.setColour (theme::lcd);
-        g.fillRoundedRectangle (r, 3.0f);
-        g.setColour (juce::Colours::black);
-        g.drawRoundedRectangle (r.reduced (0.5f), 3.0f, 1.0f);
+        g.setColour (juce::Colour (0xff2a2d30));
+        g.fillRoundedRectangle (r, 2.5f);
+        g.setColour (juce::Colours::black.withAlpha (0.6f));
+        g.drawRoundedRectangle (r.reduced (0.5f), 2.5f, 1.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.45f));
+        g.drawLine (r.getX() + 2.0f, r.getBottom() + 0.5f, r.getRight() - 2.0f, r.getBottom() + 0.5f, 1.0f);
     }
 
-    // Scribble strip: the name, lit in the track's colour
-    const auto plate = bounds.toFloat().withTop ((float) (getHeight() - nameHeight)).reduced (3.0f, 3.0f);
-    const auto base = isMaster() ? theme::neon.darker (0.4f) : model::trackColour (track);
-    g.setColour (base.darker (selected ? 0.0f : 0.25f).withAlpha (selected ? 1.0f : 0.92f));
-    g.fillRoundedRectangle (plate, 2.5f);
-    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.25f), 0.0f, plate.getY(),
-                                             juce::Colours::transparentWhite, 0.0f, plate.getCentreY(), false));
-    g.fillRoundedRectangle (plate, 2.5f);
-    g.setColour (juce::Colours::black.withAlpha (0.7f));
-    g.drawRoundedRectangle (plate, 2.5f, 1.0f);
+    // The name, printed at the foot of the strip, with the track's colour as a stripe above it
+    const auto plate = bounds.toFloat().withTop ((float) (getHeight() - nameHeight)).reduced (3.0f, 2.0f);
+    const auto base = isMaster() ? theme::knobArc : model::trackColour (track);
+    g.setColour (juce::Colours::black.withAlpha (0.08f));
+    g.fillRoundedRectangle (plate, 2.0f);
+    g.setColour (base.withAlpha (selected ? 1.0f : 0.85f));
+    g.fillRoundedRectangle (plate.withHeight (3.0f), 1.0f);
 
-    const auto name = isMaster() ? juce::String ("Main") : track[ids::name].toString();
-    g.setColour (base.getPerceivedBrightness() > 0.62f ? juce::Colour (0xff111214) : juce::Colours::white);
-    g.setFont (juce::FontOptions (13.5f, juce::Font::bold));
-    g.drawFittedText (name, plate.reduced (3.0f, 0.0f).toNearestInt(), juce::Justification::centred, 1, 0.75f);
+    const auto name = isMaster() ? juce::String ("Master") : track[ids::name].toString();
+    g.setColour (text);
+    g.setFont (juce::FontOptions (13.5f));
+    g.drawFittedText (name, plate.withTrimmedTop (3.0f).reduced (3.0f, 0.0f).toNearestInt(), juce::Justification::centred, 1, 0.75f);
 
-    // The selected track: a neon frame round the strip
+    // The selected track: a blue frame round the strip
     if (selected)
     {
-        g.setColour (theme::neon.withAlpha (0.25f));
+        g.setColour (theme::knobArc.withAlpha (0.3f));
         g.drawRect (bounds.toFloat().reduced (1.0f), 4.0f);
-        g.setColour (theme::neon);
+        g.setColour (theme::knobArc);
         g.drawRect (bounds.toFloat().reduced (1.5f), 1.6f);
     }
 
-    // Edges between strips
-    g.setColour (juce::Colours::white.withAlpha (0.06f));
+    // Edges between strips: a light bevel and a dark gap
+    g.setColour (juce::Colours::white.withAlpha (0.4f));
     g.fillRect (0, 0, 1, getHeight());
-    g.setColour (juce::Colour (0xff101112));
+    g.setColour (juce::Colour (0xff2a2c2f));
     g.fillRect (getWidth() - 2, 0, 2, getHeight());
 }
 
@@ -1073,7 +1097,7 @@ MasterBusCompressorPanel::MasterBusCompressorPanel (juce::UndoManager& um, Audio
 
     look::key (inButton, look::Key::cream);
     inButton.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
-    inButton.setColour (juce::TextButton::buttonOnColourId, theme::neon);
+    inButton.setColour (juce::TextButton::buttonOnColourId, theme::knobArc);
     inButton.setWantsKeyboardFocus (false);
     inButton.setTooltip ("Switch the Master Bus Compressor in or out");
     inButton.onClick = [this]
@@ -1088,7 +1112,7 @@ void MasterBusCompressorPanel::setup (juce::Slider& knob, const juce::Identifier
                                       double step, std::function<juce::String (double)> text, const juce::String& name)
 {
     look::knob (knob, cap);
-    look::onLight (knob);
+    look::onLight (knob, false);
     knob.setRange (min, max, step);
     knob.setScrollWheelEnabled (false);
     knob.setPopupDisplayEnabled (true, true, nullptr);
@@ -1136,8 +1160,9 @@ void MasterBusCompressorPanel::paint (juce::Graphics& g)
 {
     auto bounds = getLocalBounds();
 
-    g.setGradientFill (juce::ColourGradient (theme::console.brighter (0.08f), 0.0f, 0.0f,
-                                             theme::consoleShade, (float) getWidth(), (float) getHeight(), false));
+    // The centre section: a black panel.
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff222326), 0.0f, 0.0f,
+                                             juce::Colour (0xff141517), (float) getWidth(), (float) getHeight(), false));
     g.fillRect (bounds);
     g.setColour (theme::consoleDark);
     g.fillRect (0, 0, 1, getHeight());
@@ -1171,11 +1196,11 @@ void MasterBusCompressorPanel::paint (juce::Graphics& g)
     // IN lamp
     const auto lamp = juce::Rectangle<float> (12.0f, 12.0f).withCentre ({ (float) inButton.getRight() + 22.0f, (float) inButton.getBounds().getCentreY() });
     const bool on = inButton.getToggleState();
-    g.setColour (on ? theme::neon.brighter (0.3f) : juce::Colour (0xff1c2a3d));
+    g.setColour (on ? theme::knobArc.brighter (0.4f) : juce::Colour (0xff1c2a3d));
     g.fillRoundedRectangle (lamp, 2.0f);
     if (on)
     {
-        g.setColour (theme::neon.withAlpha (0.35f));
+        g.setColour (theme::knobArc.withAlpha (0.35f));
         g.fillRoundedRectangle (lamp.expanded (3.0f), 4.0f);
     }
     g.setColour (juce::Colours::black.withAlpha (0.6f));

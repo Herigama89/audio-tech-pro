@@ -1,4 +1,5 @@
 #include "ArrangeCanvas.h"
+#include "Commands.h"
 #include "Theme.h"
 #include "../model/Project.h"
 
@@ -1188,6 +1189,15 @@ void ArrangeCanvas::mouseDown (const juce::MouseEvent& e)
         if (onTrack)
             timeline.selectOnly (project.getChild (trackIndex)[ids::id].toString());
 
+        // Right-click on empty space: the tool menu (as in Logic).
+        if (e.mods.isPopupMenu())
+        {
+            timeline.changed();
+            if (onEmptyAreaMenu)
+                onEmptyAreaMenu();
+            return;
+        }
+
         // The pencil draws a new MIDI region on an instrument track (drag for its length).
         if (timeline.tool == TimelineState::Tool::pencil && onTrack && model::isInstrumentTrack (project.getChild (trackIndex))
             && ! e.mods.isPopupMenu())
@@ -1822,7 +1832,88 @@ void ArrangeCanvas::useTool (const juce::MouseEvent& e, juce::ValueTree region, 
 
 void ArrangeCanvas::showRegionMenu (juce::ValueTree region)
 {
+    // Logic's region shortcut menu: the edits, with their keys, then the region's own settings.
     juce::PopupMenu menu;
+    const bool midi = model::isMidiRegion (region);
+    menu.addSectionHeader (region[ids::name].toString().isNotEmpty() ? region[ids::name].toString() : juce::String (midi ? "MIDI region" : "Audio region"));
+
+    if (commandManager != nullptr)
+    {
+        for (const auto id : { commands::cutRegions, commands::copyRegions, commands::pasteRegions, commands::deleteSelection })
+            menu.addCommandItem (commandManager, id);
+        menu.addSeparator();
+        juce::PopupMenu split;
+        for (const auto id : { commands::splitAtPlayhead, commands::splitByLocators })
+            split.addCommandItem (commandManager, id);
+        menu.addSubMenu ("Split", split);
+        juce::PopupMenu trim;
+        for (const auto id : { commands::trimStartToPlayhead, commands::trimEndToPlayhead })
+            trim.addCommandItem (commandManager, id);
+        menu.addSubMenu ("Trim", trim);
+        for (const auto id : { commands::joinRegions, commands::repeatRegions, commands::muteRegions, commands::loopRegions })
+            menu.addCommandItem (commandManager, id);
+        menu.addSeparator();
+        menu.addCommandItem (commandManager, commands::bounceInPlace);
+        if (midi)
+        {
+            menu.addCommandItem (commandManager, commands::quantize);
+            menu.addCommandItem (commandManager, commands::showPianoRoll);
+            menu.addCommandItem (commandManager, commands::eventList);
+        }
+        else
+        {
+            menu.addCommandItem (commandManager, commands::regionGain);
+            menu.addCommandItem (commandManager, commands::removeFades);
+        }
+        menu.addSeparator();
+        menu.addItem ("Rename...", [this, region]
+        {
+            auto* window = new juce::AlertWindow ("Rename region", {}, juce::MessageBoxIconType::NoIcon);
+            window->addTextEditor ("name", region[ids::name].toString());
+            window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+            window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+            window->enterModalState (true, juce::ModalCallbackFunction::create ([this, window, region] (int result) mutable
+            {
+                if (result != 1)
+                    return;
+                undoManager.beginNewTransaction ("Rename region");
+                region.setProperty (ids::name, window->getTextEditorContents ("name"), &undoManager);
+            }), true);
+        });
+        if (! midi)
+        {
+            menu.addItem ("Audio File Editor (normalize, reverse, time stretch, transpose)...", [this, region] { if (onOpenAudioEditor) onOpenAudioEditor (region); });
+            juce::PopupMenu fades;
+            const auto setFades = [this, region] (double in, double out)
+            {
+                undoManager.beginNewTransaction ("Fade");
+                auto regions = timeline.selectedRegionTrees();
+                if (! regions.contains (region))
+                    regions = { region };
+                for (auto r : regions)
+                {
+                    if (in >= 0.0)  model::setFade (r, true, in, &undoManager);
+                    if (out >= 0.0) model::setFade (r, false, out, &undoManager);
+                }
+            };
+            for (auto ms : { 10, 50, 250, 1000 })
+                fades.addItem ("Fade in " + juce::String (ms) + " ms", [setFades, ms] { setFades (ms / 1000.0, -1.0); });
+            fades.addSeparator();
+            for (auto ms : { 10, 50, 250, 1000 })
+                fades.addItem ("Fade out " + juce::String (ms) + " ms", [setFades, ms] { setFades (-1.0, ms / 1000.0); });
+            menu.addSubMenu ("Fades", fades);
+        }
+        if (model::numTakes (region) > 0)
+        {
+            juce::PopupMenu takesMenu;
+            addTakeItems (takesMenu, region);
+            menu.addSeparator();
+            menu.addSubMenu ("Takes", takesMenu);
+        }
+        menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+        return;
+    }
+
     menu.addItem ("Split at playhead", [this] { if (onSplit) onSplit(); });
     menu.addItem ("Repeat", [this] { if (onRepeat) onRepeat(); });
     if (model::isMidiRegion (region))
