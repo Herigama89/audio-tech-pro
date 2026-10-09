@@ -666,6 +666,8 @@ void TrackHeaderList::paint (juce::Graphics& g)
                 juce::Justification::centredLeft);
     g.drawText ("Markers", getLocalBounds().withY (TimelineState::barRulerHeight).withHeight (TimelineState::markerHeight).reduced (12, 0),
                 juce::Justification::centredRight);
+    g.drawText ("Tempo", getLocalBounds().withY (TimelineState::tempoTop).withHeight (TimelineState::tempoHeight).reduced (12, 0),
+                juce::Justification::centredRight);
 }
 
 void TrackHeaderList::resized()

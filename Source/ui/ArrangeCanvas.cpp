@@ -38,33 +38,40 @@ void ArrangeCanvas::setProject (juce::ValueTree newProject)
 //==============================================================================
 // Grid
 //==============================================================================
-double ArrangeCanvas::gridSeconds() const
+double ArrangeCanvas::gridBeats() const
 {
+    // A beat when there's room, otherwise whole bars (doubling until they're 40 px apart). Sized at the start's tempo.
     const auto beat = model::secondsPerBeat (project);
-    const auto barLength = beat * (int) project.getProperty (ids::timeSigNumerator, 4);
+    const int beatsPerBar = juce::jmax (1, (int) project.getProperty (ids::timeSigNumerator, 4));
 
     if (beat * timeline.pixelsPerSecond >= 14.0)
-        return beat;
+        return 1.0;
 
     double bars = 1.0;
-    while (barLength * bars * timeline.pixelsPerSecond < 40.0)
+    while (beat * beatsPerBar * bars * timeline.pixelsPerSecond < 40.0)
         bars *= 2.0;
-    return barLength * bars;
+    return beatsPerBar * bars;
+}
+
+double ArrangeCanvas::gridSeconds() const
+{
+    return gridBeats() * model::secondsPerBeat (project);
 }
 
 double ArrangeCanvas::snap (double t) const
 {
-    const auto beat = model::secondsPerBeat (project);
-    double grid = gridSeconds();
+    // On the tempo track's beats: the grid is in beats, so it follows tempo changes.
+    double grid = gridBeats();
     switch (timeline.snapMode)
     {
         case TimelineState::Snap::off:      return juce::jmax (0.0, t);
-        case TimelineState::Snap::bar:      grid = beat * (int) project.getProperty (ids::timeSigNumerator, 4); break;
-        case TimelineState::Snap::beat:     grid = beat; break;
-        case TimelineState::Snap::division: grid = beat / 4.0; break;
+        case TimelineState::Snap::bar:      grid = (int) project.getProperty (ids::timeSigNumerator, 4); break;
+        case TimelineState::Snap::beat:     grid = 1.0; break;
+        case TimelineState::Snap::division: grid = 0.25; break;
         case TimelineState::Snap::smart:    break;
     }
-    return juce::jmax (0.0, std::round (t / grid) * grid);
+    const auto map = model::tempoMapOf (project);
+    return juce::jmax (0.0, map.secondsAt (std::round (map.beatAt (juce::jmax (0.0, t)) / grid) * grid));
 }
 
 //==============================================================================
@@ -202,20 +209,19 @@ void ArrangeCanvas::paint (juce::Graphics& g)
 
 void ArrangeCanvas::paintGrid (juce::Graphics& g)
 {
-    const auto beat = model::secondsPerBeat (project);
-    const int beatsPerBar = project.getProperty (ids::timeSigNumerator, 4);
-    const auto grid = gridSeconds();
-    const auto barLength = beat * beatsPerBar;
+    const int beatsPerBar = juce::jmax (1, (int) project.getProperty (ids::timeSigNumerator, 4));
+    const auto grid = gridBeats();
+    const auto map = model::tempoMapOf (project);
 
-    const auto t0 = timeline.scrollSeconds;
-    const auto t1 = timeline.xToTime ((float) getWidth());
+    const auto b0 = map.beatAt (timeline.scrollSeconds);
+    const auto b1 = map.beatAt (timeline.xToTime ((float) getWidth()));
     const auto bottom = (float) juce::jmin (getHeight(), timeline.trackTop (model::numTracks (project)));
 
-    for (auto i = (juce::int64) std::floor (t0 / grid); (double) i * grid <= t1; ++i)
+    for (auto i = (juce::int64) std::floor (b0 / grid); (double) i * grid <= b1; ++i)
     {
-        const auto t = (double) i * grid;
-        const auto x = timeline.timeToX (t);
-        const bool isBar = std::abs (std::remainder (t, barLength)) < 1e-6;
+        const auto b = (double) i * grid;
+        const auto x = timeline.timeToX (map.secondsAt (b));
+        const bool isBar = std::abs (std::remainder (b, (double) beatsPerBar)) < 1e-6;
 
         g.setColour (isBar ? theme::gridBar : theme::gridBeat);
         g.fillRect (x, (float) TimelineState::rulerHeight, 1.0f, bottom - (float) TimelineState::rulerHeight);
@@ -225,9 +231,10 @@ void ArrangeCanvas::paintGrid (juce::Graphics& g)
 void ArrangeCanvas::paintRuler (juce::Graphics& g)
 {
     const auto beat = model::secondsPerBeat (project);
-    const int beatsPerBar = project.getProperty (ids::timeSigNumerator, 4);
+    const int beatsPerBar = juce::jmax (1, (int) project.getProperty (ids::timeSigNumerator, 4));
     const auto barLength = beat * beatsPerBar;
     const auto rh = (float) TimelineState::barRulerHeight;
+    const auto map = model::tempoMapOf (project);
 
     // Gold ruler
     g.setGradientFill (juce::ColourGradient (theme::ruler.brighter (0.1f), 0.0f, 0.0f, theme::rulerDark, 0.0f, rh, false));
@@ -243,9 +250,9 @@ void ArrangeCanvas::paintRuler (juce::Graphics& g)
 
     g.setFont (juce::FontOptions (11.0f));
 
-    for (auto bar = (juce::int64) std::floor (timeline.scrollSeconds / barLength); (double) bar * barLength <= t1; ++bar)
+    for (auto bar = (juce::int64) std::floor (map.beatAt (timeline.scrollSeconds) / beatsPerBar); map.secondsAt ((double) bar * beatsPerBar) <= t1; ++bar)
     {
-        const auto x = timeline.timeToX ((double) bar * barLength);
+        const auto x = timeline.timeToX (map.secondsAt ((double) bar * beatsPerBar));
 
         if (bar % labelEvery == 0)
         {
@@ -260,7 +267,7 @@ void ArrangeCanvas::paintRuler (juce::Graphics& g)
         {
             g.setColour (theme::ink.withAlpha (0.35f));
             for (int b = 1; b < beatsPerBar; ++b)
-                g.fillRect (timeline.timeToX ((double) bar * barLength + b * beat), rh * 0.75f, 1.0f, rh * 0.25f);
+                g.fillRect (timeline.timeToX (map.secondsAt ((double) bar * beatsPerBar + b)), rh * 0.75f, 1.0f, rh * 0.25f);
         }
     }
 
@@ -269,6 +276,132 @@ void ArrangeCanvas::paintRuler (juce::Graphics& g)
 
     paintCycle (g);
     paintMarkers (g);
+    paintTempo (g);
+}
+
+void ArrangeCanvas::paintTempo (juce::Graphics& g)
+{
+    // The tempo track: the tempo as a stepped line, with each change's BPM written beside it.
+    const auto top = (float) TimelineState::tempoTop;
+    const auto lane = juce::Rectangle<float> (0.0f, top, (float) getWidth(), (float) TimelineState::tempoHeight);
+    g.setColour (theme::toolbarDark.darker (0.2f));
+    g.fillRect (lane);
+
+    const auto changes = model::sortedTempoChanges (project);
+    const auto map = model::tempoMapOf (project);
+    double lo = 60.0 / map.segments.front().secondsPerBeat, hi = lo;
+    for (const auto& s : map.segments)
+    {
+        lo = juce::jmin (lo, 60.0 / s.secondsPerBeat);
+        hi = juce::jmax (hi, 60.0 / s.secondsPerBeat);
+    }
+    const auto yOf = [&] (double bpm) { return hi - lo < 0.5 ? lane.getCentreY() : lane.getBottom() - 4.0f - (float) ((bpm - lo) / (hi - lo)) * (lane.getHeight() - 8.0f); };
+
+    juce::Path line;
+    line.startNewSubPath (0.0f, yOf (map.bpmAt (timeline.scrollSeconds)));
+    for (const auto& s : map.segments)
+    {
+        const auto x = timeline.timeToX (s.startSeconds);
+        if (x <= 0.0f)
+            continue;
+        line.lineTo (x, line.getCurrentPosition().y);
+        line.lineTo (x, yOf (60.0 / s.secondsPerBeat));
+    }
+    line.lineTo ((float) getWidth(), line.getCurrentPosition().y);
+    g.setColour (juce::Colour (0xff4fd07a).withAlpha (0.8f));
+    g.strokePath (line, juce::PathStrokeType (1.5f));
+
+    g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+    g.setColour (juce::Colours::white);
+    g.drawText (juce::String ((double) project.getProperty (ids::tempo, 120.0), 1) + " BPM",
+                juce::Rectangle<float> (4.0f, top, 80.0f, lane.getHeight()), juce::Justification::centredLeft, false);
+    for (const auto& c : changes)
+    {
+        const auto x = timeline.timeToX (map.secondsAt (c[ids::beat]));
+        if (x < -40.0f || x > (float) getWidth())
+            continue;
+        const bool selected = timeline.selectedTempoId == c[ids::id].toString();
+        g.setColour (selected ? theme::neon : juce::Colours::white);
+        g.fillRect (x - 1.0f, top + 1.0f, 2.0f, lane.getHeight() - 2.0f);
+        g.drawText (juce::String ((double) c[ids::bpm], 1), juce::Rectangle<float> (x + 4.0f, top, 60.0f, lane.getHeight()),
+                    juce::Justification::centredLeft, false);
+    }
+
+    g.setColour (juce::Colours::black.withAlpha (0.7f));
+    g.fillRect (0.0f, lane.getBottom() - 1.0f, (float) getWidth(), 1.0f);
+}
+
+juce::ValueTree ArrangeCanvas::tempoChangeAt (float x) const
+{
+    const auto map = model::tempoMapOf (project);
+    for (const auto& c : model::sortedTempoChanges (project))
+    {
+        const auto cx = timeline.timeToX (map.secondsAt (c[ids::beat]));
+        if (x >= cx - 4.0f && x <= cx + 40.0f)
+            return c;
+    }
+    return {};
+}
+
+void ArrangeCanvas::editTempoChange (juce::ValueTree change, double beat)
+{
+    // Type a BPM: for an existing change, or a new one at `beat`.
+    const auto current = change.isValid() ? (double) change[ids::bpm]
+                                          : model::tempoMapOf (project).bpmAt (model::tempoMapOf (project).secondsAt (beat));
+    auto* window = new juce::AlertWindow (change.isValid() ? "Tempo change" : "New tempo change",
+                                          "Tempo (BPM) from here:", juce::MessageBoxIconType::NoIcon);
+    window->addTextEditor ("bpm", juce::String (current, 1));
+    window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([this, window, change, beat] (int result) mutable
+    {
+        const auto bpm = window->getTextEditorContents ("bpm").getDoubleValue();
+        if (result != 1 || bpm < 20.0 || bpm > 400.0)
+            return;
+        undoManager.beginNewTransaction ("Tempo change");
+        if (change.isValid())
+            change.setProperty (ids::bpm, bpm, &undoManager);
+        else
+            timeline.selectedTempoId = model::addTempoChange (project, beat, bpm, &undoManager)[ids::id].toString();
+        timeline.changed();
+    }), true);
+}
+
+void ArrangeCanvas::tempoMouseDown (const juce::MouseEvent& e)
+{
+    auto change = tempoChangeAt ((float) e.x);
+    timeline.selectedTempoId = change.isValid() ? change[ids::id].toString() : juce::String();
+    timeline.changed();
+
+    if (e.mods.isPopupMenu())
+    {
+        juce::PopupMenu menu;
+        const auto map = model::tempoMapOf (project);
+        const int beatsPerBar = juce::jmax (1, (int) project.getProperty (ids::timeSigNumerator, 4));
+        const auto beat = std::round (map.beatAt (timeline.xToTime ((float) e.x)) / beatsPerBar) * beatsPerBar;
+        menu.addItem ("New tempo change here...", [this, beat] { editTempoChange ({}, beat); });
+        if (change.isValid())
+        {
+            menu.addItem ("Change tempo...", [this, change] { editTempoChange (change, 0.0); });
+            menu.addItem ("Delete tempo change", [this, change]() mutable
+            {
+                undoManager.beginNewTransaction ("Delete tempo change");
+                change.getParent().removeChild (change, &undoManager);
+            });
+        }
+        menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+        return;
+    }
+
+    if (change.isValid())
+    {
+        // Drag sideways to move it (on beats), up and down to change its tempo.
+        undoManager.beginNewTransaction ("Move tempo change");
+        dragTempo = change;
+        dragOriginalStart = change[ids::beat];
+        dragTempoBpm = change[ids::bpm];
+        dragMode = DragMode::tempo;
+    }
 }
 
 void ArrangeCanvas::paintMarkers (juce::Graphics& g)
@@ -811,6 +944,11 @@ void ArrangeCanvas::mouseDown (const juce::MouseEvent& e)
         if (engine.isRecording())
             return;
 
+        if (e.y >= TimelineState::tempoTop)
+        {
+            tempoMouseDown (e);
+            return;
+        }
         if (e.y >= TimelineState::barRulerHeight)
         {
             markerMouseDown (e);
@@ -1139,6 +1277,23 @@ void ArrangeCanvas::mouseDrag (const juce::MouseEvent& e)
             const auto b = maybeSnap (timeline.xToTime ((float) e.x));
             if (std::abs (b - a) >= model::minRegionLength)
                 model::setCycle (project, juce::jmin (a, b), juce::jmax (a, b), true);
+            break;
+        }
+
+        case DragMode::tempo:
+        {
+            if (! dragTempo.isValid() || e.getDistanceFromDragStart() < 3)
+                break;
+            const auto map = model::tempoMapOf (project);
+            // Vertical: tempo (1 BPM per 2 pixels); sideways: position, on beats (Cmd: sixteenths).
+            if (std::abs (e.getDistanceFromDragStartY()) > std::abs (e.getDistanceFromDragStartX()))
+                dragTempo.setProperty (ids::bpm, juce::jlimit (20.0, 400.0, std::round (dragTempoBpm - e.getDistanceFromDragStartY() * 0.5)), &undoManager);
+            else
+            {
+                const auto grid = e.mods.isCommandDown() ? 0.25 : 1.0;
+                const auto beat = std::round (map.beatAt (timeline.xToTime ((float) e.x)) / grid) * grid;
+                dragTempo.setProperty (ids::beat, juce::jmax (grid, beat), &undoManager);
+            }
             break;
         }
 
@@ -1535,8 +1690,22 @@ void ArrangeCanvas::showTakeMenu (juce::ValueTree region)
 
 void ArrangeCanvas::mouseDoubleClick (const juce::MouseEvent& e)
 {
+    // In the tempo track: a new tempo change on the nearest bar, or change one.
+    if (e.y >= TimelineState::tempoTop && e.y < TimelineState::rulerHeight)
+    {
+        if (auto change = tempoChangeAt ((float) e.x); change.isValid())
+            editTempoChange (change, 0.0);
+        else
+        {
+            const auto map = model::tempoMapOf (project);
+            const int beatsPerBar = juce::jmax (1, (int) project.getProperty (ids::timeSigNumerator, 4));
+            editTempoChange ({}, juce::jmax ((double) beatsPerBar, std::round (map.beatAt (timeline.xToTime ((float) e.x)) / beatsPerBar) * beatsPerBar));
+        }
+        return;
+    }
+
     // In the marker track: rename a marker, or make one where you double-click.
-    if (e.y >= TimelineState::barRulerHeight && e.y < TimelineState::rulerHeight)
+    if (e.y >= TimelineState::barRulerHeight && e.y < TimelineState::tempoTop)
     {
         if (auto marker = markerAt ((float) e.x); marker.isValid() && (float) e.x - timeline.timeToX ((double) marker[ids::time]) < 90.0f)
         {

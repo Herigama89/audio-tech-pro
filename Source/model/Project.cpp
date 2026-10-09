@@ -984,6 +984,71 @@ int numTracks (const juce::ValueTree& project)
     return n;
 }
 
+juce::ValueTree tempoTrackOf (juce::ValueTree project)
+{
+    auto tempo = project.getChildWithName (ids::TEMPO);
+    if (! tempo.isValid())
+    {
+        tempo = juce::ValueTree (ids::TEMPO);
+        project.appendChild (tempo, nullptr);
+    }
+    return tempo;
+}
+
+juce::ValueTree addTempoChange (juce::ValueTree project, double beat, double bpm, juce::UndoManager* um)
+{
+    juce::ValueTree change (ids::TEMPOCHANGE);
+    change.setProperty (ids::id, newId(), nullptr);
+    change.setProperty (ids::beat, juce::jmax (0.0, beat), nullptr);
+    change.setProperty (ids::bpm, juce::jlimit (20.0, 400.0, bpm), nullptr);
+    tempoTrackOf (project).appendChild (change, um);
+    return change;
+}
+
+juce::Array<juce::ValueTree> sortedTempoChanges (const juce::ValueTree& project)
+{
+    juce::Array<juce::ValueTree> changes;
+    for (const auto& c : project.getChildWithName (ids::TEMPO))
+        if (c.hasType (ids::TEMPOCHANGE))
+            changes.add (c);
+    std::stable_sort (changes.begin(), changes.end(), [] (const juce::ValueTree& a, const juce::ValueTree& b)
+                      { return (double) a[ids::beat] < (double) b[ids::beat]; });
+    return changes;
+}
+
+TempoMap tempoMapOf (const juce::ValueTree& project)
+{
+    auto map = TempoMap::constant (secondsPerBeat (project));
+    for (const auto& c : sortedTempoChanges (project))
+        if ((double) c[ids::beat] > 1.0e-9)
+            map.addChange (c[ids::beat], 60.0 / juce::jlimit (20.0, 400.0, (double) c[ids::bpm]));
+    return map;
+}
+
+BarPosition barPositionAt (const juce::ValueTree& project, double seconds)
+{
+    const int beatsPerBar = juce::jmax (1, (int) project.getProperty (ids::timeSigNumerator, 4));
+    const auto beats = juce::jmax (0.0, tempoMapOf (project).beatAt (seconds));
+    const auto bar = (int) std::floor (beats / beatsPerBar + 1.0e-9);
+    const auto inBar = beats - bar * beatsPerBar;
+    const auto beat = juce::jlimit (0, beatsPerBar - 1, (int) std::floor (inBar + 1.0e-9));
+    const auto quarters = (inBar - beat) * 4.0;
+    const auto sixteenth = juce::jlimit (0, 3, (int) std::floor (quarters + 1.0e-9));
+    return { bar + 1, beat + 1, sixteenth + 1, quarters - sixteenth };
+}
+
+double moveByBars (const juce::ValueTree& project, double seconds, int bars)
+{
+    const int beatsPerBar = juce::jmax (1, (int) project.getProperty (ids::timeSigNumerator, 4));
+    const auto map = tempoMapOf (project);
+    const auto beat = map.beatAt (seconds);
+    auto bar = std::floor (beat / beatsPerBar + 1.0e-9);
+    // Back from inside a bar goes to its start first.
+    if (bars < 0 && beat - bar * beatsPerBar > 1.0e-6)
+        bar += 1.0;
+    return juce::jmax (0.0, map.secondsAt ((bar + bars) * beatsPerBar));
+}
+
 juce::ValueTree markersOf (juce::ValueTree project)
 {
     auto markers = project.getChildWithName (ids::MARKERS);

@@ -1821,3 +1821,22 @@ TEST_CASE ("Groups link tracks", "[model][mixer]")
     CHECK (members.contains (c));
     CHECK_FALSE (members.contains (b));
 }
+
+TEST_CASE ("The metronome follows the tempo track", "[engine][tempo]")
+{
+    Fixture f;
+    f.project.setProperty (ids::tempo, 120.0, nullptr);
+    f.project.setProperty (ids::metronome, true, nullptr);
+    model::addTempoChange (f.project, 2.0, 60.0, nullptr);   // beats at 0, 0.5, then 1.0, 2.0 s
+    f.player.setProject (f.project);
+    f.engine.setPlayheadSeconds (0.0);
+    f.engine.play();
+    const auto out = renderLeft (f.engine, 48000 * 3);
+
+    // Clicks start where the beats are: 0, 0.5, 1.0 and 2.0 s, and not at 1.5 s.
+    const auto loudNear = [&out] (int sample) { float m = 0.0f; for (int i = sample; i < sample + 200; ++i) m = juce::jmax (m, std::abs (out[(size_t) i])); return m; };
+    CHECK (loudNear (24000) > 0.05f);
+    CHECK (loudNear (48000) > 0.05f);
+    CHECK (loudNear (72000) < 0.001f);
+    CHECK (loudNear (96000) > 0.05f);
+}

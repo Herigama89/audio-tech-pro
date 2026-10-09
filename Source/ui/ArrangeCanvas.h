@@ -32,6 +32,7 @@ public:
 
     /** Grid size in seconds at the current zoom: a beat, or a bar when zoomed out. */
     double gridSeconds() const;
+    double gridBeats() const;
     double snap (double t) const;
 
     void paint (juce::Graphics& g) override;
@@ -63,7 +64,13 @@ public:
 
 private:
     enum class DragMode { none, scrub, move, trimStart, trimEnd, cycleNew, cycleMove, automationPoint, rubberBand, pencilRegion, marker,
-                          fadeIn, fadeOut, loopEnd, punch, marquee, zoomRect, solo };
+                          fadeIn, fadeOut, loopEnd, punch, marquee, zoomRect, solo, tempo };
+    void paintTempo (juce::Graphics& g);
+    juce::ValueTree tempoChangeAt (float x) const;
+    void tempoMouseDown (const juce::MouseEvent& e);
+    void editTempoChange (juce::ValueTree change, double beat);
+    juce::ValueTree dragTempo;
+    double dragTempoBpm = 120.0;
     juce::ValueTree soloTrack;      // the Solo tool's track while the mouse is held
     bool soloWasOn = false;
     juce::Rectangle<float> punchBounds() const;

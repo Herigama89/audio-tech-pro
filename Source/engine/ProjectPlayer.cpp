@@ -170,6 +170,7 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
     graph->metronome = project.getProperty (ids::metronome, false);
     graph->busComp = MasterBusCompressor::fromProject (project);
     graph->secondsPerBeat = model::secondsPerBeat (project);
+    graph->tempo = model::tempoMapOf (project);
     graph->beatsPerBar = juce::jlimit (1, 16, (int) project.getProperty (ids::timeSigNumerator, 4));
 
     auto toSamples = [sampleRate] (double seconds) { return (juce::int64) std::llround (seconds * sampleRate); };

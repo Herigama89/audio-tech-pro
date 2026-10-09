@@ -208,10 +208,13 @@ double PianoRoll::gridSeconds() const
 
 double PianoRoll::snapContent (double c, double grid) const
 {
-    // The grid follows the song's bars, not the region's start.
+    // The grid follows the song's bars (and the tempo track), not the region's start.
     const double regionStart = region[ids::start], offset = region[ids::offset];
+    const auto map = model::tempoMapOf (region.getParent().getParent());
     const auto t = regionStart + c - offset;
-    return juce::jmax (0.0, std::round (t / grid) * grid - regionStart + offset);
+    const auto gridBeats = grid / map.secondsPerBeatAt (t);
+    const auto snapped = map.secondsAt (std::round (map.beatAt (t) / gridBeats) * gridBeats);
+    return juce::jmax (0.0, snapped - regionStart + offset);
 }
 
 juce::Rectangle<float> PianoRoll::noteBounds (const juce::ValueTree& note) const
@@ -300,18 +303,18 @@ void PianoRoll::paint (juce::Graphics& g)
 
         // Grid lines, aligned to the song's bars.
         const double regionStart = region[ids::start], offset = region[ids::offset];
-        const auto grid = gridSeconds();
-        const auto beat = model::secondsPerBeat (project);
-        const auto bar = beat * (int) project.getProperty (ids::timeSigNumerator, 4);
-        const auto tFrom = regionStart + xToContent ((float) area.getX()) - offset;
-        const auto tTo = regionStart + xToContent ((float) area.getRight()) - offset;
+        const auto map = model::tempoMapOf (project);
+        const auto gridBeats = gridSeconds() / model::secondsPerBeat (project);
+        const auto beatsPerBar = (double) juce::jmax (1, (int) project.getProperty (ids::timeSigNumerator, 4));
+        const auto bFrom = map.beatAt (juce::jmax (0.0, regionStart + xToContent ((float) area.getX()) - offset));
+        const auto bTo = map.beatAt (juce::jmax (0.0, regionStart + xToContent ((float) area.getRight()) - offset));
 
-        for (auto k = (juce::int64) std::floor (tFrom / grid); (double) k * grid <= tTo; ++k)
+        for (auto k = (juce::int64) std::floor (bFrom / gridBeats); (double) k * gridBeats <= bTo; ++k)
         {
-            const auto t = (double) k * grid;
-            const auto x = contentToX (t - regionStart + offset);
-            const bool isBar = std::abs (std::remainder (t, bar)) < 1e-6;
-            const bool isBeat = std::abs (std::remainder (t, beat)) < 1e-6;
+            const auto b = (double) k * gridBeats;
+            const auto x = contentToX (map.secondsAt (b) - regionStart + offset);
+            const bool isBar = std::abs (std::remainder (b, beatsPerBar)) < 1e-6;
+            const bool isBeat = std::abs (std::remainder (b, 1.0)) < 1e-6;
             g.setColour (isBar ? theme::gridBar.brighter (0.3f) : isBeat ? theme::gridBar : theme::gridBeat);
             g.fillRect (x, (float) area.getY(), 1.0f, (float) area.getHeight());
         }

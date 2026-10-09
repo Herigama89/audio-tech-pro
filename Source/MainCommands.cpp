@@ -862,24 +862,15 @@ void MainComponent::zoomVertically (int steps)
 
 void MainComponent::moveByBars (int bars)
 {
-    const double bpm = project.getProperty (ids::tempo, 120.0);
-    const int beatsPerBar = project.getProperty (ids::timeSigNumerator, 4);
-    const auto barLength = 60.0 / bpm * beatsPerBar;
-
-    // From inside a bar, "back" goes to that bar's start first, as in Logic.
-    const auto now = engine.getPlayheadSeconds();
-    const auto currentBar = std::floor (now / barLength + 1.0e-6);
-    const auto onBarLine = std::abs (now - currentBar * barLength) < 1.0e-3;
-    const auto target = bars < 0 ? (onBarLine ? currentBar - 1.0 : currentBar) : currentBar + 1.0;
-
-    const auto time = juce::jmax (0.0, target * barLength);
+    // From inside a bar, "back" goes to that bar's start first, as in Logic (bars follow the tempo track).
+    const auto time = model::moveByBars (project, engine.getPlayheadSeconds(), bars);
     engine.setPlayheadSeconds (time);
 
     // Follow the playhead if it leaves the screen.
     const auto x = timeline.timeToX (time);
     if (x < 0.0f || x > (float) canvas.getWidth())
     {
-        timeline.scrollSeconds = juce::jmax (0.0, time - 2.0 * barLength);
+        timeline.scrollSeconds = juce::jmax (0.0, time - 2.0 * model::secondsPerBeat (project) * (int) project.getProperty (ids::timeSigNumerator, 4));
         timeline.changed();
     }
 

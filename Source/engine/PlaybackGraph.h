@@ -5,6 +5,7 @@
 #include "Effect.h"
 #include "MasterBusCompressor.h"
 #include "ConsoleChannel.h"
+#include "../model/TempoMap.h"
 #include <vector>
 
 namespace riff
@@ -144,6 +145,7 @@ struct PlaybackGraph
     bool cycleEnabled = false;
     juce::int64 cycleStart = 0, cycleEnd = 0;   // samples; playback wraps from end to start
     double secondsPerBeat = 0.5;
+    TempoMap tempo;                 // the tempo track (the metronome follows it)
     int beatsPerBar = 4;
     std::vector<Track> tracks;
     std::vector<std::shared_ptr<Effect>> masterInserts;

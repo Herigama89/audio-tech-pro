@@ -1295,16 +1295,22 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
 void AudioEngine::renderClick (const PlaybackGraph& graph, float* mixL, float* mixR, int n) noexcept
 {
     const auto rate = sampleRate.load();
-    const auto samplesPerBeat = graph.secondsPerBeat * rate;
-
-    if (samplesPerBeat < 1.0)
+    if (graph.secondsPerBeat * rate < 1.0)
         return;
 
     const auto blockStart = playheadSample.load();
+    const auto& tempo = graph.tempo;
+    const auto beatToSample = [&tempo, rate] (juce::int64 b)
+    {
+        // Count-in beats before 0 use the starting tempo.
+        return (juce::int64) std::llround ((b >= 0 ? tempo.secondsAt ((double) b) : (double) b * tempo.segments.front().secondsPerBeat) * rate);
+    };
 
-    // The first beat at or after the start of this chunk.
-    auto beat = (juce::int64) std::ceil ((double) blockStart / samplesPerBeat - 1e-9);
-    auto nextBeatSample = (juce::int64) std::llround ((double) beat * samplesPerBeat);
+    // The first beat at or after the start of this chunk (on the tempo track).
+    const auto startSeconds = (double) blockStart / rate;
+    const auto beatNow = startSeconds >= 0.0 ? tempo.beatAt (startSeconds) : startSeconds / tempo.segments.front().secondsPerBeat;
+    auto beat = (juce::int64) std::ceil (beatNow - 1e-9);
+    auto nextBeatSample = beatToSample (beat);
 
     for (int i = 0; i < n; ++i)
     {
@@ -1317,7 +1323,7 @@ void AudioEngine::renderClick (const PlaybackGraph& graph, float* mixL, float* m
             clickSamplesLeft = clickLength;
 
             ++beat;
-            nextBeatSample = (juce::int64) std::llround ((double) beat * samplesPerBeat);
+            nextBeatSample = beatToSample (beat);
         }
 
         if (clickSamplesLeft > 0)

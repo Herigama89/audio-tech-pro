@@ -579,3 +579,30 @@ TEST_CASE ("MIDI: quantize strength and swing, scale quantize, transforms, contr
     CHECK ((double) mod[0][ids::start] == 0.5);
     CHECK (model::controllerName (model::pitchBend) == "Pitch Bend");
 }
+
+TEST_CASE ("The tempo track: changes on beats, bars and beats follow them", "[model][tempo]")
+{
+    auto project = model::createProject();
+    project.setProperty (ids::tempo, 120.0, nullptr);   // 0.5 s a beat
+    auto map = model::tempoMapOf (project);
+    CHECK (map.isConstant());
+    CHECK_THAT (map.secondsAt (8.0), WithinAbs (4.0, 1e-9));
+
+    // From bar 3 (beat 8), 60 BPM: a beat a second.
+    model::addTempoChange (project, 8.0, 60.0, nullptr);
+    map = model::tempoMapOf (project);
+    CHECK_THAT (map.secondsAt (8.0), WithinAbs (4.0, 1e-9));
+    CHECK_THAT (map.secondsAt (10.0), WithinAbs (6.0, 1e-9));
+    CHECK_THAT (map.beatAt (6.0), WithinAbs (10.0, 1e-9));
+    CHECK_THAT (map.bpmAt (5.0), WithinAbs (60.0, 1e-9));
+    CHECK_THAT (map.bpmAt (1.0), WithinAbs (120.0, 1e-9));
+
+    const auto p = model::barPositionAt (project, 6.0);   // beat 10 = bar 3, beat 3
+    CHECK (p.bar == 3);
+    CHECK (p.beat == 3);
+    CHECK (p.sixteenth == 1);
+
+    CHECK_THAT (model::moveByBars (project, 4.0, 1), WithinAbs (8.0, 1e-9));    // bar 3 -> bar 4 takes 4 s now
+    CHECK_THAT (model::moveByBars (project, 5.0, -1), WithinAbs (4.0, 1e-9));   // inside bar 3: back to its start
+    CHECK_THAT (model::moveByBars (project, 4.0, -1), WithinAbs (2.0, 1e-9));
+}

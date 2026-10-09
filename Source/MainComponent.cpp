@@ -1696,11 +1696,9 @@ juce::String MainComponent::formatPosition (double seconds) const
     if (seconds < 0.0) // count-in: show the beats left
         return "- " + juce::String ((int) std::ceil (-seconds / beatLength - 1e-9)) + " -";
 
-    const auto beats = seconds / beatLength;
-
-    const auto bar = (int) std::floor (beats / beatsPerBar) + 1;
-    const auto beat = (int) std::floor (beats) % beatsPerBar + 1;
-    const auto sixteenth = (int) std::floor ((beats - std::floor (beats)) * 4.0) + 1;
+    juce::ignoreUnused (beatsPerBar);
+    const auto position = model::barPositionAt (project, seconds);
+    const auto bar = position.bar, beat = position.beat, sixteenth = position.sixteenth;
 
     return juce::String::formatted ("%3d  %d  %d", bar, beat, sixteenth);
 }

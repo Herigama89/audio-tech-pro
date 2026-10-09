@@ -14,7 +14,9 @@ struct TimelineState : public juce::ChangeBroadcaster
 {
     static constexpr int barRulerHeight = 28;               // the gold bar ruler (cycle in its top half)
     static constexpr int markerHeight = 18;                 // the marker track below it
-    static constexpr int rulerHeight = barRulerHeight + markerHeight;   // everything above the tracks
+    static constexpr int tempoHeight = 18;                  // the tempo track below that
+    static constexpr int tempoTop = barRulerHeight + markerHeight;
+    static constexpr int rulerHeight = barRulerHeight + markerHeight + tempoHeight;   // everything above the tracks
     static constexpr int trackHeight = 76;        // a track's height until you resize it
     static constexpr int minTrackHeight = 30, maxTrackHeight = 400;
     static constexpr double minPixelsPerSecond = 2.0;
@@ -84,6 +86,7 @@ struct TimelineState : public juce::ChangeBroadcaster
     /** The Marquee tool's selection: a stretch of time on some tracks (empty when there's none). */
     double marqueeStart = 0.0, marqueeEnd = 0.0;
     juce::StringArray marqueeTracks;
+    juce::String selectedTempoId;   // a tempo change, in the tempo track
     bool hasMarquee() const noexcept { return marqueeEnd > marqueeStart && ! marqueeTracks.isEmpty(); }
     void clearMarquee() { marqueeStart = marqueeEnd = 0.0; marqueeTracks.clear(); }
     Tool tool = Tool::pointer;

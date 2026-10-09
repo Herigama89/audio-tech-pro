@@ -1,4 +1,5 @@
 #pragma once
+#include "TempoMap.h"
 
 #include <JuceHeader.h>
 #include "Identifiers.h"
@@ -294,6 +295,26 @@ namespace riff::model
 
     /** What a parameter can be set to (volume is drawn in dB but stored as gain). */
     ParamRange rangeOf (const juce::ValueTree& project, const juce::String& param);
+
+    // --- Tempo track ------------------------------------------------------------
+    /** The TEMPO node (changes after the start; the starting tempo is the project's tempo), created if needed. */
+    juce::ValueTree tempoTrackOf (juce::ValueTree project);
+
+    /** A tempo change at a beat (quarter notes from the start). */
+    juce::ValueTree addTempoChange (juce::ValueTree project, double beat, double bpm, juce::UndoManager* um);
+
+    /** The changes in beat order. */
+    juce::Array<juce::ValueTree> sortedTempoChanges (const juce::ValueTree& project);
+
+    /** The whole tempo map: the project's tempo, then each change. */
+    TempoMap tempoMapOf (const juce::ValueTree& project);
+
+    /** Bars and beats for a time, using the tempo map: bar (1-based), beat (1-based), sixteenth (1-based), fraction. */
+    struct BarPosition { int bar, beat, sixteenth; double fraction; };
+    BarPosition barPositionAt (const juce::ValueTree& project, double seconds);
+
+    /** The time `bars` bars away from `seconds` (on the bar grid). */
+    double moveByBars (const juce::ValueTree& project, double seconds, int bars);
 
     // --- Markers (Logic's marker track) -----------------------------------------
     /** The MARKERS node (after the MIXER), created if needed. */
