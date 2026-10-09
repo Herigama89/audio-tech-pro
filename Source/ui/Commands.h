@@ -28,7 +28,8 @@ namespace riff::commands
         zoomVerticalIn, zoomVerticalOut, toggleInspector,
         // Edit (added later; ids kept stable for saved key mappings)
         cutRegions = 0x2501, copyRegions, pasteRegions, selectAllRegions, repeatRegions, joinRegions, muteRegions,
-        nudgeLeft, nudgeRight, toolMenu
+        nudgeLeft, nudgeRight, toolMenu,
+        createMarker = 0x2601, nextMarker, previousMarker, deleteMarker
     };
 
     struct Info

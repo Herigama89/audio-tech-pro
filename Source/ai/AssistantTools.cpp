@@ -454,6 +454,18 @@ juce::var AssistantTools::describeProject()
     set (p, "name", project[ids::name]);
     set (p, "tempo_bpm", round2 ((double) project.getProperty (ids::tempo, 120.0)));
     set (p, "time_signature", juce::String ((int) project.getProperty (ids::timeSigNumerator, 4)) + "/4");
+    if (project.hasProperty (ids::keyRoot))
+        set (p, "key", model::keyName (project));
+    juce::Array<juce::var> markerList;
+    for (const auto& m : model::sortedMarkers (project))
+    {
+        auto o = object();
+        set (o, "name", m[ids::name]);
+        set (o, "bar", round2 (secondsToBar ((double) m[ids::time])));
+        markerList.add (o);
+    }
+    if (! markerList.isEmpty())
+        set (p, "markers", juce::var (markerList));
     set (p, "song_end_bar", round2 (secondsToBar (model::projectEnd (project))));
     if (hooks.playheadSeconds)
         set (p, "playhead_bar", round2 (secondsToBar (hooks.playheadSeconds())));
@@ -514,7 +526,8 @@ juce::String AssistantTools::projectState()
 {
     juce::String s;
     s << "Tempo " << round2 ((double) project.getProperty (ids::tempo, 120.0)) << " BPM, "
-      << (int) project.getProperty (ids::timeSigNumerator, 4) << "/4. ";
+      << (int) project.getProperty (ids::timeSigNumerator, 4) << "/4"
+      << (project.hasProperty (ids::keyRoot) ? ", key of " + model::keyName (project) : juce::String()) << ". ";
     if (hooks.playheadSeconds)
         s << "Playhead at bar " << round1 (secondsToBar (hooks.playheadSeconds()))
           << (hooks.isPlaying && hooks.isPlaying() ? " (playing). " : ". ");

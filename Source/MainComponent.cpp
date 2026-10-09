@@ -146,6 +146,13 @@ MainComponent::MainComponent (bool openAudioDevice)
     };
     addAndMakeVisible (tempoLabel);
 
+    signatureLabel.setJustificationType (juce::Justification::centred);
+    signatureLabel.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 17.0f, juce::Font::plain));
+    signatureLabel.setColour (juce::Label::textColourId, theme::lcdText);
+    signatureLabel.setTooltip ("Time signature and key. Click to change them.");
+    signatureLabel.addMouseListener (this, false);
+    addAndMakeVisible (signatureLabel);
+
     tempoCaption.setColour (juce::Label::textColourId, theme::lcdDim);
     tempoCaption.setFont (juce::FontOptions (10.0f));
     tempoCaption.setJustificationType (juce::Justification::centred);
@@ -407,7 +414,7 @@ MainComponent::~MainComponent()
 //==============================================================================
 juce::Rectangle<int> MainComponent::lcdBounds() const
 {
-    return juce::Rectangle<int> (440, 42).withCentre ({ getWidth() / 2, toolbarTopRow / 2 + 1 });
+    return juce::Rectangle<int> (560, 42).withCentre ({ getWidth() / 2, toolbarTopRow / 2 + 1 });
 }
 
 void MainComponent::paint (juce::Graphics& g)
@@ -443,6 +450,8 @@ void MainComponent::paint (juce::Graphics& g)
     g.setFont (juce::FontOptions (9.5f));
     const auto captionY = lcd.getBottom() - 13.0f;
     g.drawText ("BAR   BEAT   DIV", juce::Rectangle<float> ((float) positionLabel.getX(), captionY, (float) positionLabel.getWidth(), 11.0f),
+                juce::Justification::centred, false);
+    g.drawText ("SIGNATURE   KEY", juce::Rectangle<float> ((float) signatureLabel.getX(), captionY, (float) signatureLabel.getWidth(), 11.0f),
                 juce::Justification::centred, false);
     g.drawText ("TIME", juce::Rectangle<float> ((float) clockLabel.getX(), captionY, (float) clockLabel.getWidth(), 11.0f),
                 juce::Justification::centred, false);
@@ -489,9 +498,10 @@ void MainComponent::resized()
         auto numbers = lcd.withTrimmedBottom (12);
         positionLabel.setBounds (numbers.removeFromLeft (150));
         clockLabel.setBounds (numbers.removeFromLeft (190));
-        auto tempo = lcd.withLeft (numbers.getX());
+        auto tempo = lcd.withLeft (numbers.getX()).withWidth (100);
         tempoLabel.setBounds (tempo.withTrimmedBottom (12));
         tempoCaption.setBounds (tempo.removeFromBottom (12).translated (0, 1));
+        signatureLabel.setBounds (lcd.withLeft (tempo.getRight()).withTrimmedBottom (12));
     }
 
     // Row 2: transport keys in the middle, views on the right
@@ -783,7 +793,51 @@ void MainComponent::refreshProjectControls()
     tempoLabel.setText (std::abs (bpm - std::round (bpm)) < 0.05 ? juce::String ((int) bpm) : juce::String (bpm, 1),
                         juce::dontSendNotification);
     masterSlider.setValue (project.getProperty (ids::masterGain, 0.8), juce::dontSendNotification);
+
+    // "4/4  Cmaj", as Logic's display shows them
+    static const char* names[] = { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
+    const auto root = ((int) project.getProperty (ids::keyRoot, 0) % 12 + 12) % 12;
+    signatureLabel.setText (juce::String ((int) project.getProperty (ids::timeSigNumerator, 4)) + "/4  "
+                            + names[root] + ((bool) project.getProperty (ids::keyMinor, false) ? "min" : "maj"),
+                            juce::dontSendNotification);
     canvas.repaint();
+}
+
+void MainComponent::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.eventComponent == &signatureLabel)
+        showSignatureMenu();
+}
+
+void MainComponent::showSignatureMenu()
+{
+    juce::PopupMenu menu, keys;
+    menu.addSectionHeader ("Time signature");
+    const int current = project.getProperty (ids::timeSigNumerator, 4);
+    for (int beats : { 2, 3, 4, 5, 6, 7, 9, 12 })
+        menu.addItem (juce::String (beats) + "/4", true, beats == current, [this, beats]
+        {
+            undoManager.beginNewTransaction ("Time signature");
+            project.setProperty (ids::timeSigNumerator, beats, &undoManager);
+        });
+
+    static const char* names[] = { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
+    const int root = project.getProperty (ids::keyRoot, 0);
+    const bool minor = project.getProperty (ids::keyMinor, false);
+    for (bool isMinor : { false, true })
+    {
+        for (int r = 0; r < 12; ++r)
+            keys.addItem (juce::String (names[r]) + (isMinor ? " minor" : " major"), true, r == root && isMinor == minor, [this, r, isMinor]
+            {
+                undoManager.beginNewTransaction ("Key");
+                project.setProperty (ids::keyRoot, r, &undoManager);
+                project.setProperty (ids::keyMinor, isMinor, &undoManager);
+            });
+        keys.addSeparator();
+    }
+    menu.addSeparator();
+    menu.addSubMenu ("Key: " + model::keyName (project), keys);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&signatureLabel));
 }
 
 //==============================================================================
@@ -1147,7 +1201,8 @@ void MainComponent::returnToStart()
 //==============================================================================
 void MainComponent::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if (tree == project && (property == ids::tempo || property == ids::masterGain))
+    if (tree == project && (property == ids::tempo || property == ids::masterGain || property == ids::timeSigNumerator
+                            || property == ids::keyRoot || property == ids::keyMinor))
         refreshProjectControls();
 
     // Menu ticks follow these.

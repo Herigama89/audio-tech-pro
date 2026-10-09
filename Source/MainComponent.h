@@ -135,6 +135,8 @@ private:
     void updateScrollBars();
     void updateTitle();
     void refreshProjectControls();
+    void showSignatureMenu();
+    void mouseDown (const juce::MouseEvent& e) override;
     juce::String deviceStatusText() const;
     juce::String formatPosition (double seconds) const;
     juce::String formatClock (double seconds) const;
@@ -229,6 +231,7 @@ private:
     IconButton screenButton    { "Screen",  IconButton::Icon::screen, juce::Colour (0xffd8352d) };
     IconButton claudeButton    { "Claude",  IconButton::Icon::chat,  juce::Colour (0xffd97757) };
 
+    juce::Label signatureLabel;   // time signature and key, in the display (click to change)
     juce::Label positionLabel, clockLabel, tempoLabel, tempoCaption { {}, "BPM" },
                 masterCaption { {}, "Master" }, statusLabel;
     juce::Slider masterSlider;

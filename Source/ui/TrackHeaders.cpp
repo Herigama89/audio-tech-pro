@@ -551,8 +551,10 @@ void TrackHeaderList::paint (juce::Graphics& g)
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (11.0f));
     g.drawText (juce::String (model::numTracks (project)) + (model::numTracks (project) == 1 ? " track" : " tracks"),
-                getLocalBounds().removeFromTop (TimelineState::rulerHeight).reduced (12, 0),
+                getLocalBounds().removeFromTop (TimelineState::barRulerHeight).reduced (12, 0),
                 juce::Justification::centredLeft);
+    g.drawText ("Markers", getLocalBounds().withY (TimelineState::barRulerHeight).withHeight (TimelineState::markerHeight).reduced (12, 0),
+                juce::Justification::centredRight);
 }
 
 void TrackHeaderList::resized()

@@ -48,6 +48,7 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::nudgeLeft:
         case commands::nudgeRight:      info.setActive (region.isValid() && ! recording); break;
         case commands::pasteRegions:    info.setActive (! clipboardRegions.isEmpty() && track.isValid() && ! recording); break;
+        case commands::deleteMarker:    info.setActive (project.getChildWithName (ids::MARKERS).getChildWithProperty (ids::id, timeline.selectedMarkerId).isValid()); break;
         case commands::joinRegions:     info.setActive (timeline.selectedRegionTrees().size() > 1 && ! recording); break;
         case commands::duplicateTrack:  info.setActive (track.isValid() && ! recording); break;
         case commands::quantize:        info.setActive (region.isValid() && model::isMidiRegion (region)); break;
@@ -108,6 +109,32 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::nudgeLeft:              nudgeSelectedRegions (-1); break;
         case commands::nudgeRight:             nudgeSelectedRegions (1); break;
         case commands::toolMenu:               showToolMenu(); break;
+        case commands::createMarker:
+        {
+            undoManager.beginNewTransaction ("New marker");
+            const auto marker = model::addMarker (project, engine.getPlayheadSeconds(), {}, &undoManager);
+            timeline.selectedMarkerId = marker[ids::id].toString();
+            timeline.changed();
+            break;
+        }
+        case commands::nextMarker:
+        case commands::previousMarker:
+            if (const auto m = model::adjacentMarker (project, engine.getPlayheadSeconds(), info.commandID == commands::nextMarker); m.isValid())
+            {
+                engine.setPlayheadSeconds ((double) m[ids::time]);
+                timeline.selectedMarkerId = m[ids::id].toString();
+                timeline.changed();
+            }
+            break;
+        case commands::deleteMarker:
+            if (auto m = project.getChildWithName (ids::MARKERS).getChildWithProperty (ids::id, timeline.selectedMarkerId); m.isValid())
+            {
+                undoManager.beginNewTransaction ("Delete marker");
+                m.getParent().removeChild (m, &undoManager);
+                timeline.selectedMarkerId = {};
+                timeline.changed();
+            }
+            break;
         case commands::duplicateTrack:         duplicateSelectedTrack(); break;
 
         case commands::newAudioTrack:          addTrack (model::audioKind); break;
@@ -209,6 +236,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         case 3:
             add ({ commands::play, commands::goToStart, commands::rewindBar, commands::forwardBar });
             menu.addSeparator();
+            add ({ commands::createMarker, commands::nextMarker, commands::previousMarker, commands::deleteMarker });
+            menu.addSeparator();
             add ({ commands::toggleCycle, commands::setLocatorsBySelection });
             break;
 
@@ -280,6 +309,13 @@ void MainComponent::showGenerator()
     {
         generatorWindow->toFront (true);
         return;
+    }
+
+    // Start in the song's key when it has one.
+    if (project.hasProperty (ids::keyRoot))
+    {
+        generatorSettings.root = project[ids::keyRoot];
+        generatorSettings.minor = project[ids::keyMinor];
     }
 
     auto* panel = new GeneratorPanel (generatorSettings, generatorUsesTempo,

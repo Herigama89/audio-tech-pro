@@ -201,7 +201,7 @@ void ArrangeCanvas::paintRuler (juce::Graphics& g)
     const auto beat = model::secondsPerBeat (project);
     const int beatsPerBar = project.getProperty (ids::timeSigNumerator, 4);
     const auto barLength = beat * beatsPerBar;
-    const auto rh = (float) TimelineState::rulerHeight;
+    const auto rh = (float) TimelineState::barRulerHeight;
 
     // Gold ruler
     g.setGradientFill (juce::ColourGradient (theme::gold.brighter (0.12f), 0.0f, 0.0f, theme::goldDark, 0.0f, rh, false));
@@ -242,13 +242,121 @@ void ArrangeCanvas::paintRuler (juce::Graphics& g)
     g.fillRect (0.0f, rh - 1.0f, (float) getWidth(), 1.0f);
 
     paintCycle (g);
+    paintMarkers (g);
+}
+
+void ArrangeCanvas::paintMarkers (juce::Graphics& g)
+{
+    // Logic's marker track: each marker runs until the next one.
+    const auto top = (float) TimelineState::barRulerHeight;
+    const auto lane = juce::Rectangle<float> (0.0f, top, (float) getWidth(), (float) TimelineState::markerHeight);
+    g.setColour (theme::toolbarDark);
+    g.fillRect (lane);
+
+    const auto markers = model::sortedMarkers (project);
+    for (int i = 0; i < markers.size(); ++i)
+    {
+        const auto& m = markers.getReference (i);
+        const auto x0 = timeline.timeToX ((double) m[ids::time]);
+        const auto x1 = i + 1 < markers.size() ? timeline.timeToX ((double) markers[i + 1][ids::time]) : x0 + 140.0f;
+        if (x1 < 0.0f || x0 > (float) getWidth())
+            continue;
+
+        const bool selected = timeline.selectedMarkerId == m[ids::id].toString();
+        const auto body = juce::Rectangle<float> (x0, top + 2.0f, juce::jmax (4.0f, x1 - x0 - 1.0f), lane.getHeight() - 4.0f);
+        g.setColour ((selected ? theme::gold : theme::creamDeep).withAlpha (selected ? 0.95f : 0.75f));
+        g.fillRoundedRectangle (body, 2.0f);
+        g.setColour (theme::ink);
+        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        g.drawText (m[ids::name].toString(), body.reduced (4.0f, 0.0f), juce::Justification::centredLeft, true);
+    }
+
+    g.setColour (juce::Colours::black.withAlpha (0.7f));
+    g.fillRect (0.0f, lane.getBottom() - 1.0f, (float) getWidth(), 1.0f);
+}
+
+juce::ValueTree ArrangeCanvas::markerAt (float x) const
+{
+    // The marker whose span (until the next one) holds x.
+    juce::ValueTree found;
+    for (const auto& m : model::sortedMarkers (project))
+        if (timeline.timeToX ((double) m[ids::time]) <= x)
+            found = m;
+    if (found.isValid())
+    {
+        const auto next = model::adjacentMarker (project, (double) found[ids::time], true);
+        const auto end = next.isValid() ? timeline.timeToX ((double) next[ids::time]) : timeline.timeToX ((double) found[ids::time]) + 140.0f;
+        if (x > end)
+            return {};
+    }
+    return found;
+}
+
+void ArrangeCanvas::markerMouseDown (const juce::MouseEvent& e)
+{
+    auto marker = markerAt ((float) e.x);
+    timeline.selectedMarkerId = marker.isValid() ? marker[ids::id].toString() : juce::String();
+    timeline.changed();
+
+    if (! marker.isValid())
+        return;
+
+    if (e.mods.isPopupMenu())
+    {
+        juce::PopupMenu menu;
+        menu.addItem ("Go to", [this, marker] { engine.setPlayheadSeconds ((double) marker[ids::time]); repaint(); });
+        menu.addItem ("Rename...", [this, marker] { renameMarker (marker); });
+        menu.addItem ("Set Cycle to Marker", [this, marker]
+        {
+            const auto next = model::adjacentMarker (project, (double) marker[ids::time], true);
+            const auto end = next.isValid() ? (double) next[ids::time] : model::projectEnd (project);
+            if (end > (double) marker[ids::time])
+                model::setCycle (project, marker[ids::time], end, true);
+        });
+        menu.addSeparator();
+        menu.addItem ("Delete", [this, marker]
+        {
+            undoManager.beginNewTransaction ("Delete marker");
+            auto m = marker;
+            m.getParent().removeChild (m, &undoManager);
+            timeline.selectedMarkerId = {};
+            timeline.changed();
+        });
+        menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+        return;
+    }
+
+    // Click: go there. Drag: move it.
+    engine.setPlayheadSeconds ((double) marker[ids::time]);
+    undoManager.beginNewTransaction ("Move marker");
+    dragMarker = marker;
+    dragOriginalStart = marker[ids::time];
+    dragMouseDownTime = timeline.xToTime ((float) e.x);
+    dragMode = DragMode::marker;
+}
+
+void ArrangeCanvas::renameMarker (juce::ValueTree marker)
+{
+    auto* window = new juce::AlertWindow ("Rename marker", {}, juce::MessageBoxIconType::NoIcon);
+    window->addTextEditor ("name", marker[ids::name].toString());
+    window->addButton ("Rename", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([this, marker, window] (int result) mutable
+    {
+        const auto name = window->getTextEditorContents ("name").trim();
+        if (result == 1 && name.isNotEmpty())
+        {
+            undoManager.beginNewTransaction ("Rename marker");
+            marker.setProperty (ids::name, name, &undoManager);
+        }
+    }), true);
 }
 
 juce::Rectangle<float> ArrangeCanvas::cycleBounds() const
 {
     const auto x0 = timeline.timeToX (project.getProperty (ids::cycleStart, 0.0));
     const auto x1 = timeline.timeToX (project.getProperty (ids::cycleEnd, 0.0));
-    return { x0, 2.0f, juce::jmax (2.0f, x1 - x0), (float) TimelineState::rulerHeight * 0.5f - 3.0f };
+    return { x0, 2.0f, juce::jmax (2.0f, x1 - x0), (float) TimelineState::barRulerHeight * 0.5f - 3.0f };
 }
 
 void ArrangeCanvas::paintCycle (juce::Graphics& g)
@@ -587,7 +695,13 @@ void ArrangeCanvas::mouseDown (const juce::MouseEvent& e)
         if (engine.isRecording())
             return;
 
-        if (e.y < TimelineState::rulerHeight / 2)
+        if (e.y >= TimelineState::barRulerHeight)
+        {
+            markerMouseDown (e);
+            return;
+        }
+
+        if (e.y < TimelineState::barRulerHeight / 2)
         {
             const auto c = cycleBounds();
             dragMouseDownTime = timeline.xToTime ((float) e.x);
@@ -716,6 +830,14 @@ void ArrangeCanvas::mouseDrag (const juce::MouseEvent& e)
             updateRubberBand (e);
             break;
 
+        case DragMode::marker:
+            if (dragMarker.isValid() && e.getDistanceFromDragStart() >= 4)
+            {
+                dragMarker.setProperty (ids::time, maybeSnap (dragOriginalStart + timeline.xToTime ((float) e.x) - dragMouseDownTime), &undoManager);
+                engine.setPlayheadSeconds ((double) dragMarker[ids::time]);
+            }
+            break;
+
         case DragMode::pencilRegion:
         {
             if (! dragRegion.isValid())
@@ -799,6 +921,7 @@ void ArrangeCanvas::mouseUp (const juce::MouseEvent& e)
         onOpenPianoRoll (dragRegion);
 
     dragged.clear();
+    dragMarker = {};
     rubberBand = {};
     timeline.changed();
 
@@ -991,6 +1114,21 @@ void ArrangeCanvas::showTakeMenu (juce::ValueTree region)
 
 void ArrangeCanvas::mouseDoubleClick (const juce::MouseEvent& e)
 {
+    // In the marker track: rename a marker, or make one where you double-click.
+    if (e.y >= TimelineState::barRulerHeight && e.y < TimelineState::rulerHeight)
+    {
+        if (auto marker = markerAt ((float) e.x); marker.isValid() && (float) e.x - timeline.timeToX ((double) marker[ids::time]) < 90.0f)
+        {
+            renameMarker (marker);
+            return;
+        }
+        undoManager.beginNewTransaction ("New marker");
+        auto marker = model::addMarker (project, snap (timeline.xToTime ((float) e.x)), {}, &undoManager);
+        timeline.selectedMarkerId = marker[ids::id].toString();
+        timeline.changed();
+        return;
+    }
+
     if (e.y < TimelineState::rulerHeight)
         return;
 

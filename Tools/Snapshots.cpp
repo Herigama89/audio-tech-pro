@@ -214,6 +214,13 @@ public:
             main.dragBox.setSelectedId (2);
             main.timeline.changed();
             pump (main, 200);
+            model::addMarker (main.project, 0.0, "Intro", nullptr);
+            model::addMarker (main.project, 4 * 4 * model::secondsPerBeat (main.project), "Verse", nullptr);
+            model::addMarker (main.project, 8 * 4 * model::secondsPerBeat (main.project), "Hook", nullptr);
+            main.project.setProperty (ids::keyRoot, 9, nullptr);
+            main.project.setProperty (ids::keyMinor, true, nullptr);
+            main.refreshProjectControls();
+            pump (main, 100);
             save (main, "regions-edit.png");
             main.setTool (TimelineState::Tool::pointer);
             {

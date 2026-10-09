@@ -141,3 +141,40 @@ TEST_CASE ("Selecting several regions", "[edit][view]")
     t.selectedRegionId = b[ids::id].toString();          // set directly: just that one
     CHECK (t.selectedRegionTrees() == juce::Array<juce::ValueTree> { b });
 }
+
+TEST_CASE ("Markers: added in any order, found in time order, saved with the project", "[edit][markers]")
+{
+    juce::UndoManager um;
+    auto project = model::createProject();
+    model::addTrack (project, "A", nullptr);
+    model::addMarker (project, 8.0, "Chorus", &um);
+    model::addMarker (project, 0.0, "Intro", &um);
+    auto verse = model::addMarker (project, 4.0, {}, &um);
+    CHECK (verse[ids::name].toString() == "Marker 3");
+
+    const auto list = model::sortedMarkers (project);
+    REQUIRE (list.size() == 3);
+    CHECK (list[0][ids::name].toString() == "Intro");
+    CHECK (list[2][ids::name].toString() == "Chorus");
+
+    CHECK (model::adjacentMarker (project, 4.0, true)[ids::name].toString() == "Chorus");
+    CHECK (model::adjacentMarker (project, 4.0, false)[ids::name].toString() == "Intro");
+    CHECK_FALSE (model::adjacentMarker (project, 8.0, true).isValid());
+
+    // Markers don't count as tracks.
+    CHECK (model::numTracks (project) == 1);
+
+    // Through a save and load
+    const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("markers-" + juce::Uuid().toString() + ".atp");
+    juce::String error;
+    file.replaceWithText (model::toJson (project, file));
+    const auto loaded = model::load (file, error);
+    file.deleteFile();
+    CHECK (error.isEmpty());
+    CHECK (model::sortedMarkers (loaded).size() == 3);
+
+    // Key names
+    project.setProperty (ids::keyRoot, 6, nullptr);
+    project.setProperty (ids::keyMinor, true, nullptr);
+    CHECK (model::keyName (project) == "F# minor");
+}

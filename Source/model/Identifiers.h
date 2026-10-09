@@ -53,6 +53,8 @@ namespace riff::ids
     RIFF_DECLARE_ID (SEND)
     RIFF_DECLARE_ID (LANE)
     RIFF_DECLARE_ID (POINT)
+    RIFF_DECLARE_ID (MARKERS)         // after MIXER: the marker track
+    RIFF_DECLARE_ID (MARKER)          // { id, name, time }
 
     // Properties
     RIFF_DECLARE_ID (id)
@@ -130,6 +132,8 @@ namespace riff::ids
     RIFF_DECLARE_ID (param)
     RIFF_DECLARE_ID (time)
     RIFF_DECLARE_ID (value)
+    RIFF_DECLARE_ID (keyRoot)         // PROJECT: the song's key, 0 = C .. 11 = B
+    RIFF_DECLARE_ID (keyMinor)        // PROJECT: minor (true) or major
     RIFF_DECLARE_ID (hidden)          // TRACK: hidden in the tracks area (Logic's Hide; it still plays)
     RIFF_DECLARE_ID (height)          // TRACK: its height in the tracks area (pixels; view only)
     RIFF_DECLARE_ID (showAutomation)

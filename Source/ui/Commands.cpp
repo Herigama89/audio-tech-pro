@@ -52,6 +52,10 @@ const std::vector<Info>& all()
         { goToStart,              "Go to Beginning",            "Transport", "Move the playhead to the start" },
         { rewindBar,              "Rewind One Bar",             "Transport", "Move the playhead back one bar" },
         { forwardBar,             "Forward One Bar",            "Transport", "Move the playhead forward one bar" },
+        { createMarker,           "Create Marker",              "Transport", "A marker at the playhead (double-click the marker track for one anywhere)" },
+        { nextMarker,             "Go to Next Marker",          "Transport", "Move the playhead to the next marker" },
+        { previousMarker,         "Go to Previous Marker",      "Transport", "Move the playhead to the previous marker" },
+        { deleteMarker,           "Delete Marker",              "Transport", "Delete the selected marker" },
         { toggleCycle,            "Cycle",                      "Transport", "Turn Cycle (loop) on or off" },
         { toggleMetronome,        "Metronome",                  "Transport", "Turn the click on or off" },
         { toggleCountIn,          "Count-in",                   "Transport", "One bar of click before recording" },
@@ -181,6 +185,9 @@ namespace
             case nudgeLeft:              return { key (KeyPress::leftKey, opt) };
             case nudgeRight:             return { key (KeyPress::rightKey, opt) };
             case toolMenu:               return { key ('t') };
+            case createMarker:           return { key ('\'', opt) };
+            case nextMarker:             return { key ('.', opt) };
+            case previousMarker:         return { key (',', opt) };
             case showHiddenTracks:       return { key ('h') };
             case trackColours:           return { key ('c', opt) };
            #if JUCE_MAC

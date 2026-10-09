@@ -702,6 +702,62 @@ int numTracks (const juce::ValueTree& project)
     return n;
 }
 
+juce::ValueTree markersOf (juce::ValueTree project)
+{
+    auto markers = project.getChildWithName (ids::MARKERS);
+    if (! markers.isValid())
+    {
+        markers = juce::ValueTree (ids::MARKERS);
+        project.appendChild (markers, nullptr);   // after the tracks and the MIXER
+    }
+    return markers;
+}
+
+juce::ValueTree addMarker (juce::ValueTree project, double time, const juce::String& name, juce::UndoManager* um)
+{
+    auto markers = markersOf (project);
+    juce::ValueTree marker (ids::MARKER);
+    marker.setProperty (ids::id, newId(), nullptr);
+    marker.setProperty (ids::name, name.isNotEmpty() ? name : "Marker " + juce::String (markers.getNumChildren() + 1), nullptr);
+    marker.setProperty (ids::time, juce::jmax (0.0, time), nullptr);
+    markers.appendChild (marker, um);
+    return marker;
+}
+
+juce::Array<juce::ValueTree> sortedMarkers (const juce::ValueTree& project)
+{
+    juce::Array<juce::ValueTree> list;
+    for (const auto& m : project.getChildWithName (ids::MARKERS))
+        list.add (m);
+    std::sort (list.begin(), list.end(), [] (const auto& a, const auto& b) { return (double) a[ids::time] < (double) b[ids::time]; });
+    return list;
+}
+
+juce::ValueTree adjacentMarker (const juce::ValueTree& project, double time, bool forwards)
+{
+    const auto list = sortedMarkers (project);
+    if (forwards)
+    {
+        for (const auto& m : list)
+            if ((double) m[ids::time] > time + 1.0e-6)
+                return m;
+    }
+    else
+    {
+        for (int i = list.size(); --i >= 0;)
+            if ((double) list[i][ids::time] < time - 1.0e-6)
+                return list[i];
+    }
+    return {};
+}
+
+juce::String keyName (const juce::ValueTree& project)
+{
+    static const char* names[] = { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
+    const auto root = ((int) project.getProperty (ids::keyRoot, 0) % 12 + 12) % 12;
+    return juce::String (names[root]) + ((bool) project.getProperty (ids::keyMinor, false) ? " minor" : " major");
+}
+
 juce::ValueTree mixerOf (juce::ValueTree project)
 {
     auto mixer = project.getChildWithName (ids::MIXER);

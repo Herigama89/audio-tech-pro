@@ -221,6 +221,22 @@ namespace riff::model
     /** What a parameter can be set to (volume is drawn in dB but stored as gain). */
     ParamRange rangeOf (const juce::ValueTree& project, const juce::String& param);
 
+    // --- Markers (Logic's marker track) -----------------------------------------
+    /** The MARKERS node (after the MIXER), created if needed. */
+    juce::ValueTree markersOf (juce::ValueTree project);
+
+    /** Adds a marker; with an empty name it's called "Marker n". */
+    juce::ValueTree addMarker (juce::ValueTree project, double time, const juce::String& name, juce::UndoManager* um);
+
+    /** The markers in time order. */
+    juce::Array<juce::ValueTree> sortedMarkers (const juce::ValueTree& project);
+
+    /** The first marker after `time` (or before it, with `forwards` false), or invalid. */
+    juce::ValueTree adjacentMarker (const juce::ValueTree& project, double time, bool forwards);
+
+    /** The song's key as text, e.g. "C major" or "F# minor". */
+    juce::String keyName (const juce::ValueTree& project);
+
     // --- Queries ----------------------------------------------------------
     /** Tracks are the first children of the project; the MIXER node comes after them. */
     int numTracks (const juce::ValueTree& project);

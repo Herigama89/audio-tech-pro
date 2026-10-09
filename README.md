@@ -296,7 +296,9 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [x] Inspector (I): the selected track's channel strip and the Stereo Out on the left
 - [ ] Inspector: region and track parameter boxes above the strips; track icons
 - [ ] Track stacks (folder and summing stacks), track freeze
-- [ ] Global tracks: arrangement markers, markers, tempo track with tempo changes, time signature and key changes
+- [x] Marker track: double-click to add or rename, drag to move, click to go there, right-click to set the cycle or delete; Create Marker (Option+'), next/previous marker (Option+. / Option+,)
+- [x] Time signature and key in the display (click to change); the MIDI generator starts in the song's key
+- [ ] Tempo track with tempo changes, time signature and key changes along the song, arrangement markers
 - [ ] Bounce in place, export tracks as audio files (stems), import tracks from other projects
 
 **Editing in the tracks area**

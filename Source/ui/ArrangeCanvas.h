@@ -55,7 +55,13 @@ public:
     std::function<void (juce::ValueTree region)> onOpenPianoRoll;
 
 private:
-    enum class DragMode { none, scrub, move, trimStart, trimEnd, cycleNew, cycleMove, automationPoint, rubberBand, pencilRegion };
+    enum class DragMode { none, scrub, move, trimStart, trimEnd, cycleNew, cycleMove, automationPoint, rubberBand, pencilRegion, marker };
+
+    void paintMarkers (juce::Graphics& g);
+    juce::ValueTree markerAt (float x) const;
+    void markerMouseDown (const juce::MouseEvent& e);
+    void renameMarker (juce::ValueTree marker);
+    juce::ValueTree dragMarker;
 
     struct Dragged { juce::ValueTree region; double start; int trackIndex; };
     std::vector<Dragged> dragged;          // every region moving with the one under the mouse

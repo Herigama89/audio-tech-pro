@@ -12,7 +12,9 @@ namespace riff
 */
 struct TimelineState : public juce::ChangeBroadcaster
 {
-    static constexpr int rulerHeight = 28;
+    static constexpr int barRulerHeight = 28;               // the gold bar ruler (cycle in its top half)
+    static constexpr int markerHeight = 18;                 // the marker track below it
+    static constexpr int rulerHeight = barRulerHeight + markerHeight;   // everything above the tracks
     static constexpr int trackHeight = 76;        // a track's height until you resize it
     static constexpr int minTrackHeight = 30, maxTrackHeight = 400;
     static constexpr double minPixelsPerSecond = 2.0;
@@ -24,6 +26,7 @@ struct TimelineState : public juce::ChangeBroadcaster
 
     juce::String selectedTrackId;    // the selected track (with several selected: the one clicked last)
     juce::String selectedRegionId;
+    juce::String selectedMarkerId;
 
     /** Several selected tracks (Shift / Cmd-click). Only counts while it holds selectedTrackId,
         so setting selectedTrackId directly simply selects that one track. */
