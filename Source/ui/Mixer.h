@@ -9,6 +9,7 @@
 #include "../engine/EffectRack.h"
 #include "../engine/AudioEngine.h"
 #include "../engine/ProjectPlayer.h"
+#include "../engine/AutomationWriter.h"
 
 namespace riff
 {
@@ -44,13 +45,17 @@ public:
     /** Console mode: follow knobs turned in the plugin's own window. */
     void syncFromPlugin();
 
+    /** The fader and pan show what the automation is doing at `time` (unless you're holding them). */
+    void followAutomation (double time);
+
     static constexpr int numSlots = 6;
     static constexpr int numSends = 2;
     static constexpr int stripWidth = 74;
     static constexpr float artScale = (float) stripWidth / strip::artWidth;
     static constexpr int topHeight = (int) (strip::artHeight * artScale);   // the artwork's part
     static constexpr int nameHeight = 26;
-    static constexpr int minimumHeight = topHeight + 6 + numSlots * 17 + 6 + numSends * 18 + 100 + 20 + nameHeight;
+    static constexpr int automationRow = 18;
+    static constexpr int minimumHeight = topHeight + 6 + numSlots * 17 + 6 + numSends * 18 + automationRow + 100 + 20 + nameHeight;
 
 private:
     bool isMaster() const { return ! track.isValid(); }
@@ -103,6 +108,9 @@ private:
     strip::Fader fader;
     LevelMeter meter { "" };
     juce::Label dbLabel;
+    juce::TextButton automationButton;   // Off / Read / Touch / Latch / Write
+    void showAutomationModeMenu();
+    void updateAutomationButton();
     bool pluginMode = false;
 };
 

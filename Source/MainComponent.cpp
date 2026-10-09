@@ -356,6 +356,15 @@ MainComponent::MainComponent (bool openAudioDevice)
 
     setWantsKeyboardFocus (true);
     setSize (1440, 920);
+    automation.makeCurrent();
+    TrackHeader::pluginParameterNames = [this] (const juce::String& insertId)
+    {
+        juce::StringArray names;
+        if (auto* plugin = effectRack.getPlugin (insertId))
+            for (auto* p : plugin->getParameters())
+                names.add (p->getName (40));
+        return names;
+    };
     startTimerHz (30);
 
     juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<ArrangeCanvas> (&canvas)]
@@ -654,6 +663,7 @@ void MainComponent::setProject (juce::ValueTree newProject, const juce::File& fi
     timeline.scrollY = 0;
 
     player.setProject (project);
+    automation.setProject (project);
     headers.setProject (project);
     mixer.setProject (project);
     canvas.setProject (project);
@@ -1428,6 +1438,14 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 void MainComponent::timerCallback()
 {
     updateLiveMidiTrack();
+
+    // Automation: passes start with playback (Write mode) and go into the project when it stops.
+    if (! engine.isRenderingOffline())
+    {
+        automation.transportChanged (engine.isPlaying());
+        automation.tick();
+        headers.followAutomation (engine.getPlayheadSeconds());
+    }
 
     // Autosave every two minutes while there are unsaved changes.
     if (const auto now = juce::Time::getMillisecondCounter(); now - lastAutosaveMs > 120000)

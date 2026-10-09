@@ -40,6 +40,7 @@ public:
     juce::String getName() const override         { return info.name; }
 
     void setParameter (int index, float value) noexcept;
+    void setAutomatedParameter (int index, float value) noexcept override { setParameter (index, value); }
     float getParameter (int index) const noexcept;
 
 protected:

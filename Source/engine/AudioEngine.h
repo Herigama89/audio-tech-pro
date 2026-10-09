@@ -190,6 +190,18 @@ public:
                                 std::function<bool (double)> progress);
     void endOfflineRender();
 
+    /** While a fader or pan control is written as automation, the engine plays its value
+        instead of the curve. NaN (or clearAutomationOverride) hands back to the curve. */
+    void setAutomationOverride (int slot, bool pan, float value) noexcept
+    {
+        if (juce::isPositiveAndBelow (slot, PlaybackGraph::maxTracks))
+            (pan ? panOverride : volumeOverride)[(size_t) slot].store (value);
+    }
+    void clearAutomationOverride (int slot, bool pan) noexcept
+    {
+        setAutomationOverride (slot, pan, std::numeric_limits<float>::quiet_NaN());
+    }
+
     /** Renders [start, end) offline and writes each listed graph slot's own output
         (after its plugins, fader and pan) to its own file: stems, or a bounce in
         place. Between begin/endOfflineRender. */
@@ -327,6 +339,7 @@ private:
     juce::String labelledDevice;
     juce::StringArray inputLabels;
     std::atomic<ScreenAudioTap*> screenTap { nullptr };
+    std::array<std::atomic<float>, PlaybackGraph::maxTracks> volumeOverride {}, panOverride {};   // NaN: none (set in the constructor)
     bool measuring = false;                       // only while measureMix renders
     juce::AudioBuffer<float>* stemCapture = nullptr;   // only while renderStems renders: 2 channels per slot
     std::vector<LevelStats> measuredTracks;       // by slot

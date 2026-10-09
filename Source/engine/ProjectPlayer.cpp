@@ -117,6 +117,14 @@ void ProjectPlayer::addParamAutomation (PlaybackGraph::Track& t, const juce::Str
         if (it == effectsById.end())
             continue;
 
+        // A hosted plugin's parameter: "#<index>", normalised 0..1.
+        if (parts[2].startsWith ("#"))
+        {
+            const auto index = parts[2].substring (1).getIntValue();
+            t.paramAutomation.push_back ({ it->second.get(), index, curveFor (owner, lane[ids::param].toString(), sampleRate) });
+            continue;
+        }
+
         auto* builtIn = dynamic_cast<BuiltInEffect*> (it->second.get());
         if (builtIn == nullptr)
             continue;
@@ -215,10 +223,13 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         t.isInstrument = model::isInstrumentTrack (track);
         t.isBus = model::isBusTrack (track);
 
-        // Automation
-        t.volumeAutomation = curveFor (trackId, model::volumeParam, sampleRate);
-        t.panAutomation = curveFor (trackId, model::panParam, sampleRate);
-        addParamAutomation (t, trackId, sampleRate, effectsById);
+        // Automation (not in Off mode)
+        if (track.getProperty (ids::automationMode, "read").toString() != "off")
+        {
+            t.volumeAutomation = curveFor (trackId, model::volumeParam, sampleRate);
+            t.panAutomation = curveFor (trackId, model::panParam, sampleRate);
+            addParamAutomation (t, trackId, sampleRate, effectsById);
+        }
 
         int latency = 0;
         for (const auto& e : t.stripPlugins)

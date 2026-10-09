@@ -37,6 +37,14 @@ private:
     bool isOnResizeEdge (const juce::MouseEvent& e) const;
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { refresh(); }
     void refresh();
+
+public:
+    void followAutomation (double time);
+
+    /** Names of a hosted plugin's parameters (for the automation menu), by insert id. */
+    static inline std::function<juce::StringArray (const juce::String& insertId)> pluginParameterNames;
+
+private:
     void select();
     void showMenu();
 public:
@@ -93,6 +101,9 @@ public:
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
 
     std::function<void (const juce::MouseEvent&, const juce::MouseWheelDetails&)> onWheel;
+
+    /** Volume and pan show what the automation is doing at `time`. */
+    void followAutomation (double time)  { for (auto* h : headers) h->followAutomation (time); }
 
 private:
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree&) override        { if (parent == project) rebuild(); }

@@ -40,6 +40,7 @@ set(RIFF_CORE_SOURCES
     Source/engine/AudioEngine.cpp
     Source/engine/AudioFileCache.cpp
     Source/engine/ProjectPlayer.cpp
+    Source/engine/AutomationWriter.cpp
     Source/engine/LatencyMeasure.cpp
     Source/engine/BuiltInSynth.cpp
     Source/engine/PluginInstrument.cpp
@@ -173,6 +174,7 @@ if(RIFF_BUILD_TESTS)
         Tests/ViewTests.cpp
         Tests/EditTests.cpp
         Tests/FilesTests.cpp
+        Tests/AutomationWriterTests.cpp
         Source/ui/ScreenRecordPanel.cpp
         Source/ui/ScreenRecorder.cpp
     )

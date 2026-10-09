@@ -12,6 +12,10 @@ AudioEngine::AudioEngine()
     for (auto& slot : takeSlots)
         slot.store (nullptr);
 
+    for (auto* overrides : { &volumeOverride, &panOverride })
+        for (auto& v : *overrides)
+            v.store (std::numeric_limits<float>::quiet_NaN());
+
     diskThread.startThread (juce::Thread::Priority::high);
     liveMidi.ensureSize (8192);
     trackMidi.ensureSize (32768);
@@ -1021,12 +1025,17 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
     auto& state = trackStates[(size_t) track.slot];
 
     // Automation (read once per chunk; the gain smoothing below hides the steps).
-    const auto volume = (playingNow && ! track.volumeAutomation.empty()) ? track.volumeAutomation.valueAt (blockStart) : track.volume;
-    const auto pan = (playingNow && ! track.panAutomation.empty()) ? track.panAutomation.valueAt (blockStart) : track.pan;
+    // A control being written as automation right now wins over the curve.
+    const auto volumeLive = volumeOverride[(size_t) track.slot].load (std::memory_order_relaxed);
+    const auto panLive = panOverride[(size_t) track.slot].load (std::memory_order_relaxed);
+    const auto volume = ! std::isnan (volumeLive) ? volumeLive
+                      : (playingNow && ! track.volumeAutomation.empty()) ? track.volumeAutomation.valueAt (blockStart) : track.volume;
+    const auto pan = ! std::isnan (panLive) ? panLive
+                   : (playingNow && ! track.panAutomation.empty()) ? track.panAutomation.valueAt (blockStart) : track.pan;
 
     if (playingNow)
         for (const auto& automation : track.paramAutomation)
-            automation.effect->setParameter (automation.paramIndex, automation.curve.valueAt (blockStart));
+            automation.effect->setAutomatedParameter (automation.paramIndex, automation.curve.valueAt (blockStart));
 
     // Balance-style pan: unity at centre, the far side fades out.
     const auto targetL = track.audible ? volume * (pan <= 0.0f ? 1.0f : 1.0f - pan) : 0.0f;

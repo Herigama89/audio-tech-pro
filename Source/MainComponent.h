@@ -4,6 +4,7 @@
 #include "engine/AudioEngine.h"
 #include "engine/AudioFileCache.h"
 #include "engine/ProjectPlayer.h"
+#include "engine/AutomationWriter.h"
 #include "engine/InstrumentRack.h"
 #include "ui/TimelineState.h"
 #include "ui/WaveformCache.h"
@@ -206,6 +207,7 @@ private:
     EffectRack effectRack { rack.getFormatManager() };
     ProjectPlayer player { engine, fileCache, &rack, &effectRack };
     juce::UndoManager undoManager;
+    AutomationWriter automation { engine, player, undoManager };
     juce::ValueTree project;
     juce::File projectFile;
     bool dirty = false;

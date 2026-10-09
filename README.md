@@ -265,7 +265,7 @@ Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderC
 - [x] Automation of volume, pan and built-in effect parameters
 - [x] Plugin delay compensation across tracks and buses; recordings account for it too
 - [ ] CLAP instruments and effects (next)
-- [ ] Automation of plugin parameters, and moving faders that follow automation
+- [x] Automation of plugin parameters (built-in and hosted, from the A menu), and faders and pan knobs that follow automation
 
 ## Audio Tech Pro features
 
@@ -321,7 +321,8 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 **Mixer**
 - [ ] Resizable mixer, narrow/wide strips, filters (audio, instrument, aux, bus, input, output, master/VCA)
 - [ ] Groups (linked volume, mute, solo, selection), VCA faders, I/O labels, stereo panner modes
-- [ ] Channel EQ display on the strip, signal flow view, track automation modes (Read, Touch, Latch, Write)
+- [x] Track automation modes (Off, Read, Touch, Latch, Write) on every strip and in the A menu; fader and pan moves are written while playing
+- [ ] Channel EQ display on the strip, signal flow view; writing plugin knob moves as automation
 - [x] Inserts, sends (pre/post), aux buses, master bus compressor, console channel strips
 
 **Recording and MIDI**

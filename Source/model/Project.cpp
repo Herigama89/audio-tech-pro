@@ -1170,6 +1170,12 @@ ParamRange rangeOf (const juce::ValueTree& project, const juce::String& param)
                                          info->name + " " + p.name };
     }
 
+    // A plugin parameter ("insert:<id>:#<index>"): 0..1, named when its lane was made.
+    if (parts.size() == 3 && parts[0] == "insert" && parts[2].startsWith ("#"))
+        for (const auto& lane : project.getChildWithName (ids::MIXER))
+            if (lane.hasType (ids::LANE) && lane[ids::param].toString() == param && lane.hasProperty (ids::name))
+                return { 0.0, 1.0, 0.5, false, lane[ids::name].toString() };
+
     return { 0.0, 1.0, 0.5, false, param };
 }
 

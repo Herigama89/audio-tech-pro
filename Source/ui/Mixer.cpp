@@ -92,8 +92,23 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         };
         panKnob.setDoubleClickReturnValue (true, 0.0);
         panKnob.setTooltip ("Pan: drag left or right; double-click to centre");
-        panKnob.onDragStart = [this] { owner.getUndoManager().beginNewTransaction ("Pan"); };
-        panKnob.onValueChange = [this] { track.setProperty (ids::pan, panKnob.getValue(), &owner.getUndoManager()); };
+        panKnob.onDragStart = [this]
+        {
+            owner.getUndoManager().beginNewTransaction ("Pan");
+            if (auto* w = AutomationWriter::current())
+                w->begin (track[ids::id].toString(), model::panParam, panKnob.getValue());
+        };
+        panKnob.onDragEnd = [this]
+        {
+            if (auto* w = AutomationWriter::current())
+                w->end (track[ids::id].toString(), model::panParam);
+        };
+        panKnob.onValueChange = [this]
+        {
+            if (auto* w = AutomationWriter::current(); w != nullptr && w->move (track[ids::id].toString(), model::panParam, panKnob.getValue()))
+                return;   // written as automation
+            track.setProperty (ids::pan, panKnob.getValue(), &owner.getUndoManager());
+        };
         addAndMakeVisible (panKnob);
     }
 
@@ -152,14 +167,30 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
                 if (id != track[ids::id].toString())
                     if (const auto other = model::findById (project, id); other.isValid())
                         groupStart[id] = gainToDb ((double) other.getProperty (ids::volume, 1.0));
+
+        if (auto* w = AutomationWriter::current(); w != nullptr && ! isMaster())
+            w->begin (track[ids::id].toString(), model::volumeParam, dbToGain (fader.getValue()));
     };
-    fader.onDragEnd = [this] { groupStart.clear(); };
+    fader.onDragEnd = [this]
+    {
+        groupStart.clear();
+        if (auto* w = AutomationWriter::current(); w != nullptr && ! isMaster())
+            w->end (track[ids::id].toString(), model::volumeParam);
+    };
     fader.onValueChange = [this]
     {
         const auto gain = dbToGain (fader.getValue());
         if (isMaster())
         {
             project.setProperty (ids::masterGain, gain, &owner.getUndoManager());
+            return;
+        }
+
+        // Touch, Latch or Write while playing: the move becomes automation.
+        if (auto* w = AutomationWriter::current(); w != nullptr && w->move (track[ids::id].toString(), model::volumeParam, gain))
+        {
+            const auto db = fader.getValue();
+            dbLabel.setText (db <= minDb + 0.01 ? juce::String ("-inf") : juce::String (db, 1), juce::dontSendNotification);
             return;
         }
 
@@ -172,6 +203,17 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     };
     addAndMakeVisible (fader);
     addAndMakeVisible (meter);
+
+    if (! isMaster())
+    {
+        look::key (automationButton, look::Key::slot);
+        automationButton.setWantsKeyboardFocus (false);
+        automationButton.setTooltip ("Automation mode: Off, Read, Touch (writes while you hold a control), "
+                                     "Latch (writes from your first touch until you stop), Write (writes everything from the start)");
+        automationButton.onClick = [this] { showAutomationModeMenu(); };
+        addAndMakeVisible (automationButton);
+        updateAutomationButton();
+    }
 
     dbLabel.setJustificationType (juce::Justification::centred);
     dbLabel.setFont (juce::FontOptions (11.0f));
@@ -702,7 +744,7 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
 juce::Rectangle<int> ChannelStrip::faderArea() const
 {
     // Below the sends, above the level display and the name plate.
-    const auto top = topHeight + 6 + numSlots * 17 + 6 + numSends * 18 + 4;
+    const auto top = topHeight + 6 + numSlots * 17 + 6 + numSends * 18 + 4 + automationRow;
     return { 0, top, getWidth(), getHeight() - nameHeight - 22 - top };
 }
 
@@ -880,6 +922,74 @@ void ChannelStrip::resized()
     fader.setBounds (juce::Rectangle<int> (4, fa.getY(), (int) (getWidth() * 0.5f), fa.getHeight()));
     meter.setBounds (juce::Rectangle<int> ((int) (getWidth() * 0.73f), fa.getY() + 6, 12, fa.getHeight() - 12));
     dbLabel.setBounds (juce::Rectangle<int> (getWidth() - 46, fa.getBottom() + 2, 40, 17));
+    if (! isMaster())
+        automationButton.setBounds (juce::Rectangle<int> (6, fa.getY() - automationRow + 1, getWidth() - 12, automationRow - 3));
+}
+
+void ChannelStrip::updateAutomationButton()
+{
+    if (isMaster())
+        return;
+    const auto mode = AutomationWriter::modeOf (track);
+    automationButton.setButtonText (mode.substring (0, 1).toUpperCase() + mode.substring (1));
+    const auto colour = mode == "read"  ? juce::Colour (0xff2e9b4f)
+                      : mode == "touch" ? juce::Colour (0xffd08a1c)
+                      : mode == "latch" ? juce::Colour (0xff8a4fd0)
+                      : mode == "write" ? juce::Colour (0xffd23b36)
+                                        : theme::slotDark;
+    automationButton.setColour (juce::TextButton::buttonColourId, colour);
+    automationButton.setColour (juce::TextButton::textColourOffId, mode == "off" ? theme::dimText : juce::Colours::white);
+}
+
+void ChannelStrip::showAutomationModeMenu()
+{
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Automation");
+    const auto current = AutomationWriter::modeOf (track);
+    for (auto [mode, name] : { std::pair { "off", "Off" }, std::pair { "read", "Read" }, std::pair { "touch", "Touch" },
+                               std::pair { "latch", "Latch" }, std::pair { "write", "Write" } })
+    {
+        menu.addItem (name, true, current == mode, [this, m = juce::String (mode)]
+        {
+            // Every selected track follows, as in Logic.
+            auto chosen = owner.getSelectedTrackIds();
+            if (! selected || ! chosen.contains (track[ids::id].toString()))
+                chosen = { track[ids::id].toString() };
+            for (const auto& id : chosen)
+                if (auto t = model::findById (project, id); t.isValid())
+                    t.setProperty (ids::automationMode, m, nullptr);
+        });
+    }
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&automationButton));
+}
+
+void ChannelStrip::followAutomation (double time)
+{
+    if (isMaster())
+        return;
+    updateAutomationButton();
+
+    auto* w = AutomationWriter::current();
+    if (w == nullptr)
+        return;
+
+    const auto id = track[ids::id].toString();
+    if (! fader.isMouseButtonDown())
+    {
+        const auto gain = w->displayedValue (track, model::volumeParam, time);
+        const auto db = gainToDb (gain);
+        if (std::abs (db - fader.getValue()) > 0.05)
+        {
+            fader.setValue (db, juce::dontSendNotification);
+            dbLabel.setText (db <= minDb + 0.01 ? juce::String ("-inf") : juce::String (db, 1), juce::dontSendNotification);
+        }
+    }
+    if (! panKnob.isMouseButtonDown())
+    {
+        const auto pan = w->displayedValue (track, model::panParam, time);
+        if (std::abs (pan - panKnob.getValue()) > 0.005)
+            panKnob.setValue (pan, juce::dontSendNotification);
+    }
 }
 
 //==============================================================================
@@ -1232,16 +1342,19 @@ void MixerPanel::timerCallback()
         return levels[owner] = engine.takeTrackLevel (player.slotOf (owner));
     };
 
+    const auto playhead = engine.getPlayheadSeconds();
     for (auto* s : strips)
     {
         const auto [l, r] = levelOf (s->getOwnerId());
         s->pushLevels (l, r);
+        s->followAutomation (playhead);
     }
     for (auto* s : extraStrips)
         if (s->getTrack().isValid())
         {
             const auto [l, r] = levelOf (s->getOwnerId());
             s->pushLevels (l, r);
+            s->followAutomation (playhead);
         }
 
     if (! isShowing())

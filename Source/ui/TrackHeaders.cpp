@@ -4,6 +4,7 @@
 #include "../model/Project.h"
 #include "../engine/BuiltInEffects.h"
 #include "../AppInfo.h"
+#include "../engine/AutomationWriter.h"
 
 namespace riff
 {
@@ -103,8 +104,19 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
     volumeSlider.setDoubleClickReturnValue (true, 0.0);
     volumeSlider.setPopupDisplayEnabled (true, true, nullptr);
     volumeSlider.textFromValueFunction = [] (double db) { return db <= minDb + 0.01 ? juce::String ("-inf dB") : juce::String (db, 1) + " dB"; };
-    volumeSlider.onDragStart = [this] { undoManager.beginNewTransaction ("Volume"); };
-    volumeSlider.onValueChange = [this] { track.setProperty (ids::volume, dbToGain (volumeSlider.getValue()), &undoManager); };
+    volumeSlider.onDragStart = [this]
+    {
+        undoManager.beginNewTransaction ("Volume");
+        if (auto* w = AutomationWriter::current())
+            w->begin (track[ids::id].toString(), model::volumeParam, dbToGain (volumeSlider.getValue()));
+    };
+    volumeSlider.onDragEnd = [this] { if (auto* w = AutomationWriter::current()) w->end (track[ids::id].toString(), model::volumeParam); };
+    volumeSlider.onValueChange = [this]
+    {
+        if (auto* w = AutomationWriter::current(); w != nullptr && w->move (track[ids::id].toString(), model::volumeParam, dbToGain (volumeSlider.getValue())))
+            return;
+        track.setProperty (ids::volume, dbToGain (volumeSlider.getValue()), &undoManager);
+    };
     addAndMakeVisible (volumeSlider);
 
     look::knob (panKnob, look::Knob::black, false);
@@ -117,8 +129,19 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
         const auto amount = juce::roundToInt (std::abs (p) * 64.0);
         return amount == 0 ? juce::String ("C") : (p < 0 ? "L" : "R") + juce::String (amount);
     };
-    panKnob.onDragStart = [this] { undoManager.beginNewTransaction ("Pan"); };
-    panKnob.onValueChange = [this] { track.setProperty (ids::pan, panKnob.getValue(), &undoManager); };
+    panKnob.onDragStart = [this]
+    {
+        undoManager.beginNewTransaction ("Pan");
+        if (auto* w = AutomationWriter::current())
+            w->begin (track[ids::id].toString(), model::panParam, panKnob.getValue());
+    };
+    panKnob.onDragEnd = [this] { if (auto* w = AutomationWriter::current()) w->end (track[ids::id].toString(), model::panParam); };
+    panKnob.onValueChange = [this]
+    {
+        if (auto* w = AutomationWriter::current(); w != nullptr && w->move (track[ids::id].toString(), model::panParam, panKnob.getValue()))
+            return;
+        track.setProperty (ids::pan, panKnob.getValue(), &undoManager);
+    };
     addAndMakeVisible (panKnob);
 
     track.addListener (this);
@@ -159,6 +182,25 @@ void TrackHeader::refresh()
     volumeSlider.setValue (gainToDb (track.getProperty (ids::volume, 1.0)), juce::dontSendNotification);
     panKnob.setValue (track.getProperty (ids::pan, 0.0), juce::dontSendNotification);
     repaint();
+}
+
+void TrackHeader::followAutomation (double time)
+{
+    auto* w = AutomationWriter::current();
+    if (w == nullptr)
+        return;
+    if (! volumeSlider.isMouseButtonDown())
+    {
+        const auto db = gainToDb (w->displayedValue (track, model::volumeParam, time));
+        if (std::abs (db - volumeSlider.getValue()) > 0.05)
+            volumeSlider.setValue (db, juce::dontSendNotification);
+    }
+    if (! panKnob.isMouseButtonDown())
+    {
+        const auto pan = w->displayedValue (track, model::panParam, time);
+        if (std::abs (pan - panKnob.getValue()) > 0.005)
+            panKnob.setValue (pan, juce::dontSendNotification);
+    }
 }
 
 void TrackHeader::paint (juce::Graphics& g)
@@ -402,6 +444,17 @@ void TrackHeader::showAutomationMenu()
         t.setProperty (ids::showAutomation, true, nullptr);
     };
 
+    // The mode first (as on the mixer strip).
+    {
+        const auto mode = AutomationWriter::modeOf (track);
+        juce::PopupMenu modes;
+        for (auto [m, name] : { std::pair { "off", "Off" }, std::pair { "read", "Read" }, std::pair { "touch", "Touch" },
+                                std::pair { "latch", "Latch" }, std::pair { "write", "Write" } })
+            modes.addItem (name, true, mode == m, [t = track, value = juce::String (m)]() mutable { t.setProperty (ids::automationMode, value, nullptr); });
+        menu.addSubMenu ("Mode: " + mode.substring (0, 1).toUpperCase() + mode.substring (1), modes);
+        menu.addSeparator();
+    }
+
     menu.addItem ("Volume", true, current == model::volumeParam, [choose]() mutable { choose (model::volumeParam); });
     menu.addItem ("Pan", true, current == model::panParam, [choose]() mutable { choose (model::panParam); });
 
@@ -409,7 +462,26 @@ void TrackHeader::showAutomationMenu()
     {
         const auto* info = findBuiltInEffect (insert[ids::effect].toString());
         if (info == nullptr)
+        {
+            // A hosted plugin: its parameters by index.
+            const auto names = pluginParameterNames ? pluginParameterNames (insert[ids::id].toString()) : juce::StringArray();
+            if (names.isEmpty())
+                continue;
+            juce::PopupMenu params;
+            const auto xml = juce::parseXML (insert[ids::pluginDescription].toString());
+            const auto pluginName = xml != nullptr ? xml->getStringAttribute ("name") : juce::String();
+            for (int i = 0; i < names.size() && i < 512; ++i)
+            {
+                const auto param = model::insertParam (insert[ids::id].toString(), "#" + juce::String (i));
+                params.addItem (names[i], true, current == param, [choose, param, project, owner = track[ids::id].toString(), label = names[i]]() mutable
+                {
+                    model::laneFor (project, owner, param, true).setProperty (ids::name, label, nullptr);
+                    choose (param);
+                });
+            }
+            menu.addSubMenu (pluginName.isNotEmpty() ? pluginName : juce::String ("Plug-in"), params);
             continue;
+        }
 
         juce::PopupMenu params;
         for (const auto& p : info->params)
@@ -451,6 +523,8 @@ juce::String TrackHeader::automationParamName (const juce::ValueTree& project, c
 {
     if (param == model::volumeParam) return "Volume";
     if (param == model::panParam)    return "Pan";
+    if (param.contains (":#"))
+        return model::rangeOf (project, param).name;
 
     for (const auto& insert : model::insertsOf (model::findChain (project, track[ids::id].toString())))
         if (const auto* info = findBuiltInEffect (insert[ids::effect].toString()))

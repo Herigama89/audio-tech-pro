@@ -79,6 +79,7 @@ namespace riff::ids
     RIFF_DECLARE_ID (fadeOutCurve)
     RIFF_DECLARE_ID (loop)         // REGION: repeats until loopEnd (or the next region)
     RIFF_DECLARE_ID (loopEnd)
+    RIFF_DECLARE_ID (automationMode)   // TRACK: "off", "read" (default), "touch", "latch", "write"
     RIFF_DECLARE_ID (metronome)
     RIFF_DECLARE_ID (armed)        // record-enabled
     RIFF_DECLARE_ID (monitor)      // hear the input through the track while armed

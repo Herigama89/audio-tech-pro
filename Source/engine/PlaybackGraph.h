@@ -55,7 +55,7 @@ struct PlaybackGraph
     /** Automation of one parameter of a built-in effect (kept alive by the track's inserts). */
     struct ParamAutomation
     {
-        BuiltInEffect* effect = nullptr;
+        Effect* effect = nullptr;
         int paramIndex = 0;
         Curve curve;
     };

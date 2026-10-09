@@ -19,6 +19,12 @@ public:
     void process (float* left, float* right, int numSamples) noexcept override;
     juce::String getName() const override { return plugin->getName(); }
     int getLatencySamples() const override { return plugin->getLatencySamples(); }
+    void setAutomatedParameter (int index, float value) noexcept override
+    {
+        const auto& params = plugin->getParameters();
+        if (juce::isPositiveAndBelow (index, params.size()))
+            params[index]->setValue (juce::jlimit (0.0f, 1.0f, value));
+    }
 
     juce::AudioPluginInstance& getPlugin() noexcept { return *plugin; }
     juce::String getStateBase64() const;
