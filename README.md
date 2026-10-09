@@ -40,13 +40,35 @@ open "build/AudioTechPro_artefacts/Debug/Audio Tech Pro.app"
 - The first configure downloads JUCE and Catch2, which takes a few minutes.
 - After you change code, you only need `cmake --build build` again.
 
+### A Mac app for Apple Silicon and Intel (universal)
+
+```bash
+sh scripts/build-mac-universal.sh
+```
+
+This makes a Release build in `build-universal` with both kinds of Mac code in one app, signs it for local use, and zips it as `Audio Tech Pro (Universal).zip` next to the `riff` folder. On another Mac, right-click the app and choose Open the first time.
+
 ### Windows (Visual Studio 2022 with "Desktop development with C++")
 
+From a "x64 Native Tools Command Prompt for VS 2022":
+
 ```bat
-cmake -B build
-cmake --build build --config Debug
-"build\AudioTechPro_artefacts\Debug\Audio Tech Pro.exe"
+scripts\build-windows.bat
 ```
+
+or by hand:
+
+```bat
+cmake -B build-windows -G "Visual Studio 17 2022" -A x64
+cmake --build build-windows --config Release --parallel
+"build-windows\AudioTechPro_artefacts\Release\Audio Tech Pro.exe"
+```
+
+On Windows the app uses WASAPI and DirectSound devices (choose the interface in Audio settings; WASAPI Exclusive gives the lowest latency). Plugins: VST3 in `C:\Program Files\Common Files\VST3`, CLAP in `C:\Program Files\Common Files\CLAP`.
+
+### Both at once, on GitHub
+
+Put the `riff` folder in a GitHub repository and push: `.github/workflows/build.yml` builds and tests the universal Mac app and the Windows app on GitHub's machines, and attaches both to the run (Actions tab > the run > Artifacts).
 
 ### Linux (Debian/Ubuntu)
 
@@ -355,6 +377,12 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [x] Smart Controls (B): eight knobs per track, mapped automatically, right-click to remap
 - [x] Drummer and Session Players (bass, keys): Track > New Drummer Track; the Player view sets genre, simple/complex and soft/loud, fills, swing, pieces
 - [x] Live Loops: a grid of cells per track and 8 scenes, started and stopped on the next bar, Cycle to Scene (View > Live Loops)
+
+## Platforms
+
+- [x] macOS on Apple Silicon (the main build)
+- [x] macOS on Intel: a universal app (`scripts/build-mac-universal.sh`)
+- [x] Windows 10/11 x64: Visual Studio 2022 build (`scripts/build-windows.bat`), plus GitHub Actions building and testing both (`.github/workflows/build.yml`)
 
 ## Later phases
 

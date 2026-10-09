@@ -1,0 +1,46 @@
+# Builds and tests Audio Tech Pro on macOS (one universal app for Apple Silicon
+# and Intel) and Windows, whenever you push or start it by hand (Actions tab >
+# Build > Run workflow). The finished apps are attached to each run.
+name: Build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  mac:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (universal)
+        run: cmake -B build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+      - name: Build
+        run: cmake --build build --config Release -j 4
+      - name: Test
+        run: ./build/AudioTechProTests_artefacts/Release/AudioTechProTests
+      - name: Package
+        run: |
+          APP="build/AudioTechPro_artefacts/Release/Audio Tech Pro.app"
+          lipo -info "$APP/Contents/MacOS/Audio Tech Pro"
+          codesign --force --deep --sign - "$APP"
+          ditto -c -k --keepParent "$APP" AudioTechPro-mac-universal.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AudioTechPro-mac-universal
+          path: AudioTechPro-mac-universal.zip
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Test
+        run: build\AudioTechProTests_artefacts\Release\AudioTechProTests.exe
+        shell: cmd
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AudioTechPro-windows-x64
+          path: build/AudioTechPro_artefacts/Release/

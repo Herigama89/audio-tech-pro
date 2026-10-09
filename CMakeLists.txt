@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.22)
 
+# macOS: runs on macOS 11 and later, on Apple Silicon and Intel Macs.
+# A universal (both) build:  cmake -B build-universal -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+# (or scripts/build-mac-universal.sh). Must be set before project().
+if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
+endif()
+
 project(AudioTechPro VERSION 0.8.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -70,6 +77,12 @@ set(RIFF_DEFINITIONS
 # builds, so a 44.1 kHz song plays smoothly in a 48 kHz session.
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     set_source_files_properties(Source/engine/Resampler.cpp PROPERTIES COMPILE_OPTIONS "-O2")
+endif()
+
+# Windows (Visual Studio): big source files, UTF-8 sources, parallel compiles.
+if(MSVC)
+    add_compile_options(/bigobj /utf-8 /MP)
+    add_compile_definitions(NOMINMAX _USE_MATH_DEFINES)
 endif()
 
 # Audio Units exist only on macOS.
