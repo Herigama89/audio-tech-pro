@@ -2016,3 +2016,23 @@ TEST_CASE ("Long files stream from disk and play the same as from memory", "[eng
         CHECK (std::abs (out[49000]) < 1e-3f);   // ends after 1 s
     }
 }
+
+TEST_CASE ("Compressors and limiters report their gain reduction for the strip's meter", "[effects][gr]")
+{
+    for (const auto* type : { "compressor", "limiter" })
+    {
+        auto fx = BuiltInEffect::create (type);
+        REQUIRE (fx != nullptr);
+        fx->prepare (48000.0, 512);
+        CHECK (fx->takeGainReductionDb() == 0.0f);
+        std::vector<float> l (512, 2.0f), r (512, 2.0f);   // well over the threshold and the ceiling
+        for (int b = 0; b < 20; ++b)
+        {
+            std::fill (l.begin(), l.end(), 2.0f);
+            std::fill (r.begin(), r.end(), 2.0f);
+            fx->process (l.data(), r.data(), 512);
+        }
+        CHECK (fx->takeGainReductionDb() > 1.0f);   // loud: reducing
+        CHECK (fx->takeGainReductionDb() == 0.0f);  // taken
+    }
+}

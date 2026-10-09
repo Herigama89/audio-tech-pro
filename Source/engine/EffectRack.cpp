@@ -108,6 +108,38 @@ juce::String EffectRack::keyFor (const juce::ValueTree& insert)
     return "builtin:" + insert[ids::effect].toString();
 }
 
+float PluginEffect::takeGainReductionDb() noexcept
+{
+    if (! grSearched)
+    {
+        grSearched = true;
+        for (auto* p : plugin->getParameters())
+        {
+            const auto name = p->getName (64).toLowerCase().trim();
+            if (name.contains ("gain reduction") || name == "gr" || name == "reduction" || name.startsWith ("gr ") || name.contains ("gainreduction")
+                || (name.contains ("reduction") && name.contains ("meter")))
+            {
+                grParameter = p;
+                break;
+            }
+        }
+    }
+    if (grParameter == nullptr)
+        return 0.0f;
+    // Read the plugin's own reading of it ("-4.2 dB"), or its position on a 0..20 dB scale.
+    const auto text = grParameter->getCurrentValueAsText().retainCharacters ("0123456789.-");
+    if (text.containsAnyOf ("0123456789"))
+        return std::abs (text.getFloatValue());
+    return grParameter->getValue() * 20.0f;
+}
+
+float EffectRack::takeGainReduction (const juce::String& insertId)
+{
+    if (auto it = entries.find (insertId); it != entries.end() && it->second.effect != nullptr)
+        return it->second.effect->takeGainReductionDb();
+    return 0.0f;
+}
+
 std::shared_ptr<Effect> EffectRack::effectFor (const juce::ValueTree& insert, double sampleRate, int maxBlockSize)
 {
     const auto id = insert[ids::id].toString();

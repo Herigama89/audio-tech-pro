@@ -212,11 +212,17 @@ public:
             const auto gain = juce::Decibels::decibelsToGain (makeup - reductionDb);
             l[i] *= gain;
             r[i] *= gain;
+            peakReduction = juce::jmax (peakReduction, reductionDb);
         }
+        meter.store (juce::jmax (meter.load(), peakReduction));
+        peakReduction = 0.0f;
     }
 
+    float takeGainReductionDb() noexcept override { return meter.exchange (0.0f); }
+
 private:
-    float reductionDb = 0.0f;
+    float reductionDb = 0.0f, peakReduction = 0.0f;
+    std::atomic<float> meter { 0.0f };
 };
 
 class DelayEffect final : public BuiltInEffect
@@ -324,11 +330,18 @@ public:
 
             l[i] = juce::jlimit (-ceiling, ceiling, l[i] * gain);
             r[i] = juce::jlimit (-ceiling, ceiling, r[i] * gain);
+            lowest = juce::jmin (lowest, gain);
         }
+        const auto db = -juce::Decibels::gainToDecibels (lowest, -60.0f);
+        meter.store (juce::jmax (meter.load(), db));
+        lowest = 1.0f;
     }
 
+    float takeGainReductionDb() noexcept override { return meter.exchange (0.0f); }
+
 private:
-    float gain = 1.0f;
+    float gain = 1.0f, lowest = 1.0f;
+    std::atomic<float> meter { 0.0f };
 };
 
 } // namespace

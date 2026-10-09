@@ -26,6 +26,9 @@ public:
             params[index]->setValue (juce::jlimit (0.0f, 1.0f, value));
     }
 
+    /** Plugins that publish their gain reduction as a meter parameter ("Gain Reduction", "GR"...) show it on the strip. */
+    float takeGainReductionDb() noexcept override;
+
     juce::AudioPluginInstance& getPlugin() noexcept { return *plugin; }
 
     /** Hears knob moves made in the plugin's own window: (parameter index, value 0..1, phase: 0 grab, 1 move, 2 let go).
@@ -56,6 +59,8 @@ private:
         void parameterGestureChanged (int index, bool starting) override { post (index, -1.0f, starting ? 0 : 2); }
     };
     std::unique_ptr<Watcher> watcher;
+    juce::AudioProcessorParameter* grParameter = nullptr;
+    bool grSearched = false;
 };
 
 /**
@@ -82,6 +87,9 @@ public:
         entries[insert[ids::id].toString()] = { keyFor (insert), sampleRate, std::move (effect) };
     }
     BuiltInEffect* getBuiltIn (const juce::String& insertId);
+
+    /** An insert's gain reduction since the last call (dB), for the strip's meter. */
+    float takeGainReduction (const juce::String& insertId);
 
     std::function<void()> onEffectReady;
     std::function<void (const juce::String& error)> onLoadError;

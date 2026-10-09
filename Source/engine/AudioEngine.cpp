@@ -1334,6 +1334,16 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         console.process (tL, tR, n);
     }
 
+    // The spectrum analyzer's track: its sound after the EQ, in mono.
+    if (track.slot == analyzerSlot.load (std::memory_order_relaxed))
+    {
+        const auto scope = analyzerFifo.write (juce::jmin (n, analyzerFifo.getFreeSpace()));
+        for (int i = 0; i < scope.blockSize1; ++i)
+            analyzerBuffer[(size_t) (scope.startIndex1 + i)] = 0.5f * (tL[i] + tR[i]);
+        for (int i = 0; i < scope.blockSize2; ++i)
+            analyzerBuffer[(size_t) (scope.startIndex2 + i)] = 0.5f * (tL[scope.blockSize1 + i] + tR[scope.blockSize1 + i]);
+    }
+
     for (const auto& effect : track.inserts)
         effect->process (tL, tR, n);
 

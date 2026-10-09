@@ -163,8 +163,25 @@ public:
             track.setProperty (ids::consoleLMFFreq, 300.0, nullptr);
             track.setProperty (ids::consoleHPF, 80.0, nullptr);
             track.setProperty (ids::consoleDynamics, 4.0, nullptr);
-            ConsoleStripWindow panel (track, main.undoManager);
-            pump (main, 100);
+            // The analyzer fed a made-up mix: falling noise and a few tones.
+            auto phase = std::make_shared<double> (0.0);
+            auto noise = std::make_shared<juce::Random> (3);
+            auto lp = std::make_shared<float> (0.0f);
+            ConsoleStripWindow panel (track, main.undoManager, [phase, noise, lp] (float* dest, int max)
+            {
+                const int n = juce::jmin (max, 1600);
+                for (int i = 0; i < n; ++i)
+                {
+                    *lp += 0.08f * (noise->nextFloat() * 2.0f - 1.0f - *lp);
+                    *phase += 1.0;
+                    dest[i] = 0.5f * *lp + 0.05f * (noise->nextFloat() - 0.5f)
+                              + 0.25f * (float) std::sin (*phase * 2.0 * juce::MathConstants<double>::pi * 110.0 / 48000.0)
+                              + 0.08f * (float) std::sin (*phase * 2.0 * juce::MathConstants<double>::pi * 2500.0 / 48000.0);
+                }
+                return n;
+            }, [] { return 48000.0; });
+            for (int i = 0; i < 20; ++i)
+                pump (main, 40);
             save (panel, "strip-window.png");
 
             AudioEditorPanel editor (track.getChild (0), main.undoManager, main.engine.getFormatManager(), juce::File::getSpecialLocation (juce::File::tempDirectory));
@@ -264,11 +281,11 @@ public:
             main.toggleInspector();
             pump (main, 300);
             save (main, "inspector-multiselect.png");
-            main.inspector.setWidthWanted (300);
-            main.resized();
+            main.inspector.boxesWanted = 0;   // dragged all the way up: the strips take the height
+            main.inspector.resized();
             pump (main, 100);
             save (main, "inspector-wide.png");
-            main.inspector.setWidthWanted (Inspector::preferredWidth);
+            main.inspector.boxesWanted = -1;
             main.project.getChild (1).setProperty (ids::hidden, false, nullptr);
             main.toggleInspector();
 
@@ -413,14 +430,20 @@ public:
             std::vector<PluginPicker::Entry> entries;
             for (const auto* n : { "EQ", "Compressor", "Reverb", "Delay", "Limiter" })
                 entries.push_back ({ n, "Audio Tech Pro", {}, {} });
-            entries.push_back ({ "Pro-Q 3", "FabFilter", "VST3", {} });
+            entries.push_back ({ "Pro-Q 3", "FabFilter", "AU", {} });
             entries.push_back ({ "Pro-C 2", "FabFilter", "AU", {} });
             entries.push_back ({ "1176 Classic Limiter", "Universal Audio", "AU", {} });
             entries.push_back ({ "LA-2A Gray", "Universal Audio", "AU", {} });
             entries.push_back ({ "Valhalla VintageVerb", "Valhalla DSP", "CLAP", {} });
-            PluginPicker picker (entries, {}, {});
+            PluginPicker::Settings settings;
+            settings.favorites.add ("AU|FabFilter|Pro-Q 3");
+            PluginPicker picker (entries, {}, {}, settings);
             pump (main, 30);
             save (picker, "plugin-picker.png");
+            picker.setView (PluginPicker::View::category);
+            pump (main, 30);
+            save (picker, "plugin-picker-category.png");
+            picker.setView (PluginPicker::View::maker);
             picker.search.setText ("comp", true);
             pump (main, 30);
             save (picker, "plugin-picker-search.png");

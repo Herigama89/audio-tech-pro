@@ -151,6 +151,7 @@ set(RIFF_UI_SOURCES
     Source/ui/EventList.cpp
     Source/ui/LiveLoopsGrid.cpp
     Source/ui/PluginPicker.cpp
+    Source/ui/SpectrumAnalyzer.cpp
     Source/ui/LibraryPanel.cpp
     Source/ui/AudioEditorPanel.cpp
     Source/ui/SmartControls.cpp
@@ -220,6 +221,7 @@ if(RIFF_BUILD_TESTS)
         Tests/ClapTests.cpp
         Source/ui/ScreenRecordPanel.cpp
         Source/ui/ScreenRecorder.cpp
+        Source/ui/SpectrumAnalyzer.cpp
     )
 
     target_include_directories(AudioTechProTests PRIVATE Source)
@@ -244,6 +246,7 @@ if(RIFF_BUILD_TESTS)
             juce::juce_data_structures
             juce::juce_graphics
             juce::juce_audio_processors
+            juce::juce_dsp
             Catch2::Catch2
         PUBLIC
             juce::juce_recommended_config_flags

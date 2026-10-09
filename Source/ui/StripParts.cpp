@@ -111,7 +111,27 @@ void PointerKnob::paint (juce::Graphics& g)
     {
         const auto params = getRotaryParameters();
         const auto angle = params.startAngleRadians + (float) valueToProportionOfLength (getValue()) * (params.endAngleRadians - params.startAngleRadians);
-        skin::drawKnob (g, skinBody, getLocalBounds().toFloat(), angle, skinPointer, isEnabled() ? 1.0f : 0.5f);
+        const auto area = getLocalBounds().toFloat();
+        if (cap.isTransparent())
+        {
+            skin::drawKnob (g, skinBody, area, angle, skinPointer, isEnabled() ? 1.0f : 0.5f);
+            return;
+        }
+        // The knob, then its coloured cap with the pointer line across it.
+        const auto size = juce::jmin (area.getWidth(), area.getHeight());
+        const auto r = area.withSizeKeepingCentre (size, size);
+        g.setOpacity (isEnabled() ? 1.0f : 0.5f);
+        g.drawImage (skinBody, r);
+        const auto capArea = r.reduced (size * 0.2f);
+        g.setGradientFill (juce::ColourGradient (cap.brighter (0.45f), capArea.getCentreX(), capArea.getY(),
+                                                 cap.darker (0.35f), capArea.getCentreX(), capArea.getBottom(), false));
+        g.fillEllipse (capArea);
+        g.setColour (juce::Colours::black.withAlpha (0.45f));
+        g.drawEllipse (capArea, 1.0f);
+        const auto c = r.getCentre();
+        auto at = [&] (float f) { return c + juce::Point<float> (size * 0.5f * f * std::sin (angle), -size * 0.5f * f * std::cos (angle)); };
+        g.setColour (cap.getPerceivedBrightness() > 0.7f ? juce::Colour (0xff151515) : juce::Colours::white);
+        g.drawLine (juce::Line<float> (at (0.0f), at (0.6f)), juce::jmax (1.4f, size * 0.07f));
         return;
     }
 

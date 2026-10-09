@@ -219,6 +219,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     canvas.onViewChanged = [this] { updateScrollBars(); };
     canvas.onOpenPianoRoll = [this] (juce::ValueTree region) { openPianoRoll (region); };
     canvas.onSplit = [this] { splitAtPlayhead(); };
+    mixer.onLayoutChanged = [this] { inspector.resized(); };
     canvas.commandManager = &commandManager;
     canvas.onEmptyAreaMenu = [this] { showToolMenu (true); };
     canvas.onDelete = [this] { deleteSelection(); };
@@ -287,6 +288,8 @@ MainComponent::MainComponent (bool openAudioDevice)
     mixer.onSelectTrack = [this] (const juce::String& id, juce::ModifierKeys mods) { selectTrackFromMixer (id, mods); };
     addChildComponent (mixer);
     addChildComponent (inspector);
+    mixer.inputNames = [this] { return headers.inputNames ? headers.inputNames() : juce::StringArray(); };
+    mixer.onInstrumentMenu = [this] (juce::ValueTree track, juce::Component& target) { showInstrumentMenu (track, target); };
     headers.inputNames = [this]
     {
         // Your own names for the inputs (I/O Labels), where you gave one.
@@ -391,12 +394,6 @@ MainComponent::MainComponent (bool openAudioDevice)
     setProject (model::createProject(), {});
     statusLabel.setText (deviceStatusText(), juce::dontSendNotification);
     createAssistant();
-    inspector.setWidthWanted (appProperties.getUserSettings()->getIntValue ("inspectorWidth", Inspector::preferredWidth));
-    inspector.onWidthChanged = [this] (int w)
-    {
-        appProperties.getUserSettings()->setValue ("inspectorWidth", w);
-        resized();
-    };
     if (appProperties.getUserSettings()->getBoolValue ("inspector", true))
         toggleInspector();
     screenRecorder = ScreenRecorder::create();
@@ -422,6 +419,16 @@ MainComponent::MainComponent (bool openAudioDevice)
         if (value < 0.0f)
             if (auto* plugin = effectRack.getPlugin (insertId); plugin != nullptr && juce::isPositiveAndBelow (index, plugin->getParameters().size()))
                 value = plugin->getParameters()[index]->getValue();
+
+        // As in Logic: the track shows the lane of the knob you just touched (named after it).
+        if (phase == 0)
+            if (auto track = model::findById (project, owner); track.isValid() && track.hasType (ids::TRACK))
+            {
+                if (auto* plugin = effectRack.getPlugin (insertId); plugin != nullptr && juce::isPositiveAndBelow (index, plugin->getParameters().size()))
+                    model::laneFor (project, owner, param, true).setProperty (ids::name, plugin->getParameters()[index]->getName (40), nullptr);
+                track.setProperty (ids::automationParam, param, nullptr);
+                track.setProperty (ids::showAutomation, true, nullptr);
+            }
 
         if (phase == 0)      automation.begin (owner, param, value);
         else if (phase == 1) automation.move (owner, param, value);
@@ -465,14 +472,22 @@ MainComponent::MainComponent (bool openAudioDevice)
         }
         auto closer = [this, id]
         {
+            engine.setAnalyzerSlot (-1);
             juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this), id]
             {
                 if (safe != nullptr)
                     safe->editorWindows.erase (id);
             });
         };
+        // The analyzer listens to this track (after its EQ).
+        engine.setAnalyzerSlot (player.slotOf (track[ids::id].toString()));
+        float discard[4096];
+        while (engine.readAnalyzer (discard, 4096) > 0) {}
         editorWindows[id] = std::make_unique<EditorWindow> (track[ids::name].toString() + ": Channel Strip",
-                                                            new ConsoleStripWindow (track, undoManager), false, closer);
+                                                            new ConsoleStripWindow (track, undoManager,
+                                                                                    [this] (float* dest, int max) { return engine.readAnalyzer (dest, max); },
+                                                                                    [this] { return engine.getSampleRate(); }),
+                                                            false, closer);
     };
     routing::createStack = [this] (bool summing) { createStackFromSelection (summing); };
     TrackHeader::pluginParameterNames = [this] (const juce::String& insertId)
@@ -712,7 +727,7 @@ void MainComponent::resized()
 
     // The Inspector down the left side, beside the tracks and the editors, as in Logic
     if (inspector.isVisible())
-        inspector.setBounds (area.removeFromLeft (inspector.getWidthWanted()));
+        inspector.setBounds (area.removeFromLeft (Inspector::preferredWidth));
 
     // Smart Controls at the very bottom.
     if (smartControls != nullptr && smartControls->isVisible())
@@ -2173,10 +2188,15 @@ void MainComponent::showEffectMenu (const juce::String& owner, int slot, juce::V
     // The chooser with a search field (as in Logic): built-in effects, then every plugin found.
     std::vector<PluginPicker::Entry> entries;
     for (const auto& info : builtInEffects())
-        entries.push_back ({ info.name, app::effectsName, {}, [this, place, type = info.type]
+    {
+        PluginPicker::Entry e { info.name, app::effectsName, {}, [this, place, type = info.type]
         {
             place ([this, type] (juce::ValueTree chain, int index) { return model::addBuiltinInsert (chain, type, index, &undoManager); });
-        } });
+        } };
+        e.category = PluginPicker::categoryOf ({}, info.name);
+        e.key = "builtin:" + info.type;
+        entries.push_back (std::move (e));
+    }
 
     for (const auto& type : rack.getKnownPlugins().getTypes())
     {
@@ -2184,10 +2204,13 @@ void MainComponent::showEffectMenu (const juce::String& owner, int slot, juce::V
             continue;
         const auto xml = type.createXml()->toString (juce::XmlElement::TextFormat().singleLine());
         const auto format = type.pluginFormatName == "AudioUnit" ? juce::String ("AU") : type.pluginFormatName;
-        entries.push_back ({ type.name, type.manufacturerName.isNotEmpty() ? type.manufacturerName : "Other", format, [this, place, xml]
+        PluginPicker::Entry e { type.name, type.manufacturerName.isNotEmpty() ? type.manufacturerName : "Other", format, [this, place, xml]
         {
             place ([this, xml] (juce::ValueTree chain, int index) { return model::addPluginInsert (chain, xml, index, &undoManager); });
-        } });
+        } };
+        e.category = PluginPicker::categoryOf (type.category, type.name);
+        e.key = type.createIdentifierString();
+        entries.push_back (std::move (e));
     }
 
     std::function<void()> remove;
@@ -2198,7 +2221,17 @@ void MainComponent::showEffectMenu (const juce::String& owner, int slot, juce::V
             model::removeInsert (existing, &undoManager);
         };
 
-    auto picker = std::make_unique<PluginPicker> (std::move (entries), [this] { showPluginScanner(); }, remove);
+    // Favorites and the chosen view are kept between sessions.
+    PluginPicker::Settings settings;
+    settings.favorites = juce::StringArray::fromLines (appProperties.getUserSettings()->getValue ("pluginFavorites"));
+    settings.favorites.removeEmptyStrings();
+    settings.view = (PluginPicker::View) juce::jlimit (0, 3, appProperties.getUserSettings()->getIntValue ("pluginView", 1));
+    auto picker = std::make_unique<PluginPicker> (std::move (entries), [this] { showPluginScanner(); }, remove, settings,
+                                                  [this] (const PluginPicker::Settings& changed)
+    {
+        appProperties.getUserSettings()->setValue ("pluginFavorites", changed.favorites.joinIntoString ("\n"));
+        appProperties.getUserSettings()->setValue ("pluginView", (int) changed.view);
+    });
     juce::CallOutBox::launchAsynchronously (std::move (picker), target.getScreenBounds(), nullptr);
 }
 

@@ -158,6 +158,23 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         consoleTag.setVisible (! isVca());
     }
 
+    // Input and Output slots, as in Logic: where the channel's sound comes from and goes to.
+    for (auto* b : { &inputSlot, &outputSlot })
+    {
+        look::key (*b, look::Key::slot);
+        b->getProperties().set ("atpSkin", "slot");
+        b->setWantsKeyboardFocus (false);
+        b->setColour (juce::TextButton::buttonColourId, theme::stripSlotOn);
+        b->setColour (juce::TextButton::textColourOffId, juce::Colour (0xffbfe0ff));
+        addAndMakeVisible (b);
+    }
+    inputSlot.setTooltip ("Input: what this channel records or plays (an interface input, or the instrument)");
+    outputSlot.setTooltip ("Output: where this channel goes (the Stereo Out, or a bus)");
+    inputSlot.onClick = [this] { showInputMenu(); };
+    outputSlot.onClick = [this] { showOutputMenu(); };
+    inputSlot.setVisible (! isMaster() && ! isVca());
+    outputSlot.setVisible (! isVca());
+
     for (int i = 0; i < numSlots; ++i)
     {
         auto* b = slots.add (new juce::TextButton());
@@ -723,6 +740,31 @@ void ChannelStrip::refresh()
 
     updateConsoleTag();
 
+    // Input and Output slots
+    if (isMaster())
+        outputSlot.setButtonText ("Out 1-2");
+    else if (! isVca())
+    {
+        if (model::isBusTrack (track))
+            inputSlot.setButtonText (track[ids::name].toString());
+        else if (model::isInstrumentTrack (track))
+        {
+            const auto kind = track[ids::instrument].toString();
+            juce::String name = kind == "drums" ? "Drum Kit" : kind == "sampler" ? "Sampler" : "Synth";
+            if (kind == "plugin")
+            {
+                juce::PluginDescription d;
+                if (auto xml = juce::parseXML (track[ids::pluginDescription].toString()); xml != nullptr && d.loadFromXml (*xml))
+                    name = d.name;
+            }
+            inputSlot.setButtonText (name);
+        }
+        else
+            inputSlot.setButtonText (model::inputName (track, owner.inputNames ? owner.inputNames() : juce::StringArray()));
+        const auto out = model::findById (project, track[ids::output].toString());
+        outputSlot.setButtonText (out.isValid() ? out[ids::name].toString() : juce::String ("St Out"));
+    }
+
     const auto gain = isMaster() ? (double) project.getProperty (ids::masterGain, 0.8)
                                  : (double) track.getProperty (ids::volume, 1.0);
     fader.setValue (gainToDb (gain), juce::dontSendNotification);
@@ -824,7 +866,7 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
 juce::Rectangle<int> ChannelStrip::faderArea() const
 {
     // Below the sends, above the level display and the name plate.
-    const auto top = topSection() + 6 + numSlots * 17 + 6 + numSends * 18 + 4 + automationRow;
+    const auto top = topSection() + 6 + ioRow + numSlots * 17 + 6 + numSends * 18 + ioRow + 4 + automationRow;
     return { 0, top, getWidth(), getHeight() - nameHeight - 22 - top };
 }
 
@@ -933,18 +975,32 @@ void ChannelStrip::paint (juce::Graphics& g)
     {
         const auto area = faderArea();
         g.setFont (juce::FontOptions (10.0f));
-        const bool roomy = fader.getHeight() > 170;
+        float lastY = -100.0f;
         for (const auto db : { 6, 0, -5, -10, -15, -20, -30, -40, -60 })
         {
-            if (! roomy && (db == -5 || db == -15 || db == -30))
-                continue;   // short fader: fewer numbers
             const auto y = (float) fader.getY() + fader.yForValue (db);
-            if (y < (float) area.getY() || y > (float) area.getBottom())
-                continue;
+            if (y < (float) area.getY() || y > (float) area.getBottom() || y - lastY < 12.0f)
+                continue;   // only the numbers there's room for (none on top of each other)
+            lastY = y;
             g.setColour (text.withAlpha (0.85f));
             g.fillRect ((float) fader.getRight() - 6.0f, y - 0.5f, 5.0f, 1.0f);
             g.drawText (db == 0 ? juce::String ("0") : juce::String (db),
                         juce::Rectangle<float> ((float) fader.getRight() - 1.0f, y - 6.0f, 22.0f, 12.0f), juce::Justification::centredLeft, false);
+        }
+    }
+
+    // Gain reduction: amber LEDs from the top, 0 to 20 dB
+    {
+        const auto r = grArea().toFloat();
+        g.setColour (juce::Colour (0xff141616));
+        g.fillRoundedRectangle (r.expanded (1.0f), 1.5f);
+        const int leds = juce::jmax (4, (int) (r.getHeight() / 4.0f));
+        const auto lit = (int) std::ceil (juce::jlimit (0.0f, 20.0f, grShown) / 20.0f * (float) leds);
+        for (int i = 0; i < leds; ++i)
+        {
+            const auto y = r.getY() + (float) i * r.getHeight() / (float) leds;
+            g.setColour (i < lit ? juce::Colour (0xffffa62b) : juce::Colour (0xff3a2a14));
+            g.fillRect (r.getX(), y, r.getWidth(), r.getHeight() / (float) leds - 1.0f);
         }
     }
 
@@ -975,6 +1031,101 @@ void ChannelStrip::paint (juce::Graphics& g)
         g.setColour (theme::knobArc);
         g.drawRect (bounds.toFloat().reduced (1.5f), 1.6f);
     }
+}
+
+juce::Rectangle<int> ChannelStrip::grArea() const
+{
+    return { meter.getX() - 6, meter.getY(), 4, meter.getHeight() };
+}
+
+void ChannelStrip::pushGainReduction (float db)
+{
+    // Instant up, about 300 ms down.
+    const auto next = db >= grShown ? db : grShown * 0.82f;
+    if (std::abs (next - grShown) > 0.05f || (next < 0.05f && grShown > 0.0f))
+    {
+        grShown = next < 0.05f ? 0.0f : next;
+        repaint (grArea().expanded (1));
+    }
+}
+
+void ChannelStrip::showInputMenu()
+{
+    if (isMaster() || isVca())
+        return;
+    if (model::isInstrumentTrack (track))
+    {
+        if (owner.onInstrumentMenu)
+            owner.onInstrumentMenu (track, inputSlot);
+        return;
+    }
+
+    juce::PopupMenu menu;
+    if (model::isBusTrack (track))
+    {
+        menu.addSectionHeader (track[ids::name].toString() + ": what tracks send to it");
+        for (const auto& t : project)
+            if (t.hasType (ids::TRACK))
+                for (const auto& send : model::sendsOf (model::findChain (project, t[ids::id].toString())))
+                    if (send[ids::target].toString() == track[ids::id].toString())
+                        menu.addItem (t[ids::name].toString(), false, false, [] {});
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&inputSlot));
+        return;
+    }
+
+    const auto names = owner.inputNames ? owner.inputNames() : juce::StringArray();
+    const int current = track.getProperty (ids::input, 0);
+    const bool stereo = track.getProperty (ids::inputStereo, false);
+    menu.addSectionHeader ("Input");
+    if (names.isEmpty())
+        menu.addItem ("No inputs. Check Audio settings.", false, false, [] {});
+    auto setInput = [t = track] (int channel, bool isStereo) mutable
+    {
+        t.setProperty (ids::input, channel, nullptr);
+        t.setProperty (ids::inputStereo, isStereo, nullptr);
+    };
+    juce::PopupMenu mono, both;
+    for (int i = 0; i < names.size(); ++i)
+        mono.addItem (names[i], true, ! stereo && current == i, [setInput, i]() mutable { setInput (i, false); });
+    for (int i = 0; i + 1 < names.size(); i += 2)
+        both.addItem (names[i] + " + " + names[i + 1], true, stereo && current == i, [setInput, i]() mutable { setInput (i, true); });
+    menu.addSubMenu ("Mono", mono);
+    menu.addSubMenu ("Stereo", both, names.size() >= 2);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&inputSlot));
+}
+
+void ChannelStrip::showOutputMenu()
+{
+    if (isMaster() || isVca() || model::isBusTrack (track))
+        return;   // buses and the master go to the Stereo Out
+
+    auto& um = owner.getUndoManager();
+    const auto current = track[ids::output].toString();
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Output");
+    menu.addItem ("Stereo Out", true, current.isEmpty(), [t = track, &um]() mutable
+    {
+        um.beginNewTransaction ("Output");
+        t.removeProperty (ids::output, &um);
+    });
+    for (const auto& bus : project)
+        if (bus.hasType (ids::TRACK) && model::isBusTrack (bus))
+            menu.addItem (bus[ids::name].toString(), true, current == bus[ids::id].toString(), [t = track, id = bus[ids::id].toString(), &um]() mutable
+            {
+                um.beginNewTransaction ("Output");
+                t.setProperty (ids::output, id, &um);
+            });
+    menu.addSeparator();
+    menu.addItem ("New Bus", [proj = project, t = track, &um]() mutable
+    {
+        um.beginNewTransaction ("Output to a new bus");
+        int buses = 0;
+        for (const auto& c : proj)
+            buses += (c.hasType (ids::TRACK) && model::isBusTrack (c)) ? 1 : 0;
+        const auto bus = model::addTrack (proj, "Bus " + juce::String (buses + 1), &um, -1, model::busKind);
+        t.setProperty (ids::output, bus[ids::id].toString(), &um);
+    });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&outputSlot));
 }
 
 int ChannelStrip::topSection() const
@@ -1043,6 +1194,8 @@ void ChannelStrip::resized()
 
     auto area = getLocalBounds().reduced (3, 0).withTrimmedTop (topSection() + 4);
 
+    inputSlot.setBounds (area.removeFromTop (15));
+    area.removeFromTop (2);
     for (auto* b : slots)
     {
         b->setBounds (area.removeFromTop (15));
@@ -1062,11 +1215,12 @@ void ChannelStrip::resized()
         }
         area.removeFromTop (2);
     }
+    outputSlot.setBounds (area.removeFromTop (15));
 
     // Fader on the left, the scale, then the meter; the level box under the meter (as in the picture)
     const auto fa = faderArea();
     fader.setBounds (juce::Rectangle<int> (2, fa.getY(), (int) (getWidth() * 0.46f), fa.getHeight()));
-    meter.setBounds (juce::Rectangle<int> ((int) (getWidth() * 0.76f), fa.getY() + 6, 12, fa.getHeight() - 12));
+    meter.setBounds (juce::Rectangle<int> (getWidth() - 16, fa.getY() + 6, 12, fa.getHeight() - 12));
     dbLabel.setBounds (juce::Rectangle<int> (getWidth() - 46, fa.getBottom() + 2, 42, 19));
     if (! isMaster())
         automationButton.setBounds (juce::Rectangle<int> (6, fa.getY() - automationRow + 1, getWidth() - 12, automationRow - 3));
@@ -1354,6 +1508,10 @@ MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p,
                 s->resized(), s->repaint();
             if (masterStrip != nullptr)
                 masterStrip->resized(), masterStrip->repaint();
+            for (auto* s : extraStrips)
+                s->resized(), s->repaint();
+            if (onLayoutChanged)
+                onLayoutChanged();
             resized();
         };
         addAndMakeVisible (button);
@@ -1463,6 +1621,8 @@ void MixerPanel::handleAsyncUpdate()
     if (std::exchange (needsRebuild, false))
     {
         rebuild();
+        for (auto* s : extraStrips)
+            s->refresh();
         return;
     }
 
@@ -1470,6 +1630,8 @@ void MixerPanel::handleAsyncUpdate()
         s->refresh();
     if (masterStrip != nullptr)
         masterStrip->refresh();
+    for (auto* s : extraStrips)   // the Inspector's strips show the same
+        s->refresh();
 }
 
 void MixerPanel::setSelectedTracks (const juce::StringArray& trackIds, const juce::String& trackId)
@@ -1544,13 +1706,31 @@ void MixerPanel::timerCallback()
         return levels[owner] = engine.takeTrackLevel (player.slotOf (owner));
     };
 
+    // Gain reduction: the strip's Dynamics and every insert that reports it (the most of them).
+    std::map<juce::String, float> reductions;
+    auto reductionOf = [this, &reductions] (const juce::String& owner)
+    {
+        if (auto it = reductions.find (owner); it != reductions.end())
+            return it->second;
+        float gr = owner == model::masterOwner ? 0.0f : engine.getConsoleGainReduction (player.slotOf (owner));
+        for (const auto& insert : model::insertsOf (model::findChain (project, owner)))
+            if (! (bool) insert[ids::bypass])
+                gr = juce::jmax (gr, effects.takeGainReduction (insert[ids::id].toString()));
+        return reductions[owner] = gr;
+    };
+
     const auto playhead = engine.getPlayheadSeconds();
     for (auto* s : strips)
     {
         const auto [l, r] = levelOf (s->getOwnerId());
         s->pushLevels (l, r);
+        s->pushGainReduction (reductionOf (s->getOwnerId()));
         s->followAutomation (playhead);
     }
+    if (masterStrip != nullptr)
+        masterStrip->pushGainReduction (reductionOf (model::masterOwner));
+    for (auto* s : extraStrips)
+        s->pushGainReduction (reductionOf (s->getOwnerId()));
     for (auto* s : extraStrips)
         if (s->getTrack().isValid())
         {

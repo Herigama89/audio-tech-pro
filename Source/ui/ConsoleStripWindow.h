@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "StripParts.h"
 #include "../engine/ConsoleChannel.h"
+#include "SpectrumAnalyzer.h"
 
 namespace riff
 {
@@ -18,10 +19,13 @@ class ConsoleStripWindow final : public juce::Component,
                                  private juce::ValueTree::Listener
 {
 public:
-    ConsoleStripWindow (juce::ValueTree track, juce::UndoManager& um);
+    /** `analyzerSource` hands over the track's audio for the analyzer behind the EQ curve (none: no analyzer). */
+    ConsoleStripWindow (juce::ValueTree track, juce::UndoManager& um,
+                        std::function<int (float*, int)> analyzerSource = {}, std::function<double()> sampleRate = {});
     ~ConsoleStripWindow() override;
 
     void paint (juce::Graphics& g) override;
+    void paintOverChildren (juce::Graphics& g) override;
     void resized() override;
 
 private:
@@ -60,6 +64,12 @@ private:
     std::vector<Section> sections;
 
     static constexpr int knobSize = 46;
+
+    // The analyzer behind the EQ curve, and its settings (as in Logic's MultiMeter)
+    SpectrumAnalyzer analyzer;
+    juce::ComboBox modeBox, fftBox, rangeBox, releaseBox, holdBox;
+    void applyAnalyzerOptions();
+    juce::Rectangle<int> optionsArea() const;
 };
 
 } // namespace riff

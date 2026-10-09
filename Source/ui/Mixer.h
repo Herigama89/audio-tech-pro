@@ -30,6 +30,9 @@ public:
 
     void refresh();
     void pushLevels (float left, float right) { meter.push (left, right); }
+
+    /** The channel's gain reduction (its dynamics and compressors), shown on an amber LED column by the meter. */
+    void pushGainReduction (float db);
     juce::String getOwnerId() const;
     juce::ValueTree getTrack() const { return track; }
 
@@ -56,7 +59,8 @@ public:
     static constexpr int topHeight = (int) (strip::artHeight * artScale);   // the artwork's part
     static constexpr int nameHeight = 26;
     static constexpr int automationRow = 18;
-    static constexpr int minimumHeight = topHeight + 6 + numSlots * 17 + 6 + numSends * 18 + automationRow + 100 + 20 + nameHeight;
+    static constexpr int ioRow = 17;   // the Input slot (above the inserts) and the Output slot (below the sends)
+    static constexpr int minimumHeight = topHeight + 6 + ioRow + numSlots * 17 + 6 + numSends * 18 + ioRow + automationRow + 100 + 20 + nameHeight;
 
     /** Without the console section (EQ and Dynamics hidden, as in Logic): number, EQ/DYN tags, pan, mute and solo. */
     static constexpr int compactTopHeight = 92;
@@ -110,6 +114,11 @@ private:
     strip::LampKey consoleInButton { "EQ in", theme::knobArc }, dynInButton { "Dynamics in", theme::knobArc };
     strip::CreamKey muteButton { "M", theme::mute }, soloButton { "S", theme::solo }, stripInButton { "IN", theme::knobArc };
     strip::DisplaySlider panKnob;
+    juce::TextButton inputSlot, outputSlot;   // Logic's Input and Output slots
+    float grShown = 0.0f;
+    juce::Rectangle<int> grArea() const;
+    void showInputMenu();
+    void showOutputMenu();
     juce::TextButton consoleTag { "EQ" };   // compact mode: lit when the strip's EQ/Dynamics (or plugin) is working; opens it
     void updateConsoleTag();
     juce::Label dynLabel;
@@ -195,6 +204,11 @@ public:
 
     /** Strips shown elsewhere (the Inspector's): they get meter levels and plugin knob updates too. */
     void addExtraStrip (ChannelStrip* s)    { extraStrips.addIfNotAlreadyThere (s); }
+    std::function<void()> onLayoutChanged;   // the strips' layout changed (EQ/Dyn shown or hidden)
+
+    /** For the strips' Input slots: the interface's inputs, and an instrument track's instrument chooser. */
+    std::function<juce::StringArray()> inputNames;
+    std::function<void (juce::ValueTree track, juce::Component& target)> onInstrumentMenu;
     void removeExtraStrip (ChannelStrip* s) { extraStrips.removeFirstMatchingValue (s); }
 
     const juce::StringArray& getSelectedTrackIds() const noexcept { return selectedTrackIds; }

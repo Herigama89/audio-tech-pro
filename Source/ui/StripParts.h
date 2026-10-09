@@ -49,10 +49,13 @@ namespace riff::strip
         /** Draw the picture's knob (its scale is printed on the strip art underneath). */
         void useSkin (juce::Image body, juce::Colour pointerLine) { skinBody = body; skinPointer = pointerLine; repaint(); }
 
+        /** A coloured cap on the knob (as on a classic console's EQ: red, green, blue, black). */
+        void setCap (juce::Colour c) { cap = c; repaint(); }
+
     private:
         juce::Colour pointer;
         juce::Image skinBody;
-        juce::Colour skinPointer;
+        juce::Colour skinPointer, cap { juce::Colours::transparentBlack };
     };
 
     /** A small backlit key (EQ in, Dynamics in). Toggle state = lit. */

@@ -7,8 +7,10 @@ namespace riff
 
 /**
     The insert slot's plugin chooser, as in Logic and other DAWs: a search
-    field at the top (type part of a name or a maker), the matches below,
-    grouped by maker (each maker's name over its plugins). Up/Down to move, Return to choose, Escape to close.
+    field at the top (type part of a name, maker, category or format), then
+    the plugins grouped the way you choose: by Maker, by Category, by Format,
+    or just your Favorites. Click the star beside a plugin to make it a
+    favorite. Up/Down to move, Return to choose, Escape to close.
 */
 class PluginPicker final : public juce::Component,
                            private juce::ListBoxModel,
@@ -20,16 +22,30 @@ public:
     {
         juce::String name, maker, format;   // format: "VST3", "AU", "CLAP", or empty for a built-in
         std::function<void()> choose;
+        juce::String category;              // "Dynamics", "EQ", "Reverb"... (see categoryOf)
+        juce::String key;                   // stays the same between sessions (for favorites)
     };
 
-    PluginPicker (std::vector<Entry> entries, std::function<void()> onScan, std::function<void()> onRemove);
+    enum class View { favorites, maker, category, format };
+
+    struct Settings
+    {
+        juce::StringArray favorites;        // entries' keys
+        View view = View::maker;
+    };
+
+    PluginPicker (std::vector<Entry> entries, std::function<void()> onScan, std::function<void()> onRemove,
+                  Settings settings, std::function<void (const Settings&)> onSettingsChanged = {});
 
     void resized() override;
     void paint (juce::Graphics& g) override;
     void visibilityChanged() override;
 
-    /** The matches for a search: every word must be in the name, maker or format (any case). */
+    /** The matches for a search: every word must be in the name, maker, category or format (any case). */
     static std::vector<int> filter (const std::vector<Entry>& entries, const juce::String& search);
+
+    /** A plain category for a plugin from what its format says ("Fx|Dynamics", "Effect"...) and its name. */
+    static juce::String categoryOf (const juce::String& pluginCategory, const juce::String& name);
 
 private:
     friend class SnapshotTool;
@@ -45,13 +61,20 @@ private:
     void refilter();
     void choose (int row);
     void close();
+    void setView (View v);
+    juce::String groupOf (const Entry& e) const;
+    bool isFavorite (const Entry& e) const { return settings.favorites.contains (e.key); }
 
     std::vector<Entry> entries;
     std::vector<int> shown;
-    struct Row { int entry = -1; juce::String header; };   // a plugin, or a maker's name over its plugins
+    struct Row { int entry = -1; juce::String header; };   // a plugin, or a group's name over its plugins
     std::vector<Row> rows;
     void selectEntryRow (int from, int direction);
+
+    Settings settings;
+    std::function<void (const Settings&)> onSettingsChanged;
     juce::TextEditor search;
+    juce::OwnedArray<juce::TextButton> viewButtons;   // Favorites, Maker, Category, Format
     juce::ListBox list { "Plugins", this };
     juce::TextButton scanButton { "Scan for plugins..." }, removeButton { "Remove" };
     std::function<void()> onScan, onRemove;

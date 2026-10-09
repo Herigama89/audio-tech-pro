@@ -25,6 +25,10 @@ public:
         plugins by the parameter's normalised 0..1 value. */
     virtual void setAutomatedParameter (int /*index*/, float /*value*/) noexcept {}
 
+    /** The most gain reduction (dB, positive) since the last call, for the strip's gain reduction meter.
+        Compressors and limiters report it; other effects say 0. Message thread. */
+    virtual float takeGainReductionDb() noexcept { return 0.0f; }
+
     /** How many samples late this effect's output is (for delay compensation). */
     virtual int getLatencySamples() const { return 0; }
 

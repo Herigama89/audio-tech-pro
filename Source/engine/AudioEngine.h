@@ -163,6 +163,24 @@ public:
     /** Post-fader peak of a track since the last call (by the track's slot in the graph). */
     std::pair<float, float> takeTrackLevel (int slot) noexcept;
 
+    /** The spectrum analyzer listens to one track (after its EQ and Dynamics): its slot, or -1 for none. */
+    void setAnalyzerSlot (int slot) noexcept { analyzerSlot.store (slot); }
+
+    /** Takes up to `maxSamples` of the analyzed track's audio (mono) that arrived since the last call. Message thread. */
+    int readAnalyzer (float* dest, int maxSamples) noexcept
+    {
+        const auto scope = analyzerFifo.read (juce::jmin (maxSamples, analyzerFifo.getNumReady()));
+        if (scope.blockSize1 > 0) std::copy_n (analyzerBuffer.data() + scope.startIndex1, scope.blockSize1, dest);
+        if (scope.blockSize2 > 0) std::copy_n (analyzerBuffer.data() + scope.startIndex2, scope.blockSize2, dest + scope.blockSize1);
+        return scope.blockSize1 + scope.blockSize2;
+    }
+
+    /** The channel strip's Dynamics gain reduction on a track's slot (dB, positive). */
+    float getConsoleGainReduction (int slot) const noexcept
+    {
+        return juce::isPositiveAndBelow (slot, PlaybackGraph::maxTracks) ? consoles[(size_t) slot].getGainReductionDb() : 0.0f;
+    }
+
     /** Console mode: the loudest RMS going into and coming out of the bus compressor plugin since the last call. */
     std::pair<float, float> takeBusPluginLevels() noexcept;
 
@@ -343,6 +361,9 @@ private:
     juce::SmoothedValue<float> masterGain;
     MasterBusCompressor busComp;
     std::array<ConsoleChannel, PlaybackGraph::maxTracks> consoles;
+    std::atomic<int> analyzerSlot { -1 };
+    juce::AbstractFifo analyzerFifo { 32768 };
+    std::vector<float> analyzerBuffer = std::vector<float> (32768, 0.0f);
 
     // Metronome click
     int clickSamplesLeft = 0, clickLength = 0;

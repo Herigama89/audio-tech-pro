@@ -137,3 +137,20 @@ TEST_CASE ("Flex markers moved by hand stretch only the audio either side", "[au
     CHECK (std::abs (hits[1] / rate - 0.6) < 0.015);
     CHECK (std::abs (hits[2] / rate - 0.75) < 0.01);
 }
+
+#include "../Source/ui/SpectrumAnalyzer.h"
+
+TEST_CASE ("The analyzer puts a tone in its third-octave band", "[analyzer]")
+{
+    juce::ScopedJuceInitialiser_GUI gui;
+    riff::SpectrumAnalyzer analyzer ({}, {});
+    std::vector<float> tone (8192);
+    for (size_t i = 0; i < tone.size(); ++i)
+        tone[i] = 0.5f * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 1000.0 * (double) i / 48000.0);
+    const auto bands = analyzer.analyse (tone.data(), (int) tone.size(), 48000.0);
+    const auto& centres = riff::SpectrumAnalyzer::thirdOctaveCentres();
+    const auto loudest = (size_t) std::distance (bands.begin(), std::max_element (bands.begin(), bands.end()));
+    CHECK (centres[loudest] == 1000.0);
+    CHECK (bands[loudest] > -10.0f);       // about -6 dB for a half-scale sine
+    CHECK (bands[3] < bands[loudest] - 40.0f);   // 40 Hz: far below
+}
