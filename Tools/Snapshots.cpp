@@ -205,6 +205,17 @@ public:
             save (main, "inspector-multiselect.png");
             main.project.getChild (1).setProperty (ids::hidden, false, nullptr);
             main.toggleInspector();
+
+            // Several regions selected, one muted, the Scissors tool and No Overlap.
+            main.timeline.selectRegions ({ main.project.getChild (0).getChild (0)[ids::id].toString(),
+                                           main.project.getChild (2).getChild (0)[ids::id].toString() });
+            main.project.getChild (3).getChild (0).setProperty (ids::mute, true, nullptr);
+            main.setTool (TimelineState::Tool::scissors);
+            main.dragBox.setSelectedId (2);
+            main.timeline.changed();
+            pump (main, 200);
+            save (main, "regions-edit.png");
+            main.setTool (TimelineState::Tool::pointer);
             {
                 TrackColourPalette palette ({});
                 save (palette, "colour-palette.png", 2.0f);

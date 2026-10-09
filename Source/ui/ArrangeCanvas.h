@@ -55,7 +55,25 @@ public:
     std::function<void (juce::ValueTree region)> onOpenPianoRoll;
 
 private:
-    enum class DragMode { none, scrub, move, trimStart, trimEnd, cycleNew, cycleMove, automationPoint };
+    enum class DragMode { none, scrub, move, trimStart, trimEnd, cycleNew, cycleMove, automationPoint, rubberBand, pencilRegion };
+
+    struct Dragged { juce::ValueTree region; double start; int trackIndex; };
+    std::vector<Dragged> dragged;          // every region moving with the one under the mouse
+    bool copyOnDrag = false, copiesMade = false;
+    juce::Rectangle<float> rubberBand;
+    juce::StringArray selectionBeforeRubberBand;
+
+    void startMove (const juce::MouseEvent& e, juce::ValueTree region);
+    void dragMove (const juce::MouseEvent& e, bool useSnap);
+    void updateRubberBand (const juce::MouseEvent& e);
+    void useTool (const juce::MouseEvent& e, juce::ValueTree region, int trackIndex);
+    void showRegionMenu (juce::ValueTree region);
+
+public:
+    /** Region commands the window's menus and keys run too. */
+    std::function<void()> onSplit, onDelete, onRepeat, onJoin, onMuteRegions;
+
+private:
 
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { repaint(); }
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override             { repaint(); }

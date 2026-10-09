@@ -20,6 +20,16 @@ const std::vector<Info>& all()
         { splitAtPlayhead,        "Split at Playhead",          "Edit",      "Split regions at the playhead" },
         { quantize,               "Quantize",                   "Edit",      "Quantize the selected MIDI region to 16th notes" },
         { setLocatorsBySelection, "Set Locators by Selection",  "Edit",      "Set the cycle to the selected region and turn Cycle on" },
+        { cutRegions,             "Cut",                        "Edit",      "Cut the selected regions" },
+        { copyRegions,            "Copy",                       "Edit",      "Copy the selected regions" },
+        { pasteRegions,           "Paste",                      "Edit",      "Paste at the playhead, on the selected track" },
+        { selectAllRegions,       "Select All",                 "Edit",      "Select every region" },
+        { repeatRegions,          "Repeat",                     "Edit",      "Repeat the selected regions once, right after them" },
+        { joinRegions,            "Join Regions",               "Edit",      "Join the selected MIDI regions on a track into one" },
+        { muteRegions,            "Mute Regions",               "Edit",      "Mute or unmute the selected regions" },
+        { nudgeLeft,              "Nudge Left",                 "Edit",      "Move the selected regions a 16th note earlier" },
+        { nudgeRight,             "Nudge Right",                "Edit",      "Move the selected regions a 16th note later" },
+        { toolMenu,               "Tool Menu",                  "Edit",      "Choose a tool: pointer, pencil, eraser, scissors, glue, mute" },
 
         { newAudioTrack,          "New Audio Track",            "Track",     "Add an audio track" },
         { newInstrumentTrack,     "New Software Instrument Track", "Track",  "Add an instrument (MIDI) track" },
@@ -33,6 +43,7 @@ const std::vector<Info>& all()
         { selectNextTrack,        "Select Next Track",          "Track",     "Select the track below" },
         { hideTrack,              "Hide Track",                 "Track",     "Hide the selected tracks and select the next one (they still play)" },
         { showHiddenTracks,       "Show Hidden Tracks",         "Track",     "Show or leave out the tracks you hid" },
+        { duplicateTrack,         "New Track With Duplicate Settings", "Track", "A new track like the selected one (instrument, fader, console, inserts, sends), without its regions" },
         { trackColours,           "Track Colours...",           "Track",     "Choose a colour for the selected tracks" },
         { generateMidi,           "Generate MIDI...",           "Track",     "Write drums, bass, chords and a melody in a genre's style" },
 
@@ -131,7 +142,8 @@ namespace
             case newAuxBus:              return {};
             case deleteTrack:            return { key (KeyPress::backspaceKey, cmd) };
            #if JUCE_MAC
-            case muteTrack:              return { key ('m', ctrl), key ('m') };
+            case muteTrack:              return { key ('m') };              // (Ctrl+M mutes regions, as in Logic)
+            case muteRegions:            return { key ('m', ctrl) };
             case soloTrack:              return { key ('s', ctrl), key ('s') };
            #else
             // Off the Mac, Ctrl is the command key (Ctrl+S saves), so only the plain keys.
@@ -159,6 +171,16 @@ namespace
             case zoomVerticalIn:         return { key (KeyPress::downKey, cmd) };
             case zoomVerticalOut:        return { key (KeyPress::upKey, cmd) };
             case toggleInspector:        return { key ('i') };
+            case cutRegions:             return { key ('x', cmd) };
+            case copyRegions:            return { key ('c', cmd) };
+            case pasteRegions:           return { key ('v', cmd) };
+            case selectAllRegions:       return { key ('a', cmd) };
+            case repeatRegions:          return { key ('r', cmd) };
+            case joinRegions:            return { key ('j', cmd) };
+            case duplicateTrack:         return { key ('d', cmd) };
+            case nudgeLeft:              return { key (KeyPress::leftKey, opt) };
+            case nudgeRight:             return { key (KeyPress::rightKey, opt) };
+            case toolMenu:               return { key ('t') };
             case showHiddenTracks:       return { key ('h') };
             case trackColours:           return { key ('c', opt) };
            #if JUCE_MAC
@@ -179,6 +201,10 @@ namespace
         {
             case keyCommands:   return { key ('k', opt) };
             case audioSettings: return { key (',', cmd) };
+            case cutRegions:    return { key ('x', cmd) };
+            case copyRegions:   return { key ('c', cmd) };
+            case pasteRegions:  return { key ('v', cmd) };
+            case selectAllRegions: return { key ('a', cmd) };
             default:            return {};
         }
     }

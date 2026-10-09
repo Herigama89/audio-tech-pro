@@ -172,6 +172,7 @@ if(RIFF_BUILD_TESTS)
         Tests/ScreenRecordingTests.cpp
         Tests/DeviceTests.cpp
         Tests/ViewTests.cpp
+        Tests/EditTests.cpp
         Source/ui/ScreenRecordPanel.cpp
         Source/ui/ScreenRecorder.cpp
     )
@@ -181,7 +182,7 @@ if(RIFF_BUILD_TESTS)
 
     # Tests compare exact silence (0.0f) on purpose.
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        set_source_files_properties(Tests/ModelTests.cpp Tests/EngineTests.cpp Tests/GeneratorTests.cpp Tests/AssistantTests.cpp Tests/ScreenRecordingTests.cpp
+        set_source_files_properties(Tests/ModelTests.cpp Tests/EngineTests.cpp Tests/GeneratorTests.cpp Tests/AssistantTests.cpp Tests/ScreenRecordingTests.cpp Tests/EditTests.cpp
             PROPERTIES COMPILE_OPTIONS -Wno-float-equal)
     endif()
 

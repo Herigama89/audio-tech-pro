@@ -42,6 +42,23 @@ namespace riff::model
     /** Splits at a project time. Returns the new right-hand region, or an invalid tree if `time` isn't inside the region. */
     juce::ValueTree splitRegion (juce::ValueTree region, double time, juce::UndoManager* um);
 
+    /** A copy of a region (with new ids) on a track at a time. */
+    juce::ValueTree duplicateRegion (const juce::ValueTree& region, juce::ValueTree track, double start, juce::UndoManager* um);
+
+    /** Joins MIDI regions on one track into one spanning them all (Logic's Join). Returns it, or invalid if they can't be joined. */
+    juce::ValueTree joinRegions (const juce::Array<juce::ValueTree>& regions, juce::UndoManager* um);
+
+    /** "No Overlap" drag mode: shortens or removes the other regions on the track that this one now covers.
+        `sourceLength` gives an audio region's file length (0 if unknown). */
+    void clearOverlaps (const juce::ValueTree& region, std::function<double (const juce::ValueTree&)> sourceLength, juce::UndoManager* um);
+
+    /** A muted region stays on screen but doesn't play. */
+    inline bool isRegionMuted (const juce::ValueTree& region) { return region.getProperty (ids::mute, false); }
+
+    /** Logic's New Track With Duplicate Settings: the same kind, instrument, fader, pan, colour, console,
+        inserts and sends, but no regions; placed below. */
+    juce::ValueTree duplicateTrackSettings (juce::ValueTree project, const juce::ValueTree& track, juce::UndoManager* um);
+
     /**
         Adds a region for a finished recording.
 

@@ -41,6 +41,15 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::undo:            info.setActive (undoManager.canUndo()); break;
         case commands::redo:            info.setActive (undoManager.canRedo()); break;
         case commands::deleteSelection: info.setActive (region.isValid()); break;
+        case commands::cutRegions:
+        case commands::copyRegions:
+        case commands::repeatRegions:
+        case commands::muteRegions:
+        case commands::nudgeLeft:
+        case commands::nudgeRight:      info.setActive (region.isValid() && ! recording); break;
+        case commands::pasteRegions:    info.setActive (! clipboardRegions.isEmpty() && track.isValid() && ! recording); break;
+        case commands::joinRegions:     info.setActive (timeline.selectedRegionTrees().size() > 1 && ! recording); break;
+        case commands::duplicateTrack:  info.setActive (track.isValid() && ! recording); break;
         case commands::quantize:        info.setActive (region.isValid() && model::isMidiRegion (region)); break;
         case commands::setLocatorsBySelection: info.setActive (region.isValid() && ! recording); break;
         case commands::exportSong:      info.setActive (! recording); break;
@@ -89,6 +98,17 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::splitAtPlayhead:        splitAtPlayhead(); break;
         case commands::quantize:               quantizeSelection(); break;
         case commands::setLocatorsBySelection: setLocatorsBySelection(); break;
+        case commands::cutRegions:             copySelectedRegions (true); break;
+        case commands::copyRegions:            copySelectedRegions (false); break;
+        case commands::pasteRegions:           pasteRegions(); break;
+        case commands::selectAllRegions:       selectAllRegions(); break;
+        case commands::repeatRegions:          repeatSelectedRegions(); break;
+        case commands::joinRegions:            joinSelectedRegions(); break;
+        case commands::muteRegions:            muteSelectedRegions(); break;
+        case commands::nudgeLeft:              nudgeSelectedRegions (-1); break;
+        case commands::nudgeRight:             nudgeSelectedRegions (1); break;
+        case commands::toolMenu:               showToolMenu(); break;
+        case commands::duplicateTrack:         duplicateSelectedTrack(); break;
 
         case commands::newAudioTrack:          addTrack (model::audioKind); break;
         case commands::newInstrumentTrack:     addTrack (model::instrumentKind); break;
@@ -164,11 +184,16 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         case 1:
             add ({ commands::undo, commands::redo });
             menu.addSeparator();
-            add ({ commands::deleteSelection, commands::splitAtPlayhead, commands::quantize });
+            add ({ commands::cutRegions, commands::copyRegions, commands::pasteRegions, commands::deleteSelection, commands::selectAllRegions });
+            menu.addSeparator();
+            add ({ commands::splitAtPlayhead, commands::repeatRegions, commands::joinRegions, commands::muteRegions,
+                   commands::nudgeLeft, commands::nudgeRight, commands::quantize });
+            menu.addSeparator();
+            add ({ commands::toolMenu });
             break;
 
         case 2:
-            add ({ commands::newAudioTrack, commands::newInstrumentTrack, commands::newAuxBus });
+            add ({ commands::newAudioTrack, commands::newInstrumentTrack, commands::newAuxBus, commands::duplicateTrack });
             menu.addSeparator();
             add ({ commands::generateMidi });
             menu.addSeparator();
@@ -437,6 +462,201 @@ void MainComponent::selectTrackFromMixer (const juce::String& trackId, juce::Mod
         timeline.showHiddenTracks = true;              // show it rather than select something invisible
     scrollToTrack (project.indexOf (track));
     timeline.changed();
+}
+
+//==============================================================================
+// Region editing (Logic's Edit menu)
+//==============================================================================
+void MainComponent::copySelectedRegions (bool cut)
+{
+    const auto regions = timeline.selectedRegionTrees();
+    if (regions.isEmpty())
+        return;
+
+    clipboardRegions.clear();
+    clipboardTrackOffsets.clear();
+    int topTrack = model::numTracks (project);
+    clipboardStart = std::numeric_limits<double>::max();
+    for (const auto& r : regions)
+    {
+        topTrack = juce::jmin (topTrack, project.indexOf (r.getParent()));
+        clipboardStart = juce::jmin (clipboardStart, (double) r[ids::start]);
+    }
+    for (const auto& r : regions)
+    {
+        clipboardRegions.add (r.createCopy());
+        clipboardTrackOffsets.add (project.indexOf (r.getParent()) - topTrack);
+    }
+
+    if (cut)
+    {
+        undoManager.beginNewTransaction ("Cut");
+        for (auto r : regions)
+            model::deleteRegion (r, &undoManager);
+        timeline.selectOnlyRegion ({});
+        timeline.changed();
+    }
+    commandManager.commandStatusChanged();
+}
+
+void MainComponent::pasteRegions()
+{
+    const auto first = selectedTrackIndex();
+    if (clipboardRegions.isEmpty() || first < 0 || engine.isRecording())
+        return;
+
+    const auto at = engine.getPlayheadSeconds();
+    undoManager.beginNewTransaction ("Paste");
+    juce::StringArray pasted;
+    juce::Array<juce::ValueTree> pastedTrees;
+
+    for (int i = 0; i < clipboardRegions.size(); ++i)
+    {
+        const auto& source = clipboardRegions.getReference (i);
+        auto target = project.getChild (first + clipboardTrackOffsets[i]);
+        if (! target.hasType (ids::TRACK) || model::isBusTrack (target)
+            || model::isMidiRegion (source) != model::isInstrumentTrack (target))
+            continue;   // MIDI only onto instrument tracks, audio onto audio tracks
+
+        auto copy = model::duplicateRegion (source, target, at + (double) source[ids::start] - clipboardStart, &undoManager);
+        pasted.add (copy[ids::id].toString());
+        pastedTrees.add (copy);
+    }
+
+    applyNoOverlap (pastedTrees);
+    if (! pasted.isEmpty())
+        timeline.selectRegions (pasted);
+    timeline.changed();
+}
+
+void MainComponent::selectAllRegions()
+{
+    juce::StringArray all;
+    for (int i = 0; i < model::numTracks (project); ++i)
+        if (! timeline.isHidden (i))
+            for (const auto& r : project.getChild (i))
+                if (r.hasType (ids::REGION))
+                    all.add (r[ids::id].toString());
+    timeline.selectRegions (all);
+    timeline.changed();
+}
+
+void MainComponent::repeatSelectedRegions()
+{
+    const auto regions = timeline.selectedRegionTrees();
+    if (regions.isEmpty() || engine.isRecording())
+        return;
+
+    double from = std::numeric_limits<double>::max(), to = 0.0;
+    for (const auto& r : regions)
+    {
+        from = juce::jmin (from, (double) r[ids::start]);
+        to = juce::jmax (to, model::regionEnd (r));
+    }
+
+    // Logic's Repeat: a copy of the whole selection right after it.
+    undoManager.beginNewTransaction ("Repeat");
+    juce::StringArray copies;
+    juce::Array<juce::ValueTree> copyTrees;
+    for (const auto& r : regions)
+    {
+        auto copy = model::duplicateRegion (r, r.getParent(), (double) r[ids::start] + (to - from), &undoManager);
+        copies.add (copy[ids::id].toString());
+        copyTrees.add (copy);
+    }
+    applyNoOverlap (copyTrees);
+    timeline.selectRegions (copies);
+    timeline.changed();
+}
+
+void MainComponent::joinSelectedRegions()
+{
+    const auto regions = timeline.selectedRegionTrees();
+    if (regions.size() < 2)
+        return;
+
+    undoManager.beginNewTransaction ("Join regions");
+    auto joined = model::joinRegions (regions, &undoManager);
+    if (! joined.isValid())
+    {
+        statusLabel.setText ("Join works on MIDI regions on one track", juce::dontSendNotification);
+        return;
+    }
+    timeline.selectOnlyRegion (joined[ids::id].toString());
+    timeline.changed();
+}
+
+void MainComponent::muteSelectedRegions()
+{
+    const auto regions = timeline.selectedRegionTrees();
+    if (regions.isEmpty())
+        return;
+
+    const auto value = ! model::isRegionMuted (model::findById (project, timeline.selectedRegionId).isValid()
+                                                   ? model::findById (project, timeline.selectedRegionId) : regions.getFirst());
+    undoManager.beginNewTransaction (value ? "Mute regions" : "Unmute regions");
+    for (auto r : regions)
+        r.setProperty (ids::mute, value, &undoManager);
+}
+
+void MainComponent::nudgeSelectedRegions (int direction)
+{
+    const auto regions = timeline.selectedRegionTrees();
+    if (regions.isEmpty() || engine.isRecording())
+        return;
+
+    const auto step = model::secondsPerBeat (project) / 4.0 * direction;
+    double earliest = std::numeric_limits<double>::max();
+    for (const auto& r : regions)
+        earliest = juce::jmin (earliest, (double) r[ids::start]);
+    if (earliest + step < 0.0)
+        return;
+
+    undoManager.beginNewTransaction ("Nudge");
+    for (auto r : regions)
+        model::moveRegion (r, r.getParent(), (double) r[ids::start] + step, &undoManager);
+}
+
+void MainComponent::duplicateSelectedTrack()
+{
+    auto track = selectedTrack();
+    if (! track.isValid() || engine.isRecording())
+        return;
+
+    undoManager.beginNewTransaction ("New track with duplicate settings");
+    auto copy = model::duplicateTrackSettings (project, track, &undoManager);
+    timeline.selectOnly (copy[ids::id].toString());
+    timeline.changed();
+}
+
+void MainComponent::applyNoOverlap (const juce::Array<juce::ValueTree>& regions)
+{
+    if (timeline.dragMode != TimelineState::Drag::noOverlap)
+        return;
+    for (const auto& r : regions)
+        if (r.getParent().isValid())
+            model::clearOverlaps (r, [this] (const juce::ValueTree& other)
+                                  { return fileCache.getLengthSeconds (juce::File (other[ids::file].toString())); }, &undoManager);
+}
+
+void MainComponent::showToolMenu()
+{
+    using Tool = TimelineState::Tool;
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Tool");
+    const std::pair<Tool, const char*> tools[] {
+        { Tool::pointer, "Pointer" }, { Tool::pencil, "Pencil (draw MIDI regions)" }, { Tool::eraser, "Eraser" },
+        { Tool::scissors, "Scissors" }, { Tool::glue, "Glue (join)" }, { Tool::mute, "Mute" } };
+    for (const auto& [tool, name] : tools)
+        menu.addItem (name, true, timeline.tool == tool, [this, t = tool] { setTool (t); });
+    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+}
+
+void MainComponent::setTool (TimelineState::Tool tool)
+{
+    timeline.tool = tool;
+    toolBox.setSelectedId ((int) tool + 1, juce::dontSendNotification);
+    statusLabel.setText (toolBox.getText() + " tool", juce::dontSendNotification);
 }
 
 void MainComponent::toggleInspector()

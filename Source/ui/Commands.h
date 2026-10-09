@@ -20,12 +20,15 @@ namespace riff::commands
         // Track
         newAudioTrack = 0x2201, newInstrumentTrack, newAuxBus, deleteTrack,
         muteTrack, soloTrack, armTrack, showAutomation, selectPreviousTrack, selectNextTrack, generateMidi,
-        hideTrack, showHiddenTracks, trackColours,
+        hideTrack, showHiddenTracks, trackColours, duplicateTrack,
         // Transport (Logic calls this menu "Record" and "Navigate")
         play = 0x2301, record, goToStart, rewindBar, forwardBar, toggleCycle, toggleMetronome, toggleCountIn,
         // View / window
         showMixer = 0x2401, showPianoRoll, zoomIn, zoomOut, keyCommands, audioSettings, calibrateLatency, scanPlugins, showAssistant, recordScreen, combineInterfaces,
-        zoomVerticalIn, zoomVerticalOut, toggleInspector
+        zoomVerticalIn, zoomVerticalOut, toggleInspector,
+        // Edit (added later; ids kept stable for saved key mappings)
+        cutRegions = 0x2501, copyRegions, pasteRegions, selectAllRegions, repeatRegions, joinRegions, muteRegions,
+        nudgeLeft, nudgeRight, toolMenu
     };
 
     struct Info

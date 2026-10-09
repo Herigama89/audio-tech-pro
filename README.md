@@ -300,9 +300,13 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [ ] Bounce in place, export tracks as audio files (stems), import tracks from other projects
 
 **Editing in the tracks area**
-- [ ] Tool menu (T): pointer, pencil, eraser, text, scissors, glue, solo, mute, zoom, fade, automation, marquee
-- [ ] Copy, cut, paste, duplicate (Cmd+D), repeat (Cmd+R), loop regions, snap modes and drag modes (overlap, no overlap, X-fade, shuffle)
-- [ ] Region gain, fades and crossfades, nudging, trim to playhead, join, mute regions
+- [x] Tool menu (T) and Tool box: pointer, pencil (draws MIDI regions), eraser, scissors, glue, mute
+- [ ] More tools: text, solo, zoom, fade, automation, marquee
+- [x] Cut, copy, paste at the playhead (Cmd+X/C/V), Select All (Cmd+A), Repeat (Cmd+R), New Track With Duplicate Settings (Cmd+D)
+- [x] Select several regions (Shift-click, or drag a rectangle); move them together; Option-drag copies
+- [x] Snap (Smart, Bar, Beat, Division, Off) and Drag modes (Overlap, No Overlap)
+- [x] Join MIDI regions (Cmd+J), mute regions (Ctrl+M), nudge (Option+Left/Right)
+- [ ] Loop regions, X-Fade and Shuffle drag modes, region gain, fades and crossfades, trim to playhead
 - [ ] Flex Time and Flex Pitch, time stretch, Smart Tempo, quick swipe comping refinements
 - [ ] Marquee selection across tracks; edit with the playhead (split by locators, delete between)
 

@@ -82,6 +82,22 @@ private:
     void importAudio();
     void splitAtPlayhead();
     void deleteSelection();
+    void copySelectedRegions (bool cut);
+    void pasteRegions();
+    void selectAllRegions();
+    void repeatSelectedRegions();
+    void joinSelectedRegions();
+    void muteSelectedRegions();
+    void nudgeSelectedRegions (int direction);
+    void duplicateSelectedTrack();
+    void showToolMenu();
+    void setTool (TimelineState::Tool tool);
+    void applyNoOverlap (const juce::Array<juce::ValueTree>& regions);
+
+    // The region clipboard: copies, with each one's track offset from the topmost and its time
+    juce::Array<juce::ValueTree> clipboardRegions;
+    juce::Array<int> clipboardTrackOffsets;
+    double clipboardStart = 0.0;
     void undo();
     void redo();
     int selectedTrackIndex() const;
@@ -209,6 +225,7 @@ private:
     IconButton editorButton    { "Editor",  IconButton::Icon::pianoRoll, juce::Colour (0xff5a9cff) };
     IconButton keysButton      { "Keys",    IconButton::Icon::keys };
     IconButton generateButton  { "Generate", IconButton::Icon::generate, juce::Colour (0xffd3ae55) };
+    juce::ComboBox toolBox, snapBox, dragBox;   // Logic's tool, Snap and Drag menus
     IconButton screenButton    { "Screen",  IconButton::Icon::screen, juce::Colour (0xffd8352d) };
     IconButton claudeButton    { "Claude",  IconButton::Icon::chat,  juce::Colour (0xffd97757) };
 

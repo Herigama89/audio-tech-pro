@@ -255,7 +255,7 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
 
             for (const auto& region : track)
             {
-                if (! model::isMidiRegion (region))
+                if (! model::isMidiRegion (region) || model::isRegionMuted (region))
                     continue;
 
                 PlaybackGraph::Region r;
@@ -298,6 +298,9 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
 
         for (const auto& region : track)
         {
+            if (model::isRegionMuted (region))
+                continue;
+
             PlaybackGraph::Region r;
             r.audio        = cache.get (juce::File (region[ids::file].toString()));
             r.start        = toSamples (region[ids::start]);

@@ -54,7 +54,16 @@ double ArrangeCanvas::gridSeconds() const
 
 double ArrangeCanvas::snap (double t) const
 {
-    const auto grid = gridSeconds();
+    const auto beat = model::secondsPerBeat (project);
+    double grid = gridSeconds();
+    switch (timeline.snapMode)
+    {
+        case TimelineState::Snap::off:      return juce::jmax (0.0, t);
+        case TimelineState::Snap::bar:      grid = beat * (int) project.getProperty (ids::timeSigNumerator, 4); break;
+        case TimelineState::Snap::beat:     grid = beat; break;
+        case TimelineState::Snap::division: grid = beat / 4.0; break;
+        case TimelineState::Snap::smart:    break;
+    }
     return juce::jmax (0.0, std::round (t / grid) * grid);
 }
 
@@ -140,6 +149,14 @@ void ArrangeCanvas::paint (juce::Graphics& g)
                           "Space: play / stop    Cmd+Z: undo    Cmd+T: split    Delete: remove region",
                           getLocalBounds().withTrimmedTop (TimelineState::rulerHeight).reduced (20),
                           juce::Justification::centred, 3);
+    }
+
+    if (dragMode == DragMode::rubberBand && ! rubberBand.isEmpty())
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.12f));
+        g.fillRect (rubberBand);
+        g.setColour (juce::Colours::white.withAlpha (0.7f));
+        g.drawRect (rubberBand, 1.0f);
     }
 
     paintRuler (g);
@@ -468,8 +485,9 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
     if (visible.isEmpty())
         return;
 
-    const auto colour = model::trackColour (region.getParent());
-    const bool selected = timeline.selectedRegionId == region[ids::id].toString();
+    const bool muted = model::isRegionMuted (region);
+    const auto colour = muted ? juce::Colour (0xff6b6b70) : model::trackColour (region.getParent());
+    const bool selected = timeline.isRegionSelected (region[ids::id].toString());
     const juce::File file (region[ids::file].toString());
     const bool isMidi = model::isMidiRegion (region);
     const bool missing = ! isMidi && ! file.existsAsFile();
@@ -493,6 +511,8 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
         label << "  (" << ((int) region.getProperty (ids::activeTake, 0) + 1) << " of " << takes << ")  "
               << juce::String::fromUTF8 ("\xe2\x96\xbe"); // down-pointing triangle
 
+    if (muted)
+        label = juce::String::fromUTF8 ("\xe2\x80\xa2 ") + label + "  (muted)";
     if (missing)
         label << "  (file missing)";
     else if (! isMidi && fileCache.isPending (file))
@@ -588,43 +608,66 @@ void ArrangeCanvas::mouseDown (const juce::MouseEvent& e)
 
     int trackIndex = -1;
     auto region = regionAt (e.position, trackIndex);
+    const bool onTrack = trackIndex >= 0 && trackIndex < model::numTracks (project);
 
     if (! region.isValid())
     {
-        timeline.selectedRegionId = {};
-        if (trackIndex >= 0 && trackIndex < model::numTracks (project))
-            timeline.selectedTrackId = project.getChild (trackIndex)[ids::id].toString();
+        if (onTrack)
+            timeline.selectOnly (project.getChild (trackIndex)[ids::id].toString());
+
+        // The pencil draws a new MIDI region on an instrument track (drag for its length).
+        if (timeline.tool == TimelineState::Tool::pencil && onTrack && model::isInstrumentTrack (project.getChild (trackIndex))
+            && ! e.mods.isPopupMenu())
+        {
+            const auto start = snap (timeline.xToTime ((float) e.x));
+            undoManager.beginNewTransaction ("New MIDI region");
+            dragRegion = model::addMidiRegion (project.getChild (trackIndex), start, gridSeconds(), &undoManager);
+            dragOriginalStart = start;
+            timeline.selectOnlyRegion (dragRegion[ids::id].toString());
+            dragMode = DragMode::pencilRegion;
+            timeline.changed();
+            return;
+        }
+
+        // Drag over empty space to select the regions in a rectangle (Shift adds to the selection).
+        selectionBeforeRubberBand.clear();
+        if (e.mods.isShiftDown())
+            for (const auto& r : timeline.selectedRegionTrees())
+                selectionBeforeRubberBand.add (r[ids::id].toString());
+        else
+            timeline.selectOnlyRegion ({});
+        rubberBand = {};
+        dragMode = DragMode::rubberBand;
         timeline.changed();
         return;
     }
 
-    timeline.selectedRegionId = region[ids::id].toString();
-    timeline.selectedTrackId = region.getParent()[ids::id].toString();
+    const auto id = region[ids::id].toString();
+    if (e.mods.isShiftDown() && ! e.mods.isPopupMenu())
+    {
+        timeline.toggleRegionSelection (id);
+        timeline.selectOnly (region.getParent()[ids::id].toString());
+        timeline.changed();
+        return;
+    }
+
+    // A click on a region already in the selection keeps the selection (to drag it all).
+    if (timeline.isRegionSelected (id) && timeline.selectedRegionTrees().size() > 1)
+        timeline.selectedRegionId = id;
+    else
+        timeline.selectOnlyRegion (id);
+    timeline.selectOnly (region.getParent()[ids::id].toString());
     timeline.changed();
 
     if (e.mods.isPopupMenu())
     {
-        juce::PopupMenu menu;
-        menu.addItem ("Split at playhead", [this, region]
-        {
-            undoManager.beginNewTransaction ("Split region");
-            model::splitRegion (region, engine.getPlayheadSeconds(), &undoManager);
-        });
-        menu.addItem ("Delete", [this, region]
-        {
-            undoManager.beginNewTransaction ("Delete region");
-            model::deleteRegion (region, &undoManager);
-        });
+        showRegionMenu (region);
+        return;
+    }
 
-        if (model::numTakes (region) > 0)
-        {
-            juce::PopupMenu takesMenu;
-            addTakeItems (takesMenu, region);
-            menu.addSeparator();
-            menu.addSubMenu ("Takes", takesMenu);
-        }
-
-        menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+    if (timeline.tool != TimelineState::Tool::pointer && timeline.tool != TimelineState::Tool::pencil)
+    {
+        useTool (e, region, trackIndex);
         return;
     }
 
@@ -642,7 +685,10 @@ void ArrangeCanvas::mouseDown (const juce::MouseEvent& e)
     else
         dragMode = DragMode::move;
 
-    undoManager.beginNewTransaction (dragMode == DragMode::move ? "Move region" : "Trim region");
+    undoManager.beginNewTransaction (dragMode == DragMode::move ? (e.mods.isAltDown() ? "Copy region" : "Move region") : "Trim region");
+
+    if (dragMode == DragMode::move)
+        startMove (e, region);
 
     dragRegion = region;
     dragOriginalStart = region[ids::start];
@@ -663,24 +709,19 @@ void ArrangeCanvas::mouseDrag (const juce::MouseEvent& e)
             break;
 
         case DragMode::move:
+            dragMove (e, useSnap);
+            break;
+
+        case DragMode::rubberBand:
+            updateRubberBand (e);
+            break;
+
+        case DragMode::pencilRegion:
         {
-            if (! dragRegion.isValid() || ! dragRegion.getParent().isValid())
+            if (! dragRegion.isValid())
                 break;
-
-            // Ignore tiny wobbles so a click never nudges a region onto the grid.
-            if (e.getDistanceFromDragStart() < 4)
-                break;
-
-            const auto newStart = maybeSnap (dragOriginalStart + timeline.xToTime ((float) e.x) - dragMouseDownTime);
-            const auto targetIndex = juce::jlimit (0, model::numTracks (project) - 1, timeline.trackIndexAt (e.y));
-            auto target = project.getChild (targetIndex);
-
-            // MIDI belongs on instrument tracks and audio on audio tracks.
-            if (model::isMidiRegion (dragRegion) != model::isInstrumentTrack (target) || model::isBusTrack (target))
-                target = dragRegion.getParent();
-
-            model::moveRegion (dragRegion, target, newStart, &undoManager);
-            timeline.selectedTrackId = target[ids::id].toString();
+            const auto end = juce::jmax (dragOriginalStart + gridSeconds(), maybeSnap (timeline.xToTime ((float) e.x)));
+            dragRegion.setProperty (ids::length, end - dragOriginalStart, &undoManager);
             break;
         }
 
@@ -743,11 +784,176 @@ void ArrangeCanvas::mouseUp (const juce::MouseEvent& e)
     if (clickedTakeHeader && wasClick && dragRegion.isValid())
         showTakeMenu (dragRegion);
 
+    // A plain click on one of several selected regions selects just it.
+    if (dragMode == DragMode::move && wasClick && dragRegion.isValid() && ! e.mods.isShiftDown())
+        timeline.selectOnlyRegion (dragRegion[ids::id].toString());
+
+    // No Overlap: moved regions shorten (or remove) what they now cover.
+    if (dragMode == DragMode::move && ! wasClick && timeline.dragMode == TimelineState::Drag::noOverlap)
+        for (const auto& d : dragged)
+            if (d.region.getParent().isValid())
+                model::clearOverlaps (d.region, [this] (const juce::ValueTree& r)
+                                      { return fileCache.getLengthSeconds (juce::File (r[ids::file].toString())); }, &undoManager);
+
+    if (dragMode == DragMode::pencilRegion && dragRegion.isValid() && onOpenPianoRoll)
+        onOpenPianoRoll (dragRegion);
+
+    dragged.clear();
+    rubberBand = {};
+    timeline.changed();
+
     clickedTakeHeader = false;
     dragMode = DragMode::none;
     dragRegion = {};
     dragPoint = {};
     repaint();
+}
+
+void ArrangeCanvas::startMove (const juce::MouseEvent& e, juce::ValueTree region)
+{
+    dragged.clear();
+    auto selection = timeline.selectedRegionTrees();
+    if (! selection.contains (region))
+        selection = { region };
+
+    for (const auto& r : selection)
+        dragged.push_back ({ r, (double) r[ids::start], project.indexOf (r.getParent()) });
+
+    // Option-drag copies (the originals stay where they are).
+    copyOnDrag = e.mods.isAltDown();
+    copiesMade = false;
+}
+
+void ArrangeCanvas::dragMove (const juce::MouseEvent& e, bool useSnap)
+{
+    if (dragged.empty() || ! dragRegion.isValid())
+        return;
+
+    // Ignore tiny wobbles so a click never nudges a region onto the grid.
+    if (e.getDistanceFromDragStart() < 4)
+        return;
+
+    if (copyOnDrag && ! copiesMade)
+    {
+        juce::StringArray newSelection;
+        for (auto& d : dragged)
+        {
+            const bool isMain = d.region == dragRegion;
+            d.region = model::duplicateRegion (d.region, d.region.getParent(), d.start, &undoManager);
+            if (isMain)
+                dragRegion = d.region;
+            newSelection.add (d.region[ids::id].toString());
+        }
+        timeline.selectRegions (newSelection);
+        timeline.selectedRegionId = dragRegion[ids::id].toString();
+        copiesMade = true;
+    }
+
+    // The one under the mouse sets the move; the rest keep their distance from it.
+    const auto& main = *std::find_if (dragged.begin(), dragged.end(), [this] (const Dragged& d) { return d.region == dragRegion; });
+    const auto rawStart = main.start + timeline.xToTime ((float) e.x) - dragMouseDownTime;
+    const auto newMainStart = useSnap ? snap (rawStart) : juce::jmax (0.0, rawStart);
+    auto delta = newMainStart - main.start;
+    for (const auto& d : dragged)
+        delta = juce::jmax (delta, -d.start);   // nothing goes before the start
+
+    const auto numTracks = model::numTracks (project);
+    const auto trackDelta = juce::jlimit (0, numTracks - 1, timeline.trackIndexAt (e.y)) - main.trackIndex;
+
+    for (const auto& d : dragged)
+    {
+        auto target = project.getChild (juce::jlimit (0, numTracks - 1, d.trackIndex + trackDelta));
+
+        // MIDI belongs on instrument tracks and audio on audio tracks.
+        if (model::isMidiRegion (d.region) != model::isInstrumentTrack (target) || model::isBusTrack (target) || timeline.isHidden (project.indexOf (target)))
+            target = project.getChild (d.trackIndex);
+
+        model::moveRegion (d.region, target, d.start + delta, &undoManager);
+    }
+
+    timeline.selectedTrackId = dragRegion.getParent()[ids::id].toString();
+}
+
+void ArrangeCanvas::updateRubberBand (const juce::MouseEvent& e)
+{
+    rubberBand = juce::Rectangle<float> (e.mouseDownPosition, e.position).withTop (juce::jmax ((float) TimelineState::rulerHeight,
+                                                                                                 juce::jmin (e.mouseDownPosition.y, e.position.y)));
+    auto chosen = selectionBeforeRubberBand;
+    for (int i = 0; i < model::numTracks (project); ++i)
+    {
+        if (timeline.heightOf (i) == 0)
+            continue;
+        for (const auto& r : project.getChild (i))
+            if (r.hasType (ids::REGION) && regionBounds (r, i).intersects (rubberBand))
+                chosen.addIfNotAlreadyThere (r[ids::id].toString());
+    }
+    timeline.selectRegions (chosen);
+    timeline.changed();
+}
+
+void ArrangeCanvas::useTool (const juce::MouseEvent& e, juce::ValueTree region, int trackIndex)
+{
+    juce::ignoreUnused (trackIndex);
+    auto selection = timeline.selectedRegionTrees();
+    if (! selection.contains (region))
+        selection = { region };
+
+    switch (timeline.tool)
+    {
+        case TimelineState::Tool::eraser:
+            undoManager.beginNewTransaction ("Delete region");
+            for (auto& r : selection)
+                model::deleteRegion (r, &undoManager);
+            timeline.selectOnlyRegion ({});
+            break;
+
+        case TimelineState::Tool::scissors:
+        {
+            // Split where you click (on the grid; Cmd for anywhere).
+            const auto time = e.mods.isCommandDown() ? timeline.xToTime ((float) e.x) : snap (timeline.xToTime ((float) e.x));
+            undoManager.beginNewTransaction ("Split region");
+            for (auto& r : selection)
+                model::splitRegion (r, time, &undoManager);
+            break;
+        }
+
+        case TimelineState::Tool::glue:
+            if (onJoin)
+                onJoin();
+            break;
+
+        case TimelineState::Tool::mute:
+            if (onMuteRegions)
+                onMuteRegions();
+            break;
+
+        case TimelineState::Tool::pointer:
+        case TimelineState::Tool::pencil:
+            break;
+    }
+    timeline.changed();
+}
+
+void ArrangeCanvas::showRegionMenu (juce::ValueTree region)
+{
+    juce::PopupMenu menu;
+    menu.addItem ("Split at playhead", [this] { if (onSplit) onSplit(); });
+    menu.addItem ("Repeat", [this] { if (onRepeat) onRepeat(); });
+    if (model::isMidiRegion (region))
+        menu.addItem ("Join", timeline.selectedRegionTrees().size() > 1, false, [this] { if (onJoin) onJoin(); });
+    menu.addItem (model::isRegionMuted (region) ? "Unmute" : "Mute", [this] { if (onMuteRegions) onMuteRegions(); });
+    menu.addSeparator();
+    menu.addItem ("Delete", [this] { if (onDelete) onDelete(); });
+
+    if (model::numTakes (region) > 0)
+    {
+        juce::PopupMenu takesMenu;
+        addTakeItems (takesMenu, region);
+        menu.addSeparator();
+        menu.addSubMenu ("Takes", takesMenu);
+    }
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
 }
 
 void ArrangeCanvas::addTakeItems (juce::PopupMenu& menu, juce::ValueTree region)
@@ -841,7 +1047,17 @@ void ArrangeCanvas::mouseMove (const juce::MouseEvent& e)
     const auto region = regionAt (e.position, trackIndex);
     auto newCursor = juce::MouseCursor::NormalCursor;
 
-    if (region.isValid())
+    switch (timeline.tool)
+    {
+        case TimelineState::Tool::pencil:   newCursor = juce::MouseCursor::CrosshairCursor; break;
+        case TimelineState::Tool::eraser:   newCursor = region.isValid() ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor; break;
+        case TimelineState::Tool::scissors: newCursor = region.isValid() ? juce::MouseCursor::IBeamCursor : juce::MouseCursor::NormalCursor; break;
+        case TimelineState::Tool::glue:
+        case TimelineState::Tool::mute:     newCursor = region.isValid() ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor; break;
+        case TimelineState::Tool::pointer:  break;
+    }
+
+    if (region.isValid() && (timeline.tool == TimelineState::Tool::pointer || timeline.tool == TimelineState::Tool::pencil))
     {
         const auto b = regionBounds (region, trackIndex);
         if (b.getWidth() > edgeGrab * 3.0f

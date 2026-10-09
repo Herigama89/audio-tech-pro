@@ -52,6 +52,25 @@ MainComponent::MainComponent (bool openAudioDevice)
     bind (generateButton, commands::generateMidi);
     bind (claudeButton, commands::showAssistant);
     bind (screenButton, commands::recordScreen);
+
+    // Tool, Snap and Drag, as in Logic's tracks area
+    toolBox.addItemList ({ "Pointer", "Pencil", "Eraser", "Scissors", "Glue", "Mute" }, 1);
+    toolBox.setSelectedId (1, juce::dontSendNotification);
+    toolBox.setTooltip ("Tool (T): pointer, pencil (draws MIDI regions), eraser, scissors, glue (joins), mute");
+    toolBox.onChange = [this] { setTool ((TimelineState::Tool) (toolBox.getSelectedId() - 1)); };
+    snapBox.addItemList ({ "Smart", "Bar", "Beat", "Division", "Off" }, 1);
+    snapBox.setSelectedId (1, juce::dontSendNotification);
+    snapBox.setTooltip ("Snap: where regions land when you move them (Smart follows the zoom). Hold Cmd to move freely.");
+    snapBox.onChange = [this] { timeline.snapMode = (TimelineState::Snap) (snapBox.getSelectedId() - 1); };
+    dragBox.addItemList ({ "Overlap", "No Overlap" }, 1);
+    dragBox.setSelectedId (1, juce::dontSendNotification);
+    dragBox.setTooltip ("Drag: Overlap lets regions lie on top of each other; No Overlap shortens what they cover.");
+    dragBox.onChange = [this] { timeline.dragMode = (TimelineState::Drag) (dragBox.getSelectedId() - 1); };
+    for (auto* box : { &toolBox, &snapBox, &dragBox })
+    {
+        box->setWantsKeyboardFocus (false);
+        addAndMakeVisible (box);
+    }
     bind (undoButton, commands::undo);
     bind (redoButton, commands::redo);
     stopButton.onClick = [this]
@@ -171,6 +190,11 @@ MainComponent::MainComponent (bool openAudioDevice)
     };
     canvas.onViewChanged = [this] { updateScrollBars(); };
     canvas.onOpenPianoRoll = [this] (juce::ValueTree region) { openPianoRoll (region); };
+    canvas.onSplit = [this] { splitAtPlayhead(); };
+    canvas.onDelete = [this] { deleteSelection(); };
+    canvas.onRepeat = [this] { repeatSelectedRegions(); };
+    canvas.onJoin = [this] { joinSelectedRegions(); };
+    canvas.onMuteRegions = [this] { muteSelectedRegions(); };
     pianoRoll.onClose = [this] { closePianoRoll(); };
     addChildComponent (pianoRoll);
     headers.instrumentMenu = [this] (juce::ValueTree track, juce::Component& target) { showInstrumentMenu (track, target); };
@@ -423,8 +447,14 @@ void MainComponent::paint (juce::Graphics& g)
     g.drawText ("TIME", juce::Rectangle<float> ((float) clockLabel.getX(), captionY, (float) clockLabel.getWidth(), 11.0f),
                 juce::Justification::centred, false);
 
-    // Captions under the keys
+    // Captions under the Tool, Snap and Drag menus
     g.setFont (juce::FontOptions (11.0f));
+    g.setColour (theme::text.withAlpha (0.78f));
+    for (auto [box, name] : { std::pair { &toolBox, "Tool" }, std::pair { &snapBox, "Snap" }, std::pair { &dragBox, "Drag" } })
+        if (box->isVisible())
+            g.drawText (name, box->getBounds().translated (0, box->getHeight() + 4).withHeight (13), juce::Justification::centred, false);
+
+    // Captions under the keys
     for (auto* b : std::initializer_list<juce::Button*> { &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
                                                           &recordButton, &cycleButton, &countInButton, &clickButton,
                                                           &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton, &screenButton })
@@ -483,6 +513,19 @@ void MainComponent::resized()
         generateButton.setBounds (18, row.getY(), keyWidth, keyHeight);
         claudeButton.setBounds (18 + keyWidth + gap + 4, row.getY(), keyWidth, keyHeight);
         screenButton.setBounds (18 + 2 * (keyWidth + gap + 4), row.getY(), keyWidth, keyHeight);
+
+        // Tool, Snap and Drag, between those keys and the transport (when there's room)
+        {
+            auto boxes = juce::Rectangle<int> (screenButton.getRight() + 14, row.getY() + 2, 0, keyHeight - 6);
+            const auto transportLeft = getWidth() / 2 - ((int) 9 * (keyWidth + gap) + 14) / 2;
+            int boxX = boxes.getX();
+            for (auto [box, w] : { std::pair { &toolBox, 84 }, std::pair { &snapBox, 80 }, std::pair { &dragBox, 94 } })
+            {
+                box->setVisible (boxX + w < transportLeft - 12);
+                box->setBounds (boxX, boxes.getY(), w, boxes.getHeight());
+                boxX += w + 6;
+            }
+        }
 
         x = getWidth() - 12 - 3 * keyWidth - 2 * gap;
         for (auto* c : { (juce::Component*) &mixerButton, (juce::Component*) &editorButton, (juce::Component*) &keysButton })
@@ -795,15 +838,14 @@ void MainComponent::splitAtPlayhead()
     const auto time = engine.getPlayheadSeconds();
     undoManager.beginNewTransaction ("Split");
 
-    // The selected region if it's under the playhead; otherwise every region
-    // under the playhead on the selected track.
-    auto selected = model::findById (project, timeline.selectedRegionId);
-
-    if (selected.isValid() && (double) selected[ids::start] < time && time < model::regionEnd (selected))
-    {
-        model::splitRegion (selected, time, &undoManager);
+    // The selected regions under the playhead; otherwise every region under the
+    // playhead on the selected track.
+    bool splitAny = false;
+    for (auto& region : timeline.selectedRegionTrees())
+        if ((double) region[ids::start] < time && time < model::regionEnd (region))
+            splitAny = model::splitRegion (region, time, &undoManager).isValid() || splitAny;
+    if (splitAny)
         return;
-    }
 
     auto track = model::findById (project, timeline.selectedTrackId);
     if (! track.isValid())
@@ -819,13 +861,14 @@ void MainComponent::splitAtPlayhead()
 
 void MainComponent::deleteSelection()
 {
-    auto region = model::findById (project, timeline.selectedRegionId);
-    if (! region.isValid())
+    const auto regions = timeline.selectedRegionTrees();
+    if (regions.isEmpty())
         return;
 
-    undoManager.beginNewTransaction ("Delete region");
-    model::deleteRegion (region, &undoManager);
-    timeline.selectedRegionId = {};
+    undoManager.beginNewTransaction (regions.size() > 1 ? "Delete regions" : "Delete region");
+    for (auto region : regions)
+        model::deleteRegion (region, &undoManager);
+    timeline.selectOnlyRegion ({});
     timeline.changed();
 }
 

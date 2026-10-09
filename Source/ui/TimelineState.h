@@ -29,6 +29,62 @@ struct TimelineState : public juce::ChangeBroadcaster
         so setting selectedTrackId directly simply selects that one track. */
     juce::StringArray selectedTracks;
 
+    /** Several selected regions (Shift-click, or drag a rectangle over them). Like selectedTracks,
+        it only counts while it holds selectedRegionId. */
+    juce::StringArray selectedRegions;
+
+    bool isRegionSelected (const juce::String& id) const
+    {
+        return id.isNotEmpty() && (id == selectedRegionId || (selectedRegions.contains (selectedRegionId) && selectedRegions.contains (id)));
+    }
+
+    /** The selected regions (each one a REGION in the project). */
+    juce::Array<juce::ValueTree> selectedRegionTrees() const
+    {
+        juce::Array<juce::ValueTree> result;
+        for (const auto& t : project)
+            if (t.hasType (ids::TRACK))
+                for (const auto& r : t)
+                    if (r.hasType (ids::REGION) && isRegionSelected (r[ids::id].toString()))
+                        result.add (r);
+        return result;
+    }
+
+    void selectOnlyRegion (const juce::String& id)
+    {
+        selectedRegionId = id;
+        selectedRegions = { id };
+    }
+
+    void selectRegions (const juce::StringArray& regionIds)
+    {
+        selectedRegions = regionIds;
+        selectedRegionId = regionIds[regionIds.size() - 1];
+    }
+
+    /** Shift-click on a region: adds or removes it. */
+    void toggleRegionSelection (const juce::String& id)
+    {
+        juce::StringArray current;
+        for (const auto& r : selectedRegionTrees())
+            current.add (r[ids::id].toString());
+        if (current.contains (id))
+            current.removeString (id);
+        else
+            current.add (id);
+        selectRegions (current);
+    }
+
+    // --- Tools, snap and drag modes (Logic's tool menu and the Snap / Drag menus) ---------
+    enum class Tool { pointer, pencil, eraser, scissors, glue, mute };
+    Tool tool = Tool::pointer;
+
+    enum class Snap { smart, bar, beat, division, off };
+    Snap snapMode = Snap::smart;
+
+    enum class Drag { overlap, noOverlap };
+    Drag dragMode = Drag::overlap;
+
     /** Show hidden tracks (Logic's H): they're drawn dimmed instead of left out. */
     bool showHiddenTracks = false;
 

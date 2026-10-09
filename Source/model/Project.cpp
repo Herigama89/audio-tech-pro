@@ -264,6 +264,126 @@ juce::ValueTree splitRegion (juce::ValueTree region, double time, juce::UndoMana
     return right;
 }
 
+juce::ValueTree duplicateRegion (const juce::ValueTree& region, juce::ValueTree track, double start, juce::UndoManager* um)
+{
+    auto copy = region.createCopy();
+    copy.setProperty (ids::id, newId(), nullptr);
+    for (auto child : copy)
+        if (child.hasProperty (ids::id))
+            child.setProperty (ids::id, newId(), nullptr);
+    copy.setProperty (ids::start, juce::jmax (0.0, start), nullptr);
+    track.appendChild (copy, um);
+    return copy;
+}
+
+juce::ValueTree joinRegions (const juce::Array<juce::ValueTree>& regions, juce::UndoManager* um)
+{
+    if (regions.size() < 2)
+        return {};
+
+    auto track = regions.getFirst().getParent();
+    double from = std::numeric_limits<double>::max(), to = 0.0;
+    for (const auto& r : regions)
+    {
+        if (! isMidiRegion (r) || r.getParent() != track)
+            return {};
+        from = juce::jmin (from, (double) r[ids::start]);
+        to = juce::jmax (to, regionEnd (r));
+    }
+
+    auto joined = addMidiRegion (track, from, to - from, um);
+    joined.setProperty (ids::name, regions.getFirst()[ids::name], um);
+
+    // Every note that sounds inside its region's window, at its place on the timeline.
+    for (const auto& r : regions)
+    {
+        const double start = r[ids::start], offset = r[ids::offset], length = r[ids::length];
+        for (const auto& note : r)
+        {
+            if (! note.hasType (ids::NOTE))
+                continue;
+            const double noteStart = note[ids::start];
+            if (noteStart < offset - 1.0e-9 || noteStart >= offset + length)
+                continue;
+            const auto at = start + (noteStart - offset);
+            const auto noteLength = juce::jmin ((double) note[ids::length], start + length - at);
+            addNote (joined, note[ids::pitch], at - from, noteLength, note[ids::velocity], nullptr);
+        }
+    }
+
+    for (auto r : regions)
+        deleteRegion (r, um);
+    return joined;
+}
+
+void clearOverlaps (const juce::ValueTree& region, std::function<double (const juce::ValueTree&)> sourceLength, juce::UndoManager* um)
+{
+    auto track = region.getParent();
+    const double start = region[ids::start];
+    const double end = regionEnd (region);
+
+    juce::Array<juce::ValueTree> others;
+    for (const auto& r : track)
+        if (r.hasType (ids::REGION) && r != region && (double) r[ids::start] < end - 1.0e-9 && regionEnd (r) > start + 1.0e-9)
+            others.add (r);
+
+    for (auto other : others)
+    {
+        const double otherStart = other[ids::start];
+        const auto otherEnd = regionEnd (other);
+        const auto length = sourceLength ? sourceLength (other) : 0.0;
+
+        if (otherStart >= start - 1.0e-9 && otherEnd <= end + 1.0e-9)
+            deleteRegion (other, um);                                   // covered: gone
+        else if (otherStart < start && otherEnd > end)
+        {
+            auto right = splitRegion (other, end, um);                  // the new one lands in the middle
+            trimRegionEnd (other, start, length, um);
+            juce::ignoreUnused (right);
+        }
+        else if (otherStart < start)
+            trimRegionEnd (other, start, length, um);                   // keep its beginning
+        else
+            trimRegionStart (other, end, length, um);                   // keep its end
+    }
+}
+
+juce::ValueTree duplicateTrackSettings (juce::ValueTree project, const juce::ValueTree& track, juce::UndoManager* um)
+{
+    const auto kind = track[ids::kind].toString().isNotEmpty() ? track[ids::kind].toString() : audioKind;
+    auto copy = addTrack (project, track[ids::name].toString(), um, project.indexOf (track) + 1, kind);
+    const auto newTrackId = copy[ids::id].toString();
+
+    // Everything but its identity, its regions and its record state.
+    for (int i = 0; i < track.getNumProperties(); ++i)
+    {
+        const auto name = track.getPropertyName (i);
+        if (name != ids::id && name != ids::armed && name != ids::monitor)
+            copy.setProperty (name, track[name], um);
+    }
+
+    // Inserts and sends (and a channel strip plugin), with new ids.
+    const auto copyChain = [&] (const juce::String& fromOwner, const juce::String& toOwner)
+    {
+        const auto source = findChain (project, fromOwner);
+        if (! source.isValid())
+            return;
+        auto target = chainFor (project, toOwner);
+        for (const auto& item : source)
+        {
+            auto c = item.createCopy();
+            if (c.hasProperty (ids::id))
+                c.setProperty (ids::id, newId(), nullptr);
+            target.appendChild (c, um);
+        }
+    };
+    if (auto existing = findChain (project, stripOwner (newTrackId)); existing.isValid())
+        existing.getParent().removeChild (existing, um);   // addTrack may have added the console plugin; take the original's instead
+    copyChain (track[ids::id].toString(), newTrackId);
+    copyChain (stripOwner (track[ids::id].toString()), stripOwner (newTrackId));
+    return copy;
+}
+
 juce::ValueTree addRecordedRegion (juce::ValueTree track, const juce::File& file, double start,
                                    double recordedLength, double latencySeconds, juce::UndoManager* um)
 {
