@@ -93,6 +93,22 @@ namespace riff::model
     /** Library patches: a track's sound (instrument, plugins, channel strip, sends to nowhere dropped) as a small
         project of its own, and putting one onto a track (replacing its sound; its regions stay). */
     juce::ValueTree makePatch (const juce::ValueTree& project, const juce::ValueTree& track);
+
+    /** Reset Channel Strip: no inserts or sends, the console section flat, fader at 0 dB, pan centre. */
+    void resetChannelStrip (juce::ValueTree project, juce::ValueTree track, juce::UndoManager* um);
+
+    /** Logic's Region and Track parameters for a MIDI region's notes, as they play. */
+    struct MidiPlayback
+    {
+        int transpose = 0, velocity = 0;
+        double quantizeBeats = 0.0, swing = 50.0, dynamics = 100.0, gate = 100.0, delaySeconds = 0.0;
+        int keyLow = 0, keyHigh = 127, velLow = 1, velHigh = 127;
+
+        static MidiPlayback of (const juce::ValueTree& region, const juce::ValueTree& track);
+
+        /** Shapes one note (absolute seconds); false if the track's key or velocity limits leave it out. */
+        bool shape (const TempoMap& map, double& start, double& length, int& pitch, int& vel) const;
+    };
     void applyPatch (juce::ValueTree project, juce::ValueTree track, const juce::ValueTree& patch, juce::UndoManager* um);
 
     /**

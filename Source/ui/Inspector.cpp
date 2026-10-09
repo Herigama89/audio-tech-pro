@@ -1,4 +1,5 @@
 #include "Inspector.h"
+#include "TrackIcons.h"
 #include "Theme.h"
 #include "../model/Project.h"
 #include "RoutingMenu.h"
@@ -85,6 +86,18 @@ void Inspector::buildTrackBox()
     auto p = project;
     trackBox.reset ("Track: " + track[ids::name].toString(), track);
 
+    // The track's icon (as in Logic's Track box)
+    trackBox.addMenu ("Icon", [t] { const int i = t.getProperty (ids::icon, 0); return i > 0 ? icons::names()[i - 1] : juce::String ("None"); },
+                      [t, &um] (juce::Component& target) mutable
+    {
+        juce::PopupMenu menu;
+        menu.addItem ("None", true, (int) t.getProperty (ids::icon, 0) == 0, [t, &um]() mutable { um.beginNewTransaction ("Icon"); t.setProperty (ids::icon, 0, &um); });
+        for (int i = 0; i < icons::names().size(); ++i)
+            menu.addItem (icons::names()[i], true, (int) t.getProperty (ids::icon, 0) == i + 1,
+                          [t, &um, i]() mutable { um.beginNewTransaction ("Icon"); t.setProperty (ids::icon, i + 1, &um); });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+    });
+
     if (! model::isVcaTrack (track))
         trackBox.addMenu ("Automation", [t] { const auto m = AutomationWriter::modeOf (t); return m.substring (0, 1).toUpperCase() + m.substring (1); },
                           [t] (juce::Component& target) mutable
@@ -118,8 +131,17 @@ void Inspector::buildTrackBox()
 
     if (model::isInstrumentTrack (track))
     {
-        trackBox.addNumber ("Transpose", ids::transpose, -48.0, 48.0, 1.0, 0.0, [] (double v) { return (v > 0 ? "+" : "") + juce::String ((int) v); });
-        trackBox.addNumber ("Velocity", ids::velocityOffset, -64.0, 64.0, 1.0, 0.0, [] (double v) { return (v > 0 ? "+" : "") + juce::String ((int) v); });
+        const auto signedInt = [] (double v) { return (v > 0 ? "+" : "") + juce::String ((int) v); };
+        const auto noteName = [] (double v) { return juce::MidiMessage::getMidiNoteName ((int) v, true, true, 3); };
+        trackBox.addNumber ("Transpose", ids::transpose, -48.0, 48.0, 1.0, 0.0, signedInt);
+        trackBox.addNumber ("Velocity", ids::velocityOffset, -64.0, 64.0, 1.0, 0.0, signedInt);
+        trackBox.addNumber ("Key Limit Lo", ids::keyLow, 0.0, 127.0, 1.0, 0.0, noteName);
+        trackBox.addNumber ("Key Limit Hi", ids::keyHigh, 0.0, 127.0, 1.0, 127.0, noteName);
+        trackBox.addNumber ("Vel Limit Lo", ids::velLow, 1.0, 127.0, 1.0, 1.0, [] (double v) { return juce::String ((int) v); });
+        trackBox.addNumber ("Vel Limit Hi", ids::velHigh, 1.0, 127.0, 1.0, 127.0, [] (double v) { return juce::String ((int) v); });
+        trackBox.addNumber ("Delay", ids::playDelay, -500.0, 500.0, 1.0, 0.0,
+                            [] (double v) { return std::abs (v) < 0.5 ? juce::String ("0 ms") : (v > 0 ? "+" : "") + juce::String ((int) v) + " ms"; });
+        trackBox.addSwitch ("No Transpose", ids::noTranspose, false);
     }
 
     if (! model::isBusTrack (track) && ! model::isVcaTrack (track))
@@ -147,10 +169,35 @@ void Inspector::setRegion (juce::ValueTree newRegion)
             model::setLoop (r, on, &um);
         });
 
+        const auto delayText = [] (double v) { return std::abs (v) < 0.5 ? juce::String ("0 ms") : (v > 0 ? "+" : "") + juce::String ((int) v) + " ms"; };
         if (model::isMidiRegion (region))
         {
+            // Logic's Region parameters: they change how the region plays, not its notes.
+            struct Grid { const char* name; double beats; };
+            static const Grid grids[] { { "Off", 0.0 }, { "1/4 Note", 1.0 }, { "1/8 Note", 0.5 }, { "1/16 Note", 0.25 }, { "1/32 Note", 0.125 },
+                                        { "1/8 Triplet", 1.0 / 3.0 }, { "1/16 Triplet", 1.0 / 6.0 } };
+            regionBox.addMenu ("Quantize", [r]
+            {
+                const double q = r.getProperty (ids::playQuantize, 0.0);
+                for (const auto& grid : grids)
+                    if (std::abs (grid.beats - q) < 1.0e-6)
+                        return juce::String (grid.name);
+                return juce::String (q, 3) + " beat";
+            }, [r, &um] (juce::Component& target) mutable
+            {
+                juce::PopupMenu menu;
+                for (const auto& grid : grids)
+                    menu.addItem (grid.name, true, std::abs ((double) r.getProperty (ids::playQuantize, 0.0) - grid.beats) < 1.0e-6,
+                                  [r, &um, beats = grid.beats]() mutable { um.beginNewTransaction ("Quantize"); r.setProperty (ids::playQuantize, beats, &um); });
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+            });
+            regionBox.addNumber ("Q-Swing", ids::playSwing, 50.0, 75.0, 1.0, 50.0, [] (double v) { return juce::String ((int) v) + "%"; });
             regionBox.addNumber ("Transpose", ids::transpose, -48.0, 48.0, 1.0, 0.0, [] (double v) { return (v > 0 ? "+" : "") + juce::String ((int) v); });
             regionBox.addNumber ("Velocity", ids::velocityOffset, -64.0, 64.0, 1.0, 0.0, [] (double v) { return (v > 0 ? "+" : "") + juce::String ((int) v); });
+            regionBox.addNumber ("Dynamics", ids::playDynamics, 0.0, 200.0, 1.0, 100.0,
+                                 [] (double v) { return v < 0.5 ? juce::String ("Fixed") : juce::String ((int) v) + "%"; });
+            regionBox.addNumber ("Gate Time", ids::playGate, 10.0, 200.0, 1.0, 100.0, [] (double v) { return juce::String ((int) v) + "%"; });
+            regionBox.addNumber ("Delay", ids::playDelay, -500.0, 500.0, 1.0, 0.0, delayText);
         }
         else
         {
@@ -163,6 +210,7 @@ void Inspector::setRegion (juce::ValueTree newRegion)
                                  [] (double v) { return v / 1000.0; }, [] (double v) { return v * 1000.0; });
             regionBox.addNumber ("Fade Out", ids::fadeOut, 0.0, 10000.0, 1.0, 0.0, ms,
                                  [] (double v) { return v / 1000.0; }, [] (double v) { return v * 1000.0; });
+            regionBox.addNumber ("Delay", ids::playDelay, -500.0, 500.0, 1.0, 0.0, delayText);
         }
         regionBox.resized();
     }

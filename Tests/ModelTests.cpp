@@ -780,3 +780,59 @@ TEST_CASE ("Inserts stay in the slot they were put in", "[model][inserts]")
     CHECK (model::insertsOf (chain).size() == 2);
     CHECK (model::insertAtSlot (chain, 3) == comp);
 }
+
+TEST_CASE ("Region and Track parameters shape the notes as they play", "[model][inspector]")
+{
+    auto project = model::createProject();   // 120 BPM: a beat is 0.5 s
+    auto track = model::addTrack (project, "Keys", nullptr, -1, model::instrumentKind);
+    auto region = model::addMidiRegion (track, 0.0, 4.0, nullptr);
+    const auto map = model::tempoMapOf (project);
+
+    auto shape = [&] (double start, double length, int pitch, int vel, bool& played)
+    {
+        double s = start, l = length; int p = pitch, v = vel;
+        played = model::MidiPlayback::of (region, track).shape (map, s, l, p, v);
+        return std::tuple { s, l, p, v };
+    };
+    bool played = false;
+
+    // Nothing set: as recorded.
+    auto [s0, l0, p0, v0] = shape (0.27, 0.2, 60, 90, played);
+    CHECK (played);
+    CHECK_THAT (s0, WithinAbs (0.27, 1e-9));
+    CHECK (p0 == 60);
+    CHECK (v0 == 90);
+
+    // Quantize to 1/8 (half a beat = 0.25 s), with swing on the off-beats.
+    region.setProperty (riff::ids::playQuantize, 0.5, nullptr);
+    auto [s1, l1, p1, v1] = shape (0.27, 0.2, 60, 90, played);
+    CHECK_THAT (s1, WithinAbs (0.25, 1e-9));
+    region.setProperty (riff::ids::playSwing, 75.0, nullptr);
+    auto [s2, l2, p2, v2] = shape (0.27, 0.2, 60, 90, played);
+    CHECK_THAT (s2, WithinAbs (0.25 + 0.125, 1e-9));   // the off-beat moved half a step later
+
+    // Dynamics 50%: velocities move halfway to 64. Gate 50%: half as long. Delay +10 ms.
+    region.setProperty (riff::ids::playQuantize, 0.0, nullptr);
+    region.setProperty (riff::ids::playDynamics, 50.0, nullptr);
+    region.setProperty (riff::ids::playGate, 50.0, nullptr);
+    region.setProperty (riff::ids::playDelay, 10.0, nullptr);
+    auto [s3, l3, p3, v3] = shape (1.0, 0.4, 60, 120, played);
+    CHECK (v3 == 92);
+    CHECK_THAT (l3, WithinAbs (0.2, 1e-9));
+    CHECK_THAT (s3, WithinAbs (1.01, 1e-9));
+
+    // Key and velocity limits leave notes out; No Transpose ignores transposing.
+    track.setProperty (riff::ids::keyLow, 48, nullptr);
+    track.setProperty (riff::ids::keyHigh, 72, nullptr);
+    shape (1.0, 0.4, 40, 100, played);
+    CHECK (! played);
+    track.setProperty (riff::ids::velLow, 50, nullptr);
+    shape (1.0, 0.4, 60, 20, played);
+    CHECK (! played);
+    region.setProperty (riff::ids::transpose, 12, nullptr);
+    auto [s4, l4, p4, v4] = shape (1.0, 0.4, 60, 100, played);
+    CHECK (p4 == 72);
+    track.setProperty (riff::ids::noTranspose, true, nullptr);
+    auto [s5, l5, p5, v5] = shape (1.0, 0.4, 60, 100, played);
+    CHECK (p5 == 60);
+}

@@ -290,6 +290,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     addChildComponent (inspector);
     mixer.inputNames = [this] { return headers.inputNames ? headers.inputNames() : juce::StringArray(); };
     mixer.onInstrumentMenu = [this] (juce::ValueTree track, juce::Component& target) { showInstrumentMenu (track, target); };
+    mixer.onSettingMenu = [this] (juce::ValueTree track, juce::Component& target) { showChannelSettingMenu (track, target); };
     headers.inputNames = [this]
     {
         // Your own names for the inputs (I/O Labels), where you gave one.

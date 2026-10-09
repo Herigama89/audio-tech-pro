@@ -348,9 +348,10 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
                 if (! model::isMidiRegion (region) || model::isRegionMuted (region))
                     continue;
 
-                // Transpose and velocity from the Inspector (region and track add up).
-                const int transpose = (int) region.getProperty (ids::transpose, 0) + (int) track.getProperty (ids::transpose, 0);
-                const int velocityOffset = (int) region.getProperty (ids::velocityOffset, 0) + (int) track.getProperty (ids::velocityOffset, 0);
+                // The Inspector's Region and Track parameters (transpose, velocity, quantize, swing, dynamics,
+                // gate time, delay, key and velocity limits), applied as it plays.
+                const auto shaping = model::MidiPlayback::of (region, track);
+                const auto tempoMap = model::tempoMapOf (project);
 
                 // A looped region plays again and again, up to its loop end.
                 const double regionStart = region[ids::start];
@@ -379,11 +380,16 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
 
                         const double noteEnd = juce::jmin (noteStart + (double) note[ids::length], windowEnd);
 
+                        double start = repeatStart + noteStart - offset, length = noteEnd - noteStart;
+                        int pitch = note[ids::pitch], velocity = note[ids::velocity];
+                        if (! shaping.shape (tempoMap, start, length, pitch, velocity))
+                            continue;
+
                         PlaybackGraph::Note n;
-                        n.start    = toSamples (repeatStart + noteStart - offset);
-                        n.end      = juce::jmax (n.start + 1, toSamples (repeatStart + noteEnd - offset));
-                        n.pitch    = (juce::uint8) juce::jlimit (0, 127, (int) note[ids::pitch] + transpose);
-                        n.velocity = (juce::uint8) juce::jlimit (1, 127, (int) note[ids::velocity] + velocityOffset);
+                        n.start    = toSamples (start);
+                        n.end      = juce::jmax (n.start + 1, toSamples (start + length));
+                        n.pitch    = (juce::uint8) pitch;
+                        n.velocity = (juce::uint8) velocity;
                         r.notes.push_back (n);
                     }
 
@@ -472,7 +478,7 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
 
             PlaybackGraph::Region r;
             r.audio        = cache.get (juce::File (region[ids::file].toString()));
-            r.start        = toSamples (region[ids::start]);
+            r.start        = toSamples (juce::jmax (0.0, (double) region[ids::start] + (double) region.getProperty (ids::playDelay, 0.0) / 1000.0));   // (Delay, in the Region box)
             r.length       = toSamples (region[ids::length]);
 
             if (r.audio != nullptr)

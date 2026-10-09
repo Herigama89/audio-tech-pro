@@ -60,7 +60,7 @@ public:
     static constexpr int nameHeight = 26;
     static constexpr int automationRow = 18;
     static constexpr int ioRow = 17;   // the Input slot (above the inserts) and the Output slot (below the sends)
-    static constexpr int minimumHeight = topHeight + 6 + ioRow + numSlots * 17 + 6 + numSends * 18 + ioRow + automationRow + 100 + 20 + nameHeight;
+    static constexpr int minimumHeight = topHeight + 6 + 2 * ioRow + numSlots * 17 + 6 + numSends * 18 + ioRow + automationRow + 100 + 20 + nameHeight;
 
     /** Without the console section (EQ and Dynamics hidden, as in Logic): number, EQ/DYN tags, pan, mute and solo. */
     static constexpr int compactTopHeight = 92;
@@ -115,6 +115,7 @@ private:
     strip::CreamKey muteButton { "M", theme::mute }, soloButton { "S", theme::solo }, stripInButton { "IN", theme::knobArc };
     strip::DisplaySlider panKnob;
     juce::TextButton inputSlot, outputSlot;   // Logic's Input and Output slots
+    juce::TextButton settingSlot { "Setting" };   // Logic's Setting button: copy, paste, reset, patches
     float grShown = 0.0f;
     juce::Rectangle<int> grArea() const;
     void showInputMenu();
@@ -212,6 +213,9 @@ public:
     /** For the strips' Input slots: the interface's inputs, and an instrument track's instrument chooser. */
     std::function<juce::StringArray()> inputNames;
     std::function<void (juce::ValueTree track, juce::Component& target)> onInstrumentMenu;
+
+    /** The strip's Setting button (copy / paste / reset the channel strip, save and load patches). */
+    std::function<void (juce::ValueTree track, juce::Component& target)> onSettingMenu;
     void removeExtraStrip (ChannelStrip* s) { extraStrips.removeFirstMatchingValue (s); }
 
     const juce::StringArray& getSelectedTrackIds() const noexcept { return selectedTrackIds; }

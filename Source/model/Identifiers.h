@@ -102,6 +102,17 @@ namespace riff::ids
     RIFF_DECLARE_ID (loopEnd)
     RIFF_DECLARE_ID (transpose)        // REGION / TRACK (MIDI): semitones, applied as it plays
     RIFF_DECLARE_ID (velocityOffset)   // REGION / TRACK (MIDI): added to every note's velocity
+    // Logic's Region and Track parameters (applied as it plays; the notes themselves don't change)
+    RIFF_DECLARE_ID (playQuantize)     // REGION (MIDI): grid in beats (0: off)
+    RIFF_DECLARE_ID (playSwing)        // REGION (MIDI): Q-Swing, 50 (straight) to 75 %
+    RIFF_DECLARE_ID (playDynamics)     // REGION (MIDI): velocity spread, % (100: as played)
+    RIFF_DECLARE_ID (playGate)         // REGION (MIDI): note length, % (100: as played)
+    RIFF_DECLARE_ID (playDelay)        // REGION / TRACK: ms earlier (-) or later (+)
+    RIFF_DECLARE_ID (keyLow)           // TRACK (MIDI): Key Limit, lowest note that plays
+    RIFF_DECLARE_ID (keyHigh)
+    RIFF_DECLARE_ID (velLow)           // TRACK (MIDI): Vel Limit, softest and hardest notes that play
+    RIFF_DECLARE_ID (velHigh)
+    RIFF_DECLARE_ID (noTranspose)      // TRACK (MIDI): transpose leaves it alone (drums)
     RIFF_DECLARE_ID (drumTune)         // TRACK (Drum Kit): semitones
     RIFF_DECLARE_ID (drumDecay)        // TRACK (Drum Kit): 0.3 .. 3
     RIFF_DECLARE_ID (samplerFile)      // TRACK (Sampler): the sound

@@ -538,6 +538,70 @@ juce::Array<juce::ValueTree> importTracks (juce::ValueTree project, const juce::
     return added;
 }
 
+void resetChannelStrip (juce::ValueTree project, juce::ValueTree track, juce::UndoManager* um)
+{
+    const auto owner = track[ids::id].toString();
+    if (auto chain = findChain (project, owner); chain.isValid())
+        for (int i = chain.getNumChildren(); --i >= 0;)
+            if (const auto c = chain.getChild (i); c.hasType (ids::INSERT) || c.hasType (ids::SEND))
+                chain.removeChild (i, um);
+    for (const auto* name : { "consoleIn", "consoleHF", "consoleHMF", "consoleLMF", "consoleLF", "consoleDynamics", "consoleDynIn",
+                              "consoleInput", "consoleOutput", "consoleHPF", "consoleLPF", "consoleHFFreq", "consoleHFBell", "consoleHMFFreq",
+                              "consoleHMFQ", "consoleLMFFreq", "consoleLMFQ", "consoleLFFreq", "consoleLFBell", "consoleCompRatio",
+                              "consoleCompRelease", "consoleCompFast", "consoleGateThreshold", "consoleGateRange", "consoleGateRelease",
+                              "consoleGateExpander", "stripIn", "panWidth" })
+        track.removeProperty (juce::Identifier (name), um);
+    track.setProperty (ids::volume, 1.0, um);
+    track.setProperty (ids::pan, 0.0, um);
+}
+
+MidiPlayback MidiPlayback::of (const juce::ValueTree& region, const juce::ValueTree& track)
+{
+    MidiPlayback p;
+    const bool noTranspose = track.getProperty (ids::noTranspose, false);
+    p.transpose = noTranspose ? 0 : (int) region.getProperty (ids::transpose, 0) + (int) track.getProperty (ids::transpose, 0);
+    p.velocity = (int) region.getProperty (ids::velocityOffset, 0) + (int) track.getProperty (ids::velocityOffset, 0);
+    p.quantizeBeats = region.getProperty (ids::playQuantize, 0.0);
+    p.swing = juce::jlimit (50.0, 75.0, (double) region.getProperty (ids::playSwing, 50.0));
+    p.dynamics = region.getProperty (ids::playDynamics, 100.0);
+    p.gate = region.getProperty (ids::playGate, 100.0);
+    p.delaySeconds = ((double) region.getProperty (ids::playDelay, 0.0) + (double) track.getProperty (ids::playDelay, 0.0)) / 1000.0;
+    p.keyLow = track.getProperty (ids::keyLow, 0);
+    p.keyHigh = track.getProperty (ids::keyHigh, 127);
+    p.velLow = track.getProperty (ids::velLow, 1);
+    p.velHigh = track.getProperty (ids::velHigh, 127);
+    return p;
+}
+
+bool MidiPlayback::shape (const TempoMap& map, double& start, double& length, int& pitch, int& vel) const
+{
+    // The limits look at the notes as recorded.
+    if (pitch < keyLow || pitch > keyHigh || vel < velLow || vel > velHigh)
+        return false;
+
+    pitch = juce::jlimit (0, 127, pitch + transpose);
+
+    // Dynamics spreads or squeezes velocities around the middle; then the offset.
+    vel = juce::jlimit (1, 127, juce::roundToInt (64.0 + (vel - 64) * dynamics / 100.0) + velocity);
+
+    // Play quantize, with swing on every second grid step.
+    if (quantizeBeats > 0.0)
+    {
+        const auto beat = map.beatAt (start);
+        const auto step = std::round (beat / quantizeBeats);
+        auto target = step * quantizeBeats;
+        if (((juce::int64) step) % 2 != 0)
+            target += (swing - 50.0) / 50.0 * quantizeBeats;
+        const auto end = start + length;
+        start = map.secondsAt (target);
+        length = juce::jmax (0.005, end - start);
+    }
+
+    length = juce::jmax (0.005, length * gate / 100.0);
+    start = juce::jmax (0.0, start + delaySeconds);
+    return true;
+}
+
 juce::ValueTree makePatch (const juce::ValueTree& project, const juce::ValueTree& track)
 {
     auto patch = createProject (track[ids::name].toString());

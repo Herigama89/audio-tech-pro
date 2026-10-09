@@ -171,6 +171,13 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     inputSlot.setTooltip ("Input: what this channel records or plays (an interface input, or the instrument)");
     outputSlot.setTooltip ("Output: where this channel goes (the Stereo Out, or a bus)");
     inputSlot.onClick = [this] { showInputMenu(); };
+
+    look::key (settingSlot, look::Key::console);
+    settingSlot.setWantsKeyboardFocus (false);
+    settingSlot.setTooltip ("Setting: copy, paste or reset this channel strip; save it as a patch or load one");
+    settingSlot.onClick = [this] { if (owner.onSettingMenu) owner.onSettingMenu (track, settingSlot); };
+    addAndMakeVisible (settingSlot);
+    settingSlot.setVisible (! isMaster() && ! isVca());
     outputSlot.onClick = [this] { showOutputMenu(); };
     inputSlot.setVisible (! isMaster() && ! isVca());
     outputSlot.setVisible (! isVca());
@@ -866,7 +873,7 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
 juce::Rectangle<int> ChannelStrip::faderArea() const
 {
     // Below the sends, above the level display and the name plate.
-    const auto top = topSection() + 6 + ioRow + numSlots * 17 + 6 + numSends * 18 + ioRow + 4 + automationRow;
+    const auto top = topSection() + 6 + 2 * ioRow + numSlots * 17 + 6 + numSends * 18 + ioRow + 4 + automationRow;
     return { 0, top, getWidth(), getHeight() - nameHeight - 22 - top };
 }
 
@@ -1218,6 +1225,8 @@ void ChannelStrip::resized()
 
     auto area = getLocalBounds().reduced (3, 0).withTrimmedTop (topSection() + 4);
 
+    settingSlot.setBounds (area.removeFromTop (15));
+    area.removeFromTop (2);
     inputSlot.setBounds (area.removeFromTop (15));
     area.removeFromTop (2);
     for (auto* b : slots)

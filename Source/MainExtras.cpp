@@ -379,6 +379,78 @@ void MainComponent::applyTheme (const theme::Settings& settings)
     repaint();
 }
 
+void MainComponent::showChannelSettingMenu (juce::ValueTree track, juce::Component& target)
+{
+    if (! track.isValid())
+        return;
+    auto keepPluginStates = [this]
+    {
+        rack.storePluginStates (project);
+        effectRack.storePluginStates (model::mixerOf (project));
+    };
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader (track[ids::name].toString());
+    menu.addItem ("Copy Channel Strip", [this, track, keepPluginStates]
+    {
+        keepPluginStates();
+        copiedChannelStrip = model::makePatch (project, track);
+    });
+    menu.addItem ("Paste Channel Strip", copiedChannelStrip.isValid(), false, [this, track]() mutable
+    {
+        undoManager.beginNewTransaction ("Paste Channel Strip");
+        model::applyPatch (project, track, copiedChannelStrip, &undoManager);
+    });
+    menu.addItem ("Reset Channel Strip", [this, track]() mutable
+    {
+        undoManager.beginNewTransaction ("Reset Channel Strip");
+        model::resetChannelStrip (project, track, &undoManager);
+    });
+    menu.addSeparator();
+
+    // Patches from the Library
+    juce::PopupMenu patches;
+    const auto files = LibraryPanel::patchesFolder().findChildFiles (juce::File::findFiles, false, "*" + LibraryPanel::patchExtension);
+    for (const auto& file : files)
+        patches.addItem (file.getFileNameWithoutExtension(), [this, track, file]() mutable
+        {
+            juce::String error;
+            const auto patch = model::load (file, error);
+            if (! patch.isValid())
+            {
+                showError ("Couldn't open the patch", error);
+                return;
+            }
+            undoManager.beginNewTransaction ("Patch: " + file.getFileNameWithoutExtension());
+            model::applyPatch (project, track, patch, &undoManager);
+        });
+    if (files.isEmpty())
+        patches.addItem ("No patches saved yet", false, false, [] {});
+    menu.addSubMenu ("Load Patch", patches);
+    menu.addItem ("Save Channel Strip as Patch...", [this, track, keepPluginStates]
+    {
+        auto* window = new juce::AlertWindow ("Save as Patch", "A name for this sound:", juce::MessageBoxIconType::NoIcon);
+        window->addTextEditor ("name", track[ids::name].toString());
+        window->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        window->enterModalState (true, juce::ModalCallbackFunction::create ([this, window, track, keepPluginStates] (int result)
+        {
+            const auto name = window->getTextEditorContents ("name").trim();
+            if (result != 1 || name.isEmpty())
+                return;
+            keepPluginStates();
+            LibraryPanel::patchesFolder().createDirectory();
+            const auto file = LibraryPanel::patchesFolder().getChildFile (juce::File::createLegalFileName (name) + LibraryPanel::patchExtension);
+            juce::String error;
+            if (! model::save (model::makePatch (project, track), file, error))
+                showError ("Couldn't save the patch", error);
+        }), true);
+    });
+    menu.addSeparator();
+    menu.addItem ("Open Channel EQ...", [this, track] { if (mixer.onOpenStripWindow) mixer.onOpenStripWindow (track); });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+}
+
 void MainComponent::showThemeSettings()
 {
     const juce::String id ("theme");

@@ -139,6 +139,8 @@ private:
     void showEventList();
     void showLiveLoops();
     void showThemeSettings();
+    void showChannelSettingMenu (juce::ValueTree track, juce::Component& target);
+    juce::ValueTree copiedChannelStrip;   // Copy Channel Strip
     void applyTheme (const theme::Settings& settings);
     void showControllerAssignments();
     void toggleLibrary (LibraryPanel::Page page);

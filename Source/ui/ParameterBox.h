@@ -56,6 +56,7 @@ public:
         row->refresh = [this, slider, property, fallback, fromP]
         {
             slider->setValue (tree.hasProperty (property) ? fromP ((double) tree[property]) : fallback, juce::dontSendNotification);
+            slider->updateText();   // (the text even when the value didn't move)
         };
         row->control.reset (slider);
         add (std::move (row));
