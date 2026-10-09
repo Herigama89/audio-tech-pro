@@ -190,6 +190,13 @@ public:
                                 std::function<bool (double)> progress);
     void endOfflineRender();
 
+    /** Renders [start, end) offline and writes each listed graph slot's own output
+        (after its plugins, fader and pan) to its own file: stems, or a bounce in
+        place. Between begin/endOfflineRender. */
+    struct StemTarget { int slot = -1; juce::File file; };
+    juce::String renderStems (const std::vector<StemTarget>& targets, double startSeconds, double endSeconds, int bitDepth,
+                              std::function<bool (double)> progress);
+
     /** Measures every track and the master over [start, end) by rendering offline (between begin/endOfflineRender).
         Track results are by graph slot (see ProjectPlayer::slotFor); the master is the last entry. */
     struct MixMeasurement
@@ -321,6 +328,7 @@ private:
     juce::StringArray inputLabels;
     std::atomic<ScreenAudioTap*> screenTap { nullptr };
     bool measuring = false;                       // only while measureMix renders
+    juce::AudioBuffer<float>* stemCapture = nullptr;   // only while renderStems renders: 2 channels per slot
     std::vector<LevelStats> measuredTracks;       // by slot
     LevelStats measuredMaster;
     bool offlineWasAttached = false, offlineSavedPlaying = false;

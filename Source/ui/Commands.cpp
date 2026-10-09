@@ -15,6 +15,9 @@ const std::vector<Info>& all()
         { revertToBackup,         "Revert to Backup...",        "File",      "Open one of the backups made each time you saved" },
         { importAudio,            "Import Audio File...",       "File",      "Put audio files on the selected track at the playhead" },
         { exportSong,             "Bounce Song to WAV...",      "File",      "Export the song, or the cycle range, to a WAV file" },
+        { exportStems,            "Export All Tracks as Audio Files...", "File", "Each track (and bus) to its own WAV in a folder, with its plugins, fader and pan, ignoring solo" },
+        { importTracks,           "Import Tracks from Project...", "File",   "Bring tracks (regions, plugins, sends, automation) in from another project" },
+        { bounceInPlace,          "Bounce in Place",            "Track",     "Render the selected track to a new audio track and mute the original" },
 
         { undo,                   "Undo",                       "Edit",      "Undo the last edit" },
         { redo,                   "Redo",                       "Edit",      "Redo the edit you undid" },
@@ -135,6 +138,10 @@ namespace
             case saveProjectAs:          return { key ('s', shift | cmd) };
             case importAudio:            return { key ('i', shift | cmd), key ('i', cmd) };
             case exportSong:             return { key ('b', cmd), key ('e', cmd) };
+            case exportStems:            return { key ('e', shift | cmd) };
+           #if JUCE_MAC
+            case bounceInPlace:          return { key ('b', ctrl) };
+           #endif
 
             case undo:                   return { key ('z', cmd) };
             case redo:                   return { key ('z', shift | cmd), key ('y', cmd) };

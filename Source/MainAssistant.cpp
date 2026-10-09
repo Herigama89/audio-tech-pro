@@ -44,6 +44,7 @@ namespace
             case commands::audioSettings: case commands::calibrateLatency: case commands::scanPlugins:
             case commands::showAssistant: case commands::generateMidi: case commands::play: case commands::record:
             case commands::recordScreen: case commands::combineInterfaces:
+            case commands::exportStems: case commands::importTracks: case commands::revertToBackup: case commands::consolidateProject:
                 return false;
             default:
                 return true;

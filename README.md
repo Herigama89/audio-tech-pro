@@ -299,7 +299,7 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [x] Marker track: double-click to add or rename, drag to move, click to go there, right-click to set the cycle or delete; Create Marker (Option+'), next/previous marker (Option+. / Option+,)
 - [x] Time signature and key in the display (click to change); the MIDI generator starts in the song's key
 - [ ] Tempo track with tempo changes, time signature and key changes along the song, arrangement markers
-- [ ] Bounce in place, export tracks as audio files (stems), import tracks from other projects
+- [x] Bounce in place (Ctrl+B), export all tracks as audio files (stems, Shift+Cmd+E), import tracks from other projects
 
 **Editing in the tracks area**
 - [x] Tool menu (T) and Tool box: pointer, pencil (draws MIDI regions), eraser, scissors, glue, mute
@@ -329,7 +329,8 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [ ] Autopunch, replace mode, multi-track recording settings, MIDI merge/overdub, step input, MIDI learn and controller assignments
 
 **Project and file**
-- [ ] Autosave and project backups, project alternatives, project templates, consolidate (collect audio into the project)
+- [x] Autosave (every 2 minutes, with recovery after a crash), project backups (Revert to Backup), consolidate (collect audio into the project)
+- [ ] Project alternatives, project templates
 - [ ] Undo History window, preferences window, Library and loop browser, Smart Controls
 - [ ] Live Loops, Drummer and Session Players (instruments come last)
 

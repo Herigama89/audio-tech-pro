@@ -6,6 +6,7 @@
 #include "engine/BuiltInEffects.h"
 #include "ui/Commands.h"
 #include "ui/KeyCommands.h"
+#include "ui/TrackPicker.h"
 #include "engine/ConsolePlugins.h"
 
 namespace riff
@@ -1895,24 +1896,37 @@ void MainComponent::showFileMenu()
     menu.addItem ("Save", [this] { saveProject(); });
     menu.addItem ("Save As...", [this] { saveProjectAs(); });
     menu.addSeparator();
+    menu.addItem ("Revert to Backup...", [this] { showBackups(); });
+    menu.addItem ("Consolidate Project...", [this] { consolidate(); });
+    menu.addSeparator();
     menu.addItem ("Import Audio...", [this] { importAudio(); });
+    menu.addItem ("Import Tracks from Project...", [this] { importTracksFromProject(); });
+    menu.addSeparator();
     menu.addItem ("Export Song as WAV...", [this] { exportSong(); });
+    menu.addItem ("Export All Tracks as Audio Files...", [this] { exportStems(); });
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&fileButton));
 }
 
 namespace
 {
-    /** Renders the song on a background thread with a progress window. */
+    /** Renders offline on a background thread with a progress window. */
     class ExportJob final : public juce::ThreadWithProgressWindow
     {
     public:
+        using Work = std::function<juce::String (std::function<bool (double)>)>;
+
+        ExportJob (AudioEngine& e, const juce::String& title, Work w, std::function<void (const juce::String&)> done)
+            : ThreadWithProgressWindow (title, true, true),
+              engine (e), work (std::move (w)), onDone (std::move (done)) {}
+
         ExportJob (AudioEngine& e, juce::File f, double s, double en, std::function<void (const juce::String&)> done)
-            : ThreadWithProgressWindow ("Exporting " + f.getFileName(), true, true),
-              engine (e), file (std::move (f)), start (s), end (en), onDone (std::move (done)) {}
+            : ExportJob (e, "Exporting " + f.getFileName(),
+                         [&e, f, s, en] (std::function<bool (double)> progress) { return e.renderOffline (f, s, en, 24, std::move (progress)); },
+                         std::move (done)) {}
 
         void run() override
         {
-            error = engine.renderOffline (file, start, end, 24, [this] (double p)
+            error = work ([this] (double p)
             {
                 setProgress (p);
                 return ! threadShouldExit();
@@ -1928,8 +1942,7 @@ namespace
 
     private:
         AudioEngine& engine;
-        juce::File file;
-        double start, end;
+        Work work;
         std::function<void (const juce::String&)> onDone;
         juce::String error;
     };
@@ -1991,6 +2004,260 @@ void MainComponent::exportSong()
         });
 
         job->launchThread();
+    });
+}
+
+//==============================================================================
+// Stems, bounce in place, importing tracks
+//==============================================================================
+void MainComponent::exportStems()
+{
+    if (engine.isRecording())
+        return;
+
+    if (fileCache.isLoading())
+    {
+        showError ("Still loading audio", "Some audio files are still loading. Try again in a moment.");
+        return;
+    }
+
+    const bool cycle = project[ids::cycleEnabled];
+    const double start = cycle ? (double) project[ids::cycleStart] : 0.0;
+    const double end = cycle ? (double) project[ids::cycleEnd] : model::projectEnd (project) + 2.0;
+
+    if (! cycle && model::projectEnd (project) <= 0.0)
+    {
+        showError ("Nothing to export", "Record or import something first.");
+        return;
+    }
+
+    const auto base = projectFile != juce::File() ? projectFile.getParentDirectory()
+                                                  : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+    fileChooser = std::make_unique<juce::FileChooser> ("Choose a folder for the track files", base, juce::String());
+
+    fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                              [this, start, end] (const juce::FileChooser& chooser)
+    {
+        const auto chosen = chooser.getResult();
+        if (chosen == juce::File())
+            return;
+
+        const auto folder = chosen.getChildFile (juce::File::createLegalFileName (project[ids::name].toString() + " Tracks"));
+
+        // Every track as if nothing were soloed; muted tracks and empty tracks are left out.
+        player.setIgnoreSolo (true);
+        player.rebuildNow();
+
+        std::vector<AudioEngine::StemTarget> targets;
+        int number = 0;
+        for (const auto& track : project)
+        {
+            if (! track.hasType (ids::TRACK))
+                continue;
+            ++number;
+            if ((bool) track[ids::mute] || (! model::isBusTrack (track) && track.getNumChildren() == 0))
+                continue;
+            const auto slot = player.slotOf (track[ids::id].toString());
+            if (slot < 0)
+                continue;
+            const auto name = juce::String (number).paddedLeft ('0', 2) + " " + track[ids::name].toString();
+            targets.push_back ({ slot, folder.getChildFile (juce::File::createLegalFileName (name) + ".wav") });
+        }
+
+        if (targets.empty())
+        {
+            player.setIgnoreSolo (false);
+            player.rebuildNow();
+            showError ("Nothing to export", "Every track is empty or muted.");
+            return;
+        }
+
+        engine.stop();
+        engine.beginOfflineRender();
+
+        auto& eng = engine;
+        const auto count = (int) targets.size();
+        auto* job = new ExportJob (engine, "Exporting " + juce::String (count) + " tracks",
+            [&eng, targets, start, end] (std::function<bool (double)> progress)
+            {
+                return eng.renderStems (targets, start, end, 24, std::move (progress));
+            },
+            [safe = juce::Component::SafePointer<MainComponent> (this), folder, count] (const juce::String& error)
+            {
+                if (safe == nullptr)
+                    return;
+
+                safe->player.setIgnoreSolo (false);
+                safe->player.rebuildNow();
+
+                if (error.isEmpty())
+                {
+                    safe->messageBox = juce::AlertWindow::showScopedAsync (
+                        juce::MessageBoxOptions::makeOptionsOkCancel (juce::MessageBoxIconType::InfoIcon, "Export finished",
+                                                                      "Saved " + juce::String (count) + " track files in " + folder.getFileName() + ".",
+                                                                      "Show in Finder", "OK", safe.getComponent()),
+                        [folder] (int result) { if (result == 1) folder.revealToUser(); });
+                }
+                else if (error != "cancelled")
+                {
+                    safe->showError ("Export failed", error);
+                }
+            });
+
+        job->launchThread();
+    });
+}
+
+void MainComponent::bounceInPlace()
+{
+    auto track = selectedTrack();
+    if (! track.isValid() || engine.isRecording())
+        return;
+
+    if (model::isBusTrack (track))
+    {
+        showError ("Bounce in Place", "Choose an audio or instrument track: a bus has no regions of its own.");
+        return;
+    }
+
+    if ((bool) track[ids::mute])
+    {
+        showError ("Bounce in Place", "The track is muted. Unmute it first.");
+        return;
+    }
+
+    double start = std::numeric_limits<double>::max(), end = 0.0;
+    for (const auto& region : track)
+    {
+        if (! region.hasType (ids::REGION) || model::isRegionMuted (region))
+            continue;
+        start = juce::jmin (start, (double) region[ids::start]);
+        end = juce::jmax (end, model::regionEnd (region));
+    }
+
+    if (end <= start)
+    {
+        showError ("Bounce in Place", "The track has no regions to bounce.");
+        return;
+    }
+
+    if (fileCache.isLoading())
+    {
+        showError ("Still loading audio", "Some audio files are still loading. Try again in a moment.");
+        return;
+    }
+
+    end += 2.0;   // tails: reverb, delay, release
+    const auto folder = recordingFolder();
+    const auto file = folder.getNonexistentChildFile (juce::File::createLegalFileName (track[ids::name].toString() + " Bounce"), ".wav", false);
+
+    player.setIgnoreSolo (true);
+    player.rebuildNow();
+    const auto slot = player.slotOf (track[ids::id].toString());
+    if (slot < 0)
+    {
+        player.setIgnoreSolo (false);
+        player.rebuildNow();
+        return;
+    }
+
+    engine.stop();
+    engine.beginOfflineRender();
+
+    auto& eng = engine;
+    std::vector<AudioEngine::StemTarget> targets { { slot, file } };
+    const auto trackId = track[ids::id].toString();
+
+    auto* job = new ExportJob (engine, "Bouncing " + track[ids::name].toString(),
+        [&eng, targets, start, end] (std::function<bool (double)> progress)
+        {
+            return eng.renderStems (targets, start, end, 24, std::move (progress));
+        },
+        [safe = juce::Component::SafePointer<MainComponent> (this), file, start, end, trackId] (const juce::String& error)
+        {
+            if (safe == nullptr)
+                return;
+
+            auto& self = *safe;
+            self.player.setIgnoreSolo (false);
+
+            if (error.isNotEmpty())
+            {
+                self.player.rebuildNow();
+                if (error != "cancelled")
+                    self.showError ("Bounce failed", error);
+                return;
+            }
+
+            auto source = model::findById (self.project, trackId);
+            if (! source.isValid())
+                return;
+
+            self.undoManager.beginNewTransaction ("Bounce in Place");
+            auto bounced = model::addTrack (self.project, source[ids::name].toString() + " Bounce", &self.undoManager,
+                                            self.project.indexOf (source) + 1, model::audioKind);
+            model::setStripPlugin (self.project, bounced[ids::id].toString(), {}, &self.undoManager);   // already through the strip
+            bounced.setProperty (ids::colour, source[ids::colour], &self.undoManager);
+            model::addRegion (bounced, file, start, end - start, &self.undoManager);
+            source.setProperty (ids::mute, true, &self.undoManager);
+
+            self.timeline.selectOnly (bounced[ids::id].toString());
+            self.timeline.changed();
+            self.player.rebuildNow();
+        });
+
+    job->launchThread();
+}
+
+void MainComponent::importTracksFromProject()
+{
+    if (engine.isRecording())
+        return;
+
+    const auto folder = projectFile != juce::File() ? projectFile.getParentDirectory().getParentDirectory()
+                                                    : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+    fileChooser = std::make_unique<juce::FileChooser> ("Import tracks from a project", folder, "*" + model::fileExtension + ";*.riff");
+
+    fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                              [this] (const juce::FileChooser& chooser)
+    {
+        const auto file = chooser.getResult();
+        if (file == juce::File())
+            return;
+
+        juce::String error;
+        auto source = model::load (file, error);
+        if (! source.isValid())
+        {
+            showError ("Couldn't open the project", error);
+            return;
+        }
+
+        if (model::numTracks (source) == 0)
+        {
+            showError ("No tracks", file.getFileNameWithoutExtension() + " has no tracks.");
+            return;
+        }
+
+        auto picker = std::make_unique<TrackPicker> (source, "Import", [this, source] (const juce::StringArray& chosen)
+        {
+            undoManager.beginNewTransaction ("Import tracks");
+            const auto added = model::importTracks (project, source, chosen, &undoManager);
+            if (! added.isEmpty())
+            {
+                timeline.selectOnly (added.getFirst()[ids::id].toString());
+                timeline.changed();
+                markDirty();
+            }
+        });
+
+        juce::DialogWindow::LaunchOptions options;
+        options.content.setOwned (picker.release());
+        options.dialogTitle = "Import tracks from " + file.getFileNameWithoutExtension();
+        options.dialogBackgroundColour = theme::background;
+        options.useNativeTitleBar = true;
+        options.resizable = false;
+        options.launchAsync();
     });
 }
 

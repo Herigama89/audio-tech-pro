@@ -1534,3 +1534,90 @@ TEST_CASE ("A track's channel strip plugin replaces the built-in strip", "[conso
     out = renderLeft (f.engine, 24000);
     CHECK (out[20000] > 0.5f * 0.8f * 2.0f);
 }
+
+TEST_CASE ("Exporting stems writes each track to its own file, ignoring solo", "[engine][export]")
+{
+    Fixture f;
+    const auto wavA = writeConstantWav (f.temp.dir.getChildFile ("a.wav"), 48000.0, 48000, 0.5f);
+    const auto wavB = writeConstantWav (f.temp.dir.getChildFile ("b.wav"), 48000.0, 48000, 0.25f);
+    auto a = model::addTrack (f.project, "A", nullptr);
+    auto b = model::addTrack (f.project, "B", nullptr);
+    model::addRegion (a, wavA, 0.0, 1.0, nullptr);
+    model::addRegion (b, wavB, 1.0, 1.0, nullptr);
+    a.setProperty (ids::solo, true, nullptr);
+    f.player.setIgnoreSolo (true);
+    f.player.setProject (f.project);
+
+    const auto fileA = f.temp.dir.getChildFile ("Stems/A.wav");
+    const auto fileB = f.temp.dir.getChildFile ("Stems/B.wav");
+    f.engine.beginOfflineRender();
+    const auto error = f.engine.renderStems ({ { f.player.slotOf (a[ids::id]), fileA }, { f.player.slotOf (b[ids::id]), fileB } },
+                                            0.0, 2.0, 24, nullptr);
+    f.engine.endOfflineRender();
+    REQUIRE (error.isEmpty());
+
+    const auto read = [&f] (const juce::File& file)
+    {
+        auto reader = std::unique_ptr<juce::AudioFormatReader> (f.engine.getFormatManager().createReaderFor (file));
+        juce::AudioBuffer<float> data (2, 96000);
+        data.clear();
+        if (reader != nullptr)
+            reader->read (&data, 0, (int) reader->lengthInSamples, 0, true, true);
+        return data;
+    };
+
+    const auto dataA = read (fileA);
+    const auto dataB = read (fileB);
+    CHECK_THAT (dataA.getSample (0, 24000), WithinAbs (0.5f, 1e-4));   // before the master fader
+    CHECK (dataA.getMagnitude (0, 49000, 47000) == 0.0f);
+    CHECK (dataB.getMagnitude (0, 0, 47000) == 0.0f);
+    CHECK_THAT (dataB.getSample (1, 72000), WithinAbs (0.25f, 1e-4));   // B plays although A is soloed
+}
+
+TEST_CASE ("Importing tracks from another project brings their regions, plugins, sends and automation", "[model]")
+{
+    auto source = model::createProject ("Other");
+    auto bus = model::addTrack (source, "Verb", nullptr, -1, model::busKind);
+    auto vocal = model::addTrack (source, "Vocal", nullptr);
+    auto guitar = model::addTrack (source, "Guitar", nullptr);
+    model::addRegion (vocal, juce::File ("/tmp/v.wav"), 1.0, 2.0, nullptr);
+    auto chain = model::chainFor (source, vocal[ids::id]);
+    auto limiter = model::addBuiltinInsert (chain, "limiter", 0, nullptr);
+    model::addSend (chain, bus[ids::id], 0.5, nullptr);
+    model::addPoint (model::laneFor (source, vocal[ids::id], model::insertParam (limiter[ids::id], "ceiling"), true), 0.0, -3.0, nullptr);
+    model::addPoint (model::laneFor (source, vocal[ids::id], model::volumeParam, true), 0.0, 0.5, nullptr);
+    juce::ignoreUnused (guitar);
+
+    auto project = model::createProject ("Mine");
+    model::addTrack (project, "Drums", nullptr);
+    juce::UndoManager um;
+
+    // Only the vocal: its send to the bus that stayed behind is dropped.
+    auto added = model::importTracks (project, source, { vocal[ids::id].toString() }, &um);
+    REQUIRE (added.size() == 1);
+    CHECK (model::numTracks (project) == 2);
+    const auto copy = added[0];
+    CHECK (copy[ids::name].toString() == "Vocal");
+    CHECK (copy[ids::id].toString() != vocal[ids::id].toString());
+    CHECK (copy.getNumChildren() == 1);
+    CHECK (copy.getChild (0)[ids::id].toString() != vocal.getChild (0)[ids::id].toString());
+
+    const auto newChain = model::findChain (project, copy[ids::id]);
+    REQUIRE (newChain.isValid());
+    const auto inserts = model::insertsOf (newChain);
+    REQUIRE (inserts.size() == 1);
+    CHECK (inserts[0][ids::id].toString() != limiter[ids::id].toString());
+    CHECK (model::sendsOf (newChain).isEmpty());
+    CHECK (model::laneFor (project, copy[ids::id], model::volumeParam, false).isValid());
+    CHECK (model::laneFor (project, copy[ids::id], model::insertParam (inserts[0][ids::id], "ceiling"), false).isValid());
+
+    um.undo();
+    CHECK (model::numTracks (project) == 1);
+
+    // With the bus too, the send comes along, pointing at the new bus.
+    added = model::importTracks (project, source, { bus[ids::id].toString(), vocal[ids::id].toString() }, nullptr);
+    REQUIRE (added.size() == 2);
+    const auto sends = model::sendsOf (model::findChain (project, added[1][ids::id]));
+    REQUIRE (sends.size() == 1);
+    CHECK (sends[0][ids::target].toString() == added[0][ids::id].toString());
+}

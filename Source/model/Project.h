@@ -59,6 +59,12 @@ namespace riff::model
         inserts and sends, but no regions; placed below. */
     juce::ValueTree duplicateTrackSettings (juce::ValueTree project, const juce::ValueTree& track, juce::UndoManager* um);
 
+    /** File > Import > Tracks from another project: copies the chosen tracks of `source` (a loaded project)
+        with their regions, inserts, sends (to buses that come along) and automation, under new ids,
+        after the existing tracks. Returns the new tracks. */
+    juce::Array<juce::ValueTree> importTracks (juce::ValueTree project, const juce::ValueTree& source,
+                                               const juce::StringArray& trackIds, juce::UndoManager* um);
+
     /**
         Adds a region for a finished recording.
 

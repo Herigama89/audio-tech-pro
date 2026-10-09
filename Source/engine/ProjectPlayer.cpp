@@ -186,7 +186,7 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
 
     bool anySolo = false;
     for (const auto& track : project)
-        anySolo = anySolo || (bool) track[ids::solo];
+        anySolo = anySolo || (! ignoreSolo && (bool) track[ids::solo]);
 
     for (const auto& track : project)
     {

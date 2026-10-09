@@ -289,6 +289,82 @@ juce::String AudioEngine::renderOffline (const juce::File& file, double startSec
     return error;
 }
 
+juce::String AudioEngine::renderStems (const std::vector<StemTarget>& targets, double startSeconds, double endSeconds,
+                                      int bitDepth, std::function<bool (double)> progress)
+{
+    if (endSeconds <= startSeconds || targets.empty())
+        return "There's nothing to export yet.";
+
+    const auto rate = sampleRate.load();
+    std::vector<std::unique_ptr<juce::AudioFormatWriter>> writers;
+    juce::String error;
+
+    for (const auto& target : targets)
+    {
+        target.file.getParentDirectory().createDirectory();
+        target.file.deleteFile();
+        auto fileStream = std::make_unique<juce::FileOutputStream> (target.file);
+        if (fileStream->failedToOpen())
+        {
+            error = "Couldn't write " + target.file.getFullPathName();
+            break;
+        }
+        std::unique_ptr<juce::OutputStream> stream = std::move (fileStream);
+        juce::WavAudioFormat wav;
+        auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}
+                                                       .withSampleRate (rate)
+                                                       .withNumChannels (2)
+                                                       .withBitsPerSample (bitDepth));
+        if (writer == nullptr)
+        {
+            error = "Couldn't create " + target.file.getFileName();
+            break;
+        }
+        writers.push_back (std::move (writer));
+    }
+
+    if (error.isEmpty())
+    {
+        juce::AudioBuffer<float> capture (PlaybackGraph::maxTracks * 2, 1024);
+        juce::AudioBuffer<float> block (2, 1024);
+        stemCapture = &capture;
+
+        playheadSample.store ((juce::int64) std::llround (startSeconds * rate));
+        playing.store (true);
+        const auto total = (juce::int64) std::llround ((endSeconds - startSeconds) * rate);
+
+        for (juce::int64 done = 0; done < total && error.isEmpty();)
+        {
+            const auto n = (int) juce::jmin ((juce::int64) block.getNumSamples(), total - done);
+            capture.clear();
+            render (nullptr, 0, block.getArrayOfWritePointers(), 2, n);
+
+            for (size_t i = 0; i < targets.size(); ++i)
+            {
+                const auto slot = targets[i].slot;
+                if (! juce::isPositiveAndBelow (slot, PlaybackGraph::maxTracks))
+                    continue;
+                const float* channels[] = { capture.getReadPointer (slot * 2), capture.getReadPointer (slot * 2 + 1) };
+                if (! writers[i]->writeFromFloatArrays (channels, 2, n))
+                    error = "Writing the files failed (is the disk full?).";
+            }
+
+            done += n;
+            if (progress && ! progress ((double) done / (double) total))
+                error = "cancelled";
+        }
+
+        stemCapture = nullptr;
+        playing.store (false);
+    }
+
+    writers.clear();
+    if (error.isNotEmpty())
+        for (const auto& target : targets)
+            target.file.deleteFile();
+    return error;
+}
+
 AudioEngine::MixMeasurement AudioEngine::measureMix (double startSeconds, double endSeconds, std::function<bool (double)> progress)
 {
     MixMeasurement result;
@@ -1133,6 +1209,13 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
 
     if (measuring && juce::isPositiveAndBelow (track.slot, (int) measuredTracks.size()))
         measuredTracks[(size_t) track.slot].add (tL, tR, n);
+
+    if (stemCapture != nullptr && track.slot * 2 + 1 < stemCapture->getNumChannels()
+        && inputOffset + n <= stemCapture->getNumSamples())
+    {
+        juce::FloatVectorOperations::add (stemCapture->getWritePointer (track.slot * 2) + inputOffset, tL, n);
+        juce::FloatVectorOperations::add (stemCapture->getWritePointer (track.slot * 2 + 1) + inputOffset, tR, n);
+    }
 
     storeMax (trackPeaks[(size_t) track.slot * 2], peakL);
     storeMax (trackPeaks[(size_t) track.slot * 2 + 1], peakR);

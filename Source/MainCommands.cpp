@@ -53,7 +53,10 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::duplicateTrack:  info.setActive (track.isValid() && ! recording); break;
         case commands::quantize:        info.setActive (region.isValid() && model::isMidiRegion (region)); break;
         case commands::setLocatorsBySelection: info.setActive (region.isValid() && ! recording); break;
-        case commands::exportSong:      info.setActive (! recording); break;
+        case commands::exportSong:
+        case commands::exportStems:
+        case commands::importTracks:    info.setActive (! recording); break;
+        case commands::bounceInPlace:   info.setActive (track.isValid() && ! recording); break;
         case commands::generateMidi:    info.setActive (! recording); break;
 
         case commands::deleteTrack:     info.setActive (track.isValid() && ! recording); break;
@@ -94,6 +97,9 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::consolidateProject:     consolidate(); break;
         case commands::revertToBackup:         showBackups(); break;
         case commands::exportSong:             exportSong(); break;
+        case commands::exportStems:            exportStems(); break;
+        case commands::bounceInPlace:          bounceInPlace(); break;
+        case commands::importTracks:           importTracksFromProject(); break;
 
         case commands::undo:                   undo(); break;
         case commands::redo:                   redo(); break;
@@ -209,7 +215,9 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             menu.addSeparator();
             add ({ commands::consolidateProject });
             menu.addSeparator();
-            add ({ commands::importAudio, commands::exportSong });
+            add ({ commands::importAudio, commands::importTracks });
+            menu.addSeparator();
+            add ({ commands::exportSong, commands::exportStems });
             break;
 
         case 1:
@@ -226,7 +234,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         case 2:
             add ({ commands::newAudioTrack, commands::newInstrumentTrack, commands::newAuxBus, commands::duplicateTrack });
             menu.addSeparator();
-            add ({ commands::generateMidi });
+            add ({ commands::generateMidi, commands::bounceInPlace });
             menu.addSeparator();
             add ({ commands::muteTrack, commands::soloTrack, commands::armTrack, commands::showAutomation });
             menu.addSeparator();

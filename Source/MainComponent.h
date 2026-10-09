@@ -123,6 +123,9 @@ private:
     void updateLiveMidiTrack();
     void showFileMenu();
     void exportSong();
+    void exportStems();
+    void bounceInPlace();
+    void importTracksFromProject();
     void showMixer();
     void closeMixer();
     void toggleMixer();

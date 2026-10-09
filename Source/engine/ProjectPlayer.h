@@ -39,6 +39,9 @@ public:
     /** Schedules a rebuild (e.g. when a plugin finishes loading). */
     void requestRebuild() { triggerAsyncUpdate(); }
 
+    /** While exporting stems every track plays as if nothing were soloed (mutes still count). */
+    void setIgnoreSolo (bool shouldIgnore)  { ignoreSolo = shouldIgnore; }
+
     /** Which track your MIDI keyboard plays. */
     void setLiveMidiTrack (const juce::String& trackId);
     juce::String getLiveMidiTrack() const { return liveMidiTrackId; }
@@ -73,6 +76,7 @@ private:
     void addParamAutomation (PlaybackGraph::Track& t, const juce::String& owner, double sampleRate,
                              const std::map<juce::String, std::shared_ptr<Effect>>& effectsById);
     juce::String liveMidiTrackId;
+    bool ignoreSolo = false;
     juce::ValueTree project;
     double builtForRate = 0.0;
 

@@ -1,4 +1,5 @@
 #include "Project.h"
+#include <map>
 #include "../engine/BuiltInEffects.h"
 #include "../AppInfo.h"
 #include <array>
@@ -382,6 +383,105 @@ juce::ValueTree duplicateTrackSettings (juce::ValueTree project, const juce::Val
     copyChain (track[ids::id].toString(), newTrackId);
     copyChain (stripOwner (track[ids::id].toString()), stripOwner (newTrackId));
     return copy;
+}
+
+juce::Array<juce::ValueTree> importTracks (juce::ValueTree project, const juce::ValueTree& source,
+                                           const juce::StringArray& trackIds, juce::UndoManager* um)
+{
+    juce::Array<juce::ValueTree> added;
+    std::map<juce::String, juce::String> newIds;   // old track/insert id -> new
+
+    const auto renumber = [] (juce::ValueTree tree, auto& self) -> void
+    {
+        if (tree.hasProperty (ids::id))
+            tree.setProperty (ids::id, newId(), nullptr);
+        for (auto child : tree)
+            self (child, self);
+    };
+
+    // The tracks first, so sends know which buses came along.
+    for (const auto& track : source)
+    {
+        if (! track.hasType (ids::TRACK) || ! trackIds.contains (track[ids::id].toString()))
+            continue;
+        auto copy = track.createCopy();
+        renumber (copy, renumber);
+        copy.setProperty (ids::armed, false, nullptr);
+        copy.setProperty (ids::solo, false, nullptr);
+        newIds[track[ids::id].toString()] = copy[ids::id].toString();
+        project.addChild (copy, numTracks (project), um);
+        added.add (copy);
+    }
+
+    const auto mapOwner = [&newIds] (const juce::String& owner) -> juce::String
+    {
+        const bool strip = owner.startsWith ("strip:");
+        const auto trackId = strip ? owner.fromFirstOccurrenceOf ("strip:", false, false) : owner;
+        const auto it = newIds.find (trackId);
+        if (it == newIds.end())
+            return {};
+        return strip ? stripOwner (it->second) : it->second;
+    };
+
+    auto mixer = mixerOf (project);
+    const auto sourceMixer = source.getChildWithName (ids::MIXER);
+
+    for (const auto& chain : sourceMixer)
+    {
+        if (! chain.hasType (ids::CHAIN))
+            continue;
+        const auto owner = mapOwner (chain[ids::owner].toString());
+        if (owner.isEmpty())
+            continue;
+
+        juce::ValueTree copy { ids::CHAIN };
+        copy.setProperty (ids::owner, owner, nullptr);
+        for (const auto& item : chain)
+        {
+            auto c = item.createCopy();
+            if (c.hasType (ids::SEND))
+            {
+                const auto it = newIds.find (c[ids::target].toString());
+                if (it == newIds.end())
+                    continue;   // its bus stayed behind
+                c.setProperty (ids::target, it->second, nullptr);
+            }
+            if (c.hasProperty (ids::id))
+            {
+                const auto fresh = newId();
+                newIds[c[ids::id].toString()] = fresh;
+                c.setProperty (ids::id, fresh, nullptr);
+            }
+            copy.appendChild (c, nullptr);
+        }
+        mixer.appendChild (copy, um);
+    }
+
+    for (const auto& lane : sourceMixer)
+    {
+        if (! lane.hasType (ids::LANE))
+            continue;
+        const auto owner = mapOwner (lane[ids::owner].toString());
+        if (owner.isEmpty())
+            continue;
+
+        auto param = lane[ids::param].toString();
+        if (param.startsWith ("insert:"))
+        {
+            const auto insertId = param.fromFirstOccurrenceOf ("insert:", false, false).upToFirstOccurrenceOf (":", false, false);
+            const auto it = newIds.find (insertId);
+            if (it == newIds.end())
+                continue;
+            param = insertParam (it->second, param.fromFirstOccurrenceOf ("insert:" + insertId + ":", false, false));
+        }
+
+        auto copy = lane.createCopy();
+        copy.setProperty (ids::owner, owner, nullptr);
+        copy.setProperty (ids::param, param, nullptr);
+        mixer.appendChild (copy, um);
+    }
+
+    return added;
 }
 
 juce::ValueTree addRecordedRegion (juce::ValueTree track, const juce::File& file, double start,
