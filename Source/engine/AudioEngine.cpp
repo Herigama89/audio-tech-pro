@@ -788,6 +788,7 @@ void AudioEngine::prepare (double newSampleRate, int)
 
     trackBuffer.setSize (2, maxBlockSize);
     regionBuffer.setSize (2, maxBlockSize);
+    streamBuffer.setSize (2, maxBlockSize * 8 + 4 * resampler::halfWidth + 16);   // up to 8x the session's rate
     mixBuffer.setSize (2, maxBlockSize);
     directBuffer.setSize (2, maxBlockSize);
     busBuffer.setSize (PlaybackGraph::maxBuses * 2, maxBlockSize);
@@ -1223,7 +1224,8 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
                 if (from >= to)
                     continue;
 
-                const auto& source = region.audio->buffer;
+                const auto& audio = *region.audio;
+                const auto& source = audio.buffer;
                 const auto destOffset = (int) (from - blockStart);
                 const auto count = (int) (to - from);
 
@@ -1246,22 +1248,47 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
                 {
                     // Another sample rate: convert on the fly, reading at fractional positions.
                     const auto position = region.sourcePosition + (double) positionInRegion * region.step;
-                    if (position < (double) source.getNumSamples())
+                    if (position < (double) audio.numFrames())
                     {
-                        resampler::addResampled (source, position, region.step, region.gain, dL, dR, count);
+                        if (audio.isStreamed())
+                        {
+                            // From disk: the stretch the filter needs, into a scratch buffer, then the same conversion.
+                            const auto base = (juce::int64) std::floor (position) - resampler::halfWidth - 1;
+                            const auto needed = (int) juce::jmin ((juce::int64) streamBuffer.getNumSamples(),
+                                                                  (juce::int64) std::ceil (count * region.step) + 2 * resampler::halfWidth + 4);
+                            audio.readStereo (base, needed, streamBuffer.getWritePointer (0), streamBuffer.getWritePointer (1));
+                            const juce::AudioBuffer<float> window (streamBuffer.getArrayOfWritePointers(), 2, needed);
+                            resampler::addResampled (window, position - (double) base, region.step, region.gain, dL, dR, count);
+                        }
+                        else
+                        {
+                            resampler::addResampled (source, position, region.step, region.gain, dL, dR, count);
+                        }
                         rendered = true;
                     }
                 }
                 else
                 {
                     const auto sourceStart = region.sourceOffset + positionInRegion;
-                    const auto available = (juce::int64) source.getNumSamples() - sourceStart;
+                    const auto available = audio.numFrames() - sourceStart;
 
                     if (sourceStart >= 0 && available > 0)
                     {
                         const auto num = (int) juce::jmin ((juce::int64) count, available);
-                        juce::FloatVectorOperations::addWithMultiply (dL, source.getReadPointer (0, (int) sourceStart), region.gain, num);
-                        juce::FloatVectorOperations::addWithMultiply (dR, source.getReadPointer (1, (int) sourceStart), region.gain, num);
+                        if (audio.isStreamed())
+                        {
+                            // From disk, straight from the mapped file.
+                            auto* sL = streamBuffer.getWritePointer (0);
+                            auto* sR = streamBuffer.getWritePointer (1);
+                            audio.readStereo (sourceStart, num, sL, sR);
+                            juce::FloatVectorOperations::addWithMultiply (dL, sL, region.gain, num);
+                            juce::FloatVectorOperations::addWithMultiply (dR, sR, region.gain, num);
+                        }
+                        else
+                        {
+                            juce::FloatVectorOperations::addWithMultiply (dL, source.getReadPointer (0, (int) sourceStart), region.gain, num);
+                            juce::FloatVectorOperations::addWithMultiply (dR, source.getReadPointer (1, (int) sourceStart), region.gain, num);
+                        }
                         rendered = true;
                     }
                 }

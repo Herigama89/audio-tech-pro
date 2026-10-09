@@ -285,7 +285,7 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
                 r.start = 0;
                 r.resample = std::abs (audio->sampleRate - sampleRate) > 0.5;
                 r.step = r.resample ? audio->sampleRate / sampleRate : 1.0;
-                r.length = (juce::int64) ((double) audio->buffer.getNumSamples() / r.step);
+                r.length = (juce::int64) ((double) audio->numFrames() / r.step);
                 t.regions.push_back (std::move (r));
 
                 if (track.getProperty (ids::automationMode, "read").toString() != "off")
@@ -570,7 +570,19 @@ void ProjectPlayer::rebuildNow()
     cancelPendingUpdate();
 
     const auto rate = engine.getSampleRate();
-    engine.setGraph (buildGraph (rate));
+    auto graph = buildGraph (rate);
+
+    // Long files stream from disk: read ahead of the playhead for each of their regions.
+    std::vector<DiskReadAhead::Item> streamed;
+    if (graph != nullptr && rate > 0.0)
+        for (const auto& t : graph->tracks)
+            for (const auto& r : t.regions)
+                if (r.audio != nullptr && r.audio->isStreamed())
+                    streamed.push_back ({ r.audio, (double) r.start / rate, (double) r.length / rate,
+                                          r.resample ? r.sourcePosition : (double) r.sourceOffset });
+    readAhead.setItems (std::move (streamed));
+
+    engine.setGraph (std::move (graph));
 
     builtForRate = rate;
 }

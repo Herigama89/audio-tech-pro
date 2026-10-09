@@ -243,7 +243,7 @@ Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderC
 - [x] Count-in before recording
 - [x] Loopback latency calibration, saved between sessions
 - [x] Comping: open a take folder and swipe across its takes (Quick Swipe), flatten the comp into regions
-- [ ] Later: disk streaming for very long files
+- [x] Disk streaming: WAV/AIFF files over ~4 minutes play straight from disk (mapped, with a read-ahead thread) instead of being loaded into memory
 
 ## Phase 2: MIDI and instruments
 

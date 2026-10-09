@@ -36,7 +36,7 @@ public:
                 continue;
             }
 
-            auto result = decode (cache.formatManager, key);
+            auto result = decode (cache.formatManager, key, cache.streamAbove.load());
 
             {
                 const juce::ScopedLock sl (cache.lock);
@@ -89,7 +89,7 @@ SharedAudio AudioFileCache::get (const juce::File& file)
     if (worker == nullptr)
     {
         // Synchronous mode: decode right here.
-        auto result = decode (formatManager, key);
+        auto result = decode (formatManager, key, streamAbove.load());
         if (result.audio == nullptr)
         {
             failed.insert (key);
@@ -200,10 +200,77 @@ void AudioFileCache::forget (const juce::File& file)
     lengths.erase (key);
 }
 
-AudioFileCache::Result AudioFileCache::decode (juce::AudioFormatManager& formats, const Key& key)
+void DecodedAudio::readStereo (juce::int64 start, int num, float* left, float* right) const noexcept
+{
+    if (num <= 0)
+        return;
+    const auto frames = numFrames();
+
+    // Silence before the start and after the end.
+    int lead = 0;
+    if (start < 0)
+    {
+        lead = (int) juce::jmin ((juce::int64) num, -start);
+        juce::FloatVectorOperations::clear (left, lead);
+        juce::FloatVectorOperations::clear (right, lead);
+        start = 0;
+    }
+    const auto count = (int) juce::jlimit ((juce::int64) 0, (juce::int64) (num - lead), frames - start);
+    if (count < num - lead)
+    {
+        juce::FloatVectorOperations::clear (left + lead + count, num - lead - count);
+        juce::FloatVectorOperations::clear (right + lead + count, num - lead - count);
+    }
+    if (count <= 0)
+        return;
+
+    if (streamed == nullptr)
+    {
+        juce::FloatVectorOperations::copy (left + lead, buffer.getReadPointer (0, (int) start), count);
+        juce::FloatVectorOperations::copy (right + lead, buffer.getReadPointer (1, (int) start), count);
+        return;
+    }
+
+    float* dest[2] = { left + lead, right + lead };
+    streamed->read (dest, streamedChannels > 1 ? 2 : 1, start, count);
+    if (streamedChannels == 1)
+        juce::FloatVectorOperations::copy (right + lead, left + lead, count);   // mono plays in both sides
+}
+
+void DecodedAudio::touch (juce::int64 start, juce::int64 num) const noexcept
+{
+    if (streamed == nullptr)
+        return;
+    const auto from = juce::jmax ((juce::int64) 0, start), to = juce::jmin (streamedFrames, start + num);
+    for (auto i = from; i < to; i += 256)   // (a page is a few hundred frames)
+        streamed->touchSample (i);
+}
+
+AudioFileCache::Result AudioFileCache::decode (juce::AudioFormatManager& formats, const Key& key, juce::int64 streamAboveBytes)
 {
     Result result { key, nullptr, 0.0 };
-    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (juce::File (key)));
+    const juce::File file (key);
+
+    // Long WAV and AIFF files stream from disk.
+    if (file.hasFileExtension ("wav;wave;aif;aiff"))
+        if (auto* format = formats.findFormatForFileExtension (file.getFileExtension()))
+            if (std::unique_ptr<juce::MemoryMappedAudioFormatReader> mapped { format->createMemoryMappedReader (file) };
+                mapped != nullptr && mapped->sampleRate > 0 && mapped->lengthInSamples > 0
+                && mapped->lengthInSamples * 2 * (juce::int64) sizeof (float) > streamAboveBytes
+                && (mapped->bitsPerSample == 16 || mapped->bitsPerSample == 24 || mapped->bitsPerSample == 32 || mapped->bitsPerSample == 8)
+                && mapped->mapEntireFile())
+            {
+                auto audio = std::make_shared<DecodedAudio>();
+                audio->sampleRate = mapped->sampleRate;
+                audio->streamedFrames = mapped->lengthInSamples;
+                audio->streamedChannels = (int) juce::jlimit (1u, 2u, mapped->numChannels);
+                result.lengthSeconds = (double) mapped->lengthInSamples / mapped->sampleRate;
+                audio->streamed = std::move (mapped);
+                result.audio = audio;
+                return result;
+            }
+
+    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
 
     if (reader == nullptr || reader->sampleRate <= 0 || reader->lengthInSamples <= 0)
         return result;

@@ -335,6 +335,7 @@ private:
 
     // --- Audio-thread state (sized in prepare) --------------------------------
     juce::AudioBuffer<float> trackBuffer, regionBuffer, mixBuffer, silence, directBuffer, busBuffer;
+    juce::AudioBuffer<float> streamBuffer;   // a streamed file's audio for one block
     std::array<std::unique_ptr<DelayLine>, PlaybackGraph::maxTracks> trackDelays;
     std::unique_ptr<DelayLine> directDelayLine;
     struct TrackState { juce::SmoothedValue<float> gainL, gainR; bool initialised = false; };

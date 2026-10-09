@@ -9,11 +9,32 @@
 namespace riff
 {
 
-/** A decoded file in memory, at the file's own sample rate, always stereo. */
+/**
+    A file ready to play, at the file's own sample rate, always read as stereo.
+
+    Most files are decoded into memory. Long WAV and AIFF files (recordings,
+    stems, whole mixes) are streamed from disk instead: the file is mapped,
+    the playback reads straight from it, and a read-ahead thread brings in
+    what's about to play (see DiskReadAhead), so a long session doesn't fill
+    the computer's memory and opens at once.
+*/
 struct DecodedAudio
 {
-    juce::AudioBuffer<float> buffer;
+    juce::AudioBuffer<float> buffer;   // empty when streamed
     double sampleRate = 44100.0;
+
+    std::shared_ptr<juce::MemoryMappedAudioFormatReader> streamed;
+    juce::int64 streamedFrames = 0;
+    int streamedChannels = 2;
+
+    bool isStreamed() const noexcept           { return streamed != nullptr; }
+    juce::int64 numFrames() const noexcept     { return streamed != nullptr ? streamedFrames : (juce::int64) buffer.getNumSamples(); }
+
+    /** Copies frames [start, start + num) into left and right; silence outside the file. Real-time safe. */
+    void readStereo (juce::int64 start, int num, float* left, float* right) const noexcept;
+
+    /** Brings frames into memory ahead of time (for streamed files; a no-op otherwise). */
+    void touch (juce::int64 start, juce::int64 num) const noexcept;
 };
 
 using SharedAudio = std::shared_ptr<const DecodedAudio>;
@@ -59,12 +80,17 @@ public:
     /** Forgets a file (so it's read again next time), e.g. after it was re-recorded. */
     void forget (const juce::File& file);
 
+    /** WAV and AIFF files bigger than this (as decoded stereo floats) stream from disk. */
+    void setStreamingThreshold (juce::int64 bytes) noexcept { streamAbove.store (bytes); }
+    static constexpr juce::int64 defaultStreamingThreshold = 96 * 1024 * 1024;   // about 4 minutes of stereo at 48 kHz
+
 private:
     using Key = juce::String;   // the file's full path
 
     struct Result { Key key; SharedAudio audio; double lengthSeconds = 0.0; };
 
-    static Result decode (juce::AudioFormatManager& formats, const Key& key);
+    static Result decode (juce::AudioFormatManager& formats, const Key& key, juce::int64 streamAboveBytes);
+    std::atomic<juce::int64> streamAbove { defaultStreamingThreshold };
     void handleAsyncUpdate() override;
     void collectFinished();
 

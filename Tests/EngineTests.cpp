@@ -1976,3 +1976,43 @@ TEST_CASE ("Live Loops cells loop in place of the track's timeline, from their b
     model::setLiveCell (f.project, track[ids::id].toString(), 0, {}, nullptr);
     CHECK (! model::liveCell (f.project, track[ids::id].toString(), 0).isValid());
 }
+
+TEST_CASE ("Long files stream from disk and play the same as from memory", "[engine][streaming]")
+{
+    for (const double fileRate : { 48000.0, 44100.0 })
+    {
+        Fixture f;
+        f.cache.setStreamingThreshold (1024);   // stream everything bigger than 1 KB
+        const auto wav = writeConstantWav (f.temp.dir.getChildFile ("long.wav"), fileRate, 96000, 0.5f);
+
+        const auto audio = f.cache.get (wav);
+        REQUIRE (audio != nullptr);
+        CHECK (audio->isStreamed());
+        CHECK (audio->numFrames() == 96000);
+        CHECK (audio->buffer.getNumSamples() == 0);   // nothing decoded into memory
+
+        // Reads past either end are silent.
+        std::vector<float> l (16), r (16);
+        audio->readStereo (-8, 16, l.data(), r.data());
+        CHECK (l[7] == 0.0f);
+        CHECK_THAT (l[8], WithinAbs (0.5, 1e-4));
+        CHECK_THAT (r[8], WithinAbs (0.5, 1e-4));   // mono plays in both sides
+        audio->readStereo (96000 - 8, 16, l.data(), r.data());
+        CHECK_THAT (l[7], WithinAbs (0.5, 1e-4));
+        CHECK (l[8] == 0.0f);
+
+        auto track = model::addTrack (f.project, "A", nullptr);
+        model::addRegion (track, wav, 0.01, 1.0, nullptr);
+        f.player.setProject (f.project);
+        f.player.getReadAhead().readAhead (0.0, 2.0);
+
+        f.engine.play();
+        const auto out = renderLeft (f.engine, 60000);
+        const float expected = 0.5f * 0.8f;
+        CHECK (out[479] == 0.0f);
+        CHECK_THAT (out[2000], WithinAbs (expected, 2e-3));
+        CHECK_THAT (out[40000], WithinAbs (expected, 2e-3));
+        CHECK_THAT (out[48400], WithinAbs (expected, 2e-3));
+        CHECK (std::abs (out[49000]) < 1e-3f);   // ends after 1 s
+    }
+}

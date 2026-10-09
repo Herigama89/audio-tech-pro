@@ -5,6 +5,7 @@
 #include <set>
 #include "AudioEngine.h"
 #include "AudioFileCache.h"
+#include "DiskReadAhead.h"
 #include "InstrumentRack.h"
 #include "EffectRack.h"
 #include "../model/Identifiers.h"
@@ -103,6 +104,11 @@ private:
 
     std::map<juce::String, int> slots;
     int nextSlot = 0;
+
+    DiskReadAhead readAhead { [this] { return engine.getPlayheadSeconds(); } };
+
+public:
+    DiskReadAhead& getReadAhead() noexcept { return readAhead; }
 };
 
 } // namespace riff
