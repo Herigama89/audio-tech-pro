@@ -531,7 +531,7 @@ juce::Array<juce::ValueTree> apply (juce::ValueTree project, const Result& resul
                                     double startSeconds, bool setTempo, juce::UndoManager* um)
 {
     if (setTempo)
-        project.setProperty (ids::tempo, result.tempo, um);
+        model::setTempo (project, result.tempo, um);
 
     const auto genreName = juce::String (genres()[(size_t) juce::jlimit (0, (int) genres().size() - 1, settings.genre)].name);
     const auto secondsPerBeat = model::secondsPerBeat (project);

@@ -151,7 +151,7 @@ MainComponent::MainComponent (bool openAudioDevice)
         if (bpm >= 20.0 && bpm <= 400.0)
         {
             undoManager.beginNewTransaction ("Tempo");
-            project.setProperty (ids::tempo, bpm, &undoManager);
+            model::setTempo (project, bpm, &undoManager);   // MIDI, markers and the cycle stay on their bars
         }
         refreshProjectControls();
     };

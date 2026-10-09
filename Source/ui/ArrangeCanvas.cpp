@@ -359,10 +359,12 @@ void ArrangeCanvas::editTempoChange (juce::ValueTree change, double beat)
         if (result != 1 || bpm < 20.0 || bpm > 400.0)
             return;
         undoManager.beginNewTransaction ("Tempo change");
+        const auto before = model::tempoMapOf (project);
         if (change.isValid())
             change.setProperty (ids::bpm, bpm, &undoManager);
         else
             timeline.selectedTempoId = model::addTempoChange (project, beat, bpm, &undoManager)[ids::id].toString();
+        model::followTempo (project, before, &undoManager);   // MIDI and markers stay on their beats
         timeline.changed();
     }), true);
 }
@@ -386,7 +388,9 @@ void ArrangeCanvas::tempoMouseDown (const juce::MouseEvent& e)
             menu.addItem ("Delete tempo change", [this, change]() mutable
             {
                 undoManager.beginNewTransaction ("Delete tempo change");
+                const auto before = model::tempoMapOf (project);
                 change.getParent().removeChild (change, &undoManager);
+                model::followTempo (project, before, &undoManager);
             });
         }
         menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
@@ -397,6 +401,7 @@ void ArrangeCanvas::tempoMouseDown (const juce::MouseEvent& e)
     {
         // Drag sideways to move it (on beats), up and down to change its tempo.
         undoManager.beginNewTransaction ("Move tempo change");
+        tempoBefore = model::tempoMapOf (project);
         dragTempo = change;
         dragOriginalStart = change[ids::beat];
         dragTempoBpm = change[ids::bpm];
@@ -1471,6 +1476,9 @@ void ArrangeCanvas::mouseUp (const juce::MouseEvent& e)
         }
         rubberBand = {};
     }
+
+    if (dragMode == DragMode::tempo && dragTempo.isValid() && ! wasClick)
+        model::followTempo (project, tempoBefore, &undoManager);
 
     if (dragMode == DragMode::compSwipe && dragRegion.isValid())
     {

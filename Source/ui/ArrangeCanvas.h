@@ -88,6 +88,7 @@ private:
     void tempoMouseDown (const juce::MouseEvent& e);
     void editTempoChange (juce::ValueTree change, double beat);
     juce::ValueTree dragTempo;
+    TempoMap tempoBefore;
     double dragTempoBpm = 120.0;
     juce::ValueTree soloTrack;      // the Solo tool's track while the mouse is held
     bool soloWasOn = false;

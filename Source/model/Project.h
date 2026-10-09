@@ -324,6 +324,15 @@ namespace riff::model
     /** The whole tempo map: the project's tempo, then each change. */
     TempoMap tempoMapOf (const juce::ValueTree& project);
 
+    /**
+        After the tempo changed (from `before` to the project's map now): MIDI regions and their notes, markers,
+        the cycle and the punch range move so they stay on the same bars and beats, as in Logic. Audio stays put.
+    */
+    void followTempo (juce::ValueTree project, const TempoMap& before, juce::UndoManager* um);
+
+    /** Sets the starting tempo, with everything on the grid following it. */
+    void setTempo (juce::ValueTree project, double bpm, juce::UndoManager* um);
+
     /** Bars and beats for a time, using the tempo map: bar (1-based), beat (1-based), sixteenth (1-based), fraction. */
     struct BarPosition { int bar, beat, sixteenth; double fraction; };
     BarPosition barPositionAt (const juce::ValueTree& project, double seconds);

@@ -635,3 +635,24 @@ TEST_CASE ("Patches keep a track's sound and put it on another track", "[model][
     um.undo();
     CHECK (model::insertsOf (model::findChain (project, target[ids::id]))[0][ids::effect].toString() == "limiter");
 }
+
+TEST_CASE ("MIDI, markers and the cycle follow tempo changes; audio stays", "[model][tempo]")
+{
+    auto project = model::createProject();
+    project.setProperty (ids::tempo, 120.0, nullptr);
+    auto keys = model::addTrack (project, "Keys", nullptr, -1, model::instrumentKind);
+    auto midi = model::addMidiRegion (keys, 2.0, 2.0, nullptr);          // bar 2 (beat 4), 4 beats long
+    auto note = model::addNote (midi, 60, 0.5, 0.5, 100, nullptr);       // beat 5, a beat long
+    auto audio = model::addRegion (model::addTrack (project, "Vox", nullptr), juce::File ("/tmp/v.wav"), 2.0, 1.0, nullptr);
+    auto marker = model::addMarker (project, 4.0, "Chorus", nullptr);     // beat 8
+    model::setCycle (project, 2.0, 4.0, true);
+
+    model::setTempo (project, 60.0, nullptr);   // half as fast: everything on the grid twice as far
+    CHECK_THAT ((double) midi[ids::start], WithinAbs (4.0, 1e-9));
+    CHECK_THAT ((double) midi[ids::length], WithinAbs (4.0, 1e-9));
+    CHECK_THAT ((double) note[ids::start], WithinAbs (1.0, 1e-9));
+    CHECK_THAT ((double) note[ids::length], WithinAbs (1.0, 1e-9));
+    CHECK_THAT ((double) marker[ids::time], WithinAbs (8.0, 1e-9));
+    CHECK_THAT ((double) project[ids::cycleEnd], WithinAbs (8.0, 1e-9));
+    CHECK_THAT ((double) audio[ids::start], WithinAbs (2.0, 1e-9));   // audio isn't stretched
+}

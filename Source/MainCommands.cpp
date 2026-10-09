@@ -429,7 +429,7 @@ void MainComponent::generateMidi (const GeneratorPanel::Request& request)
 
     undoManager.beginNewTransaction (undoName);
     if (request.useGenreTempo)
-        project.setProperty (ids::tempo, result.tempo, &undoManager);
+        model::setTempo (project, result.tempo, &undoManager);
     const auto start = juce::jmax (0.0, oldBar) * model::secondsPerBeat (project) * oldBeatsPerBar;
     lastGenerated = generator::apply (project, result, s, start, false, &undoManager);
     undoManager.beginNewTransaction();

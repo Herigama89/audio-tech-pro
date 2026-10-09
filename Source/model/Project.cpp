@@ -1191,6 +1191,64 @@ TempoMap tempoMapOf (const juce::ValueTree& project)
     return map;
 }
 
+void followTempo (juce::ValueTree project, const TempoMap& before, juce::UndoManager* um)
+{
+    const auto after = tempoMapOf (project);
+    const auto move = [&] (double seconds) { return after.secondsAt (before.beatAt (seconds)); };
+
+    for (auto track : project)
+    {
+        if (! track.hasType (ids::TRACK))
+            continue;
+        for (auto region : track)
+        {
+            if (! region.hasType (ids::REGION) || ! isMidiRegion (region))
+                continue;
+
+            // Content times are seconds from the region's content start: map each through the song.
+            const double start = region[ids::start], offset = region[ids::offset], length = region[ids::length];
+            const auto contentStart = start - offset;   // where content time 0 sits in the song
+            const auto newStart = move (start);
+            const auto newContentStart = move (contentStart);
+            region.setProperty (ids::start, newStart, um);
+            region.setProperty (ids::offset, newStart - newContentStart, um);
+            region.setProperty (ids::length, move (start + length) - newStart, um);
+            if (region.hasProperty (ids::loopEnd))
+                region.setProperty (ids::loopEnd, move ((double) region[ids::loopEnd]), um);
+
+            for (auto e : region)
+            {
+                if (e.hasType (ids::NOTE))
+                {
+                    const auto noteStart = contentStart + (double) e[ids::start];
+                    const auto noteEnd = noteStart + (double) e[ids::length];
+                    const auto s = move (noteStart);
+                    e.setProperty (ids::start, s - newContentStart, um);
+                    e.setProperty (ids::length, juce::jmax (0.001, move (noteEnd) - s), um);
+                }
+                else if (e.hasType (ids::CC))
+                {
+                    e.setProperty (ids::start, move (contentStart + (double) e[ids::start]) - newContentStart, um);
+                }
+            }
+        }
+    }
+
+    for (auto marker : project.getChildWithName (ids::MARKERS))
+        marker.setProperty (ids::time, move ((double) marker[ids::time]), um);
+
+    for (const auto& id : { ids::cycleStart, ids::cycleEnd, ids::punchIn, ids::punchOut })
+        if (project.hasProperty (id))
+            project.setProperty (id, move ((double) project[id]), um);
+}
+
+void setTempo (juce::ValueTree project, double bpm, juce::UndoManager* um)
+{
+    const auto before = tempoMapOf (project);
+    project.setProperty (ids::tempo, juce::jlimit (20.0, 400.0, bpm), um);
+    followTempo (project, before, um);
+}
+
 BarPosition barPositionAt (const juce::ValueTree& project, double seconds)
 {
     const int beatsPerBar = juce::jmax (1, (int) project.getProperty (ids::timeSigNumerator, 4));

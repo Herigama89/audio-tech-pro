@@ -600,7 +600,7 @@ ToolResult AssistantTools::run (const juce::String& name, const juce::var& input
 ToolResult AssistantTools::setTempo (const juce::var& input)
 {
     const auto bpm = juce::jlimit (20.0, 400.0, number (input, "bpm", 120.0));
-    project.setProperty (ids::tempo, bpm, &um);
+    model::setTempo (project, bpm, &um);
     return ok ("Tempo is now " + juce::String (round2 (bpm)) + " BPM.", "Set the tempo to " + juce::String (round2 (bpm)) + " BPM");
 }
 
@@ -915,7 +915,7 @@ ToolResult AssistantTools::generatePattern (const juce::var& input)
     const auto result = generator::generate (s);
     const bool useTempo = flag (input, "use_genre_tempo", false);
     if (useTempo)
-        project.setProperty (ids::tempo, result.tempo, &um);
+        model::setTempo (project, result.tempo, &um);
 
     const auto startBar = juce::jmax (1.0, std::floor (number (input, "start_bar",
                                        hooks.playheadSeconds ? std::floor (secondsToBar (hooks.playheadSeconds()) + 1.0e-6) : 1.0)));
