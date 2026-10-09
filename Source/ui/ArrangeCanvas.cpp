@@ -204,7 +204,7 @@ void ArrangeCanvas::paintRuler (juce::Graphics& g)
     const auto rh = (float) TimelineState::barRulerHeight;
 
     // Gold ruler
-    g.setGradientFill (juce::ColourGradient (theme::gold.brighter (0.12f), 0.0f, 0.0f, theme::goldDark, 0.0f, rh, false));
+    g.setGradientFill (juce::ColourGradient (theme::ruler.brighter (0.1f), 0.0f, 0.0f, theme::rulerDark, 0.0f, rh, false));
     g.fillRect (0.0f, 0.0f, (float) getWidth(), rh);
 
     // Label every Nth bar so numbers don't collide.
@@ -264,9 +264,9 @@ void ArrangeCanvas::paintMarkers (juce::Graphics& g)
 
         const bool selected = timeline.selectedMarkerId == m[ids::id].toString();
         const auto body = juce::Rectangle<float> (x0, top + 2.0f, juce::jmax (4.0f, x1 - x0 - 1.0f), lane.getHeight() - 4.0f);
-        g.setColour ((selected ? theme::gold : theme::creamDeep).withAlpha (selected ? 0.95f : 0.75f));
+        g.setColour (selected ? theme::neon : juce::Colour (0xff4b4e54));
         g.fillRoundedRectangle (body, 2.0f);
-        g.setColour (theme::ink);
+        g.setColour (juce::Colours::white);
         g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
         g.drawText (m[ids::name].toString(), body.reduced (4.0f, 0.0f), juce::Justification::centredLeft, true);
     }

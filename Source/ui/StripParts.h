@@ -4,22 +4,15 @@
 #include "Theme.h"
 
 /**
-    The moving parts of a mixer strip that sit on the strip artwork (see
-    Tools/make_strip_art.py). The artwork shows the knob bodies, keys and
-    displays; these draw only what changes: pointers, lamps, lettering,
-    values, and the fader cap.
+    The controls on a mixer strip, all drawn in code: neon-ring encoders,
+    backlit keys, the pan display and the fader with its dark cap.
 */
 namespace riff::strip
 {
-    /** The artwork, decoded once. */
-    const juce::Image& topArt();
-    const juce::Image& plateArt();
-    const juce::Image& faderCapArt();
-
-    /** StripTop.png is this many pixels wide and tall. */
+    /** The strip's top section is laid out in this space (then scaled to the strip's width). */
     constexpr float artWidth = 195.0f, artHeight = 887.0f;
 
-    /** A knob whose body is in the artwork: draws its pointer only. */
+    /** An encoder with a neon LED ring in the given colour (EQ gains light from the centre). */
     class PointerKnob final : public juce::Slider
     {
     public:
@@ -30,7 +23,7 @@ namespace riff::strip
         juce::Colour pointer;
     };
 
-    /** A small square key with a lamp (the red keys on the artwork). Toggle state = lit. */
+    /** A small backlit key (EQ in, Dynamics in). Toggle state = lit. */
     class LampKey final : public juce::Button
     {
     public:
@@ -60,7 +53,7 @@ namespace riff::strip
         void paint (juce::Graphics&) override;
     };
 
-    /** A long-throw fader: a dark slot and the metal cap from the artwork. */
+    /** A long-throw fader: a dark slot and a dark cap with a white line. */
     class Fader final : public juce::Slider
     {
     public:

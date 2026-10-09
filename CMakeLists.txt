@@ -76,6 +76,7 @@ juce_add_gui_app(AudioTechPro
     PRODUCT_NAME "Audio Tech Pro"
     COMPANY_NAME "Audio Tech Pro"
     BUNDLE_ID    "com.audiotechpro.app"
+    ICON_BIG     "${CMAKE_CURRENT_SOURCE_DIR}/Resources/AppIcon.png"
     MICROPHONE_PERMISSION_ENABLED TRUE
     MICROPHONE_PERMISSION_TEXT "Audio Tech Pro needs audio input access to record."
 )
@@ -86,10 +87,7 @@ juce_generate_juce_header(AudioTechPro)
 juce_add_binary_data(AudioTechProData
     HEADER_NAME BinaryData.h
     NAMESPACE   BinaryData
-    SOURCES     Resources/MasterBusCompressorPanel.png
-                Resources/StripTop.png
-                Resources/StripPlate.png
-                Resources/FaderCap.png
+    SOURCES     Resources/Logo.png
                 README.md)
 
 # Everything on screen except the app's entry point (the snapshot tool reuses it).

@@ -12,7 +12,8 @@ namespace riff
     Console mode's Master Bus Compressor: a hardware-style face for the
     user's own Universal Audio G-series bus compressor plugin.
 
-    The artwork comes from the design mockup (see Tools/make_bus_comp_panel.py);
+    The faceplate is drawn in code, in the console's colours (dark charcoal,
+    neon-ring knobs, blue LEDs, a blue-lit meter);
     the pointers, the meter's needle and scale, the LEDs, the lamp and all the
     lettering are drawn here so they can move and say the right thing.
 
@@ -86,7 +87,6 @@ private:
     juce::ValueTree project;
     juce::Array<juce::PluginDescription> candidates;
 
-    juce::Image artwork;
     float scale = 1.0f;
     juce::Point<float> origin;
 

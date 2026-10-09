@@ -31,36 +31,6 @@ namespace
         return centre + juce::Point<float> (radius * std::sin (angle), -radius * std::cos (angle));
     }
 
-    /** A brushed-metal fader cap. */
-    void drawFaderCap (juce::Graphics& g, juce::Rectangle<float> cap, bool vertical)
-    {
-        // Shadow
-        g.setColour (juce::Colours::black.withAlpha (0.35f));
-        g.fillRoundedRectangle (cap.translated (1.0f, 2.0f), 2.5f);
-
-        juce::ColourGradient body (juce::Colour (0xfff6f6f4), cap.getX(), cap.getY(),
-                                   juce::Colour (0xffcfcfcc), cap.getX(), cap.getBottom(), false);
-        body.addColour (0.45, juce::Colour (0xffa9a9a6));
-        body.addColour (0.55, juce::Colour (0xffe7e7e4));
-        g.setGradientFill (body);
-        g.fillRoundedRectangle (cap, 2.5f);
-
-        g.setColour (juce::Colour (0xff4b4b4b));
-        g.drawRoundedRectangle (cap.reduced (0.5f), 2.5f, 1.0f);
-
-        g.setColour (juce::Colour (0xff1b1b1b));
-        if (vertical)
-        {
-            g.fillRect (cap.getX() + 2.0f, cap.getCentreY() - 1.0f, cap.getWidth() - 4.0f, 2.0f);
-            g.setColour (juce::Colours::black.withAlpha (0.25f));
-            for (const auto f : { 0.2f, 0.32f, 0.68f, 0.8f })
-                g.fillRect (cap.getX() + 3.0f, cap.getY() + cap.getHeight() * f, cap.getWidth() - 6.0f, 1.0f);
-        }
-        else
-        {
-            g.fillRect (cap.getCentreX() - 0.75f, cap.getY() + 2.0f, 1.5f, cap.getHeight() - 4.0f);
-        }
-    }
 }
 
 //==============================================================================
@@ -73,65 +43,9 @@ void ConsoleLook::drawRotarySlider (juce::Graphics& g, int x, int y, int width, 
                                     float startAngle, float endAngle, juce::Slider& slider)
 {
     const auto bounds = juce::Rectangle<float> ((float) x, (float) y, (float) width, (float) height).reduced (1.0f);
-    const auto size = juce::jmin (bounds.getWidth(), bounds.getHeight());
-    const auto centre = bounds.getCentre();
-    const auto outer = size * 0.5f;
-
-    const bool ticks = slider.getProperties().getWithDefault (ticksProperty, size >= 28.0f);
-    const auto cap = capColour (slider.getProperties().getWithDefault (knobProperty, (int) look::Knob::black));
-    const auto alpha = slider.isEnabled() ? 1.0f : 0.45f;
-
-    // Scale around the knob
-    const auto skirt = ticks ? outer * 0.74f : outer * 0.96f;
-    if (ticks)
-    {
-        const auto interval = slider.getInterval();
-        const auto range = slider.getMaximum() - slider.getMinimum();
-        const auto steps = (interval >= 1.0 && range / interval <= 12.0) ? (int) std::round (range / interval) + 1 : 11;
-
-        g.setColour ((isLight (slider) ? theme::ink : theme::text).withAlpha (0.75f * alpha));
-        for (int i = 0; i < steps; ++i)
-        {
-            const auto a = startAngle + (endAngle - startAngle) * (float) i / (float) (steps - 1);
-            const bool major = steps <= 12 || i == 0 || i == steps - 1 || i == steps / 2;
-            g.drawLine (juce::Line<float> (onCircle (centre, outer * (major ? 0.82f : 0.86f), a),
-                                           onCircle (centre, outer * 0.98f, a)),
-                        major ? 1.3f : 1.0f);
-        }
-    }
-
-    // Drop shadow
-    g.setColour (juce::Colours::black.withAlpha (0.35f * alpha));
-    g.fillEllipse (juce::Rectangle<float> (skirt * 2.0f, skirt * 2.0f).withCentre (centre.translated (0.8f, 1.6f)));
-
-    // Black skirt with a soft sheen
-    {
-        juce::ColourGradient grad (juce::Colour (0xff4a4a4e), centre.x - skirt * 0.6f, centre.y - skirt * 0.7f,
-                                   juce::Colour (0xff111113), centre.x + skirt * 0.7f, centre.y + skirt * 0.8f, false);
-        g.setGradientFill (grad);
-        g.setOpacity (alpha);
-        g.fillEllipse (juce::Rectangle<float> (skirt * 2.0f, skirt * 2.0f).withCentre (centre));
-    }
-
-    // Coloured cap (black knobs get a slightly smaller, glossier cap)
-    const auto capRadius = skirt * (cap == theme::knobBlack ? 0.72f : 0.8f);
-    {
-        juce::ColourGradient grad (cap.brighter (0.55f), centre.x - capRadius * 0.45f, centre.y - capRadius * 0.55f,
-                                   cap.darker (0.45f), centre.x + capRadius * 0.9f, centre.y + capRadius * 0.9f, true);
-        g.setGradientFill (grad);
-        g.setOpacity (alpha);
-        const auto capArea = juce::Rectangle<float> (capRadius * 2.0f, capRadius * 2.0f).withCentre (centre);
-        g.fillEllipse (capArea);
-        g.setColour (juce::Colours::white.withAlpha (0.22f * alpha));
-        g.drawEllipse (capArea.reduced (0.6f), 0.9f);
-    }
-
-    // Pointer
-    const auto angle = startAngle + sliderPos * (endAngle - startAngle);
-    const auto pointerColour = cap == theme::knobCream ? theme::ink : juce::Colours::white;
-    g.setColour (pointerColour.withAlpha (alpha));
-    g.drawLine (juce::Line<float> (onCircle (centre, skirt * 0.18f, angle), onCircle (centre, skirt * 0.96f, angle)),
-                juce::jmax (1.4f, skirt * 0.12f));
+    const auto ring = capColour (slider.getProperties().getWithDefault (knobProperty, (int) look::Knob::black));
+    const bool fromCentre = slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0;
+    look::drawNeonKnob (g, bounds, sliderPos, startAngle, endAngle, ring, fromCentre, slider.isEnabled());
 }
 
 int ConsoleLook::getSliderThumbRadius (juce::Slider& slider)
@@ -178,7 +92,7 @@ void ConsoleLook::drawLinearSlider (juce::Graphics& g, int x, int y, int width, 
         g.drawLine (slot.getRight() + 0.5f, slot.getY() + 2.0f, slot.getRight() + 0.5f, slot.getBottom() - 2.0f, 1.0f);
 
         const auto capWidth = juce::jlimit (16.0f, 26.0f, bounds.getWidth() - 4.0f);
-        drawFaderCap (g, juce::Rectangle<float> (capWidth, 30.0f).withCentre ({ cx, sliderPos }), true);
+        look::drawFaderCap (g, juce::Rectangle<float> (capWidth, 30.0f).withCentre ({ cx, sliderPos }), true);
     }
     else
     {
@@ -191,7 +105,7 @@ void ConsoleLook::drawLinearSlider (juce::Graphics& g, int x, int y, int width, 
         g.setColour ((light ? theme::inkDim : theme::accent).withAlpha (0.55f * alpha));
         g.fillRoundedRectangle (slot.withRight (sliderPos).reduced (0.0f, 0.5f), 2.0f);
 
-        drawFaderCap (g, juce::Rectangle<float> (12.0f, juce::jmin (18.0f, bounds.getHeight())).withCentre ({ sliderPos, cy }), false);
+        look::drawFaderCap (g, juce::Rectangle<float> (12.0f, juce::jmin (18.0f, bounds.getHeight())).withCentre ({ sliderPos, cy }), false);
     }
 }
 
@@ -313,6 +227,101 @@ namespace look
         s.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
     }
 
+    void drawNeonKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
+                       juce::Colour ringColour, bool fromCentre, bool enabled)
+    {
+        const auto size = juce::jmin (area.getWidth(), area.getHeight());
+        const auto centre = area.getCentre();
+        const auto outer = size * 0.5f;
+        const auto alpha = enabled ? 1.0f : 0.45f;
+        proportion = juce::jlimit (0.0f, 1.0f, proportion);
+
+        // The LED ring: separate LEDs round the knob, dim when off; the lit ones glow.
+        const auto ringRadius = outer * 0.84f;
+        const auto ledSize = juce::jlimit (1.6f, 6.0f, outer * 0.15f);
+        const auto count = outer > 30.0f ? 25 : (outer > 16.0f ? 17 : 13);
+        const auto from = startAngle + (fromCentre ? 0.5f : 0.0f) * (endAngle - startAngle);
+        const auto to = startAngle + proportion * (endAngle - startAngle);
+        const auto lo = juce::jmin (from, to), hi = juce::jmax (from, to);
+
+        for (int i = 0; i < count; ++i)
+        {
+            const auto a = startAngle + (endAngle - startAngle) * (float) i / (float) (count - 1);
+            const auto p = onCircle (centre, ringRadius, a);
+            const auto halfStep = (endAngle - startAngle) * 0.5f / (float) (count - 1);
+            const bool on = (a >= lo - halfStep && a <= hi + halfStep) && (std::abs (hi - lo) > 0.01f || (fromCentre && std::abs (a - from) < halfStep));
+            const auto dot = juce::Rectangle<float> (ledSize, ledSize).withCentre (p);
+
+            if (on)
+            {
+                g.setColour (ringColour.withAlpha (0.18f * alpha));
+                g.fillEllipse (dot.expanded (ledSize * 1.1f));
+                g.setColour (ringColour.withAlpha (0.35f * alpha));
+                g.fillEllipse (dot.expanded (ledSize * 0.5f));
+                g.setColour (ringColour.brighter (0.4f).withAlpha (alpha));
+                g.fillEllipse (dot);
+                g.setColour (juce::Colours::white.withAlpha (0.6f * alpha));
+                g.fillEllipse (dot.reduced (ledSize * 0.3f));
+            }
+            else
+            {
+                g.setColour (ringColour.withAlpha (0.16f * alpha));
+                g.fillEllipse (dot);
+            }
+        }
+
+        // The encoder: a dark rubber cap with a soft top light and a white pointer.
+        const auto capRadius = outer * 0.62f;
+        const auto cap = juce::Rectangle<float> (capRadius * 2.0f, capRadius * 2.0f).withCentre (centre);
+        g.setColour (juce::Colours::black.withAlpha (0.5f * alpha));
+        g.fillEllipse (cap.translated (0.6f, 1.4f).expanded (0.8f));
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff4e5055), centre.x, cap.getY(),
+                                                 juce::Colour (0xff1b1c1e), centre.x, cap.getBottom(), false));
+        g.setOpacity (alpha);
+        g.fillEllipse (cap);
+        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.16f * alpha), centre.x, cap.getY(),
+                                                 juce::Colours::transparentWhite, centre.x, centre.y, false));
+        g.fillEllipse (cap.reduced (capRadius * 0.12f));
+        g.setColour (juce::Colours::black.withAlpha (0.7f * alpha));
+        g.drawEllipse (cap, 0.8f);
+
+        const auto angle = to;
+        g.setColour (juce::Colours::white.withAlpha (0.92f * alpha));
+        g.drawLine (juce::Line<float> (onCircle (centre, capRadius * 0.38f, angle), onCircle (centre, capRadius * 0.9f, angle)),
+                    juce::jmax (1.3f, capRadius * 0.16f));
+    }
+
+    void drawFaderCap (juce::Graphics& g, juce::Rectangle<float> cap, bool vertical)
+    {
+        // Shadow
+        g.setColour (juce::Colours::black.withAlpha (0.45f));
+        g.fillRoundedRectangle (cap.translated (1.0f, 2.5f), 2.5f);
+
+        // Dark body, lighter on its top face
+        juce::ColourGradient body (juce::Colour (0xff6a6c71), cap.getX(), cap.getY(),
+                                   juce::Colour (0xff1f2023), cap.getX(), cap.getBottom(), false);
+        body.addColour (0.48, juce::Colour (0xff35373b));
+        body.addColour (0.52, juce::Colour (0xff4a4c51));
+        g.setGradientFill (body);
+        g.fillRoundedRectangle (cap, 2.5f);
+
+        // Grip ridges
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        if (vertical)
+            for (const auto f : { 0.16f, 0.27f, 0.73f, 0.84f })
+                g.fillRect (cap.getX() + 2.0f, cap.getY() + cap.getHeight() * f, cap.getWidth() - 4.0f, 1.0f);
+
+        // The white line
+        g.setColour (juce::Colours::white.withAlpha (0.95f));
+        if (vertical)
+            g.fillRect (cap.getX() + 1.5f, cap.getCentreY() - 1.0f, cap.getWidth() - 3.0f, 2.0f);
+        else
+            g.fillRect (cap.getCentreX() - 1.0f, cap.getY() + 1.5f, 2.0f, cap.getHeight() - 3.0f);
+
+        g.setColour (juce::Colours::black.withAlpha (0.8f));
+        g.drawRoundedRectangle (cap.reduced (0.5f), 2.5f, 1.0f);
+    }
+
     void drawKey (juce::Graphics& g, juce::Rectangle<float> area, Key style, bool on, juce::Colour onColour, bool over, bool down)
     {
         juce::Colour top, bottom, edge;
@@ -324,7 +333,7 @@ namespace look
                 top = theme::cream.brighter (0.15f); bottom = theme::creamShade; edge = theme::creamDeep.darker (0.45f);
                 break;
             case Key::console:
-                top = juce::Colour (0xffd9d4c7); bottom = juce::Colour (0xffb5ae9e); edge = theme::consoleDark.darker (0.3f);
+                top = juce::Colour (0xff4a4c51); bottom = juce::Colour (0xff2c2d31); edge = juce::Colour (0xff0e0f10);
                 corner = 2.5f;
                 break;
             case Key::dark:
@@ -335,9 +344,12 @@ namespace look
 
         if (on)
         {
-            top = onColour.brighter (0.25f);
-            bottom = onColour.darker (0.1f);
-            edge = onColour.darker (0.6f);
+            // Backlit: the key glows in its colour.
+            g.setColour (onColour.withAlpha (0.28f));
+            g.fillRoundedRectangle (area.expanded (2.0f), corner + 2.0f);
+            top = onColour.brighter (0.35f);
+            bottom = onColour.darker (0.05f);
+            edge = onColour.darker (0.7f);
         }
 
         if (down)
@@ -585,9 +597,11 @@ void GainReductionMeter::paint (juce::Graphics& g)
     juce::Path faceShape;
     faceShape.addRoundedRectangle (face, 3.0f);
 
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xfff8ecc4), face.getCentreX(), face.getY(),
-                                             juce::Colour (0xffe6c983), face.getCentreX(), face.getBottom(), false));
+    // A dark face lit blue from below, like a backlit meter on a digital console
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff0d1a2e), face.getCentreX(), face.getY(),
+                                             juce::Colour (0xff12305c), face.getCentreX(), face.getBottom(), false));
     g.fillPath (faceShape);
+    const auto meterInk = juce::Colour (0xffd6e8ff);
 
     {
         juce::Graphics::ScopedSaveState state (g);
@@ -614,31 +628,33 @@ void GainReductionMeter::paint (juce::Graphics& g)
 
         juce::Path arc;
         arc.addCentredArc (pivot.x, pivot.y, radius * 0.86f, radius * 0.86f, 0.0f, -sweep, sweep, true);
-        g.setColour (theme::ink);
+        g.setColour (meterInk);
         g.strokePath (arc, juce::PathStrokeType (1.2f));
 
         g.setFont (juce::FontOptions (juce::jmax (8.0f, face.getHeight() * 0.13f)));
         for (const auto db : { 0.0f, 1.0f, 2.0f, 3.0f, 5.0f, 7.0f, 10.0f, 20.0f })
         {
             const auto a = angleFor (db);
-            g.setColour (db >= 10.0f ? juce::Colour (0xffb32a24) : theme::ink);
+            g.setColour (db >= 10.0f ? juce::Colour (0xffff5a4a) : meterInk);
             g.drawLine (juce::Line<float> (onCircle (pivot, radius * 0.86f, a), onCircle (pivot, radius * 0.94f, a)), 1.4f);
             const auto label = onCircle (pivot, radius * 1.02f, a);
             g.drawText (juce::String ((int) db), juce::Rectangle<float> (22.0f, 12.0f).withCentre (label), juce::Justification::centred, false);
         }
 
-        g.setColour (theme::ink.withAlpha (0.85f));
+        g.setColour (theme::neon.withAlpha (0.9f));
         g.setFont (juce::FontOptions (face.getHeight() * 0.22f, juce::Font::bold));
         g.drawText ("GR", face.withTrimmedTop (face.getHeight() * 0.45f).withTrimmedBottom (face.getHeight() * 0.12f),
                     juce::Justification::centred, false);
 
         // Needle
         const auto a = angleFor (needle);
-        g.setColour (juce::Colour (0xff1a1a1a));
+        g.setColour (juce::Colour (0xffff8a3c).withAlpha (0.35f));
+        g.drawLine (juce::Line<float> (onCircle (pivot, radius * 0.45f, a), onCircle (pivot, radius * 0.97f, a)), 3.5f);
+        g.setColour (juce::Colour (0xffffb070));
         g.drawLine (juce::Line<float> (onCircle (pivot, radius * 0.45f, a), onCircle (pivot, radius * 0.97f, a)), 1.6f);
 
         // Glass
-        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.28f), face.getX(), face.getY(),
+        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.08f), face.getX(), face.getY(),
                                                  juce::Colours::transparentWhite, face.getX(), face.getCentreY(), false));
         g.fillRect (face);
     }

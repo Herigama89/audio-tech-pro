@@ -90,8 +90,9 @@ private:
     juce::ValueTree project, track;
 
     // On the artwork: cream, blue, cream and red EQ knobs, the grey Dynamics knob
-    strip::PointerKnob hfKnob { theme::ink }, hmfKnob, lmfKnob { theme::ink }, lfKnob, dynKnob;
-    strip::LampKey consoleInButton { "EQ in", juce::Colour (0xffff3b2a) }, dynInButton { "Dynamics in", juce::Colour (0xffff3b2a) };
+    // Neon-ring encoders: blue for the EQ, white-blue for the Dynamics
+    strip::PointerKnob hfKnob { theme::neon }, hmfKnob { theme::neon }, lmfKnob { theme::neon }, lfKnob { theme::neon }, dynKnob { theme::knobCream };
+    strip::LampKey consoleInButton { "EQ in", theme::neon }, dynInButton { "Dynamics in", theme::neon };
     strip::CreamKey muteButton { "M", theme::mute }, soloButton { "S", theme::solo };
     strip::DisplaySlider panKnob;
     juce::Label dynLabel;

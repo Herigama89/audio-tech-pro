@@ -2,6 +2,7 @@
 #include "MainComponent.h"
 #include "ui/ConsoleLook.h"
 #include "ui/Theme.h"
+#include <BinaryData.h>
 
 class RiffApplication final : public juce::JUCEApplication
 {
@@ -13,6 +14,21 @@ public:
     void initialise (const juce::String&) override
     {
         juce::LookAndFeel::setDefaultLookAndFeel (&look);
+
+        // The logo while the app starts (click it to close it sooner).
+        {
+            const auto logo = juce::ImageCache::getFromMemory (BinaryData::Logo_png, BinaryData::Logo_pngSize);
+            if (logo.isValid())
+            {
+                const auto width = 720;
+                auto* splash = new juce::SplashScreen (getApplicationName(),
+                                                       logo.rescaled (width, width * logo.getHeight() / logo.getWidth(),
+                                                                      juce::Graphics::highResamplingQuality),
+                                                       true);
+                splash->deleteAfterDelay (juce::RelativeTime::seconds (2.5), true);
+            }
+        }
+
         mainWindow = std::make_unique<MainWindow> (getApplicationName());
     }
 

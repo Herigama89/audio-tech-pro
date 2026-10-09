@@ -1,14 +1,14 @@
 #include "BusCompConsolePanel.h"
 #include "Theme.h"
+#include "ConsoleLook.h"
 #include "../model/Project.h"
-#include <BinaryData.h>
 
 namespace riff
 {
 
 namespace
 {
-    // Where things are on the artwork (in its own pixels, 636 x 1484).
+    // Where things are on the faceplate (drawn in a 636 x 1484 space, then scaled).
     struct KnobSpot { console::Control control; float x, y, radius; bool blue; };
 
     constexpr KnobSpot knobSpots[] = {
@@ -33,8 +33,9 @@ namespace
     constexpr float              reductionSteps[numLeds] = { 1, 2, 3, 4, 6, 8, 10, 14, 20 };          // bottom to top
     constexpr float              outputSteps[numLeds]    = { -30, -24, -18, -12, -9, -6, -3, -1, 0 };
 
-    const juce::Colour ink { 0xff2a2a28 };
-    const juce::Colour engraved { 0xff3a3a37 };
+    // Light lettering on the dark faceplate
+    const juce::Colour ink { 0xffe6e8ec };
+    const juce::Colour engraved { 0xff9a9ca3 };
 
     float angleFor (float reductionDb)
     {
@@ -61,7 +62,7 @@ namespace
 }
 
 //==============================================================================
-/** A knob on the artwork: the body is in the picture; this draws the pointer. */
+/** A neon-ring encoder on the faceplate. */
 class BusCompConsolePanel::Knob final : public juce::Slider
 {
 public:
@@ -80,22 +81,10 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        const auto bounds = getLocalBounds().toFloat();
-        const auto centre = bounds.getCentre();
-        const auto cap = bounds.getWidth() * 0.5f * 0.78f;
+        // A neon-ring encoder, like the strips'
         const auto params = getRotaryParameters();
-        const auto angle = params.startAngleRadians
-                         + (float) valueToProportionOfLength (getValue()) * (params.endAngleRadians - params.startAngleRadians);
-
-        const auto from = polar (centre, cap * 0.02f, angle);
-        const auto to = polar (centre, cap * (large ? 0.86f : 0.9f), angle);
-        const auto width = juce::jmax (1.6f, cap * (large ? 0.12f : 0.15f));
-
-        // Engraved groove shadow, then the painted line
-        g.setColour (juce::Colours::black.withAlpha (0.45f));
-        g.drawLine (juce::Line<float> (from.translated (0.7f, 0.9f), to.translated (0.7f, 0.9f)), width + 0.6f);
-        g.setColour (juce::Colour (0xfff4f2ea).withAlpha (isEnabled() ? 1.0f : 0.75f));
-        g.drawLine (juce::Line<float> (from, to), width);
+        look::drawNeonKnob (g, getLocalBounds().toFloat(), (float) valueToProportionOfLength (getValue()),
+                            params.startAngleRadians, params.endAngleRadians, large ? theme::knobCream : theme::neon, false, isEnabled());
     }
 
 private:
@@ -106,7 +95,6 @@ private:
 BusCompConsolePanel::BusCompConsolePanel (juce::UndoManager& um, AudioEngine& e, EffectRack& fx)
     : undoManager (um), engine (e), effects (fx)
 {
-    artwork = juce::ImageCache::getFromMemory (BinaryData::MasterBusCompressorPanel_png, BinaryData::MasterBusCompressorPanel_pngSize);
 
     for (size_t i = 0; i < numKnobs; ++i)
     {
@@ -378,12 +366,50 @@ void BusCompConsolePanel::resized()
 
 void BusCompConsolePanel::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour (0xffc9c4b8));
+    g.fillAll (theme::consoleDark);
 
     juce::Graphics::ScopedSaveState state (g);
     g.addTransform (juce::AffineTransform::scale (scale).translated (origin));
     g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-    g.drawImageAt (artwork, 0, 0);
+    // --- The faceplate, drawn: dark charcoal, a bezelled meter window, four screws
+    {
+        const juce::Rectangle<float> plate { 6.0f, 6.0f, 624.0f, 1472.0f };
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff36383c), 0.0f, plate.getY(), juce::Colour (0xff222326), 0.0f, plate.getBottom(), false));
+        g.fillRoundedRectangle (plate, 18.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.07f));
+        g.drawRoundedRectangle (plate.reduced (2.0f), 16.0f, 2.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.8f));
+        g.drawRoundedRectangle (plate, 18.0f, 3.0f);
+
+        for (const auto p : { juce::Point<float> (34.0f, 34.0f), juce::Point<float> (602.0f, 34.0f),
+                              juce::Point<float> (34.0f, 1450.0f), juce::Point<float> (602.0f, 1450.0f) })
+        {
+            const auto screw = juce::Rectangle<float> (22.0f, 22.0f).withCentre (p);
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xff6a6c70), screw.getX(), screw.getY(), juce::Colour (0xff2a2b2e), screw.getRight(), screw.getBottom(), false));
+            g.fillEllipse (screw);
+            g.setColour (juce::Colour (0xff141516));
+            g.drawLine (screw.getX() + 4.0f, screw.getCentreY(), screw.getRight() - 4.0f, screw.getCentreY(), 3.0f);
+        }
+
+        // Meter window: bezel, then the face lit blue from below
+        const auto bezel = meterFace.expanded (22.0f, 22.0f);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3a3c40), 0.0f, bezel.getY(), juce::Colour (0xff0c0d0e), 0.0f, bezel.getBottom(), false));
+        g.fillRoundedRectangle (bezel, 14.0f);
+        g.setColour (juce::Colours::black);
+        g.drawRoundedRectangle (bezel, 14.0f, 2.0f);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff0b1830), 0.0f, meterFace.getY(), juce::Colour (0xff15396b), 0.0f, meterFace.getBottom(), false));
+        g.fillRoundedRectangle (meterFace, 6.0f);
+        g.setColour (theme::neon.withAlpha (0.18f));
+        g.fillRoundedRectangle (meterFace.withTrimmedTop (meterFace.getHeight() * 0.6f), 6.0f);
+
+        // LED ladders' housings
+        for (const auto x : ledColumns)
+        {
+            const auto housing = juce::Rectangle<float> (x - 20.0f, ledTop - 26.0f, 40.0f, ledStep * (float) (numLeds - 1) + 52.0f);
+            g.setColour (juce::Colour (0xff0c0d0e));
+            g.fillRoundedRectangle (housing, 8.0f);
+        }
+    }
 
     const auto loaded = plugin() != nullptr || previewing;
     const auto in = isIn();
@@ -431,12 +457,6 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
         const juce::Point<float> c { s.x, s.y };
         const auto dotRadius = s.radius + 20.0f;
 
-        g.setColour (ink.withAlpha (0.85f));
-        for (int d = 0; d <= 10; ++d)
-        {
-            const auto a = juce::degreesToRadians (-135.0f + 27.0f * (float) d);
-            g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre (polar (c, dotRadius, a)));
-        }
 
         auto* param = parameterFor (s.control);
         auto caption = param != nullptr ? param->getName (20) : console::controlName (s.control);
@@ -483,7 +503,7 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
         // Heavy-compression zone, then the scale
         juce::Path zone;
         zone.addCentredArc (needlePivot.x, needlePivot.y, scaleRadius + 6.0f, scaleRadius + 6.0f, 0.0f, angleFor (20.0f), angleFor (10.0f), true);
-        g.setColour (juce::Colour (0xffc63a2c));
+        g.setColour (juce::Colour (0xffff5a4a));
         g.strokePath (zone, juce::PathStrokeType (9.0f));
 
         juce::Path arc;
@@ -495,7 +515,7 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
         for (const auto db : { 20.0f, 10.0f, 7.0f, 5.0f, 3.0f, 2.0f, 1.0f, 0.0f })
         {
             const auto a = angleFor (db);
-            g.setColour (db >= 10.0f ? juce::Colour (0xffb3281f) : ink);
+            g.setColour (db >= 10.0f ? juce::Colour (0xffff6a5a) : ink);
             g.drawLine (juce::Line<float> (polar (needlePivot, scaleRadius - 2.0f, a), polar (needlePivot, scaleRadius + 16.0f, a)), 3.0f);
             g.drawText (juce::String ((int) db), juce::Rectangle<float> (40.0f, 26.0f).withCentre (polar (needlePivot, scaleRadius + 36.0f, a)),
                         juce::Justification::centred, false);
@@ -527,7 +547,9 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
         const auto root = polar (needlePivot, 70.0f, a), tip = polar (needlePivot, scaleRadius + 22.0f, a);
         g.setColour (juce::Colours::black.withAlpha (0.18f));
         g.drawLine (juce::Line<float> (root.translated (6.0f, 5.0f), tip.translated (6.0f, 5.0f)), 3.5f);
-        g.setColour (juce::Colour (0xff141414));
+        g.setColour (juce::Colour (0xffff8a3c).withAlpha (0.35f));
+        g.drawLine (juce::Line<float> (root, tip), 8.0f);
+        g.setColour (juce::Colour (0xffffb070));
         g.drawLine (juce::Line<float> (root, tip), 3.0f);
     }
 
@@ -552,8 +574,9 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
     for (int i = 0; i < numLeds; ++i)
     {
         const auto y = ledTop + ledStep * (float) (numLeds - 1 - i);
-        const auto grColour = i >= 7 ? juce::Colour (0xfff2c230) : juce::Colour (0xff53d14b);
-        const auto outColour = i >= 7 ? juce::Colour (0xffe8382c) : (i >= 6 ? juce::Colour (0xfff2c230) : juce::Colour (0xff53d14b));
+        // Blue LEDs: deep to ice blue, red at the top of the output
+        const auto grColour = i >= 7 ? juce::Colour (0xffa8e6ff) : juce::Colour (0xff2f8cff);
+        const auto outColour = i >= 8 ? juce::Colour (0xffff4a3a) : (i >= 6 ? juce::Colour (0xffa8e6ff) : juce::Colour (0xff2f8cff));
         led ({ ledColumns[0], y }, grColour, in && reductionDb >= reductionSteps[i]);
         led ({ ledColumns[1], y }, outColour, outputDb >= outputSteps[i]);
 
@@ -562,26 +585,21 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
     }
 
     // --- IN key and its lamp ---------------------------------------------------
-    if (! in)
-    {
-        // The artwork shows the key lit; unlit, it's a dull grey.
-        g.setColour (juce::Colour (0xff4a4844).withAlpha (0.62f));
-        g.fillRoundedRectangle (inKey.reduced (12.0f), 6.0f);
-        g.setColour (juce::Colour (0xffd9d6cc).withAlpha (0.9f));
-        g.setFont (juce::FontOptions (38.0f, juce::Font::bold));
-        g.drawText ("IN", inKey, juce::Justification::centred, false);
-    }
+    look::drawKey (g, inKey.reduced (10.0f), look::Key::console, in, theme::neon, false, false);
+    g.setColour (in ? juce::Colours::white : ink.withAlpha (0.85f));
+    g.setFont (juce::FontOptions (38.0f, juce::Font::bold));
+    g.drawText ("IN", inKey, juce::Justification::centred, false);
 
     const auto lamp = juce::Rectangle<float> (34.0f, 34.0f).withCentre (inLamp);
-    g.setColour (juce::Colours::black.withAlpha (0.5f));
+    g.setColour (juce::Colours::black.withAlpha (0.6f));
     g.fillRoundedRectangle (lamp.expanded (4.0f), 5.0f);
     if (in)
     {
-        g.setColour (juce::Colour (0xfff9dc48).withAlpha (0.35f));
+        g.setColour (theme::neon.withAlpha (0.35f));
         g.fillRoundedRectangle (lamp.expanded (12.0f), 12.0f);
     }
-    g.setGradientFill (juce::ColourGradient (in ? juce::Colour (0xfffff3a0) : juce::Colour (0xff6d6436), lamp.getCentreX(), lamp.getY(),
-                                             in ? juce::Colour (0xffe8b81c) : juce::Colour (0xff3e3820), lamp.getCentreX(), lamp.getBottom(), false));
+    g.setGradientFill (juce::ColourGradient (in ? juce::Colour (0xffbfe0ff) : juce::Colour (0xff1c2a3d), lamp.getCentreX(), lamp.getY(),
+                                             in ? theme::neon : juce::Colour (0xff111a26), lamp.getCentreX(), lamp.getBottom(), false));
     g.fillRoundedRectangle (lamp, 4.0f);
 
     // --- Which plugin this face is running ------------------------------------

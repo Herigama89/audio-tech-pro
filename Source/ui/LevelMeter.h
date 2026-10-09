@@ -56,9 +56,19 @@ private:
         {
             const auto proportion = (float) (i + 1) / (float) count;
             const auto segDb = juce::jmap (proportion, -60.0f, 0.0f);
-            const auto colour = segDb > -1.0f ? theme::danger : segDb > -12.0f ? theme::meterAmber : theme::meterGreen;
+            // Blue LEDs, as in Cubase: deep blue, bright blue, ice blue near the top, red at 0 dB.
+            const auto colour = segDb > -1.0f ? theme::danger
+                              : segDb > -6.0f ? juce::Colour (0xffa8e6ff)
+                              : segDb > -18.0f ? juce::Colour (0xff4aa8ff)
+                              : juce::Colour (0xff1f6fe0);
             const auto y = r.getBottom() - (float) (i + 1) * (segment + gap) + gap;
-            g.setColour (proportion <= lit + 0.5f / (float) count ? colour : colour.withAlpha (0.12f));
+            const bool on = proportion <= lit + 0.5f / (float) count;
+            if (on)
+            {
+                g.setColour (colour.withAlpha (0.25f));
+                g.fillRect (r.getX() - 0.5f, y - 0.5f, r.getWidth() + 1.0f, segment + 1.0f);
+            }
+            g.setColour (on ? colour : colour.withAlpha (0.1f));
             g.fillRect (r.getX(), y, r.getWidth(), segment);
         }
     }

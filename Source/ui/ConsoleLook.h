@@ -61,6 +61,17 @@ namespace look
     /** A vertical fader with a metal cap, or a horizontal one with a small cap. */
     void fader (juce::Slider&);
 
+    /**
+        An encoder with a neon LED ring, as on modern digital consoles: the ring lights
+        from the start (or from the centre, for a knob that goes both ways) up to the value.
+        `proportion` is 0..1; `fromCentre` lights from 0.5.
+    */
+    void drawNeonKnob (juce::Graphics&, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
+                       juce::Colour ring, bool fromCentre, bool enabled = true);
+
+    /** A dark fader cap with grip ridges and a white line across its middle. */
+    void drawFaderCap (juce::Graphics&, juce::Rectangle<float> cap, bool vertical);
+
     /** Draws a raised key; used by the look and by custom buttons. */
     void drawKey (juce::Graphics&, juce::Rectangle<float> area, Key style, bool on, juce::Colour onColour,
                   bool over, bool down);
