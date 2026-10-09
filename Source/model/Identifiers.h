@@ -87,6 +87,11 @@ namespace riff::ids
     RIFF_DECLARE_ID (input)        // first input channel (index among the device's active inputs)
     RIFF_DECLARE_ID (inputStereo)  // true: record `input` and `input + 1`
     RIFF_DECLARE_ID (cycleEnabled)
+    RIFF_DECLARE_ID (autopunch)        // PROJECT: record only between punchIn and punchOut
+    RIFF_DECLARE_ID (punchIn)
+    RIFF_DECLARE_ID (punchOut)
+    RIFF_DECLARE_ID (replaceMode)      // PROJECT: a recording replaces what it covers
+    RIFF_DECLARE_ID (midiMerge)        // PROJECT: MIDI recorded over a MIDI region joins it
     RIFF_DECLARE_ID (cycleStart)
     RIFF_DECLARE_ID (cycleEnd)
     RIFF_DECLARE_ID (countIn)      // one bar of click before recording

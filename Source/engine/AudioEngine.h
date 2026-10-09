@@ -190,6 +190,10 @@ public:
                                 std::function<bool (double)> progress);
     void endOfflineRender();
 
+    /** The recording format: 16, 24 or 32 (float) bits. */
+    void setRecordBitDepth (int bits) noexcept { recordBitDepth = (bits == 16 || bits == 32) ? bits : 24; }
+    int getRecordBitDepth() const noexcept { return recordBitDepth; }
+
     /** While a fader or pan control is written as automation, the engine plays its value
         instead of the curve. NaN (or clearAutomationOverride) hands back to the curve. */
     void setAutomationOverride (int slot, bool pan, float value) noexcept
@@ -342,7 +346,8 @@ private:
     std::array<std::atomic<float>, PlaybackGraph::maxTracks> volumeOverride {}, panOverride {};   // NaN: none (set in the constructor)
     bool measuring = false;                       // only while measureMix renders
     juce::AudioBuffer<float>* stemCapture = nullptr;   // only while renderStems renders: 2 channels per slot
-    bool stemBeforeFader = false;                      // freezing: before the fader, pan and sends
+    bool stemBeforeFader = false;
+    int recordBitDepth = 24;                      // freezing: before the fader, pan and sends
     std::vector<LevelStats> measuredTracks;       // by slot
     LevelStats measuredMaster;
     bool offlineWasAttached = false, offlineSavedPlaying = false;

@@ -110,6 +110,9 @@ private:
     void toggleRecord();
     void beginRecording();
     void finishRecording();
+    void replaceUnder (const juce::ValueTree& region);
+    bool recordPunchOn = false;
+    double recordPunchIn = 0.0, recordPunchOut = 0.0;
     void toggleMetronome();
     void toggleCycle();
     void showAudioMenu();
@@ -125,6 +128,15 @@ private:
     void showFileMenu();
     void exportSong();
     void exportStems();
+    void toggleAutopunch();
+    void showUndoHistory();
+    void showPreferences();
+    void saveAsTemplate();
+    void newAlternative();
+    void showEventList();
+    void addTemplateAndAlternativeItems (juce::PopupMenu& menu);
+    juce::File templatesFolder() const;
+    int autosaveMinutes = 2;
     void toggleFreeze (juce::ValueTree track);
     void createStackFromSelection (bool summing);
     void newVcaForSelection();
@@ -245,6 +257,8 @@ private:
     IconButton cycleButton     { "Cycle",   IconButton::Icon::cycle,  juce::Colour (0xffe9b949) };
     IconButton countInButton   { "Count",   IconButton::Icon::countIn, juce::Colour (0xff5a9cff) };
     IconButton clickButton     { "Click",   IconButton::Icon::metronome, juce::Colour (0xff5a9cff) };
+    IconButton punchButton     { "Punch",   IconButton::Icon::punch,  juce::Colour (0xffd8352d) };
+    IconButton replaceButton   { "Replace", IconButton::Icon::replace, juce::Colour (0xffd8352d) };
     IconButton mixerButton     { "Mixer",   IconButton::Icon::mixer,  juce::Colour (0xff5a9cff) };
     IconButton editorButton    { "Editor",  IconButton::Icon::pianoRoll, juce::Colour (0xff5a9cff) };
     IconButton keysButton      { "Keys",    IconButton::Icon::keys };

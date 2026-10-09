@@ -97,6 +97,7 @@ set(RIFF_UI_SOURCES
     Source/MainComponent.cpp
     Source/MainCommands.cpp
     Source/MainAssistant.cpp
+    Source/MainExtras.cpp
     Source/MainScreenRecording.cpp
     Source/MainAudioDevices.cpp
     Source/ui/Theme.cpp
@@ -116,6 +117,7 @@ set(RIFF_UI_SOURCES
     Source/ui/InstrumentWindows.cpp
     Source/ui/Mixer.cpp
     Source/ui/ConsoleStripWindow.cpp
+    Source/ui/EventList.cpp
     Source/ui/BusCompConsolePanel.cpp
     Source/ui/StripParts.cpp
 )

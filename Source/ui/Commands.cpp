@@ -12,6 +12,8 @@ const std::vector<Info>& all()
         { saveProject,            "Save",                       "File",      "Save the project" },
         { saveProjectAs,          "Save As...",                 "File",      "Save the project under a new name" },
         { consolidateProject,     "Consolidate Project...",     "File",      "Copy every audio file the project uses into its folder (Audio Files), so it's all in one place" },
+        { saveAsTemplate,         "Save as Template...",        "File",      "Save this project as a template to start new ones from (File > New from Template)" },
+        { newAlternative,         "New Alternative...",         "File",      "Save a copy of the project beside it, to try ideas and switch between them (File > Alternatives)" },
         { revertToBackup,         "Revert to Backup...",        "File",      "Open one of the backups made each time you saved" },
         { importAudio,            "Import Audio File...",       "File",      "Put audio files on the selected track at the playhead" },
         { exportSong,             "Bounce Song to WAV...",      "File",      "Export the song, or the cycle range, to a WAV file" },
@@ -73,6 +75,9 @@ const std::vector<Info>& all()
         { toggleCycle,            "Cycle",                      "Transport", "Turn Cycle (loop) on or off" },
         { toggleMetronome,        "Metronome",                  "Transport", "Turn the click on or off" },
         { toggleCountIn,          "Count-in",                   "Transport", "One bar of click before recording" },
+        { toggleAutopunch,        "Autopunch",                  "Transport", "Record only between the punch locators (the red bar under the cycle; drag it in the ruler)" },
+        { toggleReplace,          "Replace",                    "Transport", "A recording replaces the parts of regions it covers" },
+        { toggleMidiMerge,        "Merge MIDI Recordings",      "Transport", "MIDI recorded over a MIDI region is merged into it" },
 
         { showMixer,              "Mixer",                      "View",      "Show or hide the mixer" },
         { showPianoRoll,          "Piano Roll",                 "View",      "Open the selected MIDI region in the piano roll, or close it" },
@@ -81,6 +86,9 @@ const std::vector<Info>& all()
         { toggleInspector,        "Inspector",                  "View",      "Show or hide the Inspector: the selected track's channel strip and the master's, on the left" },
         { zoomVerticalIn,         "Zoom Vertical In",           "View",      "Make every track taller" },
         { zoomVerticalOut,        "Zoom Vertical Out",          "View",      "Make every track shorter" },
+        { undoHistory,            "Undo History...",            "View",      "Every edit you can undo; click one to go back (or forward) to it" },
+        { preferences,            "Settings...",                "View",      "Autosave, backups, recording format and more" },
+        { eventList,              "Event List",                 "View",      "The selected MIDI region's notes and controllers as a list you can edit" },
         { keyCommands,            "Key Commands...",            "View",      "Show and edit the key commands" },
         { audioSettings,          "Audio Settings...",          "View",      "Choose the audio interface, sample rate and buffer size" },
         { calibrateLatency,       "Calibrate Recording Latency...", "View",  "Measure the round trip of your interface" },
@@ -185,6 +193,10 @@ namespace
             case toggleCycle:            return { key ('c') };
             case toggleMetronome:        return { key ('k') };
             case toggleCountIn:          return { key ('k', shift) };
+            case toggleAutopunch:        return { key ('i', opt | cmd) };
+            case undoHistory:            return { key ('z', opt | cmd) };
+            case preferences:            return { key (',', opt | cmd) };
+            case eventList:              return { key ('d', opt | cmd) };
 
             case showMixer:              return { key ('x') };
             case showPianoRoll:          return { key ('p'), key ('e') };

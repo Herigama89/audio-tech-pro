@@ -29,7 +29,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     // --- Toolbar ----------------------------------------------------------------
     for (auto* b : std::initializer_list<juce::Button*> { &fileButton, &undoButton, &redoButton, &addTrackButton, &settingsButton,
                                                           &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
-                                                          &recordButton, &cycleButton, &countInButton, &clickButton,
+                                                          &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton, &replaceButton,
                                                           &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton, &screenButton })
     {
         b->setWantsKeyboardFocus (false); // keep Space for play/stop
@@ -49,6 +49,10 @@ MainComponent::MainComponent (bool openAudioDevice)
     bind (cycleButton, commands::toggleCycle);
     bind (countInButton, commands::toggleCountIn);
     bind (clickButton, commands::toggleMetronome);
+    bind (punchButton, commands::toggleAutopunch);
+    bind (replaceButton, commands::toggleReplace);
+    punchButton.setTooltip ("Autopunch: record only between the punch locators (the red bar in the ruler, under the cycle)");
+    replaceButton.setTooltip ("Replace: a recording replaces the parts of regions it covers");
     bind (mixerButton, commands::showMixer);
     bind (editorButton, commands::showPianoRoll);
     bind (keysButton, commands::keyCommands);
@@ -57,9 +61,11 @@ MainComponent::MainComponent (bool openAudioDevice)
     bind (screenButton, commands::recordScreen);
 
     // Tool, Snap and Drag, as in Logic's tracks area
-    toolBox.addItemList ({ "Pointer", "Pencil", "Eraser", "Scissors", "Glue", "Mute", "Fade" }, 1);
+    toolBox.addItemList ({ "Pointer", "Pencil", "Eraser", "Scissors", "Glue", "Mute", "Fade", "Marquee", "Zoom", "Solo", "Text" }, 1);
     toolBox.setSelectedId (1, juce::dontSendNotification);
-    toolBox.setTooltip ("Tool (T): pointer, pencil (draws MIDI regions), eraser, scissors, glue (joins), mute, fade (drag at a region's start or end; Option-click removes)");
+    toolBox.setTooltip ("Tool (T): pointer, pencil (draws MIDI regions), eraser, scissors, glue (joins), mute, fade (drag at a region's start or end; Option-click removes), "
+                        "marquee (select a stretch of time on tracks; Delete removes it, Cmd+T splits at its edges), zoom (click or drag; Option-click zooms out), "
+                        "solo (hold on a region to hear its track alone from there), text (click a region to rename it)");
     toolBox.onChange = [this] { setTool ((TimelineState::Tool) (toolBox.getSelectedId() - 1)); };
     snapBox.addItemList ({ "Smart", "Bar", "Beat", "Division", "Off" }, 1);
     snapBox.setSelectedId (1, juce::dontSendNotification);
@@ -305,6 +311,8 @@ MainComponent::MainComponent (bool openAudioDevice)
 
     appProperties.setStorageParameters (settingsOptions);
     recordingOffsetMs = appProperties.getUserSettings()->getDoubleValue ("recordingOffsetMs", 0.0);
+    autosaveMinutes = appProperties.getUserSettings()->getIntValue ("autosaveMinutes", 2);
+    engine.setRecordBitDepth (appProperties.getUserSettings()->getIntValue ("recordBitDepth", 24));
 
     // The list of plugins found by earlier scans.
     if (auto xml = appProperties.getUserSettings()->getXmlValue ("knownPlugins"))
@@ -410,8 +418,22 @@ MainComponent::MainComponent (bool openAudioDevice)
     else if (openAudioDevice)
         juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this)]
         {
-            if (safe != nullptr)
-                safe->offerRecovery();
+            if (safe == nullptr)
+                return;
+
+            // Settings: open the last project at startup.
+            if (safe->appProperties.getUserSettings()->getBoolValue ("openLastProject", false))
+            {
+                const juce::File last (safe->appProperties.getUserSettings()->getValue ("lastProject"));
+                juce::String error;
+                if (last.existsAsFile())
+                    if (auto loaded = model::load (last, error); loaded.isValid())
+                    {
+                        loaded.setProperty (ids::name, last.getFileNameWithoutExtension(), nullptr);
+                        safe->setProject (loaded, last);
+                    }
+            }
+            safe->offerRecovery();
         });
 }
 
@@ -514,7 +536,7 @@ void MainComponent::paint (juce::Graphics& g)
 
     // Captions under the keys
     for (auto* b : std::initializer_list<juce::Button*> { &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
-                                                          &recordButton, &cycleButton, &countInButton, &clickButton,
+                                                          &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton, &replaceButton,
                                                           &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton, &screenButton })
     {
         g.setColour (b->getToggleState() ? theme::cream : theme::text.withAlpha (0.78f));
@@ -559,7 +581,8 @@ void MainComponent::resized()
         auto row = toolbar.withTrimmedTop (5).withHeight (keyHeight);
 
         const std::initializer_list<juce::Component*> transport { &rewindButton, &backBarButton, &forwardButton, &stopButton,
-                                                                  &playButton, &recordButton, &cycleButton, &countInButton, &clickButton };
+                                                                  &playButton, &recordButton, &cycleButton, &countInButton, &clickButton,
+                                                                  &punchButton, &replaceButton };
         const int totalWidth = (int) transport.size() * (keyWidth + gap) + 14;
         int x = getWidth() / 2 - totalWidth / 2;
 
@@ -767,6 +790,7 @@ void MainComponent::openProject()
             }
 
             loaded.setProperty (ids::name, file.getFileNameWithoutExtension(), nullptr);
+            appProperties.getUserSettings()->setValue ("lastProject", file.getFullPathName());
 
             // A newer autosave (the app closed before saving): offer it.
             if (const auto autosaved = model::files::newerAutosave (file); autosaved.existsAsFile())
@@ -813,7 +837,7 @@ void MainComponent::saveProject (std::function<void()> then)
     effectRack.storePluginStates (model::mixerOf (project));
 
     // The version on disk becomes a backup before it's replaced.
-    model::files::makeBackup (projectFile);
+    model::files::makeBackup (projectFile, appProperties.getUserSettings()->getIntValue ("backupsToKeep", 10));
 
     juce::String error;
     if (! model::save (project, projectFile, error))
@@ -825,6 +849,7 @@ void MainComponent::saveProject (std::function<void()> then)
     dirty = false;
     removeAutosave();   // saved: the autosave isn't needed
     updateTitle();
+    appProperties.getUserSettings()->setValue ("lastProject", projectFile.getFullPathName());
 
     if (then)
         then();
@@ -1114,6 +1139,25 @@ void MainComponent::splitAtPlayhead()
     const auto time = engine.getPlayheadSeconds();
     undoManager.beginNewTransaction ("Split");
 
+    // With a marquee selection, split at both of its edges.
+    if (timeline.hasMarquee())
+    {
+        for (const auto& id : timeline.marqueeTracks)
+        {
+            auto track = model::findById (project, id);
+            juce::Array<juce::ValueTree> regions;
+            for (const auto& r : track)
+                if (r.hasType (ids::REGION))
+                    regions.add (r);
+            for (auto r : regions)
+            {
+                model::splitRegion (r, timeline.marqueeEnd, &undoManager);
+                model::splitRegion (r, timeline.marqueeStart, &undoManager);
+            }
+        }
+        return;
+    }
+
     // The selected regions under the playhead; otherwise every region under the
     // playhead on the selected track.
     bool splitAny = false;
@@ -1137,6 +1181,32 @@ void MainComponent::splitAtPlayhead()
 
 void MainComponent::deleteSelection()
 {
+    // A marquee selection: cut that stretch out of the regions under it.
+    if (timeline.hasMarquee())
+    {
+        undoManager.beginNewTransaction ("Delete marquee selection");
+        for (const auto& id : timeline.marqueeTracks)
+        {
+            auto track = model::findById (project, id);
+            juce::Array<juce::ValueTree> regions;
+            for (const auto& r : track)
+                if (r.hasType (ids::REGION))
+                    regions.add (r);
+            for (auto r : regions)
+            {
+                if (auto right = model::splitRegion (r, timeline.marqueeEnd, &undoManager); right.isValid())
+                    juce::ignoreUnused (right);
+                auto middle = model::splitRegion (r, timeline.marqueeStart, &undoManager);
+                auto inside = middle.isValid() ? middle : r;
+                if ((double) inside[ids::start] >= timeline.marqueeStart - 1.0e-6 && model::regionEnd (inside) <= timeline.marqueeEnd + 1.0e-6)
+                    model::deleteRegion (inside, &undoManager);
+            }
+        }
+        timeline.clearMarquee();
+        timeline.changed();
+        return;
+    }
+
     const auto regions = timeline.selectedRegionTrees();
     if (regions.isEmpty())
         return;
@@ -1287,6 +1357,23 @@ void MainComponent::beginRecording()
     if (! wasPlaying && recordCycleOn && (start < recordCycleStart || start >= recordCycleEnd))
         start = recordCycleStart;
 
+    // Autopunch: playback starts here (or a bar before the punch-in when we're past it); recording at the punch-in.
+    auto playFrom = start;
+    recordPunchOn = project[ids::autopunch];
+    recordPunchIn = project.getProperty (ids::punchIn, 0.0);
+    recordPunchOut = project.getProperty (ids::punchOut, 0.0);
+    if (recordPunchOn && recordPunchOut > recordPunchIn)
+    {
+        const auto barLength = model::secondsPerBeat (project) * (int) project.getProperty (ids::timeSigNumerator, 4);
+        if (! wasPlaying && (playFrom > recordPunchIn || playFrom < recordPunchIn - 4.0 * barLength))
+            playFrom = juce::jmax (0.0, recordPunchIn - barLength);
+        start = juce::jmax (recordPunchIn, wasPlaying ? engine.getPlayheadSeconds() : recordPunchIn);
+    }
+    else
+    {
+        recordPunchOn = false;
+    }
+
     juce::String error;
     if (! engine.startRecording (requests, error, (juce::int64) std::llround (start * rate)))
     {
@@ -1298,9 +1385,18 @@ void MainComponent::beginRecording()
     {
         const bool countIn = project[ids::countIn];
         const auto barLength = model::secondsPerBeat (project) * (int) project.getProperty (ids::timeSigNumerator, 4);
-        engine.setPlayheadSecondsAllowingNegative (countIn ? start - barLength : start);
+        engine.setPlayheadSecondsAllowingNegative (countIn ? playFrom - barLength : playFrom);
         engine.play();
     }
+}
+
+void MainComponent::replaceUnder (const juce::ValueTree& region)
+{
+    // Replace mode: the new recording shortens, splits or removes what it covers.
+    if (! (bool) project[ids::replaceMode] || ! region.isValid())
+        return;
+    model::clearOverlaps (region, [this] (const juce::ValueTree& r) { return fileCache.getLengthSeconds (juce::File (r[ids::file].toString())); },
+                          &undoManager);
 }
 
 void MainComponent::finishRecording()
@@ -1335,12 +1431,18 @@ void MainComponent::finishRecording()
         if (pieces.empty())
             continue;
 
-        // One pass: an ordinary region.
+        // One pass: an ordinary region (cut at the punch-out with Autopunch).
         if (pieces.size() == 1)
         {
             const auto& p = pieces.front();
-            auto region = model::addRegion (track, take.file, p.timelineStart, p.length, &undoManager);
+            auto length = p.length;
+            if (recordPunchOn)
+                length = juce::jmin (length, recordPunchOut - p.timelineStart);
+            if (length < model::minRegionLength)
+                continue;
+            auto region = model::addRegion (track, take.file, p.timelineStart, length, &undoManager);
             region.setProperty (ids::offset, p.fileOffset, &undoManager);
+            replaceUnder (region);
             last = region;
             continue;
         }
@@ -1372,6 +1474,7 @@ void MainComponent::finishRecording()
         {
             auto region = model::addRegion (track, take.file, recordCycleStart, cycleLength, &undoManager);
             region.setProperty (ids::offset, takeOffsets.front(), &undoManager);
+            replaceUnder (region);
             last = region;
         }
         else if (takeOffsets.size() > 1)
@@ -1511,7 +1614,8 @@ void MainComponent::timerCallback()
     }
 
     // Autosave every two minutes while there are unsaved changes.
-    if (const auto now = juce::Time::getMillisecondCounter(); now - lastAutosaveMs > 120000)
+    if (const auto now = juce::Time::getMillisecondCounter();
+        autosaveMinutes > 0 && now - lastAutosaveMs > (juce::uint32) autosaveMinutes * 60000u)
     {
         lastAutosaveMs = now;
         if (changedSinceAutosave)
@@ -1545,6 +1649,13 @@ void MainComponent::timerCallback()
     clickButton.setToggleState ((bool) project[ids::metronome], juce::dontSendNotification);
     cycleButton.setToggleState ((bool) project[ids::cycleEnabled], juce::dontSendNotification);
     countInButton.setToggleState ((bool) project[ids::countIn], juce::dontSendNotification);
+    punchButton.setToggleState ((bool) project[ids::autopunch], juce::dontSendNotification);
+    replaceButton.setToggleState ((bool) project[ids::replaceMode], juce::dontSendNotification);
+
+    // Autopunch: recording stops at the punch-out locator (the region is cut exactly there).
+    if (engine.isRecording() && (bool) project[ids::autopunch] && ! recordCycleOn
+        && engine.getPlayheadSeconds() >= (double) project.getProperty (ids::punchOut, 0.0))
+        finishRecording();
 
     // While audio decodes in the background, say so in the status line.
     if (const bool loading = fileCache.isLoading(); loading || wasLoadingAudio)
@@ -1659,6 +1770,22 @@ void MainComponent::createMidiRegionFromTake (juce::ValueTree track, const Audio
         model::addNote (region, n.pitch, n.start, n.length, n.velocity, &undoManager);
     for (const auto& c : controllers)
         model::addControllerEvent (region, c.controller, c.time, c.value, &undoManager);
+
+    // Merge: played over a MIDI region, it joins it (otherwise, with Replace, it replaces what's under it).
+    if ((bool) project[ids::midiMerge])
+    {
+        juce::Array<juce::ValueTree> overlapping { region };
+        for (const auto& r : track)
+            if (r != region && model::isMidiRegion (r) && (double) r[ids::start] < model::regionEnd (region) && model::regionEnd (r) > (double) region[ids::start])
+                overlapping.add (r);
+        if (overlapping.size() > 1)
+            if (auto joined = model::joinRegions (overlapping, &undoManager); joined.isValid())
+                region = joined;
+    }
+    else
+    {
+        replaceUnder (region);
+    }
 
     last = region;
 }

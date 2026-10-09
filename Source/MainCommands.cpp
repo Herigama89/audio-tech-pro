@@ -40,7 +40,7 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
     {
         case commands::undo:            info.setActive (undoManager.canUndo()); break;
         case commands::redo:            info.setActive (undoManager.canRedo()); break;
-        case commands::deleteSelection: info.setActive (region.isValid()); break;
+        case commands::deleteSelection: info.setActive (region.isValid() || timeline.hasMarquee()); break;
         case commands::cutRegions:
         case commands::copyRegions:
         case commands::repeatRegions:
@@ -79,6 +79,10 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::toggleCycle:     info.setTicked ((bool) project[ids::cycleEnabled]); info.setActive (! recording); break;
         case commands::toggleMetronome: info.setTicked ((bool) project[ids::metronome]); break;
         case commands::toggleCountIn:   info.setTicked ((bool) project[ids::countIn]); break;
+        case commands::toggleAutopunch: info.setTicked ((bool) project[ids::autopunch]); break;
+        case commands::toggleReplace:   info.setTicked ((bool) project[ids::replaceMode]); break;
+        case commands::toggleMidiMerge: info.setTicked ((bool) project[ids::midiMerge]); break;
+        case commands::eventList:       info.setActive (region.isValid() && model::isMidiRegion (region)); break;
 
         case commands::showMixer:       info.setTicked (mixer.isVisible()); break;
         case commands::showHiddenTracks: info.setTicked (timeline.showHiddenTracks); break;
@@ -196,6 +200,14 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::toggleCycle:            toggleCycle(); break;
         case commands::toggleMetronome:        toggleMetronome(); break;
         case commands::toggleCountIn:          project.setProperty (ids::countIn, ! (bool) project[ids::countIn], nullptr); break;
+        case commands::toggleAutopunch:        toggleAutopunch(); break;
+        case commands::toggleReplace:          project.setProperty (ids::replaceMode, ! (bool) project[ids::replaceMode], nullptr); break;
+        case commands::toggleMidiMerge:        project.setProperty (ids::midiMerge, ! (bool) project[ids::midiMerge], nullptr); break;
+        case commands::undoHistory:            showUndoHistory(); break;
+        case commands::preferences:            showPreferences(); break;
+        case commands::saveAsTemplate:         saveAsTemplate(); break;
+        case commands::newAlternative:         newAlternative(); break;
+        case commands::eventList:              showEventList(); break;
 
         case commands::showMixer:              toggleMixer(); break;
         case commands::showPianoRoll:          togglePianoRoll(); break;
@@ -238,8 +250,9 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
     {
         case 0:
             add ({ commands::newProject, commands::openProject });
+            addTemplateAndAlternativeItems (menu);
             menu.addSeparator();
-            add ({ commands::saveProject, commands::saveProjectAs, commands::revertToBackup });
+            add ({ commands::saveProject, commands::saveProjectAs, commands::saveAsTemplate, commands::newAlternative, commands::revertToBackup });
             menu.addSeparator();
             add ({ commands::consolidateProject });
             menu.addSeparator();
@@ -288,6 +301,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         case 4:
             add ({ commands::record, commands::toggleCountIn, commands::toggleMetronome });
             menu.addSeparator();
+            add ({ commands::toggleAutopunch, commands::toggleReplace, commands::toggleMidiMerge });
+            menu.addSeparator();
             add ({ commands::calibrateLatency });
             break;
 
@@ -298,12 +313,12 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             break;
 
         case 6:
-            add ({ commands::toggleInspector });
+            add ({ commands::toggleInspector, commands::undoHistory, commands::eventList });
             add ({ commands::showPianoRoll, commands::zoomIn, commands::zoomOut, commands::zoomVerticalIn, commands::zoomVerticalOut });
             menu.addSeparator();
             add ({ commands::showAssistant, commands::recordScreen });
             menu.addSeparator();
-            add ({ commands::keyCommands, commands::audioSettings, commands::combineInterfaces });
+            add ({ commands::preferences, commands::keyCommands, commands::audioSettings, commands::combineInterfaces });
             break;
 
         default:
@@ -780,7 +795,8 @@ void MainComponent::showToolMenu()
     menu.addSectionHeader ("Tool");
     const std::pair<Tool, const char*> tools[] {
         { Tool::pointer, "Pointer" }, { Tool::pencil, "Pencil (draw MIDI regions)" }, { Tool::eraser, "Eraser" },
-        { Tool::scissors, "Scissors" }, { Tool::glue, "Glue (join)" }, { Tool::mute, "Mute" }, { Tool::fade, "Fade" } };
+        { Tool::scissors, "Scissors" }, { Tool::glue, "Glue (join)" }, { Tool::mute, "Mute" }, { Tool::fade, "Fade" },
+        { Tool::marquee, "Marquee" }, { Tool::zoom, "Zoom" }, { Tool::solo, "Solo" }, { Tool::text, "Text (rename)" } };
     for (const auto& [tool, name] : tools)
         menu.addItem (name, true, timeline.tool == tool, [this, t = tool] { setTool (t); });
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());

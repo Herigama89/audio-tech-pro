@@ -500,7 +500,7 @@ bool AudioEngine::startRecording (const std::vector<RecordRequest>& requests, ju
         auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}
                                                        .withSampleRate (rate)
                                                        .withNumChannels (request.numChannels)
-                                                       .withBitsPerSample (24));
+                                                       .withBitsPerSample (recordBitDepth));
         if (writer == nullptr)
             return fail ("Couldn't create a WAV writer for " + request.file.getFileName());
 

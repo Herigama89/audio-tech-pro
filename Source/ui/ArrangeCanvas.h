@@ -63,7 +63,11 @@ public:
 
 private:
     enum class DragMode { none, scrub, move, trimStart, trimEnd, cycleNew, cycleMove, automationPoint, rubberBand, pencilRegion, marker,
-                          fadeIn, fadeOut, loopEnd };
+                          fadeIn, fadeOut, loopEnd, punch, marquee, zoomRect, solo };
+    juce::ValueTree soloTrack;      // the Solo tool's track while the mouse is held
+    bool soloWasOn = false;
+    juce::Rectangle<float> punchBounds() const;
+    int punchDrag = 0;   // 1: the in point, 2: the out point, 3: the whole range, 0: a new one
 
     /** What a press at `pos` on a region would do with the pointer: trim, fade, loop or move. */
     DragMode edgeActionAt (const juce::ValueTree& region, int trackIndex, juce::Point<float> pos) const;

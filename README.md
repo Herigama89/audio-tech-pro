@@ -305,7 +305,7 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 
 **Editing in the tracks area**
 - [x] Tool menu (T) and Tool box: pointer, pencil (draws MIDI regions), eraser, scissors, glue, mute
-- [ ] More tools: text, solo, zoom, fade, automation, marquee
+- [x] More tools: text, solo, zoom, fade, marquee
 - [x] Cut, copy, paste at the playhead (Cmd+X/C/V), Select All (Cmd+A), Repeat (Cmd+R), New Track With Duplicate Settings (Cmd+D)
 - [x] Select several regions (Shift-click, or drag a rectangle); move them together; Option-drag copies
 - [x] Snap (Smart, Bar, Beat, Division, Off) and Drag modes (Overlap, No Overlap)
@@ -317,7 +317,8 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 **Editors**
 - [x] Piano Roll: velocity lane, MIDI CC and pitch bend lanes (recorded too), quantize grid / strength / swing, Scale Quantize, MIDI Transform presets, rubber-band note selection
 - [ ] Piano Roll: Time Handles, note repeat, more Transform sets
-- [ ] Step Editor, Event List, Score Editor, Audio Track Editor and Audio File Editor
+- [x] Event List (MIDI regions)
+- [ ] Step Editor, Score Editor, Audio Track Editor and Audio File Editor
 - [ ] Step Sequencer
 - [x] Editors open below the tracks with a resizable divider (double-click it for the default); the editor follows the selected track and region
 
@@ -333,12 +334,14 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 
 **Recording and MIDI**
 - [x] Audio and MIDI recording, punch in/out, cycle recording with take folders, count-in, metronome
-- [ ] Autopunch, replace mode, multi-track recording settings, MIDI merge/overdub, step input, MIDI learn and controller assignments
+- [x] Autopunch (punch locators in the ruler), Replace mode, MIDI merge
+- [ ] Step input, MIDI learn and controller assignments
 
 **Project and file**
 - [x] Autosave (every 2 minutes, with recovery after a crash), project backups (Revert to Backup), consolidate (collect audio into the project)
-- [ ] Project alternatives, project templates
-- [ ] Undo History window, preferences window, Library and loop browser, Smart Controls
+- [x] Project alternatives, project templates
+- [x] Undo History window, Settings window (autosave, backups, recording format, stop behaviour, open last project)
+- [ ] Library and loop browser, Smart Controls
 - [ ] Live Loops, Drummer and Session Players (instruments come last)
 
 ## Later phases

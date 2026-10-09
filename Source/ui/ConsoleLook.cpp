@@ -469,6 +469,21 @@ void IconButton::drawIcon (juce::Graphics& g, Icon icon, juce::Rectangle<float> 
             break;
         }
 
+        case Icon::punch:
+        {
+            // Two locators with the recorded stretch between them.
+            const auto h = r.getHeight();
+            g.fillRect (r.getX() + r.getWidth() * 0.12f, r.getY(), r.getWidth() * 0.09f, h);
+            g.fillRect (r.getRight() - r.getWidth() * 0.21f, r.getY(), r.getWidth() * 0.09f, h);
+            g.fillRoundedRectangle (r.getX() + r.getWidth() * 0.3f, r.getCentreY() - h * 0.17f, r.getWidth() * 0.4f, h * 0.34f, 1.5f);
+            return;
+        }
+
+        case Icon::replace:
+            g.setFont (juce::FontOptions (r.getHeight() * 0.75f, juce::Font::bold));
+            g.drawText ("REPL", r.expanded (r.getWidth() * 0.5f, 0.0f), juce::Justification::centred, false);
+            return;
+
         case Icon::countIn:
             g.setFont (juce::FontOptions (r.getHeight() * 0.75f, juce::Font::bold));
             g.drawText ("1234", r.expanded (r.getWidth() * 0.5f, 0.0f), juce::Justification::centred, false);

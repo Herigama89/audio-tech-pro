@@ -151,6 +151,32 @@ void ArrangeCanvas::paint (juce::Graphics& g)
                           juce::Justification::centred, 3);
     }
 
+    // The marquee selection: a bright stretch on its tracks.
+    if (timeline.hasMarquee())
+    {
+        const auto x0 = timeline.timeToX (timeline.marqueeStart), x1 = timeline.timeToX (timeline.marqueeEnd);
+        for (const auto& id : timeline.marqueeTracks)
+        {
+            const auto index = project.indexOf (project.getChildWithProperty (ids::id, id));
+            if (index < 0)
+                continue;
+            const juce::Rectangle<float> r (x0, (float) timeline.trackTop (index), x1 - x0, (float) timeline.heightOf (index));
+            g.setColour (juce::Colours::white.withAlpha (0.18f));
+            g.fillRect (r);
+            g.setColour (juce::Colours::white.withAlpha (0.8f));
+            g.fillRect (r.withWidth (1.0f));
+            g.fillRect (juce::Rectangle<float> (x1 - 1.0f, r.getY(), 1.0f, r.getHeight()));
+        }
+    }
+
+    if (dragMode == DragMode::zoomRect && ! rubberBand.isEmpty())
+    {
+        g.setColour (theme::accent.withAlpha (0.15f));
+        g.fillRect (rubberBand);
+        g.setColour (theme::accent);
+        g.drawRect (rubberBand, 1.0f);
+    }
+
     if (dragMode == DragMode::rubberBand && ! rubberBand.isEmpty())
     {
         g.setColour (juce::Colours::white.withAlpha (0.12f));
@@ -369,6 +395,24 @@ void ArrangeCanvas::paintCycle (juce::Graphics& g)
     g.fillRoundedRectangle (r, 3.0f);
     g.setColour (theme::ink.withAlpha (on ? 0.6f : 0.25f));
     g.drawRoundedRectangle (r.reduced (0.5f), 3.0f, 1.0f);
+
+    // Autopunch: the punch range as a red band just under the cycle.
+    if ((bool) project[ids::autopunch])
+    {
+        const auto p = punchBounds();
+        g.setColour (juce::Colour (0xffd8352d));
+        g.fillRoundedRectangle (p, 2.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.8f));
+        g.fillRect (p.getX(), p.getY() - 2.0f, 1.5f, p.getHeight() + 4.0f);
+        g.fillRect (p.getRight() - 1.5f, p.getY() - 2.0f, 1.5f, p.getHeight() + 4.0f);
+    }
+}
+
+juce::Rectangle<float> ArrangeCanvas::punchBounds() const
+{
+    const auto x0 = timeline.timeToX (project.getProperty (ids::punchIn, 0.0));
+    const auto x1 = timeline.timeToX (project.getProperty (ids::punchOut, 0.0));
+    return { x0, (float) TimelineState::barRulerHeight * 0.5f - 1.0f, juce::jmax (2.0f, x1 - x0), 5.0f };
 }
 
 void ArrangeCanvas::paintMidiNotes (juce::Graphics& g, const juce::ValueTree& region,
@@ -773,6 +817,19 @@ void ArrangeCanvas::mouseDown (const juce::MouseEvent& e)
             return;
         }
 
+        // Autopunch: drag the punch band's ends, or the band itself, or draw a new one.
+        if ((bool) project[ids::autopunch] && std::abs ((float) e.y - punchBounds().getCentreY()) <= 5.0f)
+        {
+            const auto p = punchBounds();
+            dragMouseDownTime = timeline.xToTime ((float) e.x);
+            dragCycleStart = project.getProperty (ids::punchIn, 0.0);
+            dragCycleEnd = project.getProperty (ids::punchOut, 0.0);
+            punchDrag = std::abs ((float) e.x - p.getX()) <= 5.0f ? 1 : std::abs ((float) e.x - p.getRight()) <= 5.0f ? 2
+                      : (e.position.x > p.getX() && e.position.x < p.getRight()) ? 3 : 0;
+            dragMode = DragMode::punch;
+            return;
+        }
+
         if (e.y < TimelineState::barRulerHeight / 2)
         {
             const auto c = cycleBounds();
@@ -791,6 +848,24 @@ void ArrangeCanvas::mouseDown (const juce::MouseEvent& e)
     if (const auto laneIndex = timeline.trackIndexAt (e.y);
         laneIndex >= 0 && laneIndex < model::numTracks (project) && handleAutomationMouseDown (e, laneIndex))
         return;
+
+    // Marquee and Zoom tools work anywhere in the lanes.
+    if ((timeline.tool == TimelineState::Tool::marquee || timeline.tool == TimelineState::Tool::zoom) && ! e.mods.isPopupMenu())
+    {
+        dragMode = timeline.tool == TimelineState::Tool::marquee ? DragMode::marquee : DragMode::zoomRect;
+        dragMouseDownTime = timeline.xToTime ((float) e.x);
+        if (dragMode == DragMode::marquee)
+        {
+            timeline.clearMarquee();
+            timeline.changed();
+        }
+        return;
+    }
+    if (timeline.hasMarquee())
+    {
+        timeline.clearMarquee();   // any other click drops the marquee
+        timeline.changed();
+    }
 
     int trackIndex = -1;
     auto region = regionAt (e.position, trackIndex);
@@ -977,6 +1052,29 @@ void ArrangeCanvas::mouseDrag (const juce::MouseEvent& e)
             updateRubberBand (e);
             break;
 
+        case DragMode::marquee:
+        {
+            const auto a = maybeSnap (dragMouseDownTime), b = maybeSnap (timeline.xToTime ((float) e.x));
+            timeline.marqueeStart = juce::jmin (a, b);
+            timeline.marqueeEnd = juce::jmax (a, b);
+            timeline.marqueeTracks.clear();
+            const auto i0 = timeline.trackIndexAt (juce::jmin (e.mouseDownPosition.toInt().y, e.y));
+            const auto i1 = timeline.trackIndexAt (juce::jmax (e.mouseDownPosition.toInt().y, e.y));
+            for (int i = juce::jmax (0, i0); i <= juce::jmin (model::numTracks (project) - 1, i1); ++i)
+                if (timeline.heightOf (i) > 0)
+                    timeline.marqueeTracks.add (project.getChild (i)[ids::id].toString());
+            repaint();
+            break;
+        }
+
+        case DragMode::zoomRect:
+            rubberBand = juce::Rectangle<float> (e.mouseDownPosition, e.position);
+            repaint();
+            break;
+
+        case DragMode::solo:
+            break;
+
         case DragMode::marker:
             if (dragMarker.isValid() && e.getDistanceFromDragStart() >= 4)
             {
@@ -1044,6 +1142,27 @@ void ArrangeCanvas::mouseDrag (const juce::MouseEvent& e)
             break;
         }
 
+        case DragMode::punch:
+        {
+            const auto t = maybeSnap (timeline.xToTime ((float) e.x));
+            auto in = dragCycleStart, out = dragCycleEnd;
+            if (punchDrag == 1)      in = juce::jmin (t, out - model::minRegionLength);
+            else if (punchDrag == 2) out = juce::jmax (t, in + model::minRegionLength);
+            else if (punchDrag == 3) { const auto shift = maybeSnap (dragCycleStart + timeline.xToTime ((float) e.x) - dragMouseDownTime) - dragCycleStart;
+                                       in += shift; out += shift; }
+            else if (e.getDistanceFromDragStart() >= 4)
+            {
+                const auto a = maybeSnap (dragMouseDownTime);
+                in = juce::jmin (a, t); out = juce::jmax (a, t);
+            }
+            if (out - in >= model::minRegionLength && in >= 0.0)
+            {
+                project.setProperty (ids::punchIn, in, nullptr);
+                project.setProperty (ids::punchOut, out, nullptr);
+            }
+            break;
+        }
+
         case DragMode::cycleMove:
         {
             if (e.getDistanceFromDragStart() < 4)
@@ -1075,6 +1194,32 @@ void ArrangeCanvas::mouseDrag (const juce::MouseEvent& e)
 void ArrangeCanvas::mouseUp (const juce::MouseEvent& e)
 {
     const bool wasClick = e.getDistanceFromDragStart() < 4;
+
+    if (dragMode == DragMode::zoomRect)
+    {
+        if (wasClick)
+            zoomAround ((float) e.x, e.mods.isAltDown() ? 0.5 : 2.0);
+        else
+        {
+            // Zoom so the dragged stretch fills the view.
+            const auto t0 = timeline.xToTime (juce::jmin (e.mouseDownPosition.x, e.position.x));
+            const auto t1 = timeline.xToTime (juce::jmax (e.mouseDownPosition.x, e.position.x));
+            if (t1 - t0 > 0.01)
+            {
+                timeline.pixelsPerSecond = juce::jlimit (TimelineState::minPixelsPerSecond, 4000.0, (double) getWidth() / (t1 - t0));
+                timeline.scrollSeconds = juce::jmax (0.0, t0);
+                if (onViewChanged) onViewChanged();
+            }
+        }
+        rubberBand = {};
+    }
+
+    if (dragMode == DragMode::solo && soloTrack.isValid())
+    {
+        engine.stop();
+        soloTrack.setProperty (ids::solo, soloWasOn, nullptr);
+        soloTrack = {};
+    }
 
     // Clicking the cycle bar turns the cycle on and off.
     if (dragMode == DragMode::cycleMove && wasClick)
@@ -1233,6 +1378,40 @@ void ArrangeCanvas::useTool (const juce::MouseEvent& e, juce::ValueTree region, 
         case TimelineState::Tool::mute:
             if (onMuteRegions)
                 onMuteRegions();
+            break;
+
+        case TimelineState::Tool::solo:
+        {
+            // Hear this track alone from here while the mouse is held.
+            soloTrack = region.getParent();
+            soloWasOn = soloTrack[ids::solo];
+            soloTrack.setProperty (ids::solo, true, nullptr);
+            engine.setPlayheadSeconds (juce::jmax (0.0, timeline.xToTime ((float) e.x)));
+            engine.play();
+            dragMode = DragMode::solo;
+            break;
+        }
+
+        case TimelineState::Tool::text:
+        {
+            auto* window = new juce::AlertWindow ("Rename region", {}, juce::MessageBoxIconType::NoIcon);
+            window->addTextEditor ("name", region[ids::name].toString());
+            window->addButton ("Rename", 1, juce::KeyPress (juce::KeyPress::returnKey));
+            window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+            window->enterModalState (true, juce::ModalCallbackFunction::create ([this, window, selection] (int result)
+            {
+                const auto name = window->getTextEditorContents ("name").trim();
+                if (result != 1 || name.isEmpty())
+                    return;
+                undoManager.beginNewTransaction ("Rename region");
+                for (auto r : selection)
+                    r.setProperty (ids::name, name, &undoManager);
+            }), true);
+            break;
+        }
+
+        case TimelineState::Tool::marquee:
+        case TimelineState::Tool::zoom:
             break;
 
         case TimelineState::Tool::fade:
@@ -1435,6 +1614,10 @@ void ArrangeCanvas::mouseMove (const juce::MouseEvent& e)
         case TimelineState::Tool::glue:
         case TimelineState::Tool::mute:     newCursor = region.isValid() ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor; break;
         case TimelineState::Tool::fade:     newCursor = region.isValid() ? juce::MouseCursor::CrosshairCursor : juce::MouseCursor::NormalCursor; break;
+        case TimelineState::Tool::marquee:  newCursor = juce::MouseCursor::CrosshairCursor; break;
+        case TimelineState::Tool::zoom:     newCursor = juce::MouseCursor::PointingHandCursor; break;
+        case TimelineState::Tool::solo:     newCursor = region.isValid() ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor; break;
+        case TimelineState::Tool::text:     newCursor = region.isValid() ? juce::MouseCursor::IBeamCursor : juce::MouseCursor::NormalCursor; break;
         case TimelineState::Tool::pointer:  break;
     }
 

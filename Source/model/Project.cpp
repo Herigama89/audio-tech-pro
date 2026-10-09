@@ -335,6 +335,17 @@ juce::ValueTree joinRegions (const juce::Array<juce::ValueTree>& regions, juce::
             const auto noteLength = juce::jmin ((double) note[ids::length], start + length - at);
             addNote (joined, note[ids::pitch], at - from, noteLength, note[ids::velocity], nullptr);
         }
+
+        // Controllers and pitch bend too.
+        for (const auto& event : r)
+        {
+            if (! event.hasType (ids::CC))
+                continue;
+            const double t = event[ids::start];
+            if (t < offset - 1.0e-9 || t >= offset + length)
+                continue;
+            addControllerEvent (joined, event[ids::controller], start + (t - offset) - from, event[ids::value], nullptr);
+        }
     }
 
     for (auto r : regions)
