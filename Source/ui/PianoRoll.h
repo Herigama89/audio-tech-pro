@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "../engine/AudioEngine.h"
+#include "NoteViews.h"
 
 namespace riff
 {
@@ -95,7 +96,11 @@ private:
     juce::ValueTree region;
 
     juce::TextButton quantizeButton { "Quantize" }, closeButton { "Close" }, scaleButton { "Scale Q" }, transformButton { "Transform" };
-    juce::ComboBox gridBox, strengthBox, laneBox;
+    juce::ComboBox gridBox, strengthBox, laneBox, viewBox;   // viewBox: Piano Roll, Score, Step Editor
+    friend class SnapshotTool;
+    ScoreView score;
+    StepEditor stepEditor { undoManager };
+    void showView (int id);
     juce::TextButton stepButton { "Step In" }, restButton { "Rest" };
     double stepContent = 0.0;     // where the next step goes (content time)
     int stepHeld = 0;

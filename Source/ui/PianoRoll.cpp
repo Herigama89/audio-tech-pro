@@ -62,7 +62,14 @@ PianoRoll::PianoRoll (juce::UndoManager& um, AudioEngine& e)
     laneBox.setSelectedId (1, juce::dontSendNotification);
     laneBox.setTooltip ("What the lane under the notes shows and edits");
     laneBox.onChange = [this] { repaint(); };
-    for (auto* box : { &gridBox, &strengthBox, &laneBox })
+    viewBox.addItemList ({ "Piano Roll", "Score", "Step Editor" }, 1);
+    viewBox.setSelectedId (1, juce::dontSendNotification);
+    viewBox.setTooltip ("The region as a piano roll, as notation (Score), or as a grid of steps (Step Editor)");
+    viewBox.onChange = [this] { showView (viewBox.getSelectedId()); };
+    addChildComponent (score);
+    addChildComponent (stepEditor);
+
+    for (auto* box : { &gridBox, &strengthBox, &laneBox, &viewBox })
     {
         box->setWantsKeyboardFocus (false);
         addAndMakeVisible (box);
@@ -125,6 +132,8 @@ void PianoRoll::setRegion (juce::ValueTree newRegion)
 
     titleLabel.setText (region.getParent()[ids::name].toString() + "  -  " + region[ids::name].toString(),
                         juce::dontSendNotification);
+    score.setRegion (region);
+    stepEditor.setRegion (region);
 
     scrollContent = juce::jmax (0.0, (double) region[ids::offset] - 0.1);
 
@@ -282,7 +291,11 @@ void PianoRoll::resized()
     restButton.setBounds (header.removeFromRight (46));
     header.removeFromRight (4);
     stepButton.setBounds (header.removeFromRight (64));
+    viewBox.setBounds (header.removeFromLeft (110));
+    header.removeFromLeft (8);
     titleLabel.setBounds (header);
+    score.setBounds (getLocalBounds().withTrimmedTop (headerHeight));
+    stepEditor.setBounds (getLocalBounds().withTrimmedTop (headerHeight));
 }
 
 void PianoRoll::paint (juce::Graphics& g)
@@ -681,6 +694,16 @@ void PianoRoll::quantizeSelection()
     const auto swing = strengthBox.getSelectedId() == 4 ? 0.3 : strengthBox.getSelectedId() == 5 ? 0.6 : 0.0;
     model::quantizeNotesTo (selectedOrAllNotes(), quantizeGrid(), strength, swing,
                             (double) region[ids::start] - (double) region[ids::offset], &undoManager);
+}
+
+void PianoRoll::showView (int id)
+{
+    score.setVisible (id == 2);
+    stepEditor.setVisible (id == 3);
+    for (auto* c : std::initializer_list<juce::Component*> { &laneBox, &stepButton, &restButton })
+        c->setVisible (id == 1);
+    resized();
+    repaint();
 }
 
 void PianoRoll::advanceStep()

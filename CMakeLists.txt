@@ -122,6 +122,7 @@ set(RIFF_UI_SOURCES
     Source/ui/LibraryPanel.cpp
     Source/ui/AudioEditorPanel.cpp
     Source/ui/SmartControls.cpp
+    Source/ui/NoteViews.cpp
     Source/ui/BusCompConsolePanel.cpp
     Source/ui/StripParts.cpp
 )

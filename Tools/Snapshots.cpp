@@ -128,6 +128,13 @@ public:
                 }
         pump (main, 200);
         save (main, "pianoroll.png");
+        main.pianoRoll.viewBox.setSelectedId (2);
+        pump (main, 150);
+        save (main.pianoRoll, "score.png");
+        main.pianoRoll.viewBox.setSelectedId (3);
+        pump (main, 150);
+        save (main.pianoRoll, "step-editor.png");
+        main.pianoRoll.viewBox.setSelectedId (1);
         main.closePianoRoll();
 
         {
