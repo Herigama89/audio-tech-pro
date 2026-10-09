@@ -23,6 +23,63 @@ struct TempoMap
 
     std::vector<Segment> segments { Segment {} };   // always at least one, starting at 0
 
+    /** Time signatures: from `startBar` (0-based) on, `beatsPerBar` beats a bar. */
+    struct Meter
+    {
+        int startBar = 0;
+        double startBeat = 0.0;
+        int beatsPerBar = 4;
+    };
+    std::vector<Meter> meters { Meter {} };
+
+    void setBaseMeter (int beatsPerBar) { meters.front().beatsPerBar = beatsPerBar > 0 ? beatsPerBar : 4; }
+
+    /** A time signature change at a bar (call in bar order). */
+    void addMeterChange (int bar, int beatsPerBar)
+    {
+        if (beatsPerBar <= 0 || bar <= meters.back().startBar)
+        {
+            if (bar == meters.back().startBar && beatsPerBar > 0)
+                meters.back().beatsPerBar = beatsPerBar;
+            return;
+        }
+        Meter m;
+        m.startBar = bar;
+        m.startBeat = beatOfBar (bar);
+        m.beatsPerBar = beatsPerBar;
+        meters.push_back (m);
+    }
+
+    /** The beat a bar (0-based) starts on. */
+    double beatOfBar (double bar) const noexcept
+    {
+        const Meter* m = &meters.front();
+        for (const auto& candidate : meters)
+            if (candidate.startBar <= bar)
+                m = &candidate;
+        return m->startBeat + (bar - m->startBar) * m->beatsPerBar;
+    }
+
+    /** The bar (0-based) a beat is in, and how far into it (beats). */
+    std::pair<int, double> barAndBeat (double beat) const noexcept
+    {
+        const Meter* m = &meters.front();
+        for (const auto& candidate : meters)
+            if (candidate.startBeat <= beat + 1.0e-9)
+                m = &candidate;
+        const auto barsIn = std::floor ((beat - m->startBeat) / m->beatsPerBar + 1.0e-9);
+        return { m->startBar + (int) barsIn, beat - m->startBeat - barsIn * m->beatsPerBar };
+    }
+
+    int beatsPerBarAt (double beat) const noexcept
+    {
+        const Meter* m = &meters.front();
+        for (const auto& candidate : meters)
+            if (candidate.startBeat <= beat + 1.0e-9)
+                m = &candidate;
+        return m->beatsPerBar;
+    }
+
     static TempoMap constant (double secondsPerBeat)
     {
         TempoMap m;

@@ -656,3 +656,21 @@ TEST_CASE ("MIDI, markers and the cycle follow tempo changes; audio stays", "[mo
     CHECK_THAT ((double) project[ids::cycleEnd], WithinAbs (8.0, 1e-9));
     CHECK_THAT ((double) audio[ids::start], WithinAbs (2.0, 1e-9));   // audio isn't stretched
 }
+
+TEST_CASE ("Time signature changes along the song", "[model][tempo]")
+{
+    auto project = model::createProject();
+    project.setProperty (ids::tempo, 120.0, nullptr);
+    model::addSignatureChange (project, 3, 3, nullptr);   // from bar 3: 3/4
+    const auto map = model::tempoMapOf (project);
+    CHECK_THAT (map.beatOfBar (2), WithinAbs (8.0, 1e-9));    // bar 3 starts after two 4/4 bars
+    CHECK_THAT (map.beatOfBar (3), WithinAbs (11.0, 1e-9));   // bar 4: three beats later
+    const auto [bar, inBar] = map.barAndBeat (12.0);
+    CHECK (bar == 3);
+    CHECK_THAT (inBar, WithinAbs (1.0, 1e-9));
+
+    const auto p = model::barPositionAt (project, 6.0);   // beat 12 = bar 4, beat 2
+    CHECK (p.bar == 4);
+    CHECK (p.beat == 2);
+    CHECK_THAT (model::moveByBars (project, 4.0, 1), WithinAbs (5.5, 1e-9));   // bar 3 (4 s) -> bar 4 (beat 11 = 5.5 s)
+}

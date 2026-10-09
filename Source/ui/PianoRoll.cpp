@@ -348,7 +348,9 @@ void PianoRoll::paint (juce::Graphics& g)
         {
             const auto b = (double) k * gridBeats;
             const auto x = contentToX (map.secondsAt (b) - regionStart + offset);
-            const bool isBar = std::abs (std::remainder (b, beatsPerBar)) < 1e-6;
+            const auto inBar = map.barAndBeat (b).second;
+            const bool isBar = inBar < 1e-6 || std::abs (inBar - map.beatsPerBarAt (b)) < 1e-6;
+            juce::ignoreUnused (beatsPerBar);
             const bool isBeat = std::abs (std::remainder (b, 1.0)) < 1e-6;
             g.setColour (isBar ? theme::gridBar.brighter (0.3f) : isBeat ? theme::gridBar : theme::gridBeat);
             g.fillRect (x, (float) area.getY(), 1.0f, (float) area.getHeight());

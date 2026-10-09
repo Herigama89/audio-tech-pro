@@ -56,7 +56,9 @@ void ScoreView::paint (juce::Graphics& g)
     const auto lastBeat = map.beatAt (regionStart + length);
 
     const auto left = 70.0f;
-    const auto xOf = [&] (double beat) { return left + (float) (beat - std::floor (firstBeat / beatsPerBar) * beatsPerBar) * pixelsPerBeat - scroll; };
+    const auto firstBar = map.barAndBeat (firstBeat).first;
+    const auto xOf = [&] (double beat) { return left + (float) (beat - map.beatOfBar (firstBar)) * pixelsPerBeat - scroll; };
+    juce::ignoreUnused (beatsPerBar);
 
     // The grand staff: middle C between the two staves.
     const auto middleC = (float) getHeight() * 0.5f;
@@ -76,9 +78,9 @@ void ScoreView::paint (juce::Graphics& g)
     // Bar lines and numbers.
     juce::Graphics::ScopedSaveState save (g);
     g.reduceClipRegion (juce::Rectangle<int> ((int) left - 6, 0, getWidth() - (int) left, getHeight()));
-    for (auto bar = (int) std::floor (firstBeat / beatsPerBar); bar * beatsPerBar <= lastBeat + 1.0e-6; ++bar)
+    for (auto bar = firstBar; map.beatOfBar (bar) <= lastBeat + 1.0e-6; ++bar)
     {
-        const auto x = xOf (bar * beatsPerBar);
+        const auto x = xOf (map.beatOfBar (bar));
         g.setColour (juce::Colour (0xff2b2b2b));
         g.fillRect (x, yOfStep (10), 1.0f, yOfStep (-10) - yOfStep (10));
         g.setColour (juce::Colour (0xff777777));

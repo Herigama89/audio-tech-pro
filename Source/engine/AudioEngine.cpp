@@ -1412,7 +1412,8 @@ void AudioEngine::renderClick (const PlaybackGraph& graph, float* mixL, float* m
     {
         if (blockStart + i == nextBeatSample)
         {
-            const bool downbeat = graph.beatsPerBar > 0 && ((beat % graph.beatsPerBar) + graph.beatsPerBar) % graph.beatsPerBar == 0;
+            const bool downbeat = beat >= 0 ? tempo.barAndBeat ((double) beat).second < 1.0e-6
+                                            : graph.beatsPerBar > 0 && ((beat % graph.beatsPerBar) + graph.beatsPerBar) % graph.beatsPerBar == 0;
             clickPhaseInc = juce::MathConstants<double>::twoPi * (downbeat ? 1600.0 : 1100.0) / rate;
             clickAmplitude = downbeat ? 0.5f : 0.32f;
             clickPhase = 0.0;

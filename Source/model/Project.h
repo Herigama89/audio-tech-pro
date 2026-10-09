@@ -321,6 +321,10 @@ namespace riff::model
     /** The changes in beat order. */
     juce::Array<juce::ValueTree> sortedTempoChanges (const juce::ValueTree& project);
 
+    /** A time signature change at a bar (1-based): `beatsPerBar` beats a bar from there on. */
+    juce::ValueTree addSignatureChange (juce::ValueTree project, int bar, int beatsPerBar, juce::UndoManager* um);
+    juce::Array<juce::ValueTree> sortedSignatureChanges (const juce::ValueTree& project);
+
     /** The whole tempo map: the project's tempo, then each change. */
     TempoMap tempoMapOf (const juce::ValueTree& project);
 

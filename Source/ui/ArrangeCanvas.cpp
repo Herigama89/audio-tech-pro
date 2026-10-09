@@ -65,7 +65,15 @@ double ArrangeCanvas::snap (double t) const
     switch (timeline.snapMode)
     {
         case TimelineState::Snap::off:      return juce::jmax (0.0, t);
-        case TimelineState::Snap::bar:      grid = (int) project.getProperty (ids::timeSigNumerator, 4); break;
+        case TimelineState::Snap::bar:
+        {
+            // To the nearest bar line (bars can change length with the time signature).
+            const auto map = model::tempoMapOf (project);
+            const auto beat = map.beatAt (juce::jmax (0.0, t));
+            const auto bar = map.barAndBeat (beat).first;
+            const auto a = map.beatOfBar (bar), b = map.beatOfBar (bar + 1);
+            return map.secondsAt (beat - a < b - beat ? a : b);
+        }
         case TimelineState::Snap::beat:     grid = 1.0; break;
         case TimelineState::Snap::division: grid = 0.25; break;
         case TimelineState::Snap::smart:    break;
@@ -221,7 +229,9 @@ void ArrangeCanvas::paintGrid (juce::Graphics& g)
     {
         const auto b = (double) i * grid;
         const auto x = timeline.timeToX (map.secondsAt (b));
-        const bool isBar = std::abs (std::remainder (b, (double) beatsPerBar)) < 1e-6;
+        const auto inBar = map.barAndBeat (b).second;
+        const bool isBar = inBar < 1e-6 || std::abs (inBar - map.beatsPerBarAt (b)) < 1e-6;
+        juce::ignoreUnused (beatsPerBar);
 
         g.setColour (isBar ? theme::gridBar : theme::gridBeat);
         g.fillRect (x, (float) TimelineState::rulerHeight, 1.0f, bottom - (float) TimelineState::rulerHeight);
@@ -250,9 +260,11 @@ void ArrangeCanvas::paintRuler (juce::Graphics& g)
 
     g.setFont (juce::FontOptions (11.0f));
 
-    for (auto bar = (juce::int64) std::floor (map.beatAt (timeline.scrollSeconds) / beatsPerBar); map.secondsAt ((double) bar * beatsPerBar) <= t1; ++bar)
+    juce::ignoreUnused (beatsPerBar);
+    for (auto bar = (juce::int64) map.barAndBeat (map.beatAt (timeline.scrollSeconds)).first; map.secondsAt (map.beatOfBar ((double) bar)) <= t1; ++bar)
     {
-        const auto x = timeline.timeToX (map.secondsAt ((double) bar * beatsPerBar));
+        const auto barBeat = map.beatOfBar ((double) bar);
+        const auto x = timeline.timeToX (map.secondsAt (barBeat));
 
         if (bar % labelEvery == 0)
         {
@@ -266,8 +278,8 @@ void ArrangeCanvas::paintRuler (juce::Graphics& g)
         if (showBeats)
         {
             g.setColour (theme::ink.withAlpha (0.35f));
-            for (int b = 1; b < beatsPerBar; ++b)
-                g.fillRect (timeline.timeToX (map.secondsAt ((double) bar * beatsPerBar + b)), rh * 0.75f, 1.0f, rh * 0.25f);
+            for (int b = 1; b < map.beatsPerBarAt (barBeat); ++b)
+                g.fillRect (timeline.timeToX (map.secondsAt (barBeat + b)), rh * 0.75f, 1.0f, rh * 0.25f);
         }
     }
 
@@ -327,6 +339,17 @@ void ArrangeCanvas::paintTempo (juce::Graphics& g)
                     juce::Justification::centredLeft, false);
     }
 
+    // Time signature changes, in yellow.
+    g.setColour (theme::solo);
+    for (const auto& sig : model::sortedSignatureChanges (project))
+    {
+        const auto x = timeline.timeToX (map.secondsAt (map.beatOfBar ((int) sig[ids::bar] - 1)));
+        if (x < -40.0f || x > (float) getWidth())
+            continue;
+        g.drawText (sig[ids::timeSigNumerator].toString() + "/4", juce::Rectangle<float> (x - 34.0f, top, 30.0f, lane.getHeight()),
+                    juce::Justification::centredRight, false);
+    }
+
     g.setColour (juce::Colours::black.withAlpha (0.7f));
     g.fillRect (0.0f, lane.getBottom() - 1.0f, (float) getWidth(), 1.0f);
 }
@@ -379,9 +402,34 @@ void ArrangeCanvas::tempoMouseDown (const juce::MouseEvent& e)
     {
         juce::PopupMenu menu;
         const auto map = model::tempoMapOf (project);
-        const int beatsPerBar = juce::jmax (1, (int) project.getProperty (ids::timeSigNumerator, 4));
-        const auto beat = std::round (map.beatAt (timeline.xToTime ((float) e.x)) / beatsPerBar) * beatsPerBar;
+        const auto clickedBeat = map.beatAt (timeline.xToTime ((float) e.x));
+        const auto [barIndex, inBar] = map.barAndBeat (clickedBeat);
+        const auto nearestBar = inBar > map.beatsPerBarAt (clickedBeat) * 0.5 ? barIndex + 1 : barIndex;
+        const auto beat = map.beatOfBar (nearestBar);
         menu.addItem ("New tempo change here...", [this, beat] { editTempoChange ({}, beat); });
+        menu.addItem ("New time signature at bar " + juce::String (juce::jmax (2, nearestBar + 1)) + "...", [this, nearestBar]
+        {
+            auto* window = new juce::AlertWindow ("Time signature", "Beats per bar from bar " + juce::String (juce::jmax (2, nearestBar + 1)) + " (e.g. 3 for 3/4):",
+                                                  juce::MessageBoxIconType::NoIcon);
+            window->addTextEditor ("beats", "3");
+            window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+            window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+            window->enterModalState (true, juce::ModalCallbackFunction::create ([this, window, nearestBar] (int result)
+            {
+                const auto beats = window->getTextEditorContents ("beats").getIntValue();
+                if (result != 1 || beats < 1 || beats > 16)
+                    return;
+                undoManager.beginNewTransaction ("Time signature change");
+                model::addSignatureChange (project, juce::jmax (2, nearestBar + 1), beats, &undoManager);
+                timeline.changed();
+            }), true);
+        });
+        for (const auto& sig : model::sortedSignatureChanges (project))
+            menu.addItem ("Delete " + sig[ids::timeSigNumerator].toString() + "/4 at bar " + sig[ids::bar].toString(), [this, sig]() mutable
+            {
+                undoManager.beginNewTransaction ("Delete time signature change");
+                sig.getParent().removeChild (sig, &undoManager);
+            });
         if (change.isValid())
         {
             menu.addItem ("Change tempo...", [this, change] { editTempoChange (change, 0.0); });
