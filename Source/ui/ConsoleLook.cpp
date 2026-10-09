@@ -2,6 +2,7 @@
 #include "Theme.h"
 #include "ToolIcons.h"
 #include "Skin.h"
+#include "PluginNames.h"
 
 namespace riff
 {
@@ -164,6 +165,20 @@ void ConsoleLook::drawButtonBackground (juce::Graphics& g, juce::Button& button,
         g.setColour ((style == look::Key::dark ? theme::toolbar : theme::console).withAlpha (0.5f));
         g.fillRoundedRectangle (area, 3.0f);
     }
+}
+
+void ConsoleLook::drawButtonText (juce::Graphics& g, juce::TextButton& button, bool over, bool down)
+{
+    if (button.getProperties().getWithDefault ("atpSkin", {}).toString().isEmpty())
+    {
+        LookAndFeel_V4::drawButtonText (g, button, over, down);
+        return;
+    }
+    const auto font = getTextButtonFont (button, button.getHeight());
+    g.setFont (font);
+    g.setColour (button.findColour (juce::TextButton::textColourOffId).withMultipliedAlpha (button.isEnabled() ? 1.0f : 0.5f));
+    const auto area = button.getLocalBounds().reduced (3, 0);
+    g.drawText (pluginnames::abbreviate (button.getButtonText(), font, (float) area.getWidth()), area, juce::Justification::centred, false);
 }
 
 juce::Font ConsoleLook::getTextButtonFont (juce::TextButton& button, int buttonHeight)

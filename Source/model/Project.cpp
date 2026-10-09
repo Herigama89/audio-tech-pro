@@ -1,5 +1,6 @@
 #include "Project.h"
 #include <map>
+#include <algorithm>
 #include "../engine/BuiltInEffects.h"
 #include "../AppInfo.h"
 #include <array>
@@ -1835,11 +1836,59 @@ juce::Array<juce::ValueTree> sendsOf (const juce::ValueTree& chain)
 
 juce::Array<juce::ValueTree> insertsOf (const juce::ValueTree& chain)
 {
+    // In slot order (the order they process in).
     juce::Array<juce::ValueTree> result;
     for (const auto& c : chain)
         if (c.hasType (ids::INSERT))
             result.add (c);
+    std::stable_sort (result.begin(), result.end(), [] (const juce::ValueTree& a, const juce::ValueTree& b) { return insertSlot (a) < insertSlot (b); });
     return result;
+}
+
+int insertSlot (const juce::ValueTree& insert)
+{
+    if (insert.hasProperty (ids::slot))
+        return (int) insert[ids::slot];
+    // Before slots: its place among the chain's inserts.
+    int index = 0;
+    for (const auto& c : insert.getParent())
+    {
+        if (c == insert)
+            return index;
+        if (c.hasType (ids::INSERT))
+            ++index;
+    }
+    return index;
+}
+
+juce::ValueTree insertAtSlot (const juce::ValueTree& chain, int slot)
+{
+    for (const auto& c : chain)
+        if (c.hasType (ids::INSERT) && insertSlot (c) == slot)
+            return c;
+    return {};
+}
+
+juce::ValueTree placeInsert (juce::ValueTree chain, int slot,
+                             const std::function<juce::ValueTree (juce::ValueTree chain, int index)>& make, juce::UndoManager* um)
+{
+    // Give every insert its slot for good (older projects had none), so nothing moves.
+    for (auto c : insertsOf (chain))
+        if (! c.hasProperty (ids::slot))
+            c.setProperty (ids::slot, insertSlot (c), um);
+
+    if (auto old = insertAtSlot (chain, slot); old.isValid())
+        removeInsert (old, um);
+
+    // In the chain, after the inserts in the slots above.
+    int index = 0;
+    for (int i = 0; i < chain.getNumChildren(); ++i)
+        if (const auto c = chain.getChild (i); c.hasType (ids::INSERT) && insertSlot (c) < slot)
+            index = i + 1;
+
+    auto insert = make (chain, index);
+    insert.setProperty (ids::slot, slot, um);
+    return insert;
 }
 
 //==============================================================================

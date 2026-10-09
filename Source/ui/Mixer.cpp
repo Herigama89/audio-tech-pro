@@ -614,8 +614,7 @@ bool ChannelStrip::hasSends() const
 
 juce::ValueTree ChannelStrip::insertAt (int slot) const
 {
-    const auto inserts = model::insertsOf (model::findChain (project, getOwnerId()));
-    return juce::isPositiveAndBelow (slot, inserts.size()) ? inserts[slot] : juce::ValueTree();
+    return model::insertAtSlot (model::findChain (project, getOwnerId()), slot);
 }
 
 juce::ValueTree ChannelStrip::sendAt (int index) const
@@ -759,6 +758,7 @@ void ChannelStrip::refresh()
         {
             const bool off = insert[ids::bypass];
             b->setButtonText (insertName (insert));
+            b->setTooltip (insertName (insert) + (off ? " (bypassed)" : "") + ". Click to open; right-click for bypass, replace and remove.");
             b->setColour (juce::TextButton::buttonColourId, off ? theme::stripSlot : theme::stripSlotOn);
             b->setColour (juce::TextButton::textColourOffId, off ? juce::Colour (0xff8d9196) : juce::Colours::white);
         }

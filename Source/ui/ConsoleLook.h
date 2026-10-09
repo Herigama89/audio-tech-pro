@@ -31,6 +31,9 @@ public:
 
     juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override;
 
+    /** Insert and send slots shorten long plugin names to fit (as Logic does). */
+    void drawButtonText (juce::Graphics&, juce::TextButton&, bool isMouseOverButton, bool isButtonDown) override;
+
     void drawScrollbar (juce::Graphics&, juce::ScrollBar&, int x, int y, int width, int height, bool isScrollbarVertical,
                         int thumbStartPosition, int thumbSize, bool isMouseOver, bool isMouseDown) override;
 

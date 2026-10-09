@@ -4,6 +4,7 @@
 
 #include "../Source/ui/LiveLoopsGrid.h"
 #include "../Source/ui/ToolIcons.h"
+#include "../Source/ui/PluginPicker.h"
 #include <JuceHeader.h>
 #include "MainComponent.h"
 #include "model/Project.h"
@@ -401,6 +402,23 @@ public:
             save (grid, "live-loops.png");
             main.player.clearLiveCells();
             main.project.removeChild (main.project.getChildWithName (ids::LIVELOOPS), nullptr);
+        }
+
+        {
+            std::vector<PluginPicker::Entry> entries;
+            for (const auto* n : { "EQ", "Compressor", "Reverb", "Delay", "Limiter" })
+                entries.push_back ({ n, "Audio Tech Pro", {}, {} });
+            entries.push_back ({ "Pro-Q 3", "FabFilter", "VST3", {} });
+            entries.push_back ({ "Pro-C 2", "FabFilter", "AU", {} });
+            entries.push_back ({ "1176 Classic Limiter", "Universal Audio", "AU", {} });
+            entries.push_back ({ "LA-2A Gray", "Universal Audio", "AU", {} });
+            entries.push_back ({ "Valhalla VintageVerb", "Valhalla DSP", "CLAP", {} });
+            PluginPicker picker (entries, {}, {});
+            pump (main, 30);
+            save (picker, "plugin-picker.png");
+            picker.search.setText ("comp", true);
+            pump (main, 30);
+            save (picker, "plugin-picker-search.png");
         }
 
         {

@@ -161,3 +161,18 @@ TEST_CASE ("Clearing automation removes a lane, undoably", "[automation]")
         CHECK (model::laneFor (project, owner, model::panParam, false).getNumChildren() == 1);
     }
 }
+
+#include "ui/PluginNames.h"
+
+TEST_CASE ("Plugin names are shortened to fit a slot, as in Logic", "[ui][names]")
+{
+    using riff::pluginnames::abbreviate;
+    auto fitsIn = [] (int chars) { return [chars] (const juce::String& s) { return s.length() <= chars; }; };
+
+    CHECK (abbreviate ("Compressor", fitsIn (20)) == "Compressor");                  // fits: unchanged
+    CHECK (abbreviate ("FabFilter Pro-Q 3", fitsIn (10)) == "Pro-Q 3");               // the maker's name goes first
+    CHECK (abbreviate ("ChromaVerb (Stereo)", fitsIn (10)) == "ChromaVerb");          // then bracketed extras
+    CHECK (abbreviate ("Channel EQ", fitsIn (8)) == "Chnnl EQ");                      // then vowels inside words
+    CHECK (abbreviate ("Space Designer", fitsIn (8)).length() <= 8);
+    CHECK (abbreviate ("Space Designer", fitsIn (8)).startsWith ("Spc"));
+}

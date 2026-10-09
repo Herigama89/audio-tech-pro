@@ -150,6 +150,7 @@ set(RIFF_UI_SOURCES
     Source/ui/ConsoleStripWindow.cpp
     Source/ui/EventList.cpp
     Source/ui/LiveLoopsGrid.cpp
+    Source/ui/PluginPicker.cpp
     Source/ui/LibraryPanel.cpp
     Source/ui/AudioEditorPanel.cpp
     Source/ui/SmartControls.cpp

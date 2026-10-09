@@ -170,6 +170,7 @@ namespace riff::ids
     RIFF_DECLARE_ID (owner)
     RIFF_DECLARE_ID (effect)          // built-in effect type: "eq", "compressor", "delay", "reverb", "limiter"
     RIFF_DECLARE_ID (bypass)
+    RIFF_DECLARE_ID (slot)          // an insert's slot on the strip (0 at the top); slots can be left empty above it
     RIFF_DECLARE_ID (target)
     RIFF_DECLARE_ID (level)
     RIFF_DECLARE_ID (pre)

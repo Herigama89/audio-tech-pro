@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "ui/ToolIcons.h"
+#include "ui/PluginPicker.h"
 #include "model/Project.h"
 #include "ui/Theme.h"
 #include "AppInfo.h"
@@ -390,7 +391,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     setProject (model::createProject(), {});
     statusLabel.setText (deviceStatusText(), juce::dontSendNotification);
     createAssistant();
-    if (appProperties.getUserSettings()->getBoolValue ("inspector", false))
+    if (appProperties.getUserSettings()->getBoolValue ("inspector", true))
         toggleInspector();
     screenRecorder = ScreenRecorder::create();
 
@@ -2150,12 +2151,9 @@ void MainComponent::showEffectMenu (const juce::String& owner, int slot, juce::V
     {
         undoManager.beginNewTransaction (existing.isValid() ? "Replace effect" : "Add effect");
         auto chain = model::chainFor (project, owner);
-        auto index = existing.isValid() ? chain.indexOf (existing) : juce::jmin (slot, chain.getNumChildren());
 
-        if (existing.isValid())
-            model::removeInsert (existing, &undoManager);
-
-        auto insert = make (chain, index);
+        // It goes in the slot you clicked, and stays there (as in Logic), even with empty slots above it.
+        auto insert = model::placeInsert (chain, existing.isValid() ? model::insertSlot (existing) : slot, make, &undoManager);
 
         // Open its window (plugins need a moment to load).
         juce::Timer::callAfterDelay (insert[ids::kind].toString() == model::pluginKind ? 600 : 50,
@@ -2166,50 +2164,36 @@ void MainComponent::showEffectMenu (const juce::String& owner, int slot, juce::V
         });
     };
 
-    juce::PopupMenu menu;
-    menu.addSectionHeader (app::effectsName);
-
+    // The chooser with a search field (as in Logic): built-in effects, then every plugin found.
+    std::vector<PluginPicker::Entry> entries;
     for (const auto& info : builtInEffects())
-        menu.addItem (info.name, [this, place, type = info.type]
+        entries.push_back ({ info.name, app::effectsName, {}, [this, place, type = info.type]
         {
-            place ([this, type] (juce::ValueTree chain, int index)
-                   { return model::addBuiltinInsert (chain, type, index, &undoManager); });
-        });
-
-    std::map<juce::String, juce::PopupMenu> byMaker;
-    int numEffects = 0;
+            place ([this, type] (juce::ValueTree chain, int index) { return model::addBuiltinInsert (chain, type, index, &undoManager); });
+        } });
 
     for (const auto& type : rack.getKnownPlugins().getTypes())
     {
         if (type.isInstrument)
             continue;
-
-        ++numEffects;
         const auto xml = type.createXml()->toString (juce::XmlElement::TextFormat().singleLine());
-        byMaker[type.manufacturerName.isNotEmpty() ? type.manufacturerName : "Other"]
-            .addItem (type.name + "  (" + type.pluginFormatName + ")", [this, place, xml]
-            {
-                place ([this, xml] (juce::ValueTree chain, int index)
-                       { return model::addPluginInsert (chain, xml, index, &undoManager); });
-            });
+        const auto format = type.pluginFormatName == "AudioUnit" ? juce::String ("AU") : type.pluginFormatName;
+        entries.push_back ({ type.name, type.manufacturerName.isNotEmpty() ? type.manufacturerName : "Other", format, [this, place, xml]
+        {
+            place ([this, xml] (juce::ValueTree chain, int index) { return model::addPluginInsert (chain, xml, index, &undoManager); });
+        } });
     }
 
-    menu.addSeparator();
+    std::function<void()> remove;
+    if (existing.isValid())
+        remove = [this, existing]
+        {
+            undoManager.beginNewTransaction ("Remove effect");
+            model::removeInsert (existing, &undoManager);
+        };
 
-    if (numEffects > 0)
-    {
-        juce::PopupMenu plugins;
-        for (auto& [maker, sub] : byMaker)
-            plugins.addSubMenu (maker, sub);
-        menu.addSubMenu ("Plugins", plugins);
-    }
-    else
-    {
-        menu.addItem ("No plugins yet. Scan for them first.", false, false, [] {});
-    }
-
-    menu.addItem ("Scan for plugins...", [this] { showPluginScanner(); });
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+    auto picker = std::make_unique<PluginPicker> (std::move (entries), [this] { showPluginScanner(); }, remove);
+    juce::CallOutBox::launchAsynchronously (std::move (picker), target.getScreenBounds(), nullptr);
 }
 
 void MainComponent::openInsertWindow (const juce::ValueTree& insert)

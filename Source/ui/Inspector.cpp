@@ -198,7 +198,7 @@ void Inspector::resized()
     viewport.setBounds (area);
 
     const auto boxes = boxesHeight();
-    const auto height = juce::jmax (area.getHeight(), ChannelStrip::minimumHeight + boxes);
+    const auto height = juce::jmax (area.getHeight(), ChannelStrip::minimumHeightFor (mixer.showsConsole()) + boxes);
     holder.setSize (area.getWidth() - (height > area.getHeight() ? viewport.getScrollBarThickness() : 0), height);
 
     // The Region and Track boxes, then the strips.

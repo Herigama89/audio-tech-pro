@@ -255,6 +255,15 @@ namespace riff::model
     juce::ValueTree addPluginInsert (juce::ValueTree chain, const juce::String& descriptionXml, int index, juce::UndoManager* um);
     void removeInsert (juce::ValueTree insert, juce::UndoManager* um);
 
+    /** Logic's insert slots: an insert stays in the slot you put it in, with empty slots above it if you like.
+        (Projects from before slots: an insert's slot is its place in the chain.) */
+    int insertSlot (const juce::ValueTree& insert);
+    juce::ValueTree insertAtSlot (const juce::ValueTree& chain, int slot);
+
+    /** Puts a new insert (made by `make` at a chain index) in a slot, replacing what's there, as part of the current undo step. */
+    juce::ValueTree placeInsert (juce::ValueTree chain, int slot,
+                                 const std::function<juce::ValueTree (juce::ValueTree chain, int index)>& make, juce::UndoManager* um);
+
     // --- Buses and sends --------------------------------------------------------
     bool isBusTrack (const juce::ValueTree& track);
 

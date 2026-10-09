@@ -754,3 +754,29 @@ TEST_CASE ("Drummer and Session Players write their regions from their settings"
     auto bass = generator::player::addPlayerTrack (project, "bass", 0.0, 2, nullptr);
     CHECK (bass.getChild (0).getNumChildren() > 0);
 }
+
+TEST_CASE ("Inserts stay in the slot they were put in", "[model][inserts]")
+{
+    auto project = model::createProject();
+    auto track = model::addTrack (project, "A", nullptr);
+    auto chain = model::chainFor (project, track[riff::ids::id].toString());
+    auto make = [] (const juce::String& type) { return [type] (juce::ValueTree c, int index) { return model::addBuiltinInsert (c, type, index, nullptr); }; };
+
+    // The fourth slot first: it stays fourth, with three empty slots above.
+    auto delay = model::placeInsert (chain, 3, make ("delay"), nullptr);
+    CHECK (model::insertSlot (delay) == 3);
+    CHECK (! model::insertAtSlot (chain, 0).isValid());
+    CHECK (model::insertAtSlot (chain, 3) == delay);
+
+    // Then the first: it processes before the fourth.
+    auto eq = model::placeInsert (chain, 0, make ("eq"), nullptr);
+    auto inserts = model::insertsOf (chain);
+    REQUIRE (inserts.size() == 2);
+    CHECK (inserts[0] == eq);
+    CHECK (inserts[1] == delay);
+
+    // Choosing again in a used slot replaces what's there.
+    auto comp = model::placeInsert (chain, 3, make ("compressor"), nullptr);
+    CHECK (model::insertsOf (chain).size() == 2);
+    CHECK (model::insertAtSlot (chain, 3) == comp);
+}
