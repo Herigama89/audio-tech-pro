@@ -378,6 +378,27 @@ MainComponent::MainComponent (bool openAudioDevice)
     setSize (1440, 920);
     automation.makeCurrent();
     routing::toggleFreeze = [this] (juce::ValueTree track) { toggleFreeze (track); };
+
+    // A knob turned in a plugin's own window: written as automation in Touch, Latch or Write.
+    effectRack.onPluginParameter = [this] (const juce::String& insertId, int index, float value, int phase)
+    {
+        juce::ValueTree insert;
+        for (const auto& chain : model::mixerOf (project))
+            if (chain.hasType (ids::CHAIN))
+                if (auto i = chain.getChildWithProperty (ids::id, insertId); i.isValid())
+                    insert = i;
+        if (! insert.isValid())
+            return;
+        const auto owner = insert.getParent()[ids::owner].toString();
+        const auto param = model::insertParam (insertId, "#" + juce::String (index));
+        if (value < 0.0f)
+            if (auto* plugin = effectRack.getPlugin (insertId); plugin != nullptr && juce::isPositiveAndBelow (index, plugin->getParameters().size()))
+                value = plugin->getParameters()[index]->getValue();
+
+        if (phase == 0)      automation.begin (owner, param, value);
+        else if (phase == 1) automation.move (owner, param, value);
+        else                 automation.end (owner, param);
+    };
     canvas.onOpenAudioEditor = [this] (juce::ValueTree region)
     {
         const auto id = "audio:" + region[ids::id].toString();

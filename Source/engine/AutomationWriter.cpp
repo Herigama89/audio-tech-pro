@@ -9,7 +9,8 @@ namespace
     constexpr double minStep = 0.02;   // seconds between written points
     constexpr double glide = 0.05;     // back to what was there after a pass
 
-    bool isWritable (const juce::String& param) { return param == model::volumeParam || param == model::panParam; }
+    bool isWritable (const juce::String& param) { return param == model::volumeParam || param == model::panParam || param.startsWith ("insert:"); }
+    bool isFader (const juce::String& param)    { return param == model::volumeParam || param == model::panParam; }
 }
 
 AutomationWriter::AutomationWriter (AudioEngine& e, ProjectPlayer& p, juce::UndoManager& um)
@@ -51,6 +52,7 @@ AutomationWriter::Pass& AutomationWriter::startPass (const juce::String& trackId
     pass.param = param;
     pass.start = pass.lastTime = now();
     pass.value = value;
+    pass.startValue = value;
     passes.push_back (pass);
     auto& added = passes.back();
     addPoint (added, added.start, true);
@@ -78,6 +80,18 @@ void AutomationWriter::addPoint (Pass& pass, double time, bool force)
 
 void AutomationWriter::setOverride (const Pass& pass, bool on)
 {
+    // A plugin knob: its curve steps aside while it's written (the knob itself is what plays).
+    if (! isFader (pass.param))
+    {
+        if (on != pass.suppressed)
+        {
+            player.setLaneSuppressed (pass.trackId, pass.param, on);
+            const_cast<Pass&> (pass).suppressed = on;
+            player.rebuildNow();
+        }
+        return;
+    }
+
     const auto slot = player.slotOf (pass.trackId);
     const bool pan = pass.param == model::panParam;
     if (on)
@@ -170,9 +184,9 @@ void AutomationWriter::transportChanged (bool nowPlaying)
             wroteInWriteMode.addIfNotAlreadyThere (pass.trackId);
     }
 
-    player.rebuildNow();
     for (const auto& pass : finished)
         setOverride (pass, false);
+    player.rebuildNow();
 
     // As in Logic, Write turns into Latch once a pass is done (so the next play doesn't erase it).
     for (const auto& id : wroteInWriteMode)
@@ -189,7 +203,9 @@ void AutomationWriter::commit (const Pass& pass)
         return;
 
     const bool volume = pass.param == model::volumeParam;
-    const double staticValue = volume ? (double) track.getProperty (ids::volume, 1.0) : (double) track.getProperty (ids::pan, 0.0);
+    const double staticValue = volume ? (double) track.getProperty (ids::volume, 1.0)
+                             : pass.param == model::panParam ? (double) track.getProperty (ids::pan, 0.0)
+                                                              : pass.startValue;
 
     undoManager.beginNewTransaction ("Write automation");
     auto lane = model::laneFor (project, pass.trackId, pass.param, true);

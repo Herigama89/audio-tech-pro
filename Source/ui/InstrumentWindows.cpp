@@ -2,6 +2,7 @@
 #include "Theme.h"
 #include "../model/Project.h"
 #include "../engine/BuiltInEffects.h"
+#include "../engine/AutomationWriter.h"
 
 namespace riff
 {
@@ -116,8 +117,22 @@ EffectPanel::EffectPanel (juce::ValueTree i, juce::UndoManager& um)
             k->slider.setDoubleClickReturnValue (true, p.defaultValue);
             k->slider.setNumDecimalPlacesToDisplay (p.max > 100.0f ? 0 : (p.max > 10.0f ? 1 : 2));
             k->slider.setTextValueSuffix (p.suffix);
-            k->slider.onDragStart = [this, name = p.name] { undoManager.beginNewTransaction (name); };
-            k->slider.onValueChange = [this, k] { insert.setProperty (juce::Identifier (k->id), k->slider.getValue(), &undoManager); };
+            // Touch, Latch or Write while playing: the knob is written as automation too.
+            const auto owner = [this] { return insert.getParent()[ids::owner].toString(); };
+            const auto param = [this, k] { return model::insertParam (insert[ids::id].toString(), k->id); };
+            k->slider.onDragStart = [this, k, owner, param, name = p.name]
+            {
+                undoManager.beginNewTransaction (name);
+                if (auto* w = AutomationWriter::current())
+                    w->begin (owner(), param(), k->slider.getValue());
+            };
+            k->slider.onDragEnd = [k, owner, param] { juce::ignoreUnused (k); if (auto* w = AutomationWriter::current()) w->end (owner(), param()); };
+            k->slider.onValueChange = [this, k, owner, param]
+            {
+                if (auto* w = AutomationWriter::current())
+                    w->move (owner(), param(), k->slider.getValue());
+                insert.setProperty (juce::Identifier (k->id), k->slider.getValue(), &undoManager);
+            };
             addAndMakeVisible (k->slider);
 
             k->label.setText (p.name, juce::dontSendNotification);

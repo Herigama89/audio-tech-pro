@@ -61,8 +61,8 @@ private:
     struct Pass
     {
         juce::String trackId, param;
-        double start = 0.0, lastTime = 0.0, value = 0.0;
-        bool touching = false;
+        double start = 0.0, lastTime = 0.0, value = 0.0, startValue = 0.0;
+        bool touching = false, suppressed = false;
         std::vector<std::pair<double, double>> points;
     };
 

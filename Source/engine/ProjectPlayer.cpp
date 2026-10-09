@@ -108,6 +108,8 @@ void ProjectPlayer::addParamAutomation (PlaybackGraph::Track& t, const juce::Str
     {
         if (! lane.hasType (ids::LANE) || lane[ids::owner].toString() != owner || lane.getNumChildren() == 0)
             continue;
+        if (suppressedLanes.count (owner + "|" + lane[ids::param].toString()) > 0)
+            continue;   // being written right now
 
         const auto parts = juce::StringArray::fromTokens (lane[ids::param].toString(), ":", {});
         if (parts.size() != 3 || parts[0] != "insert")

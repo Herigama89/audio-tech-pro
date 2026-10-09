@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include <map>
+#include <set>
 #include "AudioEngine.h"
 #include "AudioFileCache.h"
 #include "InstrumentRack.h"
@@ -38,6 +39,13 @@ public:
 
     /** Schedules a rebuild (e.g. when a plugin finishes loading). */
     void requestRebuild() { triggerAsyncUpdate(); }
+
+    /** While a plugin knob is being written as automation, its lane's curve is left out (the knob plays). */
+    void setLaneSuppressed (const juce::String& owner, const juce::String& param, bool suppressed)
+    {
+        if (suppressed) suppressedLanes.insert (owner + "|" + param);
+        else            suppressedLanes.erase (owner + "|" + param);
+    }
 
     /** While exporting stems every track plays as if nothing were soloed (mutes still count). */
     void setIgnoreSolo (bool shouldIgnore)  { ignoreSolo = shouldIgnore; }
@@ -77,6 +85,7 @@ private:
                              const std::map<juce::String, std::shared_ptr<Effect>>& effectsById);
     juce::String liveMidiTrackId;
     bool ignoreSolo = false;
+    std::set<juce::String> suppressedLanes;
     juce::ValueTree project;
     double builtForRate = 0.0;
 

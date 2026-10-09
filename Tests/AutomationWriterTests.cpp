@@ -119,3 +119,25 @@ TEST_CASE ("Off mode: the curves are left out of playback", "[automation]")
     REQUIRE (graph->tracks.size() == 1);
     CHECK (graph->tracks[0].volumeAutomation.empty());
 }
+
+TEST_CASE ("Plugin knobs are written as automation too", "[automation]")
+{
+    WriterFixture f;
+    f.track.setProperty (ids::automationMode, "touch", nullptr);
+    auto chain = model::chainFor (f.project, f.id);
+    auto delay = model::addBuiltinInsert (chain, "delay", 0, nullptr);
+    const auto param = model::insertParam (delay[ids::id].toString(), "mix");
+
+    f.writer.transportChanged (true);
+    f.time = 1.0;
+    REQUIRE (f.writer.begin (f.id, param, 0.2));
+    f.time = 1.5;
+    f.writer.move (f.id, param, 0.8);
+    f.time = 2.0;
+    f.writer.end (f.id, param);
+
+    const auto lane = model::laneFor (f.project, f.id, param, false);
+    REQUIRE (lane.isValid());
+    CHECK_THAT (model::valueAt (lane, 1.6, 0.0), WithinAbs (0.8, 1e-9));
+    CHECK_THAT (model::valueAt (lane, 0.5, 0.0), WithinAbs (0.2, 1e-9));   // before: where the knob was
+}

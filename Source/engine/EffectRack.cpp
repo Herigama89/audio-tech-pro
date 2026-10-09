@@ -26,8 +26,23 @@ PluginEffect::PluginEffect (std::unique_ptr<juce::AudioPluginInstance> p)
 
 PluginEffect::~PluginEffect()
 {
+    if (watcher != nullptr)
+        for (auto* p : plugin->getParameters())
+            p->removeListener (watcher.get());
+
     if (prepared)
         plugin->releaseResources();
+}
+
+void PluginEffect::watchParameters (std::function<void (int, float, int)> callback)
+{
+    if (watcher == nullptr)
+    {
+        watcher = std::make_unique<Watcher>();
+        for (auto* p : plugin->getParameters())
+            p->addListener (watcher.get());
+    }
+    watcher->callback = std::move (callback);
 }
 
 void PluginEffect::prepare (double sampleRate, int maxBlockSize)
@@ -187,6 +202,11 @@ void EffectRack::loadPlugin (const juce::ValueTree& insert, const juce::String& 
 
         auto effect = std::make_shared<PluginEffect> (std::move (instance));
         effect->setStateBase64 (state);
+        effect->watchParameters ([this, id, weakAlive = std::weak_ptr<bool> (alive)] (int index, float value, int phase)
+        {
+            if (! weakAlive.expired() && onPluginParameter)
+                onPluginParameter (id, index, value, phase);
+        });
         effect->prepare (sampleRate, maxBlockSize);
         it->second.effect = effect;
 

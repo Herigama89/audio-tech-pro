@@ -27,6 +27,10 @@ public:
     }
 
     juce::AudioPluginInstance& getPlugin() noexcept { return *plugin; }
+
+    /** Hears knob moves made in the plugin's own window: (parameter index, value 0..1, phase: 0 grab, 1 move, 2 let go).
+        Called on the message thread. */
+    void watchParameters (std::function<void (int, float, int)> callback);
     juce::String getStateBase64() const;
     void setStateBase64 (const juce::String& state);
 
@@ -35,6 +39,23 @@ private:
     juce::AudioBuffer<float> buffer;
     juce::MidiBuffer noMidi;
     bool prepared = false;
+
+    struct Watcher final : juce::AudioProcessorParameter::Listener
+    {
+        std::function<void (int, float, int)> callback;
+        std::shared_ptr<bool> alive = std::make_shared<bool> (true);
+        void post (int index, float value, int phase)
+        {
+            juce::MessageManager::callAsync ([weak = std::weak_ptr<bool> (alive), cb = callback, index, value, phase]
+            {
+                if (! weak.expired() && cb)
+                    cb (index, value, phase);
+            });
+        }
+        void parameterValueChanged (int index, float value) override { post (index, value, 1); }
+        void parameterGestureChanged (int index, bool starting) override { post (index, -1.0f, starting ? 0 : 2); }
+    };
+    std::unique_ptr<Watcher> watcher;
 };
 
 /**
@@ -65,6 +86,9 @@ public:
     std::function<void()> onEffectReady;
     std::function<void (const juce::String& error)> onLoadError;
     std::function<void (const juce::String& insertId)> onEffectReplaced;   // close its window
+
+    /** A hosted plugin's knob moved in its own window (for writing automation): insert id, parameter, value, phase. */
+    std::function<void (const juce::String& insertId, int index, float value, int phase)> onPluginParameter;
 
 private:
     struct Entry
