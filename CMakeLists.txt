@@ -44,6 +44,7 @@ set(RIFF_CORE_SOURCES
     Source/engine/AudioEdit.cpp
     Source/engine/LatencyMeasure.cpp
     Source/engine/BuiltInSynth.cpp
+    Source/engine/BuiltInInstruments.cpp
     Source/engine/PluginInstrument.cpp
     Source/engine/InstrumentRack.cpp
     Source/engine/BuiltInEffects.cpp

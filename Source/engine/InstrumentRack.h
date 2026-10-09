@@ -49,6 +49,7 @@ public:
 
     /** Settings for the built-in synth, read from the track. */
     static BuiltInSynth::Settings synthSettingsFrom (const juce::ValueTree& track);
+    static void applyBuiltInSettings (Instrument* instrument, const juce::ValueTree& track);
 
 private:
     struct Entry
@@ -64,6 +65,7 @@ private:
                      const juce::String& state);
 
     juce::AudioPluginFormatManager formatManager;
+    juce::AudioFormatManager sampleFormats;   // for the Sampler's sounds
     juce::KnownPluginList knownPlugins;
     std::map<juce::String, Entry> entries;
     std::shared_ptr<bool> alive = std::make_shared<bool> (true); // guards async callbacks

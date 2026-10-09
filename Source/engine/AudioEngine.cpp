@@ -1341,6 +1341,15 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         juce::FloatVectorOperations::addWithMultiply (busBuffer.getWritePointer (send.busIndex * 2 + 1), tR, send.level, n);
     }
 
+    // Stereo width (Stereo Pan mode): narrower towards mono, or wider.
+    if (std::abs (track.width - 1.0f) > 1.0e-3f)
+        for (int i = 0; i < n; ++i)
+        {
+            const auto mid = (tL[i] + tR[i]) * 0.5f, side = (tL[i] - tR[i]) * 0.5f * track.width;
+            tL[i] = mid + side;
+            tR[i] = mid - side;
+        }
+
     // Fader and pan.
     float peakL = 0.0f, peakR = 0.0f;
 

@@ -1,5 +1,6 @@
 #include "InstrumentRack.h"
 #include "../model/Project.h"
+#include "BuiltInInstruments.h"
 
 namespace riff
 {
@@ -7,6 +8,7 @@ namespace riff
 InstrumentRack::InstrumentRack()
 {
     juce::addDefaultFormatsToManager (formatManager); // VST3, plus Audio Units on macOS
+    sampleFormats.registerBasicFormats();
 }
 
 BuiltInSynth::Settings InstrumentRack::synthSettingsFrom (const juce::ValueTree& track)
@@ -23,6 +25,16 @@ BuiltInSynth::Settings InstrumentRack::synthSettingsFrom (const juce::ValueTree&
     return s;
 }
 
+void InstrumentRack::applyBuiltInSettings (Instrument* instrument, const juce::ValueTree& track)
+{
+    const auto level = (float) (double) track.getProperty (ids::synthGain, 0.8);
+    if (auto* kit = dynamic_cast<DrumKit*> (instrument))
+        kit->setSettings ((float) (double) track.getProperty (ids::drumTune, 0.0), (float) (double) track.getProperty (ids::drumDecay, 1.0), level);
+    else if (auto* sampler = dynamic_cast<Sampler*> (instrument))
+        sampler->setSettings ((int) track.getProperty (ids::samplerRoot, 60), (float) (double) track.getProperty (ids::synthAttack, 0.002),
+                              (float) (double) track.getProperty (ids::synthRelease, 0.2), level);
+}
+
 juce::String InstrumentRack::keyFor (const juce::ValueTree& track)
 {
     if (! model::isInstrumentTrack (track))
@@ -30,6 +42,10 @@ juce::String InstrumentRack::keyFor (const juce::ValueTree& track)
 
     if (track[ids::instrument].toString() == "plugin")
         return "plugin:" + track[ids::pluginDescription].toString();
+    if (track[ids::instrument].toString() == "drums")
+        return "drums";
+    if (track[ids::instrument].toString() == "sampler")
+        return "sampler:" + track[ids::samplerFile].toString();
 
     return "synth";
 }
@@ -51,8 +67,37 @@ std::shared_ptr<Instrument> InstrumentRack::instrumentFor (const juce::ValueTree
     {
         if (auto* synth = dynamic_cast<BuiltInSynth*> (entry.instrument.get()))
             synth->setSettings (synthSettingsFrom (track));
+        applyBuiltInSettings (entry.instrument.get(), track);
 
         return entry.instrument;
+    }
+
+    // The built-in Drum Kit and Sampler.
+    if (key == "drums" || key.startsWith ("sampler:"))
+    {
+        if (! sameKind && onPluginReplaced && entry.instrument != nullptr)
+            onPluginReplaced (id);
+
+        std::shared_ptr<Instrument> instrument;
+        if (key == "drums")
+            instrument = std::make_shared<DrumKit>();
+        else
+        {
+            auto sampler = std::make_shared<Sampler>();
+            const juce::File file (track[ids::samplerFile].toString());
+            if (std::unique_ptr<juce::AudioFormatReader> reader (sampleFormats.createReaderFor (file)); reader != nullptr)
+            {
+                const auto length = (int) juce::jmin (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 60.0));
+                auto buffer = std::make_shared<juce::AudioBuffer<float>> ((int) juce::jlimit (1u, 2u, reader->numChannels), juce::jmax (1, length));
+                reader->read (buffer.get(), 0, length, 0, true, buffer->getNumChannels() > 1);
+                sampler->setSample (buffer, reader->sampleRate);
+            }
+            instrument = sampler;
+        }
+        instrument->prepare (sampleRate, maxBlockSize);
+        applyBuiltInSettings (instrument.get(), track);
+        entry = { key, sampleRate, instrument, false };
+        return instrument;
     }
 
     if (key == "synth")

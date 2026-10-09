@@ -32,12 +32,12 @@ private:
     std::function<void()> onClose;
 };
 
-/** Controls for Riff's built-in synth, bound (undoably) to the track's properties. */
+/** Controls for the built-in instruments (Tech Synth, Drum Kit, Sampler), bound (undoably) to the track's properties. */
 class SynthPanel final : public juce::Component,
                          private juce::ValueTree::Listener
 {
 public:
-    SynthPanel (juce::ValueTree track, juce::UndoManager& um);
+    SynthPanel (juce::ValueTree track, juce::UndoManager& um, const juce::String& kind = "synth");
     ~SynthPanel() override;
 
     void paint (juce::Graphics& g) override;
@@ -60,6 +60,9 @@ private:
     juce::UndoManager& undoManager;
     juce::ComboBox waveBox;
     juce::Label waveLabel;
+    juce::TextButton soundButton { "Choose Sound..." };
+    std::unique_ptr<juce::FileChooser> chooser;
+    juce::String kind;
     juce::OwnedArray<Control> controls;
 };
 

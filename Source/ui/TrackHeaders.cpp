@@ -176,7 +176,12 @@ void TrackHeader::refresh()
         armButton.setTooltip ("Record enable: records your MIDI keyboard");
 
         juce::String name = app::synthName;
-        if (track[ids::instrument].toString() == "plugin")
+        if (track[ids::instrument].toString() == "drums")
+            name = "Drum Kit";
+        else if (track[ids::instrument].toString() == "sampler")
+            name = juce::File (track[ids::samplerFile].toString()).existsAsFile() ? "Sampler: " + juce::File (track[ids::samplerFile].toString()).getFileNameWithoutExtension()
+                                                                                     : juce::String ("Sampler");
+        else if (track[ids::instrument].toString() == "plugin")
         {
             juce::PluginDescription d;
             if (auto xml = juce::parseXML (track[ids::pluginDescription].toString()); xml != nullptr && d.loadFromXml (*xml))

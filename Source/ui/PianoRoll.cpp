@@ -66,6 +66,7 @@ PianoRoll::PianoRoll (juce::UndoManager& um, AudioEngine& e)
     viewBox.setSelectedId (1, juce::dontSendNotification);
     viewBox.setTooltip ("The region as a piano roll, as notation (Score), or as a grid of steps (Step Editor)");
     viewBox.onChange = [this] { showView (viewBox.getSelectedId()); };
+    score.setUndoManager (&undoManager);
     addChildComponent (score);
     addChildComponent (stepEditor);
 

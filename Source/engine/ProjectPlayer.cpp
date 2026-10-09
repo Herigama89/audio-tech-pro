@@ -220,6 +220,7 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         t.pan     = (float) juce::jlimit (-1.0, 1.0, (double) track.getProperty (ids::pan, 0.0));
         t.audible = ! (bool) track[ids::mute] && ! model::vcaMutes (project, track) && (! anySolo || soloed (track));
         t.vcaGain = (float) model::vcaGainOf (project, track);
+        t.width = (float) juce::jlimit (0.0, 2.0, (double) track.getProperty (ids::panWidth, 1.0));
         if (const auto out = busIndex.find (track[ids::output].toString()); out != busIndex.end() && ! model::isBusTrack (track))
             t.outputBus = out->second;
 

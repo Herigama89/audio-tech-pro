@@ -98,6 +98,11 @@ namespace riff::ids
     RIFF_DECLARE_ID (loopEnd)
     RIFF_DECLARE_ID (transpose)        // REGION / TRACK (MIDI): semitones, applied as it plays
     RIFF_DECLARE_ID (velocityOffset)   // REGION / TRACK (MIDI): added to every note's velocity
+    RIFF_DECLARE_ID (drumTune)         // TRACK (Drum Kit): semitones
+    RIFF_DECLARE_ID (drumDecay)        // TRACK (Drum Kit): 0.3 .. 3
+    RIFF_DECLARE_ID (samplerFile)      // TRACK (Sampler): the sound
+    RIFF_DECLARE_ID (samplerRoot)      // TRACK (Sampler): the key that plays it as recorded
+    RIFF_DECLARE_ID (panWidth)         // TRACK: stereo width (Stereo Pan mode): 0 mono .. 1 .. 2
     RIFF_DECLARE_ID (icon)             // TRACK: which track icon (see TrackIcons.h)
     RIFF_DECLARE_ID (smartControls)    // TRACK: what the eight Smart Controls knobs drive, "|"-separated
     RIFF_DECLARE_ID (automationMode)   // TRACK: "off", "read" (default), "touch", "latch", "write"

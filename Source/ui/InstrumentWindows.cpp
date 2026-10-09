@@ -7,9 +7,45 @@
 namespace riff
 {
 
-SynthPanel::SynthPanel (juce::ValueTree t, juce::UndoManager& um)
-    : track (t), undoManager (um)
+SynthPanel::SynthPanel (juce::ValueTree t, juce::UndoManager& um, const juce::String& k)
+    : track (t), undoManager (um), kind (k)
 {
+    if (kind == "drums" || kind == "sampler")
+    {
+        waveLabel.setText (kind == "drums" ? "Drum Kit" : "Sound", juce::dontSendNotification);
+        waveLabel.setJustificationType (juce::Justification::centred);
+        addAndMakeVisible (waveLabel);
+        if (kind == "drums")
+        {
+            addControl (ids::drumTune,  "Tune",   -12.0, 12.0, 0.0, " st");
+            addControl (ids::drumDecay, "Decay",  0.3, 3.0, 1.0, "x");
+        }
+        else
+        {
+            soundButton.onClick = [this]
+            {
+                chooser = std::make_unique<juce::FileChooser> ("Choose a sound for the sampler",
+                                                               juce::File (track[ids::samplerFile].toString()).getParentDirectory(), "*.wav;*.aif;*.aiff;*.flac;*.mp3");
+                chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this] (const juce::FileChooser& c)
+                {
+                    if (c.getResult() == juce::File())
+                        return;
+                    undoManager.beginNewTransaction ("Sampler sound");
+                    track.setProperty (ids::samplerFile, c.getResult().getFullPathName(), &undoManager);
+                });
+            };
+            addAndMakeVisible (soundButton);
+            addControl (ids::samplerRoot,  "Root Key", 24.0, 96.0, 60.0, "");
+            addControl (ids::synthAttack,  "Attack",  0.001, 2.0, 0.05, " s");
+            addControl (ids::synthRelease, "Release", 0.001, 6.0, 0.5, " s");
+        }
+        addControl (ids::synthGain, "Volume", 0.0, 1.0, 0.5, "");
+        track.addListener (this);
+        refresh();
+        setSize ((controls.size() + 1) * 84 + 64, 150);
+        return;
+    }
+
     waveLabel.setText ("Wave", juce::dontSendNotification);
     waveLabel.setJustificationType (juce::Justification::centred);
     addAndMakeVisible (waveLabel);
@@ -65,7 +101,18 @@ void SynthPanel::refresh()
 {
     waveBox.setSelectedId ((int) track.getProperty (ids::synthWave, 0) + 1, juce::dontSendNotification);
     for (auto* c : controls)
-        c->slider.setValue (track.getProperty (c->id, c->slider.getMinimum()), juce::dontSendNotification);
+    {
+        const auto fallback = c->id == ids::drumDecay ? 1.0 : c->id == ids::drumTune ? 0.0 : c->id == ids::samplerRoot ? 60.0
+                            : c->id == ids::synthGain ? 0.8 : c->slider.getMinimum();
+        c->slider.setValue (track.getProperty (c->id, fallback), juce::dontSendNotification);
+        if (c->id == ids::samplerRoot)
+            c->slider.textFromValueFunction = [] (double v) { return juce::MidiMessage::getMidiNoteName (juce::roundToInt (v), true, true, 3); };
+    }
+    if (kind == "sampler")
+    {
+        const juce::File file (track[ids::samplerFile].toString());
+        soundButton.setButtonText (file.existsAsFile() ? file.getFileNameWithoutExtension() : juce::String ("Choose Sound..."));
+    }
 }
 
 void SynthPanel::paint (juce::Graphics& g)
@@ -77,9 +124,12 @@ void SynthPanel::resized()
 {
     auto area = getLocalBounds().reduced (12);
 
-    auto column = area.removeFromLeft (84);
+    auto column = area.removeFromLeft (kind == "synth" ? 84 : 140);
     waveLabel.setBounds (column.removeFromTop (20));
-    waveBox.setBounds (column.removeFromTop (26).reduced (2, 0));
+    if (kind == "sampler")
+        soundButton.setBounds (column.removeFromTop (26).reduced (2, 0));
+    else if (kind == "synth")
+        waveBox.setBounds (column.removeFromTop (26).reduced (2, 0));
 
     for (auto* c : controls)
     {

@@ -556,7 +556,8 @@ juce::Array<juce::ValueTree> apply (juce::ValueTree project, const Result& resul
 
         switch (part.kind)
         {
-            case PartKind::drums:  sound (3, 9000.0, 0.001, 0.09, 0.0, 0.05, 0.5); break;   // blips: load a drum plugin
+            case PartKind::drums:  track.setProperty (ids::instrument, "drums", um);   // the built-in Drum Kit plays GM drums
+                                   track.setProperty (ids::synthGain, 0.8, um); break;
             case PartKind::bass:   bassIs808 ? sound (3, 2500.0, 0.002, 1.2, 0.7, 0.25, 0.7)
                                              : sound (0, 700.0, 0.003, 0.3, 0.6, 0.12, 0.55); break;
             case PartKind::chords: sound (0, 1600.0, 0.06, 0.6, 0.7, 0.7, 0.3); break;

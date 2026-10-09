@@ -100,6 +100,11 @@ void Inspector::buildTrackBox()
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
     });
 
+    if (! model::isVcaTrack (track))
+        trackBox.addNumber ("Width", ids::panWidth, 0.0, 200.0, 1.0, 100.0,
+                            [] (double v) { return juce::String (juce::roundToInt (v)) + "%"; },
+                            [] (double v) { return v / 100.0; }, [] (double v) { return v * 100.0; });
+
     if (model::isInstrumentTrack (track))
     {
         trackBox.addNumber ("Transpose", ids::transpose, -48.0, 48.0, 1.0, 0.0, [] (double v) { return (v > 0 ? "+" : "") + juce::String ((int) v); });

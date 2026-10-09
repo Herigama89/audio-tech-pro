@@ -254,7 +254,7 @@ Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderC
 - [x] VST3 and Audio Unit instrument hosting: scanning, plugin windows, settings saved in the project
 - [ ] CLAP hosting (needs our own CLAP host layer; JUCE doesn't host CLAP)
 - [x] Velocity editing, pitch bend and controllers in the piano roll
-- [ ] A sampler instrument (also used by the drum machine in Phase 4)
+- [x] A sampler instrument (one sound across the keyboard: root key, attack, release)
 
 ## Phase 3: mixer and effects
 
@@ -274,7 +274,7 @@ Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderC
 - [x] Master Bus Compressor with a VU meter; console EQ and Dynamics on every strip
 - [x] Key presets for other DAWs (Pro Tools, Ableton Live, FL Studio, Cubase), with each one's stop workflow
 - [x] MIDI genre generator: drums, bass, chords and melody in 11 genres (MIDI only; you play it with your own instruments)
-- [ ] Built-in instruments (drum kit, sampler), at the end
+- [x] Built-in instruments: Drum Kit (every General MIDI drum synthesised), Sampler
 - [x] Console mode for the master: your UA SSL G Bus Compressor plugin, with a hardware-style face
 - [x] Console mode for the strips: your UA SSL 4000 E channel strip plugin driven from each strip's console section
 - [x] Console strips, part 2a: an IN key on every strip (bypasses the whole channel strip, a plugin stays loaded)
@@ -325,7 +325,8 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [x] Event List (MIDI regions)
 - [x] Audio File Editor (double-click an audio region): normalize, gain, fades, silence, reverse, invert
 - [x] Score view and Step Editor (the View menu in the editor's header)
-- [ ] Audio Track Editor, editing in the score
+- [x] Writing in the score (click to add, drag up/down, Delete)
+- [ ] Audio Track Editor (the Audio File Editor covers its edits)
 - [x] Step Sequencer (the Step Editor grid)
 - [x] Editors open below the tracks with a resizable divider (double-click it for the default); the editor follows the selected track and region
 
@@ -334,7 +335,7 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [ ] Narrow/wide strips
 - [x] Groups 1-8 (linked volume, mute, solo), VCA faders, track outputs into buses (right-click a strip's fader or a track header)
 - [x] Group Settings (names; what each group links), I/O Labels
-- [ ] Stereo panner modes
+- [x] Stereo width (Track box in the Inspector)
 - [x] Track automation modes (Off, Read, Touch, Latch, Write) on every strip and in the A menu; fader and pan moves are written while playing
 - [x] Channel EQ curve (in the strip window)
 - [x] Writing plugin knob moves (built-in and hosted) as automation

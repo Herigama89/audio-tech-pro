@@ -9,7 +9,68 @@ namespace riff
 //==============================================================================
 // Score
 //==============================================================================
-ScoreView::ScoreView() {}
+ScoreView::ScoreView() { setWantsKeyboardFocus (true); }
+
+int ScoreView::pitchOfStep (int step)
+{
+    static constexpr int naturals[7] { 0, 2, 4, 5, 7, 9, 11 };
+    const auto octave = (int) std::floor (step / 7.0);
+    return juce::jlimit (0, 127, 60 + octave * 12 + naturals[((step % 7) + 7) % 7]);
+}
+
+void ScoreView::mouseDown (const juce::MouseEvent& e)
+{
+    grabKeyboardFocus();
+    if (! region.isValid() || undoManager == nullptr)
+        return;
+
+    for (const auto& [note, box] : heads)
+        if (box.expanded (3.0f).contains (e.position))
+        {
+            selected = note;
+            dragStartPitch = note[ids::pitch];
+            undoManager->beginNewTransaction ("Move note");
+            repaint();
+            return;
+        }
+
+    // A new quarter note where you clicked (on the sixteenth grid).
+    const auto project = region.getParent().getParent();
+    const auto map = model::tempoMapOf (project);
+    const auto beat = std::round ((layoutFirstBarBeat + (e.position.x - 14.0f - layoutLeft + scroll) / pixelsPerBeat) * 4.0) / 4.0;
+    const auto step = juce::roundToInt ((layoutMiddleC - e.position.y) / (lineGap * 0.5f));
+    const double regionStart = region[ids::start], offset = region[ids::offset];
+    const auto content = map.secondsAt (beat) - regionStart + offset;
+    if (content < offset || content >= offset + (double) region[ids::length])
+        return;
+    undoManager->beginNewTransaction ("Write note");
+    selected = model::addNote (region, pitchOfStep (step), content, map.secondsAt (beat + 1.0) - map.secondsAt (beat), 90, undoManager);
+    dragStartPitch = selected[ids::pitch];
+}
+
+void ScoreView::mouseDrag (const juce::MouseEvent& e)
+{
+    if (! selected.isValid() || undoManager == nullptr)
+        return;
+    // Up and down by staff steps (white keys); a sharp note moves to its natural first.
+    bool sharp = false;
+    const auto startStep = staffStep (dragStartPitch, sharp);
+    const auto steps = juce::roundToInt (-e.getDistanceFromDragStartY() / (lineGap * 0.5f));
+    if (steps != 0 || ! sharp)
+        selected.setProperty (ids::pitch, steps == 0 ? dragStartPitch : pitchOfStep (startStep + steps), undoManager);
+}
+
+bool ScoreView::keyPressed (const juce::KeyPress& key)
+{
+    if ((key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey) && selected.isValid() && undoManager != nullptr)
+    {
+        undoManager->beginNewTransaction ("Delete note");
+        model::deleteNote (selected, undoManager);
+        selected = {};
+        return true;
+    }
+    return false;
+}
 
 ScoreView::~ScoreView()
 {
@@ -57,11 +118,15 @@ void ScoreView::paint (juce::Graphics& g)
 
     const auto left = 70.0f;
     const auto firstBar = map.barAndBeat (firstBeat).first;
+    layoutLeft = left;
+    layoutFirstBarBeat = map.beatOfBar (firstBar);
+    heads.clear();
     const auto xOf = [&] (double beat) { return left + (float) (beat - map.beatOfBar (firstBar)) * pixelsPerBeat - scroll; };
     juce::ignoreUnused (beatsPerBar);
 
     // The grand staff: middle C between the two staves.
     const auto middleC = (float) getHeight() * 0.5f;
+    layoutMiddleC = middleC;
     const auto yOfStep = [&] (int step) { return middleC - (float) step * lineGap * 0.5f; };
     const int trebleLines[] { 2, 4, 6, 8, 10 };      // E4 G4 B4 D5 F5
     const int bassLines[] { -2, -4, -6, -8, -10 };   // A3 F3 D3 B2 G2
@@ -116,6 +181,8 @@ void ScoreView::paint (juce::Graphics& g)
 
         // Head: open for half and whole notes; a stem below a whole note; a dot when dotted.
         const juce::Rectangle<float> head (x - 5.0f, y - 3.6f, 10.0f, 7.2f);
+        heads.push_back ({ note, head });
+        g.setColour (note == selected ? theme::accent : juce::Colour (0xff2b2b2b));
         if (beats >= 2.0) g.drawEllipse (head, 1.6f);
         else              g.fillEllipse (head);
         if (beats < 4.0)

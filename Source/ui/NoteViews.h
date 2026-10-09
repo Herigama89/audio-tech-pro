@@ -9,7 +9,8 @@ namespace riff
 /**
     The MIDI region as music notation: a grand staff (treble and bass), the
     notes on it shown to the nearest sixteenth, with accidentals, ledger lines
-    and bar lines. For reading; edit in the Piano Roll or Step Editor.
+    and bar lines. Click the staff to write a note (a quarter note on the
+    sixteenth grid), drag a note up or down, Delete removes the selected one.
 */
 class ScoreView final : public juce::Component,
                         private juce::ValueTree::Listener
@@ -19,8 +20,15 @@ public:
     ~ScoreView() override;
 
     void setRegion (juce::ValueTree region);
+    void setUndoManager (juce::UndoManager* um) { undoManager = um; }
     void paint (juce::Graphics& g) override;
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override;
+    void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDrag (const juce::MouseEvent& e) override;
+    bool keyPressed (const juce::KeyPress& key) override;
+
+    /** The white key a staff step is on (inverse of staffStep for naturals). */
+    static int pitchOfStep (int step);
 
     /** Staff steps from middle C (C4 = 0, D4 = 1 ... B4 = 6, C5 = 7), and whether it needs a sharp. */
     static int staffStep (int pitch, bool& sharp);
@@ -31,7 +39,14 @@ private:
     void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override      { repaint(); }
 
     juce::ValueTree region;
+    juce::UndoManager* undoManager = nullptr;
     float scroll = 0.0f;
+    // Where things were drawn (for the mouse).
+    float layoutLeft = 70.0f, layoutMiddleC = 0.0f;
+    double layoutFirstBarBeat = 0.0;
+    std::vector<std::pair<juce::ValueTree, juce::Rectangle<float>>> heads;
+    juce::ValueTree selected;
+    int dragStartPitch = 60;
     static constexpr float pixelsPerBeat = 70.0f, lineGap = 8.0f;
 };
 

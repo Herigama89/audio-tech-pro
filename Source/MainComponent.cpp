@@ -1918,10 +1918,22 @@ void MainComponent::showInstrumentMenu (juce::ValueTree track, juce::Component& 
     menu.addItem (isPlugin ? "Show plugin window" : "Show synth controls", [this, track] { openInstrumentWindow (track); });
     menu.addSeparator();
 
-    menu.addItem (app::synthName, true, ! isPlugin, [this, track]() mutable
+    const auto kind = track[ids::instrument].toString();
+    menu.addItem (app::synthName, true, kind == "synth" || kind.isEmpty(), [this, track]() mutable
     {
         undoManager.beginNewTransaction ("Choose instrument");
         track.setProperty (ids::instrument, "synth", &undoManager);
+    });
+    menu.addItem ("Drum Kit", true, kind == "drums", [this, track]() mutable
+    {
+        undoManager.beginNewTransaction ("Choose instrument");
+        track.setProperty (ids::instrument, "drums", &undoManager);
+    });
+    menu.addItem ("Sampler...", true, kind == "sampler", [this, track]() mutable
+    {
+        undoManager.beginNewTransaction ("Choose instrument");
+        track.setProperty (ids::instrument, "sampler", &undoManager);
+        openInstrumentWindow (track);   // to choose its sound
     });
 
     // Instrument plugins found by the scanner, grouped by maker.
@@ -2009,7 +2021,11 @@ void MainComponent::openInstrumentWindow (const juce::ValueTree& track)
         return;
     }
 
-    editorWindows[id] = std::make_unique<EditorWindow> (title + ": " + app::synthName, new SynthPanel (track, undoManager), false, closer);
+    const auto kind = track[ids::instrument].toString();
+    const auto name = kind == "drums" ? juce::String ("Drum Kit") : kind == "sampler" ? juce::String ("Sampler") : app::synthName;
+    editorWindows[id] = std::make_unique<EditorWindow> (title + ": " + name,
+                                                        new SynthPanel (track, undoManager, kind == "drums" || kind == "sampler" ? kind : juce::String ("synth")),
+                                                        false, closer);
 }
 
 void MainComponent::showPluginScanner()

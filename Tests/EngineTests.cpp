@@ -1901,3 +1901,33 @@ TEST_CASE ("Comping: swiped stretches of takes play, and flatten into regions", 
     CHECK (track.getNumChildren() == 3);
     CHECK_THAT ((double) regions[1][ids::offset], WithinAbs (1.5, 1e-9));
 }
+
+#include "../Source/engine/BuiltInInstruments.h"
+
+TEST_CASE ("The built-in Drum Kit and Sampler make sound", "[engine][instruments]")
+{
+    DrumKit kit;
+    kit.prepare (48000.0, 512);
+    juce::MidiBuffer midi;
+    midi.addEvent (juce::MidiMessage::noteOn (10, 36, (juce::uint8) 120), 0);
+    midi.addEvent (juce::MidiMessage::noteOn (10, 42, (juce::uint8) 100), 100);
+    std::vector<float> l (4800), r (4800);
+    kit.render (l.data(), r.data(), 4800, midi);
+    float peak = 0.0f;
+    for (auto v : l) peak = juce::jmax (peak, std::abs (v));
+    CHECK (peak > 0.1f);
+    CHECK (DrumKit::pieceName (38) == "Snare");
+
+    Sampler sampler;
+    sampler.prepare (48000.0, 512);
+    auto sound = std::make_shared<juce::AudioBuffer<float>> (1, 48000);
+    for (int i = 0; i < 48000; ++i)
+        sound->setSample (0, i, 0.5f * (float) std::sin (i * 0.05));
+    sampler.setSample (sound, 48000.0);
+    sampler.setSettings (60, 0.001f, 0.1f, 1.0f);
+    juce::MidiBuffer notes;
+    notes.addEvent (juce::MidiMessage::noteOn (1, 72, (juce::uint8) 127), 0);   // an octave up: twice as fast
+    std::vector<float> sl (2000), sr (2000);
+    sampler.render (sl.data(), sr.data(), 2000, notes);
+    CHECK_THAT (sl[1000], WithinAbs (0.5f * (float) std::sin (2000 * 0.05), 0.02f));
+}
