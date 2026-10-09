@@ -137,6 +137,7 @@ private:
     void saveAsTemplate();
     void newAlternative();
     void showEventList();
+    void showLiveLoops();
     void showControllerAssignments();
     void toggleLibrary (LibraryPanel::Page page);
     void toggleSmartControls();
@@ -363,6 +364,7 @@ private:
     // the instruments they show are destroyed.
     std::map<juce::String, std::unique_ptr<EditorWindow>> editorWindows;
     std::unique_ptr<EditorWindow> scannerWindow;
+    bool liveLoopsWasPlaying = false;
 
     friend class SnapshotTool;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)

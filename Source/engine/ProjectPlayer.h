@@ -40,6 +40,16 @@ public:
     /** Schedules a rebuild (e.g. when a plugin finishes loading). */
     void requestRebuild() { triggerAsyncUpdate(); }
 
+    /** Live Loops: a cell plays on its track from `from` (seconds) until `until` (0: until it's stopped). */
+    struct LiveCell { juce::String cellId; double from = 0.0, until = 0.0; };
+    void setLiveCell (const juce::String& trackId, const LiveCell& cell) { liveCells[trackId] = cell; rebuildNow(); }
+    void stopLiveCell (const juce::String& trackId, double at)
+    {
+        if (auto it = liveCells.find (trackId); it != liveCells.end()) { it->second.until = at; rebuildNow(); }
+    }
+    void clearLiveCells() { if (! liveCells.empty()) { liveCells.clear(); rebuildNow(); } }
+    const std::map<juce::String, LiveCell>& getLiveCells() const noexcept { return liveCells; }
+
     /** While a plugin knob is being written as automation, its lane's curve is left out (the knob plays). */
     void setLaneSuppressed (const juce::String& owner, const juce::String& param, bool suppressed)
     {
@@ -85,6 +95,8 @@ private:
                              const std::map<juce::String, std::shared_ptr<Effect>>& effectsById);
     juce::String liveMidiTrackId;
     bool ignoreSolo = false;
+    std::map<juce::String, LiveCell> liveCells;
+    juce::Array<juce::ValueTree> regionsToPlay (const juce::ValueTree& track) const;
     std::set<juce::String> suppressedLanes;
     juce::ValueTree project;
     double builtForRate = 0.0;

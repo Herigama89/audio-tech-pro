@@ -1496,6 +1496,59 @@ std::pair<double, double> markerSection (const juce::ValueTree& project, const j
     return { start, end };
 }
 
+juce::ValueTree liveCell (const juce::ValueTree& project, const juce::String& trackId, int scene)
+{
+    for (const auto& c : project.getChildWithName (ids::LIVELOOPS))
+        if (c[ids::track].toString() == trackId && (int) c[ids::scene] == scene)
+            return c;
+    return {};
+}
+
+juce::ValueTree setLiveCell (juce::ValueTree project, const juce::String& trackId, int scene, const juce::ValueTree& region, juce::UndoManager* um)
+{
+    auto grid = project.getChildWithName (ids::LIVELOOPS);
+    if (! grid.isValid())
+    {
+        grid = juce::ValueTree (ids::LIVELOOPS);
+        project.appendChild (grid, nullptr);
+    }
+    if (auto old = liveCell (project, trackId, scene); old.isValid())
+        grid.removeChild (old, um);
+    if (! region.isValid())
+        return {};
+
+    juce::ValueTree cell (ids::CELL);
+    cell.setProperty (ids::id, newId(), nullptr);
+    cell.setProperty (ids::track, trackId, nullptr);
+    cell.setProperty (ids::scene, scene, nullptr);
+    auto copy = region.createCopy();
+    copy.setProperty (ids::id, newId(), nullptr);
+    copy.setProperty (ids::start, 0.0, nullptr);
+    copy.removeProperty (ids::loop, nullptr);
+    copy.removeProperty (ids::loopEnd, nullptr);
+    cell.appendChild (copy, nullptr);
+    grid.appendChild (cell, um);
+    return cell;
+}
+
+void captureScene (juce::ValueTree project, int scene, double a, double b, juce::UndoManager* um)
+{
+    for (const auto& track : project)
+    {
+        if (! track.hasType (ids::TRACK))
+            continue;
+        // The first region that starts inside the stretch, trimmed to it.
+        for (const auto& r : track)
+            if (r.hasType (ids::REGION) && (double) r[ids::start] >= a - 1.0e-6 && (double) r[ids::start] < b)
+            {
+                auto copy = r.createCopy();
+                copy.setProperty (ids::length, juce::jmin ((double) r[ids::length], b - (double) r[ids::start]), nullptr);
+                setLiveCell (project, track[ids::id].toString(), scene, copy, um);
+                break;
+            }
+    }
+}
+
 juce::ValueTree markersOf (juce::ValueTree project)
 {
     auto markers = project.getChildWithName (ids::MARKERS);

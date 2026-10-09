@@ -1931,3 +1931,48 @@ TEST_CASE ("The built-in Drum Kit and Sampler make sound", "[engine][instruments
     sampler.render (sl.data(), sr.data(), 2000, notes);
     CHECK_THAT (sl[1000], WithinAbs (0.5f * (float) std::sin (2000 * 0.05), 0.02f));
 }
+
+TEST_CASE ("Live Loops cells loop in place of the track's timeline, from their bar until stopped", "[engine][liveloops]")
+{
+    Fixture f;
+    const auto loopWav = writeConstantWav (f.temp.dir.getChildFile ("loop.wav"), 48000.0, 4800, 0.5f);
+    const auto otherWav = writeConstantWav (f.temp.dir.getChildFile ("other.wav"), 48000.0, 48000, 0.25f);
+
+    auto track = model::addTrack (f.project, "A", nullptr);
+    auto region = model::addRegion (track, loopWav, 0.0, 0.05, nullptr);   // 2400 samples of sound
+    model::addRegion (track, otherWav, 0.5, 0.5, nullptr);
+    const auto cell = model::setLiveCell (f.project, track[ids::id].toString(), 0, region, nullptr);
+    REQUIRE (cell.isValid());
+    model::captureScene (f.project, 3, 0.4, 1.2, nullptr);
+    f.player.setProject (f.project);
+
+    // Starts at 0.1 s and stops at 0.3 s; the timeline's region at 0.5 s stays quiet meanwhile.
+    f.player.setLiveCell (track[ids::id].toString(), { cell[ids::id].toString(), 0.1, 0.0 });
+    f.player.stopLiveCell (track[ids::id].toString(), 0.3);
+    f.engine.play();
+    const auto out = renderLeft (f.engine, 36000);
+    const float expected = 0.5f * 0.8f;
+
+    CHECK (out[4799] == 0.0f);
+    CHECK_THAT (out[4800], WithinAbs (expected, 1e-4));
+    CHECK_THAT (out[4800 + 2400 + 100], WithinAbs (expected, 1e-4));   // second pass of the loop
+    CHECK_THAT (out[14399], WithinAbs (expected, 1e-4));
+    CHECK (out[14400] == 0.0f);
+    CHECK (out[30000] == 0.0f);   // not the timeline
+
+    // When it's cleared, the timeline plays again.
+    f.player.clearLiveCells();
+    f.engine.setPlayheadSeconds (0.6);
+    const auto after = renderLeft (f.engine, 1000);
+    CHECK_THAT (after[500], WithinAbs (0.25f * 0.8f, 1e-4));
+
+    // Cycle to scene took the region that starts in 0.4..1.2, trimmed to the stretch.
+    const auto captured = model::liveCell (f.project, track[ids::id].toString(), 3);
+    REQUIRE (captured.isValid());
+    CHECK_THAT ((double) captured.getChild (0)[ids::length], WithinAbs (0.5, 1e-9));
+    CHECK ((double) captured.getChild (0)[ids::start] == 0.0);
+
+    // Replacing and clearing a cell.
+    model::setLiveCell (f.project, track[ids::id].toString(), 0, {}, nullptr);
+    CHECK (! model::liveCell (f.project, track[ids::id].toString(), 0).isValid());
+}

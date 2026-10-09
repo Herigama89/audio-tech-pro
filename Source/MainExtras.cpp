@@ -1,5 +1,6 @@
 // Undo History, Settings, templates, project alternatives, Autopunch and the Event List.
 #include "MainComponent.h"
+#include "ui/LiveLoopsGrid.h"
 #include "model/Project.h"
 #include "ui/Theme.h"
 #include "ui/EventList.h"
@@ -354,6 +355,31 @@ void MainComponent::showEventList()
     editorWindows[id] = std::make_unique<EditorWindow> (region[ids::name].toString() + ": Event List",
                                                         new EventListPanel (region, undoManager, [this] { return engine.getPlayheadSeconds(); }),
                                                         true, closer);
+}
+
+//==============================================================================
+void MainComponent::showLiveLoops()
+{
+    const juce::String id ("liveloops");
+    if (auto it = editorWindows.find (id); it != editorWindows.end())
+    {
+        it->second->toFront (true);
+        return;
+    }
+    auto closer = [this, id]
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this), id]
+        {
+            if (safe != nullptr)
+                safe->editorWindows.erase (id);
+        });
+    };
+    auto* grid = new LiveLoopsGrid (undoManager, engine, player);
+    grid->setProject (project);
+    grid->selectedRegion = [this] { return model::findById (project, timeline.selectedRegionId); };
+    grid->onClose = closer;
+    grid->setSize (LiveLoopsGrid::numScenes * 110 + 140, 420);
+    editorWindows[id] = std::make_unique<EditorWindow> ("Live Loops", grid, true, closer);
 }
 
 } // namespace riff

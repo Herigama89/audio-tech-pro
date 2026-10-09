@@ -138,6 +138,31 @@ void ProjectPlayer::addParamAutomation (PlaybackGraph::Track& t, const juce::Str
     }
 }
 
+juce::Array<juce::ValueTree> ProjectPlayer::regionsToPlay (const juce::ValueTree& track) const
+{
+    juce::Array<juce::ValueTree> regions;
+
+    // A Live Loops cell playing on this track takes over from its timeline.
+    if (auto it = liveCells.find (track[ids::id].toString()); it != liveCells.end())
+    {
+        const auto cell = project.getChildWithName (ids::LIVELOOPS).getChildWithProperty (ids::id, it->second.cellId);
+        const auto source = cell.getChild (0);
+        if (source.hasType (ids::REGION))
+        {
+            auto copy = source.createCopy();   // (no parent: nothing cuts its loop short)
+            copy.setProperty (ids::start, it->second.from, nullptr);
+            copy.setProperty (ids::loop, true, nullptr);
+            copy.setProperty (ids::loopEnd, it->second.until > it->second.from ? it->second.until : it->second.from + 3600.0, nullptr);
+            regions.add (copy);
+            return regions;
+        }
+    }
+
+    for (const auto& region : track)
+        regions.add (region);
+    return regions;
+}
+
 int ProjectPlayer::slotFor (const juce::String& trackId)
 {
     if (auto it = slots.find (trackId); it != slots.end())
@@ -318,7 +343,7 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
             if (t.instrument != nullptr)
                 latency += t.instrument->getLatencySamples();
 
-            for (const auto& region : track)
+            for (const auto& region : regionsToPlay (track))
             {
                 if (! model::isMidiRegion (region) || model::isRegionMuted (region))
                     continue;
@@ -404,7 +429,7 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
             continue;
         }
 
-        for (const auto& region : track)
+        for (const auto& region : regionsToPlay (track))
         {
             if (model::isRegionMuted (region))
                 continue;

@@ -68,6 +68,10 @@ namespace riff::ids
     RIFF_DECLARE_ID (cc)
     RIFF_DECLARE_ID (channel)
     RIFF_DECLARE_ID (TEMPOCHANGE)     // { id, beat (quarter notes from the start), bpm }
+    RIFF_DECLARE_ID (LIVELOOPS)       // after MIXER: the Live Loops grid
+    RIFF_DECLARE_ID (CELL)            // { id, track, scene } with a REGION inside (its start is 0)
+    RIFF_DECLARE_ID (scene)
+    RIFF_DECLARE_ID (track)
     RIFF_DECLARE_ID (KEYCHANGE)       // in TEMPO: { id, bar (1-based), keyRoot, keyMinor }
     RIFF_DECLARE_ID (SIGCHANGE)       // in TEMPO: { id, bar (1-based), timeSigNumerator }
     RIFF_DECLARE_ID (bar)

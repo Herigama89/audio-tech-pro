@@ -2,6 +2,7 @@
 // be checked on a build machine. Build with -DRIFF_BUILD_SNAPSHOTS=ON, then:
 //     Snapshots <output folder>
 
+#include "../Source/ui/LiveLoopsGrid.h"
 #include <JuceHeader.h>
 #include "MainComponent.h"
 #include "model/Project.h"
@@ -355,6 +356,33 @@ public:
             CombineInterfacesPanel panel (s, true, [fake] { return fake; }, {}, {});
             pump (main, 50);
             save (panel, "combine-interfaces.png");
+        }
+
+        {
+            // Live Loops: fill two scenes from the song's tracks and start one cell.
+            juce::Array<juce::ValueTree> filled;
+            for (const auto& track : main.project)
+                if (track.hasType (ids::TRACK) && track.getNumChildren() > 0 && filled.size() < 5)
+                    filled.add (track);
+            for (int i = 0; i < filled.size(); ++i)
+            {
+                model::setLiveCell (main.project, filled[i][ids::id].toString(), 0, filled[i].getChild (0), nullptr);
+                if (i % 2 == 0)
+                    model::setLiveCell (main.project, filled[i][ids::id].toString(), 1, filled[i].getChild (0), nullptr);
+            }
+            LiveLoopsGrid grid (main.undoManager, main.engine, main.player);
+            grid.setProject (main.project);
+            grid.setSize (LiveLoopsGrid::numScenes * 110 + 140, 300);
+            if (! filled.isEmpty())
+            {
+                const auto id = filled[0][ids::id].toString();
+                main.player.setLiveCell (id, { model::liveCell (main.project, id, 0)[ids::id].toString(), 0.0, 0.0 });
+            }
+            main.engine.setPlayheadSeconds (1.3);
+            pump (main, 50);
+            save (grid, "live-loops.png");
+            main.player.clearLiveCells();
+            main.project.removeChild (main.project.getChildWithName (ids::LIVELOOPS), nullptr);
         }
 
         {

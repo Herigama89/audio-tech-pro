@@ -1688,6 +1688,14 @@ void MainComponent::timerCallback()
 
     handleIncomingMidi();
 
+    // Live Loops cells stop with the song.
+    if (const auto playingNow = engine.isPlaying(); liveLoopsWasPlaying != playingNow)
+    {
+        if (! playingNow)
+            player.clearLiveCells();
+        liveLoopsWasPlaying = playingNow;
+    }
+
     // Autosave every two minutes while there are unsaved changes.
     if (const auto now = juce::Time::getMillisecondCounter();
         autosaveMinutes > 0 && now - lastAutosaveMs > (juce::uint32) autosaveMinutes * 60000u)

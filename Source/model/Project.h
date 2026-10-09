@@ -374,6 +374,16 @@ namespace riff::model
     /** The section a marker starts: to the next marker (or the end of the song). */
     std::pair<double, double> markerSection (const juce::ValueTree& project, const juce::ValueTree& marker);
 
+    // --- Live Loops ----------------------------------------------------------------
+    /** The cell for a track and scene, or invalid. */
+    juce::ValueTree liveCell (const juce::ValueTree& project, const juce::String& trackId, int scene);
+
+    /** Puts a copy of a region into a cell (replacing what was there); it loops for its own length. */
+    juce::ValueTree setLiveCell (juce::ValueTree project, const juce::String& trackId, int scene, const juce::ValueTree& region, juce::UndoManager* um);
+
+    /** Copies what's on each track between `a` and `b` into the cells of a scene (Logic's "copy to scene"). */
+    void captureScene (juce::ValueTree project, int scene, double a, double b, juce::UndoManager* um);
+
     // --- Markers (Logic's marker track) -----------------------------------------
     /** The MARKERS node (after the MIXER), created if needed. */
     juce::ValueTree markersOf (juce::ValueTree project);

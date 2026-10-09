@@ -63,6 +63,7 @@ const std::vector<Info>& all()
         { trackColours,           "Track Colours...",           "Track",     "Choose a colour for the selected tracks" },
         { newDrummerTrack,        "New Drummer Track",          "Track",     "A drummer who plays the song in a genre: set how busy and how loud, fills and swing" },
         { newBassPlayerTrack,     "New Bass Player Track",      "Track",     "A session bass player, in the song's key" },
+        { liveLoops,              "Live Loops",                 "View",      "A grid of loops per track: start and stop cells and scenes in time, on the next bar" },
         { newKeysPlayerTrack,     "New Keyboard Player Track",  "Track",     "A session keyboard player playing chords in the song's key" },
         { createFolderStack,      "Create Folder Stack",        "Track",     "Put the selected tracks in a folder stack: one fader, mute and solo for them all" },
         { createSummingStack,     "Create Summing Stack",       "Track",     "Put the selected tracks in a summing stack: they play into one aux bus" },
