@@ -79,7 +79,16 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
     automationButton.addMouseListener (this, false);
 
     // Arming and monitoring are live settings, not edits, so they skip undo.
-    armButton.onClick = [this] { if (! lastClickWasPopup) track.setProperty (ids::armed, ! (bool) track[ids::armed], nullptr); };
+    armButton.onClick = [this]
+    {
+        if (lastClickWasPopup)
+            return;
+        const auto value = ! (bool) track[ids::armed];
+        // Grouped tracks arm together (when the group links record).
+        for (auto other : routing::linkedTracks (track.getParent(), track, {}, "Record"))
+            if (! model::isBusTrack (other) && ! model::isVcaTrack (other))
+                other.setProperty (ids::armed, value, nullptr);
+    };
     monitorButton.onClick = [this] { track.setProperty (ids::monitor, ! (bool) track[ids::monitor], nullptr); };
     armButton.addMouseListener (this, false);
 
@@ -90,7 +99,7 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
         const auto value = ! (bool) track[flag];
         // The selection (if this track is in it) and their groups follow.
         const auto selected = timeline.isTrackSelected (track[ids::id].toString()) ? timeline.selectedTrackIds() : juce::StringArray();
-        for (auto other : routing::linkedTracks (track.getParent(), track, selected))
+        for (auto other : routing::linkedTracks (track.getParent(), track, selected, flag == ids::mute ? "Mute" : "Solo"))
             other.setProperty (flag, value, &undoManager);
     };
     muteButton.onClick = [toggle] { toggle (ids::mute, "Mute"); };

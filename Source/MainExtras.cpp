@@ -4,6 +4,7 @@
 #include "ui/Theme.h"
 #include "ui/EventList.h"
 #include "AppInfo.h"
+#include "engine/BuiltInEffects.h"
 
 namespace riff
 {
@@ -545,6 +546,224 @@ void MainComponent::toggleSmartControls()
     smartControls->setVisible (! smartControls->isVisible());
     smartControls->setTrack (project, selectedTrack());
     resized();
+}
+
+} // namespace riff
+
+namespace riff
+{
+
+namespace
+{
+    /** Group Settings: each group's name and what it links. */
+    class GroupSettingsPanel final : public juce::Component
+    {
+    public:
+        GroupSettingsPanel (juce::ValueTree p, juce::UndoManager& um) : project (p), undoManager (um)
+        {
+            for (int g = 1; g <= 8; ++g)
+            {
+                auto* name = names.add (new juce::TextEditor());
+                name->setText (project[model::groupProperty (g, "Name")].toString(), juce::dontSendNotification);
+                name->setTextToShowWhenEmpty ("Group " + juce::String (g), theme::dimText);
+                name->onTextChange = [this, g, name] { project.setProperty (model::groupProperty (g, "Name"), name->getText(), &undoManager); };
+                addAndMakeVisible (name);
+                for (const auto& what : links())
+                {
+                    auto* box = toggles.add (new juce::ToggleButton());
+                    box->setToggleState (model::groupLinks (project, g, what), juce::dontSendNotification);
+                    box->onClick = [this, g, what, box] { project.setProperty (model::groupProperty (g, what), box->getToggleState(), &undoManager); };
+                    addAndMakeVisible (box);
+                }
+            }
+            setSize (520, 40 + 8 * 30 + 12);
+        }
+
+        static const juce::StringArray& links() { static const juce::StringArray l { "Volume", "Mute", "Solo", "Record" }; return l; }
+
+        void paint (juce::Graphics& g) override
+        {
+            g.fillAll (theme::background);
+            g.setColour (theme::dimText);
+            g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+            g.drawText ("Group", 12, 10, 180, 20, juce::Justification::centredLeft);
+            for (int i = 0; i < links().size(); ++i)
+                g.drawText (links()[i], 220 + i * 72, 10, 72, 20, juce::Justification::centred);
+        }
+
+        void resized() override
+        {
+            for (int g = 0; g < 8; ++g)
+            {
+                const auto y = 40 + g * 30;
+                names[g]->setBounds (12, y, 196, 24);
+                for (int i = 0; i < links().size(); ++i)
+                    toggles[g * links().size() + i]->setBounds (220 + i * 72 + 26, y, 26, 24);
+            }
+        }
+
+    private:
+        juce::ValueTree project;
+        juce::UndoManager& undoManager;
+        juce::OwnedArray<juce::TextEditor> names;
+        juce::OwnedArray<juce::ToggleButton> toggles;
+    };
+
+    /** I/O Labels: your names for the inputs. */
+    class IOLabelsPanel final : public juce::Component
+    {
+    public:
+        IOLabelsPanel (const juce::StringArray& inputs, juce::PropertiesFile& p) : props (p)
+        {
+            const auto labels = juce::StringArray::fromLines (props.getValue ("inputLabels"));
+            for (int i = 0; i < inputs.size(); ++i)
+            {
+                auto* editor = editors.add (new juce::TextEditor());
+                editor->setText (labels[i], juce::dontSendNotification);
+                editor->setTextToShowWhenEmpty (inputs[i], theme::dimText);
+                editor->onTextChange = [this] { save(); };
+                addAndMakeVisible (editor);
+                deviceNames.add (inputs[i]);
+            }
+            setSize (420, juce::jmax (80, 20 + inputs.size() * 30));
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            g.fillAll (theme::background);
+            g.setColour (theme::dimText);
+            g.setFont (juce::FontOptions (12.0f));
+            if (deviceNames.isEmpty())
+                g.drawText ("No inputs: choose an interface under Audio first.", getLocalBounds(), juce::Justification::centred);
+            for (int i = 0; i < deviceNames.size(); ++i)
+                g.drawText (deviceNames[i], 12, 10 + i * 30, 170, 24, juce::Justification::centredLeft, true);
+        }
+
+        void resized() override
+        {
+            for (int i = 0; i < editors.size(); ++i)
+                editors[i]->setBounds (190, 10 + i * 30, getWidth() - 202, 24);
+        }
+
+    private:
+        void save()
+        {
+            juce::StringArray labels;
+            for (auto* e : editors)
+                labels.add (e->getText().trim());
+            props.setValue ("inputLabels", labels.joinIntoString ("\n"));
+        }
+
+        juce::PropertiesFile& props;
+        juce::OwnedArray<juce::TextEditor> editors;
+        juce::StringArray deviceNames;
+    };
+
+    /** Signal Flow: the selected track's stages, input to main output, as boxes. */
+    class SignalFlowPanel final : public juce::Component
+    {
+    public:
+        SignalFlowPanel (juce::ValueTree project, juce::ValueTree track, const juce::StringArray& inputs, EffectRack& effects)
+        {
+            const auto add = [this] (const juce::String& title, const juce::String& detail, juce::Colour colour) { stages.push_back ({ title, detail, colour }); };
+            const auto id = track[ids::id].toString();
+            const auto grey = juce::Colour (0xff4b4e54), blue = theme::accent, amber = juce::Colour (0xffd08a1c);
+
+            if (model::isInstrumentTrack (track))
+                add ("Instrument", track[ids::instrument].toString() == "plugin" ? (effects.getPlugin (id) != nullptr ? juce::String ("Plug-in") : juce::String ("Plug-in"))
+                                                                                  : juce::String ("Tech Synth"), amber);
+            else if (! model::isBusTrack (track) && ! model::isVcaTrack (track))
+                add ("Input", model::inputName (track, inputs), grey);
+            else if (model::isBusTrack (track))
+                add ("Sends in", "from other tracks", grey);
+
+            if ((bool) track[ids::frozen])
+                add ("Frozen", "plays the frozen file", blue);
+
+            const bool stripIn = track.getProperty (ids::stripIn, true);
+            if (auto strip = model::stripPlugin (project, id); strip.isValid())
+                add ("Channel strip", juce::String ("plug-in") + (stripIn ? "" : " (out)"), blue);
+            else
+                add ("Channel strip", juce::String ("EQ, Dynamics") + (stripIn ? "" : " (out)"), blue);
+
+            for (const auto& insert : model::insertsOf (model::findChain (project, id)))
+            {
+                const auto* info = findBuiltInEffect (insert[ids::effect].toString());
+                juce::String name = info != nullptr ? info->name : juce::String ("Plug-in");
+                if (auto* p = effects.getPlugin (insert[ids::id].toString()))
+                    name = p->getName();
+                add ("Insert", name + ((bool) insert[ids::bypass] ? " (bypassed)" : ""), blue);
+            }
+
+            for (const auto& send : model::sendsOf (model::findChain (project, id)))
+                if (const auto bus = model::findById (project, send[ids::target].toString()); bus.isValid())
+                    add ((bool) send[ids::pre] ? "Send (pre-fader)" : "Send", "to " + bus[ids::name].toString(), grey);
+
+            add ("Fader and pan", juce::String (juce::Decibels::gainToDecibels ((double) track.getProperty (ids::volume, 1.0)), 1) + " dB", grey);
+            if (const auto vca = model::findById (project, track[ids::vca].toString()); vca.isValid())
+                add ("VCA", vca[ids::name].toString(), grey);
+
+            if (const auto out = model::findById (project, track[ids::output].toString()); out.isValid())
+                add ("Output", "into " + out[ids::name].toString(), amber);
+            add ("Main output", "master inserts, bus compressor, master fader", amber);
+
+            title = track[ids::name].toString();
+            setSize (300, 50 + (int) stages.size() * 56);
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            g.fillAll (theme::background);
+            g.setColour (theme::text);
+            g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+            g.drawText (title, 16, 10, getWidth() - 32, 24, juce::Justification::centredLeft);
+
+            for (size_t i = 0; i < stages.size(); ++i)
+            {
+                const juce::Rectangle<float> box (24.0f, 44.0f + (float) i * 56.0f, (float) getWidth() - 48.0f, 40.0f);
+                g.setColour (stages[i].colour.withAlpha (0.85f));
+                g.fillRoundedRectangle (box, 5.0f);
+                g.setColour (juce::Colours::white);
+                g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
+                g.drawText (stages[i].title, box.reduced (10.0f, 3.0f).removeFromTop (17.0f), juce::Justification::centredLeft);
+                g.setFont (juce::FontOptions (11.5f));
+                g.drawText (stages[i].detail, box.reduced (10.0f, 3.0f).removeFromBottom (17.0f), juce::Justification::centredLeft, true);
+                if (i + 1 < stages.size())
+                {
+                    g.setColour (theme::dimText);
+                    const auto x = box.getCentreX(), y = box.getBottom();
+                    g.drawArrow ({ x, y + 1.0f, x, y + 15.0f }, 1.5f, 7.0f, 6.0f);
+                }
+            }
+        }
+
+    private:
+        struct Stage { juce::String title, detail; juce::Colour colour; };
+        std::vector<Stage> stages;
+        juce::String title;
+    };
+}
+
+void MainComponent::showGroupSettings()
+{
+    launch (new GroupSettingsPanel (project, undoManager), "Group Settings", this);
+}
+
+void MainComponent::showIOLabels()
+{
+    launch (new IOLabelsPanel (engine.getActiveInputChannelNames(), *appProperties.getUserSettings()), "I/O Labels", this);
+}
+
+void MainComponent::showSignalFlow()
+{
+    const auto track = selectedTrack();
+    if (! track.isValid())
+    {
+        showError ("Signal Flow", "Select a track first.");
+        return;
+    }
+    launch (new SignalFlowPanel (project, track, headers.inputNames ? headers.inputNames() : juce::StringArray(), effectRack),
+            "Signal Flow: " + track[ids::name].toString(), this);
 }
 
 } // namespace riff

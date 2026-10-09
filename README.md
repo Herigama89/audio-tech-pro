@@ -279,7 +279,6 @@ Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderC
 - [x] Console mode for the strips: your UA SSL 4000 E channel strip plugin driven from each strip's console section
 - [x] Console strips, part 2a: an IN key on every strip (bypasses the whole channel strip, a plugin stays loaded)
 - [x] Console strips, part 2b: every control of the built-in strip in its own window, as LUNA does (double-click the strip's top, or right-click > Open channel strip window): input/output trims, HPF/LPF, EQ frequencies, Qs and bell switches, compressor ratio/release/fast attack, gate/expander, and the EQ curve
-- [ ] (was) every 4000 E control in a separate strip window that opens from the strip (as in LUNA): filters, EQ frequencies, Q and bell switches, compressor, gate/expander, input and output
 - [x] Claude AI assistant (with your own API key): controls the DAW, writes MIDI, measures and advises on the mix, answers questions
 - [x] Screen recording of the app (or the whole screen) with the mix's sound and an optional mic, up to 4K (Mac)
 - [x] Several audio interfaces at once: Combine Audio Interfaces makes one device from them, with a clock and drift correction (Mac)
@@ -304,7 +303,7 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [x] Time signature and key in the display (click to change); the MIDI generator starts in the song's key
 - [x] Tempo track with tempo changes (double-click the Tempo lane; drag a change sideways to move it, up/down for its BPM)
 - [x] Time signature changes (right-click the Tempo lane); MIDI regions, markers and locators follow tempo changes
-- [ ] Key changes along the song, arrangement markers
+- [x] Key changes (right-click the Tempo lane; Scale Quantize follows them), arrangement: duplicate or delete a marker's section
 - [x] Bounce in place (Ctrl+B), export all tracks as audio files (stems, Shift+Cmd+E), import tracks from other projects
 
 **Editing in the tracks area**
@@ -317,27 +316,28 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [x] Loop regions (L, or drag a region's upper right edge), X-Fade and Shuffle R/L drag modes, region gain, fades (drag the handles at a region's top corners, Shift-drag bends the curve, or the Fade tool) and equal-power crossfades, trim region start/end to playhead
 - [x] Time stretch and transpose for audio regions (in the Audio File Editor, without changing pitch / length)
 - [ ] Flex Time markers and Flex Pitch note editing, Smart Tempo
-- [ ] Marquee selection across tracks; edit with the playhead (split by locators, delete between)
+- [x] Marquee selection across tracks; Split by Locators, Cut Section / Insert Silence / Repeat Section between locators
 
 **Editors**
 - [x] Piano Roll: velocity lane, MIDI CC and pitch bend lanes (recorded too), quantize grid / strength / swing, Scale Quantize, MIDI Transform presets, rubber-band note selection
-- [ ] Piano Roll: Time Handles, note repeat, more Transform sets
+- [x] Piano Roll: Time Handles (the bar over a selection), Note Repeat, Random Velocity, Pitch Inversion, Reverse Pitch Order
 - [x] Event List (MIDI regions)
 - [x] Audio File Editor (double-click an audio region): normalize, gain, fades, silence, reverse, invert
 - [x] Score view and Step Editor (the View menu in the editor's header)
 - [ ] Audio Track Editor, editing in the score
-- [ ] Step Sequencer
+- [x] Step Sequencer (the Step Editor grid)
 - [x] Editors open below the tracks with a resizable divider (double-click it for the default); the editor follows the selected track and region
 
 **Mixer**
 - [x] Resizable mixer (drag the bar above it), filters (all, audio, instrument, aux, VCA)
 - [ ] Narrow/wide strips
 - [x] Groups 1-8 (linked volume, mute, solo), VCA faders, track outputs into buses (right-click a strip's fader or a track header)
-- [ ] Group settings window, I/O labels, stereo panner modes
+- [x] Group Settings (names; what each group links), I/O Labels
+- [ ] Stereo panner modes
 - [x] Track automation modes (Off, Read, Touch, Latch, Write) on every strip and in the A menu; fader and pan moves are written while playing
 - [x] Channel EQ curve (in the strip window)
 - [x] Writing plugin knob moves (built-in and hosted) as automation
-- [ ] Signal flow view
+- [x] Signal Flow view (Mix menu)
 - [x] Inserts, sends (pre/post), aux buses, master bus compressor, console channel strips
 
 **Recording and MIDI**

@@ -1009,6 +1009,45 @@ void transformNotes (const juce::Array<juce::ValueTree>& notes, Transform transf
                 // Mirrored in time within the notes' span.
                 note.setProperty (ids::start, juce::jmax (0.0, first + (last - (start + length) )), um);
                 break;
+            case Transform::randomVelocity:
+                note.setProperty (ids::velocity, 40 + random.nextInt (88), um);
+                break;
+            case Transform::invertPitch:
+            case Transform::reversePitch:
+                break;   // done for all notes together below
+            case Transform::noteRepeat:
+            {
+                // The note becomes repeats a sixteenth apart (the length of a sixteenth at 120 BPM unless set by `seed`).
+                const auto step = seed > 0 ? seed / 1000.0 : 0.125;
+                if (length < step * 1.5)
+                    break;
+                const auto count = (int) std::floor (length / step + 1.0e-6);
+                note.setProperty (ids::length, step * 0.9, um);
+                auto region = note.getParent();
+                for (int k = 1; k < count; ++k)
+                    addNote (region, pitch, start + k * step, step * 0.9, velocity, um);
+                break;
+            }
+        }
+    }
+
+    // Pitch mirrors: around the middle of the notes' range, or the order of pitches reversed in time.
+    if (transform == Transform::invertPitch || transform == Transform::reversePitch)
+    {
+        int lo = 127, hi = 0;
+        for (const auto& n : sorted)
+        {
+            lo = juce::jmin (lo, (int) n[ids::pitch]);
+            hi = juce::jmax (hi, (int) n[ids::pitch]);
+        }
+        std::vector<int> pitches;
+        for (const auto& n : sorted)
+            pitches.push_back (n[ids::pitch]);
+        for (int i = 0; i < sorted.size(); ++i)
+        {
+            auto n = sorted[i];
+            n.setProperty (ids::pitch, transform == Transform::invertPitch ? lo + hi - pitches[(size_t) i]
+                                                                           : pitches[pitches.size() - 1 - (size_t) i], um);
         }
     }
 }
@@ -1203,6 +1242,45 @@ juce::Array<juce::ValueTree> sortedSignatureChanges (const juce::ValueTree& proj
     return changes;
 }
 
+juce::ValueTree addKeyChange (juce::ValueTree project, int bar, int keyRoot, bool minor, juce::UndoManager* um)
+{
+    juce::ValueTree change (ids::KEYCHANGE);
+    change.setProperty (ids::id, newId(), nullptr);
+    change.setProperty (ids::bar, juce::jmax (2, bar), nullptr);
+    change.setProperty (ids::keyRoot, ((keyRoot % 12) + 12) % 12, nullptr);
+    change.setProperty (ids::keyMinor, minor, nullptr);
+    tempoTrackOf (project).appendChild (change, um);
+    return change;
+}
+
+juce::Array<juce::ValueTree> sortedKeyChanges (const juce::ValueTree& project)
+{
+    juce::Array<juce::ValueTree> changes;
+    for (const auto& c : project.getChildWithName (ids::TEMPO))
+        if (c.hasType (ids::KEYCHANGE))
+            changes.add (c);
+    std::stable_sort (changes.begin(), changes.end(), [] (const juce::ValueTree& a, const juce::ValueTree& b)
+                      { return (int) a[ids::bar] < (int) b[ids::bar]; });
+    return changes;
+}
+
+std::pair<int, bool> keyAt (const juce::ValueTree& project, double seconds)
+{
+    std::pair<int, bool> key { (int) project.getProperty (ids::keyRoot, 0), (bool) project.getProperty (ids::keyMinor, false) };
+    const auto map = tempoMapOf (project);
+    const auto bar = map.barAndBeat (map.beatAt (seconds)).first + 1;
+    for (const auto& c : sortedKeyChanges (project))
+        if ((int) c[ids::bar] <= bar)
+            key = { (int) c[ids::keyRoot], (bool) c[ids::keyMinor] };
+    return key;
+}
+
+juce::String keyName (int root, bool minor)
+{
+    static const char* names[] = { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
+    return juce::String (names[((root % 12) + 12) % 12]) + (minor ? " minor" : " major");
+}
+
 TempoMap tempoMapOf (const juce::ValueTree& project)
 {
     auto map = TempoMap::constant (secondsPerBeat (project));
@@ -1294,6 +1372,128 @@ double moveByBars (const juce::ValueTree& project, double seconds, int bars)
     if (bars < 0 && inBar > 1.0e-6)
         bar += 1;
     return juce::jmax (0.0, map.secondsAt (map.beatOfBar (juce::jmax (0, bar + bars))));
+}
+
+namespace
+{
+    juce::Array<juce::ValueTree> allRegions (const juce::ValueTree& project)
+    {
+        juce::Array<juce::ValueTree> regions;
+        for (const auto& track : project)
+            if (track.hasType (ids::TRACK))
+                for (const auto& r : track)
+                    if (r.hasType (ids::REGION))
+                        regions.add (r);
+        return regions;
+    }
+
+    /** Moves everything at or after `from` by `delta` seconds (regions, automation, markers). */
+    void shiftAfter (juce::ValueTree project, double from, double delta, juce::UndoManager* um)
+    {
+        for (auto r : allRegions (project))
+            if ((double) r[ids::start] >= from - 1.0e-9)
+                r.setProperty (ids::start, juce::jmax (0.0, (double) r[ids::start] + delta), um);
+
+        for (auto lane : project.getChildWithName (ids::MIXER))
+            if (lane.hasType (ids::LANE))
+                for (auto p : lane)
+                    if ((double) p[ids::time] >= from - 1.0e-9)
+                        p.setProperty (ids::time, juce::jmax (0.0, (double) p[ids::time] + delta), um);
+
+        for (auto m : project.getChildWithName (ids::MARKERS))
+            if ((double) m[ids::time] >= from - 1.0e-9)
+                m.setProperty (ids::time, juce::jmax (0.0, (double) m[ids::time] + delta), um);
+    }
+}
+
+void splitAtTimes (juce::ValueTree project, double a, double b, juce::UndoManager* um)
+{
+    for (auto r : allRegions (project))
+    {
+        auto right = splitRegion (r, b, um);
+        juce::ignoreUnused (right);
+        splitRegion (r, a, um);
+    }
+}
+
+void deleteSection (juce::ValueTree project, double a, double b, juce::UndoManager* um)
+{
+    if (b <= a)
+        return;
+    splitAtTimes (project, a, b, um);
+
+    for (auto r : allRegions (project))
+        if ((double) r[ids::start] >= a - 1.0e-6 && regionEnd (r) <= b + 1.0e-6)
+            deleteRegion (r, um);
+
+    for (auto lane : project.getChildWithName (ids::MIXER))
+        if (lane.hasType (ids::LANE))
+            for (int i = lane.getNumChildren(); --i >= 0;)
+                if (const double t = lane.getChild (i)[ids::time]; t >= a && t < b)
+                    lane.removeChild (i, um);
+
+    auto markers = project.getChildWithName (ids::MARKERS);
+    for (int i = markers.getNumChildren(); --i >= 0;)
+        if (const double t = markers.getChild (i)[ids::time]; t >= a && t < b)
+            markers.removeChild (i, um);
+
+    shiftAfter (project, b, -(b - a), um);
+}
+
+void insertSilence (juce::ValueTree project, double a, double b, juce::UndoManager* um)
+{
+    if (b <= a)
+        return;
+    for (auto r : allRegions (project))
+        splitRegion (r, a, um);
+    shiftAfter (project, a, b - a, um);
+}
+
+void duplicateSection (juce::ValueTree project, double a, double b, juce::UndoManager* um)
+{
+    if (b <= a)
+        return;
+    const auto length = b - a;
+    splitAtTimes (project, a, b, um);
+
+    // What's in the section, before anything moves.
+    juce::Array<juce::ValueTree> inside;
+    for (const auto& r : allRegions (project))
+        if ((double) r[ids::start] >= a - 1.0e-6 && regionEnd (r) <= b + 1.0e-6)
+            inside.add (r);
+    struct Point { juce::ValueTree lane; double time, value; };
+    std::vector<Point> points;
+    for (const auto& lane : project.getChildWithName (ids::MIXER))
+        if (lane.hasType (ids::LANE))
+            for (const auto& p : lane)
+                if (const double t = p[ids::time]; t >= a && t < b)
+                    points.push_back ({ lane, t, (double) p[ids::value] });
+    std::vector<std::pair<double, juce::String>> markers;
+    for (const auto& m : project.getChildWithName (ids::MARKERS))
+        if (const double t = m[ids::time]; t >= a && t < b)
+            markers.push_back ({ t, m[ids::name].toString() });
+
+    shiftAfter (project, b, length, um);
+
+    for (const auto& r : inside)
+        duplicateRegion (r, r.getParent(), (double) r[ids::start] + length, um);
+    for (auto& p : points)
+        addPoint (p.lane, p.time + length, p.value, um);
+    for (const auto& [t, name] : markers)
+        addMarker (project, t + length, name, um);
+}
+
+std::pair<double, double> markerSection (const juce::ValueTree& project, const juce::ValueTree& marker)
+{
+    const double start = marker[ids::time];
+    double end = juce::jmax (start, projectEnd (project));
+    for (const auto& m : sortedMarkers (project))
+        if ((double) m[ids::time] > start + 1.0e-9)
+        {
+            end = m[ids::time];
+            break;
+        }
+    return { start, end };
 }
 
 juce::ValueTree markersOf (juce::ValueTree project)
@@ -1434,6 +1634,17 @@ juce::Array<juce::ValueTree> groupMembers (const juce::ValueTree& project, const
         if (t.hasType (ids::TRACK) && (int) t.getProperty (ids::group, 0) == group)
             members.add (t);
     return members;
+}
+
+juce::String groupName (const juce::ValueTree& project, int group)
+{
+    const auto name = project[groupProperty (group, "Name")].toString();
+    return name.isNotEmpty() ? name : "Group " + juce::String (group);
+}
+
+bool groupLinks (const juce::ValueTree& project, int group, const juce::String& what)
+{
+    return group > 0 && (bool) project.getProperty (groupProperty (group, what), true);
 }
 
 juce::Array<juce::ValueTree> vcaMembers (const juce::ValueTree& project, const juce::ValueTree& vcaTrack)

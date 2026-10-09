@@ -140,6 +140,9 @@ private:
     void showControllerAssignments();
     void toggleLibrary (LibraryPanel::Page page);
     void toggleSmartControls();
+    void showGroupSettings();
+    void showIOLabels();
+    void showSignalFlow();
     std::unique_ptr<SmartControls> smartControls;
     std::unique_ptr<LibraryPanel> libraryPanel;
     void handleIncomingMidi();

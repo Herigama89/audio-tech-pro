@@ -83,7 +83,8 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
             auto& um = owner.getUndoManager();
             um.beginNewTransaction (undoName);
             const auto value = ! (bool) track[flag];
-            for (auto other : routing::linkedTracks (project, track, selected ? owner.getSelectedTrackIds() : juce::StringArray()))
+            for (auto other : routing::linkedTracks (project, track, selected ? owner.getSelectedTrackIds() : juce::StringArray(),
+                                                     flag == ids::mute ? "Mute" : "Solo"))
                 other.setProperty (flag, value, &um);
         };
         muteButton.onClick = [toggle] { toggle (ids::mute, "Mute"); };
@@ -179,7 +180,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         groupStart.clear();
         dragStartDb = fader.getValue();
         if (! isMaster())
-            for (const auto& other : routing::linkedTracks (project, track, selected ? owner.getSelectedTrackIds() : juce::StringArray()))
+            for (const auto& other : routing::linkedTracks (project, track, selected ? owner.getSelectedTrackIds() : juce::StringArray(), "Volume"))
                 if (other != track)
                     groupStart[other[ids::id].toString()] = gainToDb ((double) other.getProperty (ids::volume, 1.0));
 

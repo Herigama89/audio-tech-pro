@@ -41,6 +41,10 @@ const std::vector<Info>& all()
         { loopRegions,            "Loop Regions",               "Edit",      "Repeat the selected regions up to the next region (drag the upper right edge to set how far)" },
         { regionGain,             "Region Gain...",             "Edit",      "Turn the selected audio regions up or down" },
         { removeFades,            "Remove Fades",               "Edit",      "Take the fades off the selected regions" },
+        { splitByLocators,        "Split Regions by Locators",  "Edit",      "Split every region at the cycle's start and end" },
+        { cutSectionBetweenLocators, "Cut Section Between Locators", "Edit", "Remove the cycle's stretch of the song, and close the gap" },
+        { insertSilenceBetweenLocators, "Insert Silence Between Locators", "Edit", "Open a gap the length of the cycle at its start" },
+        { repeatSectionBetweenLocators, "Repeat Section Between Locators", "Edit", "Play the cycle's stretch twice: a copy right after it" },
         { toolMenu,               "Tool Menu",                  "Edit",      "Choose a tool: pointer, pencil, eraser, scissors, glue, mute" },
 
         { newAudioTrack,          "New Audio Track",            "Track",     "Add an audio track" },
@@ -91,6 +95,9 @@ const std::vector<Info>& all()
         { showSmartControls,      "Smart Controls",             "View",      "Eight knobs for the selected track's sound (right-click one to map it)" },
         { showLibrary,            "Library",                    "View",      "Patches: save a track's sound and put it on other tracks" },
         { showLoopBrowser,        "Loop Browser",               "View",      "Browse a folder of loops and samples: click to hear, drag onto a track" },
+        { groupSettings,          "Group Settings...",          "Mix",       "Name the groups and choose what each links: volume, mute, solo, record" },
+        { ioLabels,               "I/O Labels...",              "Mix",       "Your own names for the interface's inputs (they show in the input menus)" },
+        { signalFlow,             "Signal Flow",                "Mix",       "The selected track's path from its input to the main output, with every stage" },
         { controllerAssignments,  "Controller Assignments...",  "View",      "The knobs and faders on your MIDI controller that move tracks (right-click a track > Learn MIDI Controller to add one)" },
         { eventList,              "Event List",                 "View",      "The selected MIDI region's notes and controllers as a list you can edit" },
         { keyCommands,            "Key Commands...",            "View",      "Show and edit the key commands" },
@@ -220,6 +227,11 @@ namespace
             case nudgeLeft:              return { key (KeyPress::leftKey, opt) };
             case nudgeRight:             return { key (KeyPress::rightKey, opt) };
             case toolMenu:               return { key ('t') };
+           #if JUCE_MAC
+            case cutSectionBetweenLocators:    return { key ('x', ctrl | cmd) };
+            case insertSilenceBetweenLocators: return { key ('z', ctrl | cmd) };
+            case repeatSectionBetweenLocators: return { key ('r', ctrl | cmd) };
+           #endif
             case loopRegions:            return { key ('l') };
             case showLibrary:            return { key ('y') };
             case showSmartControls:      return { key ('b') };

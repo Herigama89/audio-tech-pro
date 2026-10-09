@@ -47,7 +47,11 @@ public:
     void stepInput (const juce::MidiMessage& message);
 
 private:
-    enum class Drag { none, move, resize, keyboard, rubberBand, velocity, controller };
+    enum class Drag { none, move, resize, keyboard, rubberBand, velocity, controller, timeHandle };
+
+    /** Time Handles: with several notes selected, a bar over them whose right end stretches their timing. */
+    juce::Rectangle<float> timeHandleBar() const;
+    double handleFrom = 0.0, handleTo = 0.0;
 
     static constexpr int headerHeight = 28;
     static constexpr int laneHeight = 84;

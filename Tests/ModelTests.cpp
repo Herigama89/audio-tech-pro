@@ -674,3 +674,52 @@ TEST_CASE ("Time signature changes along the song", "[model][tempo]")
     CHECK (p.beat == 2);
     CHECK_THAT (model::moveByBars (project, 4.0, 1), WithinAbs (5.5, 1e-9));   // bar 3 (4 s) -> bar 4 (beat 11 = 5.5 s)
 }
+
+TEST_CASE ("Section edits: cut, insert silence, duplicate", "[model][arrange]")
+{
+    auto project = model::createProject();
+    auto track = model::addTrack (project, "A", nullptr);
+    auto r = model::addRegion (track, juce::File ("/tmp/a.wav"), 0.0, 10.0, nullptr);
+    auto lane = model::laneFor (project, track[ids::id], model::volumeParam, true);
+    model::addPoint (lane, 8.0, 0.5, nullptr);
+    model::addMarker (project, 6.0, "Chorus", nullptr);
+
+    model::deleteSection (project, 2.0, 4.0, nullptr);   // 2 s cut out
+    CHECK (track.getNumChildren() == 2);
+    CHECK_THAT (model::projectEnd (project), WithinAbs (8.0, 1e-9));
+    CHECK_THAT ((double) lane.getChild (0)[ids::time], WithinAbs (6.0, 1e-9));
+    CHECK_THAT ((double) model::sortedMarkers (project)[0][ids::time], WithinAbs (4.0, 1e-9));
+
+    model::insertSilence (project, 1.0, 2.0, nullptr);
+    CHECK_THAT (model::projectEnd (project), WithinAbs (9.0, 1e-9));
+
+    model::duplicateSection (project, 5.0, 7.0, nullptr);   // the marker's 2 s, twice
+    CHECK_THAT (model::projectEnd (project), WithinAbs (11.0, 1e-9));
+    CHECK (model::sortedMarkers (project).size() == 2);
+    juce::ignoreUnused (r);
+}
+
+TEST_CASE ("Key changes along the song", "[model][key]")
+{
+    auto project = model::createProject();
+    project.setProperty (ids::tempo, 120.0, nullptr);
+    project.setProperty (ids::keyRoot, 0, nullptr);
+    model::addKeyChange (project, 5, 9, true, nullptr);   // A minor from bar 5 (8 s)
+    CHECK (model::keyAt (project, 1.0).first == 0);
+    CHECK (model::keyAt (project, 8.5).first == 9);
+    CHECK (model::keyAt (project, 8.5).second);
+    CHECK (model::keyName (9, true) == "A minor");
+}
+
+TEST_CASE ("More MIDI transforms", "[model][midi]")
+{
+    auto project = model::createProject();
+    auto region = model::addMidiRegion (model::addTrack (project, "K", nullptr, -1, model::instrumentKind), 0.0, 4.0, nullptr);
+    auto a = model::addNote (region, 60, 0.0, 0.5, 100, nullptr);
+    auto b = model::addNote (region, 67, 1.0, 0.5, 100, nullptr);
+    model::transformNotes ({ a, b }, model::Transform::invertPitch, nullptr);
+    CHECK ((int) a[ids::pitch] == 67);
+    CHECK ((int) b[ids::pitch] == 60);
+    model::transformNotes ({ a }, model::Transform::noteRepeat, nullptr, 125);
+    CHECK (region.getNumChildren() == 5);   // a became four 125 ms repeats
+}

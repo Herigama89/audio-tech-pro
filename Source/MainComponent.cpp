@@ -275,7 +275,16 @@ MainComponent::MainComponent (bool openAudioDevice)
     mixer.onSelectTrack = [this] (const juce::String& id, juce::ModifierKeys mods) { selectTrackFromMixer (id, mods); };
     addChildComponent (mixer);
     addChildComponent (inspector);
-    headers.inputNames = [this] { return engine.getActiveInputChannelNames(); };
+    headers.inputNames = [this]
+    {
+        // Your own names for the inputs (I/O Labels), where you gave one.
+        auto names = engine.getActiveInputChannelNames();
+        const auto labels = juce::StringArray::fromLines (appProperties.getUserSettings()->getValue ("inputLabels"));
+        for (int i = 0; i < names.size() && i < labels.size(); ++i)
+            if (labels[i].trim().isNotEmpty())
+                names.set (i, labels[i].trim());
+        return names;
+    };
     waveforms.onChange = [this] { canvas.repaint(); };
 
     timeline.addChangeListener (this);
@@ -378,6 +387,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     setSize (1440, 920);
     automation.makeCurrent();
     routing::toggleFreeze = [this] (juce::ValueTree track) { toggleFreeze (track); };
+    routing::openGroupSettings = [this] { showGroupSettings(); };
 
     // A knob turned in a plugin's own window: written as automation in Touch, Latch or Write.
     effectRack.onPluginParameter = [this] (const juce::String& insertId, int index, float value, int phase)

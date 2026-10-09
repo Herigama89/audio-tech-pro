@@ -111,6 +111,25 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::consolidateProject:     consolidate(); break;
         case commands::revertToBackup:         showBackups(); break;
         case commands::exportSong:             exportSong(); break;
+        case commands::splitByLocators:
+        case commands::cutSectionBetweenLocators:
+        case commands::insertSilenceBetweenLocators:
+        case commands::repeatSectionBetweenLocators:
+        {
+            const double a = project.getProperty (ids::cycleStart, 0.0), b = project.getProperty (ids::cycleEnd, 0.0);
+            if (b <= a)
+            {
+                showError ("No locators", "Set the cycle range first: drag in the top half of the ruler.");
+                break;
+            }
+            undoManager.beginNewTransaction (commands::find (info.commandID)->name);
+            if (info.commandID == commands::splitByLocators)              model::splitAtTimes (project, a, b, &undoManager);
+            else if (info.commandID == commands::cutSectionBetweenLocators) model::deleteSection (project, a, b, &undoManager);
+            else if (info.commandID == commands::insertSilenceBetweenLocators) model::insertSilence (project, a, b, &undoManager);
+            else                                                           model::duplicateSection (project, a, b, &undoManager);
+            timeline.changed();
+            break;
+        }
         case commands::trimStartToPlayhead:    trimSelectedToPlayhead (true); break;
         case commands::trimEndToPlayhead:      trimSelectedToPlayhead (false); break;
         case commands::loopRegions:            loopSelectedRegions(); break;
@@ -211,6 +230,9 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::controllerAssignments:  showControllerAssignments(); break;
         case commands::showLibrary:            toggleLibrary (LibraryPanel::Page::patches); break;
         case commands::showSmartControls:      toggleSmartControls(); break;
+        case commands::groupSettings:          showGroupSettings(); break;
+        case commands::ioLabels:               showIOLabels(); break;
+        case commands::signalFlow:             showSignalFlow(); break;
         case commands::showLoopBrowser:        toggleLibrary (LibraryPanel::Page::loops); break;
 
         case commands::showMixer:              toggleMixer(); break;
@@ -275,6 +297,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             menu.addSeparator();
             add ({ commands::trimStartToPlayhead, commands::trimEndToPlayhead, commands::loopRegions, commands::regionGain, commands::removeFades });
             menu.addSeparator();
+            add ({ commands::splitByLocators, commands::cutSectionBetweenLocators, commands::insertSilenceBetweenLocators, commands::repeatSectionBetweenLocators });
+            menu.addSeparator();
             add ({ commands::toolMenu });
             break;
 
@@ -311,7 +335,9 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             break;
 
         case 5:
-            add ({ commands::showMixer });
+            add ({ commands::showMixer, commands::signalFlow });
+            menu.addSeparator();
+            add ({ commands::groupSettings, commands::ioLabels });
             menu.addSeparator();
             add ({ commands::scanPlugins });
             break;

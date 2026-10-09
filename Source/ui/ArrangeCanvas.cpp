@@ -350,6 +350,17 @@ void ArrangeCanvas::paintTempo (juce::Graphics& g)
                     juce::Justification::centredRight, false);
     }
 
+    // Key changes, in cyan.
+    g.setColour (juce::Colour (0xff7fd3ff));
+    for (const auto& k : model::sortedKeyChanges (project))
+    {
+        const auto x = timeline.timeToX (map.secondsAt (map.beatOfBar ((int) k[ids::bar] - 1)));
+        if (x < -80.0f || x > (float) getWidth())
+            continue;
+        g.drawText (model::keyName (k[ids::keyRoot], k[ids::keyMinor]), juce::Rectangle<float> (x + 50.0f, top, 80.0f, lane.getHeight()),
+                    juce::Justification::centredLeft, false);
+    }
+
     g.setColour (juce::Colours::black.withAlpha (0.7f));
     g.fillRect (0.0f, lane.getBottom() - 1.0f, (float) getWidth(), 1.0f);
 }
@@ -424,6 +435,24 @@ void ArrangeCanvas::tempoMouseDown (const juce::MouseEvent& e)
                 timeline.changed();
             }), true);
         });
+        {
+            juce::PopupMenu keys;
+            for (int minor = 0; minor < 2; ++minor)
+                for (int root = 0; root < 12; ++root)
+                    keys.addItem (model::keyName (root, minor == 1), [this, root, minor, nearestBar]
+                    {
+                        undoManager.beginNewTransaction ("Key change");
+                        model::addKeyChange (project, juce::jmax (2, nearestBar + 1), root, minor == 1, &undoManager);
+                        timeline.changed();
+                    });
+            menu.addSubMenu ("New key change at bar " + juce::String (juce::jmax (2, nearestBar + 1)), keys);
+        }
+        for (const auto& k : model::sortedKeyChanges (project))
+            menu.addItem ("Delete key change to " + model::keyName (k[ids::keyRoot], k[ids::keyMinor]) + " at bar " + k[ids::bar].toString(), [this, k]() mutable
+            {
+                undoManager.beginNewTransaction ("Delete key change");
+                k.getParent().removeChild (k, &undoManager);
+            });
         for (const auto& sig : model::sortedSignatureChanges (project))
             menu.addItem ("Delete " + sig[ids::timeSigNumerator].toString() + "/4 at bar " + sig[ids::bar].toString(), [this, sig]() mutable
             {
@@ -518,6 +547,21 @@ void ArrangeCanvas::markerMouseDown (const juce::MouseEvent& e)
         juce::PopupMenu menu;
         menu.addItem ("Go to", [this, marker] { engine.setPlayheadSeconds ((double) marker[ids::time]); repaint(); });
         menu.addItem ("Rename...", [this, marker] { renameMarker (marker); });
+        // Arrangement: the marker's section (to the next marker) as a whole.
+        menu.addItem ("Duplicate Section (everything until the next marker)", [this, marker]
+        {
+            const auto [a, b] = model::markerSection (project, marker);
+            undoManager.beginNewTransaction ("Duplicate section");
+            model::duplicateSection (project, a, b, &undoManager);
+            timeline.changed();
+        });
+        menu.addItem ("Delete Section (and close the gap)", [this, marker]
+        {
+            const auto [a, b] = model::markerSection (project, marker);
+            undoManager.beginNewTransaction ("Delete section");
+            model::deleteSection (project, a, b, &undoManager);
+            timeline.changed();
+        });
         menu.addItem ("Set Cycle to Marker", [this, marker]
         {
             const auto next = model::adjacentMarker (project, (double) marker[ids::time], true);

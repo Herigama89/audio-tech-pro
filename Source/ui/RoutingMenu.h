@@ -12,12 +12,15 @@ inline std::function<void (juce::ValueTree track)> toggleFreeze;
 /** Set by the main window: the next controller you move on a MIDI device controls this (MIDI Learn). */
 inline std::function<void (juce::ValueTree track, juce::String param)> learnController;
 
+/** Set by the main window: opens the Group Settings window. */
+inline std::function<void()> openGroupSettings;
+
 /** Set by the main window: makes a track stack from the selected tracks. */
 inline std::function<void (bool summing)> createStack;
 
 /** The tracks a mute, solo or arm on `track` acts on: the selection (when the track is in it) and their groups. */
 inline juce::Array<juce::ValueTree> linkedTracks (const juce::ValueTree& project, const juce::ValueTree& track,
-                                                  const juce::StringArray& selectedIds)
+                                                  const juce::StringArray& selectedIds, const juce::String& what = {})
 {
     juce::Array<juce::ValueTree> result;
     juce::Array<juce::ValueTree> start { track };
@@ -27,8 +30,12 @@ inline juce::Array<juce::ValueTree> linkedTracks (const juce::ValueTree& project
                 start.addIfNotAlreadyThere (t);
 
     for (const auto& t : start)
-        for (const auto& member : model::groupMembers (project, t))
-            result.addIfNotAlreadyThere (member);
+    {
+        result.addIfNotAlreadyThere (t);
+        if (what.isEmpty() || model::groupLinks (project, (int) t.getProperty (ids::group, 0), what))
+            for (const auto& member : model::groupMembers (project, t))
+                result.addIfNotAlreadyThere (member);
+    }
     return result;
 }
 
@@ -76,14 +83,19 @@ inline void addRoutingItems (juce::PopupMenu& menu, juce::ValueTree project, juc
             int members = 0;
             for (const auto& other : project)
                 members += other.hasType (ids::TRACK) && (int) other.getProperty (ids::group, 0) == g ? 1 : 0;
-            groups.addItem ("Group " + juce::String (g) + (members > 0 ? "  (" + juce::String (members) + ")" : juce::String()),
+            groups.addItem (model::groupName (project, g) + (members > 0 ? "  (" + juce::String (members) + ")" : juce::String()),
                             true, current == g, [t = track, g, &um]() mutable
             {
                 um.beginNewTransaction ("Group");
                 t.setProperty (ids::group, g, &um);
             });
         }
-        menu.addSubMenu (current > 0 ? "Group " + juce::String (current) : juce::String ("Group"), groups);
+        if (openGroupSettings)
+        {
+            groups.addSeparator();
+            groups.addItem ("Group Settings...", [] { openGroupSettings(); });
+        }
+        menu.addSubMenu (current > 0 ? model::groupName (project, current) : juce::String ("Group"), groups);
     }
 
     // VCA

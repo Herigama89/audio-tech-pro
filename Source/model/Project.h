@@ -179,7 +179,8 @@ namespace riff::model
     bool isInScale (int pitch, int keyRoot, bool minor);
 
     // MIDI Transform (Logic's presets, the common ones)
-    enum class Transform { humanize, fixedVelocity, crescendo, decrescendo, legato, doubleSpeed, halfSpeed, transposeUp, transposeDown, reverse };
+    enum class Transform { humanize, fixedVelocity, crescendo, decrescendo, legato, doubleSpeed, halfSpeed, transposeUp, transposeDown, reverse,
+                           randomVelocity, invertPitch, reversePitch, noteRepeat };
     void transformNotes (const juce::Array<juce::ValueTree>& notes, Transform transform, juce::UndoManager* um, int seed = 0);
 
     /** A raw MIDI event captured while recording, at an absolute timeline position. */
@@ -263,6 +264,11 @@ namespace riff::model
     /** The track and every other track in its group (just the track when it has none). */
     juce::Array<juce::ValueTree> groupMembers (const juce::ValueTree& project, const juce::ValueTree& track);
 
+    /** Group settings: a group's name, and whether it links "volume", "mute", "solo" or "record" (all on unless switched off). */
+    juce::String groupName (const juce::ValueTree& project, int group);
+    bool groupLinks (const juce::ValueTree& project, int group, const juce::String& what);
+    inline juce::Identifier groupProperty (int group, const juce::String& what) { return juce::Identifier ("group" + juce::String (group) + what); }
+
     /** Tracks controlled by a VCA (or folder stack) track. */
     juce::Array<juce::ValueTree> vcaMembers (const juce::ValueTree& project, const juce::ValueTree& vcaTrack);
 
@@ -325,6 +331,14 @@ namespace riff::model
     juce::ValueTree addSignatureChange (juce::ValueTree project, int bar, int beatsPerBar, juce::UndoManager* um);
     juce::Array<juce::ValueTree> sortedSignatureChanges (const juce::ValueTree& project);
 
+    /** A key change at a bar (1-based). */
+    juce::ValueTree addKeyChange (juce::ValueTree project, int bar, int keyRoot, bool minor, juce::UndoManager* um);
+    juce::Array<juce::ValueTree> sortedKeyChanges (const juce::ValueTree& project);
+
+    /** The key at a time: root (0 = C) and minor. */
+    std::pair<int, bool> keyAt (const juce::ValueTree& project, double seconds);
+    juce::String keyName (int root, bool minor);
+
     /** The whole tempo map: the project's tempo, then each change. */
     TempoMap tempoMapOf (const juce::ValueTree& project);
 
@@ -343,6 +357,22 @@ namespace riff::model
 
     /** The time `bars` bars away from `seconds` (on the bar grid). */
     double moveByBars (const juce::ValueTree& project, double seconds, int bars);
+
+    // --- Editing whole sections of the song (Logic's locator edits, arrangement) ----
+    /** Splits every region that crosses `a` or `b`. */
+    void splitAtTimes (juce::ValueTree project, double a, double b, juce::UndoManager* um);
+
+    /** Cuts the time from `a` to `b` out of the song: what's in it goes, everything after moves earlier. */
+    void deleteSection (juce::ValueTree project, double a, double b, juce::UndoManager* um);
+
+    /** Opens a gap from `a` to `b`: everything from `a` on moves later. */
+    void insertSilence (juce::ValueTree project, double a, double b, juce::UndoManager* um);
+
+    /** Plays the section from `a` to `b` twice: a copy right after it, everything later moved along. */
+    void duplicateSection (juce::ValueTree project, double a, double b, juce::UndoManager* um);
+
+    /** The section a marker starts: to the next marker (or the end of the song). */
+    std::pair<double, double> markerSection (const juce::ValueTree& project, const juce::ValueTree& marker);
 
     // --- Markers (Logic's marker track) -----------------------------------------
     /** The MARKERS node (after the MIXER), created if needed. */

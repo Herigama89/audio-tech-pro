@@ -381,6 +381,15 @@ void PianoRoll::paint (juce::Graphics& g)
             }
         }
 
+        // Time Handles over a selection of several notes.
+        if (const auto bar = timeHandleBar(); ! bar.isEmpty())
+        {
+            g.setColour (theme::accent.withAlpha (0.35f));
+            g.fillRect (bar);
+            g.setColour (theme::accent);
+            g.fillRect (bar.withLeft (bar.getRight() - 8.0f));
+        }
+
         // Playhead
         const auto playX = contentToX (engine.getPlayheadSeconds() - regionStart + offset);
         g.setColour (juce::Colours::white);
@@ -453,6 +462,24 @@ void PianoRoll::mouseDown (const juce::MouseEvent& e)
     }
     if (e.y >= gridArea().getBottom())
         return;
+
+    // Time Handles: drag the right end of the bar over the selection to stretch its timing.
+    if (const auto bar = timeHandleBar(); ! bar.isEmpty() && bar.expanded (0.0f, 2.0f).contains (e.position) && e.position.x > bar.getRight() - 12.0f)
+    {
+        undoManager.beginNewTransaction ("Time Handles");
+        drag = Drag::timeHandle;
+        originals.clear();
+        for (const auto& n : selection)
+            originals.push_back ({ n, n[ids::start], n[ids::length], n[ids::pitch] });
+        handleFrom = std::numeric_limits<double>::max();
+        handleTo = 0.0;
+        for (const auto& o : originals)
+        {
+            handleFrom = juce::jmin (handleFrom, o.start);
+            handleTo = juce::jmax (handleTo, o.start + o.length);
+        }
+        return;
+    }
 
     if (e.x < keyboardWidth)
     {
@@ -545,6 +572,20 @@ void PianoRoll::mouseDrag (const juce::MouseEvent& e)
     if (drag == Drag::velocity || drag == Drag::controller)
     {
         laneMouse (e, false);
+        return;
+    }
+
+    if (drag == Drag::timeHandle)
+    {
+        const auto newEnd = juce::jmax (handleFrom + 0.01, snapContent (xToContent ((float) e.x)));
+        const auto scale = (newEnd - handleFrom) / juce::jmax (1.0e-6, handleTo - handleFrom);
+        for (const auto& o : originals)
+        {
+            auto n = o.note;
+            n.setProperty (ids::start, handleFrom + (o.start - handleFrom) * scale, &undoManager);
+            n.setProperty (ids::length, juce::jmax (0.01, o.length * scale), &undoManager);
+        }
+        repaint();
         return;
     }
 
@@ -708,6 +749,20 @@ void PianoRoll::showView (int id)
     repaint();
 }
 
+juce::Rectangle<float> PianoRoll::timeHandleBar() const
+{
+    if (selection.size() < 2)
+        return {};
+    double from = std::numeric_limits<double>::max(), to = 0.0;
+    for (const auto& n : selection)
+    {
+        from = juce::jmin (from, (double) n[ids::start]);
+        to = juce::jmax (to, (double) n[ids::start] + (double) n[ids::length]);
+    }
+    const auto area = gridArea();
+    return { contentToX (from), (float) area.getY(), contentToX (to) - contentToX (from), 6.0f };
+}
+
 void PianoRoll::advanceStep()
 {
     stepContent += quantizeGrid();
@@ -749,7 +804,8 @@ void PianoRoll::scaleQuantizeSelection()
         return;
     const auto project = region.getParent().getParent();
     undoManager.beginNewTransaction ("Scale Quantize");
-    model::scaleQuantize (selectedOrAllNotes(), (int) project.getProperty (ids::keyRoot, 0), (bool) project.getProperty (ids::keyMinor, false), &undoManager);
+    const auto [root, minor] = model::keyAt (project, region[ids::start]);   // the key where the region is (key changes count)
+    model::scaleQuantize (selectedOrAllNotes(), root, minor, &undoManager);
 }
 
 void PianoRoll::showTransformMenu()
@@ -761,12 +817,14 @@ void PianoRoll::showTransformMenu()
         { T::humanize, "Humanize (timing and velocity)" }, { T::fixedVelocity, "Fixed Velocity (100)" },
         { T::crescendo, "Crescendo" }, { T::decrescendo, "Decrescendo" }, { T::legato, "Legato" },
         { T::doubleSpeed, "Double Speed" }, { T::halfSpeed, "Half Speed" },
-        { T::transposeUp, "Transpose +12" }, { T::transposeDown, "Transpose -12" }, { T::reverse, "Reverse Position" } };
+        { T::transposeUp, "Transpose +12" }, { T::transposeDown, "Transpose -12" }, { T::reverse, "Reverse Position" },
+        { T::randomVelocity, "Random Velocity" }, { T::invertPitch, "Pitch Inversion" }, { T::reversePitch, "Reverse Pitch Order" },
+        { T::noteRepeat, "Note Repeat (at the quantize grid)" } };
     for (const auto& [t, name] : items)
         menu.addItem (name, [this, t = t, name = juce::String (name)]
         {
             undoManager.beginNewTransaction ("Transform: " + name);
-            model::transformNotes (selectedOrAllNotes(), t, &undoManager);
+            model::transformNotes (selectedOrAllNotes(), t, &undoManager, t == T::noteRepeat ? juce::roundToInt (quantizeGrid() * 1000.0) : 0);
         });
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&transformButton));
 }

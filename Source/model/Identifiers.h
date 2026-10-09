@@ -68,6 +68,7 @@ namespace riff::ids
     RIFF_DECLARE_ID (cc)
     RIFF_DECLARE_ID (channel)
     RIFF_DECLARE_ID (TEMPOCHANGE)     // { id, beat (quarter notes from the start), bpm }
+    RIFF_DECLARE_ID (KEYCHANGE)       // in TEMPO: { id, bar (1-based), keyRoot, keyMinor }
     RIFF_DECLARE_ID (SIGCHANGE)       // in TEMPO: { id, bar (1-based), timeSigNumerator }
     RIFF_DECLARE_ID (bar)
     RIFF_DECLARE_ID (beat)
