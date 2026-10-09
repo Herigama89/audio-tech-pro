@@ -672,11 +672,11 @@ void MainComponent::resized()
             auto boxes = juce::Rectangle<int> (screenButton.getRight() + 14, row.getY() + 2, 0, keyHeight - 6);
             const auto transportLeft = getWidth() / 2 - ((int) 9 * (keyWidth + gap) + 14) / 2;
             int boxX = boxes.getX();
-            for (auto [box, w] : { std::pair { &toolBox, 112 }, std::pair { &snapBox, 80 }, std::pair { &dragBox, 94 } })
+            for (auto [box, w] : { std::pair { &toolBox, 96 }, std::pair { &snapBox, 74 }, std::pair { &dragBox, 88 } })
             {
                 box->setVisible (boxX + w < transportLeft - 12);
                 box->setBounds (boxX, boxes.getY(), w, boxes.getHeight());
-                boxX += w + 6;
+                boxX += w + 4;
             }
         }
 

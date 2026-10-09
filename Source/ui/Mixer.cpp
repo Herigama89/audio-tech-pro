@@ -1,4 +1,5 @@
 #include "Mixer.h"
+#include "Skin.h"
 #include "RoutingMenu.h"
 #include "Theme.h"
 #include "../model/Project.h"
@@ -96,9 +97,15 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         dynLabel.setJustificationType (juce::Justification::centred);
         dynLabel.setColour (juce::Label::textColourId, theme::stripInk);
 
-        // The knobs sit on the light grey face.
+        // The knobs, keys and lamps are the picture's (printed on the strip art).
         for (auto* k : std::initializer_list<juce::Component*> { &hfKnob, &hmfKnob, &lmfKnob, &lfKnob, &dynKnob, &panKnob })
             look::onLight (*k);
+        for (auto* k : { &hfKnob, &hmfKnob, &lmfKnob, &lfKnob })
+            k->useSkin (skin::knobBlack(), juce::Colours::white);
+        dynKnob.useSkin (skin::knobWhite(), juce::Colour (0xff141516));
+        for (auto* k : { &muteButton, &soloButton, &stripInButton })
+            k->onArt = true;
+        consoleInButton.onArt = dynInButton.onArt = true;
         dynLabel.setInterceptsMouseClicks (false, false);
         addAndMakeVisible (dynLabel);
         dynLabel.setVisible (! isVca());
@@ -136,6 +143,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     {
         auto* b = slots.add (new juce::TextButton());
         look::key (*b, look::Key::slot);
+        b->getProperties().set ("atpSkin", "slot");
         b->setWantsKeyboardFocus (false);
         b->setTooltip ("Click to add an effect, or open this one. Right-click for bypass and remove.");
         b->addMouseListener (this, false);
@@ -147,6 +155,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     {
         auto* b = sendButtons.add (new juce::TextButton());
         look::key (*b, look::Key::slot);
+        b->getProperties().set ("atpSkin", "send");
         b->setWantsKeyboardFocus (false);
         b->setTooltip ("Send to an aux bus (e.g. a shared reverb). Click to choose the bus.");
         b->onClick = [this, i] { showSendMenu (i); };
@@ -802,36 +811,19 @@ void ChannelStrip::paint (juce::Graphics& g)
 {
     const auto bounds = getLocalBounds();
     const auto w = (float) getWidth();
+    const bool channel = ! isMaster() && ! isVca();
 
-    // The strip: a light grey brushed face, lit a touch from the left.
-    {
-        juce::ColourGradient face (theme::stripFace.brighter (0.06f), 0.0f, 0.0f, theme::stripFaceLow, w, 0.0f, false);
-        face.addColour (0.35, theme::stripFace);
-        g.setGradientFill (face);
-        g.fillRect (bounds);
-
-        // Brushed grain: faint horizontal lines.
-        juce::Random grain (getOwnerId().hashCode());
-        for (int y = 0; y < getHeight(); y += 2)
-        {
-            g.setColour ((grain.nextBool() ? juce::Colours::white : juce::Colours::black).withAlpha (0.018f + grain.nextFloat() * 0.02f));
-            g.fillRect (0, y, getWidth(), 1);
-        }
-
-        // Shade towards the bottom, and a raised edge at the top.
-        g.setGradientFill (juce::ColourGradient (juce::Colours::transparentBlack, 0.0f, (float) getHeight() * 0.55f,
-                                                 juce::Colours::black.withAlpha (0.08f), 0.0f, (float) getHeight(), false));
-        g.fillRect (bounds);
-        g.setColour (juce::Colours::white.withAlpha (0.45f));
-        g.fillRect (1, 0, getWidth() - 3, 1);
-    }
+    // The strip, from the picture: its top (knob scales, keys, Dynamics), then its plain face below.
+    skin::tileDown (g, skin::stripFace(), bounds.toFloat());
+    if (channel)
+        g.setOpacity (1.0f), g.drawImage (skin::stripTop(), juce::Rectangle<float> (0.0f, 0.0f, w, (float) topHeight + 1.0f));
 
     const auto text = theme::stripInk, dim = theme::stripInkDim;
     {
         juce::Graphics::ScopedSaveState state (g);
         g.addTransform (juce::AffineTransform::scale (artScale));
 
-        if (isMaster() || isVca())
+        if (! channel)
         {
             const bool folder = isVca() && track[ids::stack].toString() == "folder";
             g.setColour (text);
@@ -849,53 +841,38 @@ void ChannelStrip::paint (juce::Graphics& g)
         }
         else
         {
-            // Band names beside the knobs
+            // Printed on the face, as in the picture: the channel number, the band names and frequencies.
+            g.setColour (text);
+            g.setFont (juce::FontOptions (44.0f));
+            g.drawText (juce::String (track.getParent().indexOf (track) + 1), juce::Rectangle<float> (4.0f, 16.0f, 60.0f, 50.0f),
+                        juce::Justification::centredLeft, false);
+
             struct Spot { juce::Slider* knob; const char* band; const char* freq; };
             const Spot spots[] = { { &hfKnob, "HF", "8k" }, { &hmfKnob, "HMF", "2.5k" }, { &lmfKnob, "LMF", "400" }, { &lfKnob, "LF", "100" } };
-
             for (const auto& spot : spots)
             {
                 const auto c = spot.knob->getBounds().toFloat().transformedBy (juce::AffineTransform::scale (1.0f / artScale)).getCentre();
                 g.setColour (text);
-                g.setFont (juce::FontOptions (25.0f, juce::Font::bold));
-                g.drawText (spot.band, juce::Rectangle<float> (131.0f, c.y - 22.0f, 62.0f, 26.0f), juce::Justification::centredLeft, false);
-                g.setColour (dim);
-                g.setFont (juce::FontOptions (20.0f));
-                g.drawText (spot.freq, juce::Rectangle<float> (131.0f, c.y + 2.0f, 62.0f, 22.0f), juce::Justification::centredLeft, false);
-            }
-
-            // The channel number, top left (as printed on a console)
-            if (! isVca())
-            {
-                g.setColour (text);
                 g.setFont (juce::FontOptions (30.0f, juce::Font::bold));
-                g.drawText (juce::String (track.getParent().indexOf (track) + 1), juce::Rectangle<float> (14.0f, 74.0f, 60.0f, 32.0f),
-                            juce::Justification::centredLeft, false);
+                g.drawText (spot.band, juce::Rectangle<float> (120.0f, c.y - 30.0f, 76.0f, 30.0f), juce::Justification::centredLeft, false);
+                g.setFont (juce::FontOptions (26.0f, juce::Font::bold));
+                g.drawText (spot.freq, juce::Rectangle<float> (120.0f, c.y + 2.0f, 76.0f, 28.0f), juce::Justification::centredLeft, false);
             }
 
-            // Console mode: which strip this is
-            g.setColour (pluginMode ? theme::knobArc.darker (0.3f) : dim);
-            g.setFont (juce::FontOptions (19.0f, juce::Font::bold));
+            // Console mode: which strip this is; and the DYN lamp's name.
+            g.setFont (juce::FontOptions (24.0f, juce::Font::bold));
+            g.setColour (pluginMode ? theme::knobArc.darker (0.4f) : text);
             g.drawText (pluginMode ? (stripInstance() != nullptr ? "PLUG" : "...") : juce::String ("EQ"),
-                        juce::Rectangle<float> (64.0f, 30.0f, 76.0f, 40.0f), juce::Justification::centredRight, false);
-            g.setColour (dim);
-            g.drawText ("DYN", juce::Rectangle<float> (90.0f, 440.0f, 50.0f, 34.0f), juce::Justification::centredRight, false);
-
-            // Section line, then Dynamics
-            g.setColour (juce::Colours::black.withAlpha (0.35f));
-            g.fillRect (10.0f, 659.0f, strip::artWidth - 20.0f, 2.0f);
-            g.setColour (juce::Colours::white.withAlpha (0.5f));
-            g.fillRect (10.0f, 661.0f, strip::artWidth - 20.0f, 1.5f);
+                        juce::Rectangle<float> (112.0f, 28.0f, 32.0f, 36.0f), juce::Justification::centred, false);
             g.setColour (text);
-            g.setFont (juce::FontOptions (30.0f));
-            g.drawText ("Dynamics", juce::Rectangle<float> (0.0f, 672.0f, strip::artWidth, 40.0f), juce::Justification::centred, false);
+            g.drawText ("DYN", juce::Rectangle<float> (88.0f, 434.0f, 54.0f, 34.0f), juce::Justification::centredRight, false);
         }
     }
 
     // Fader scale beside the slot
     {
         const auto area = faderArea();
-        g.setFont (juce::FontOptions (9.5f));
+        g.setFont (juce::FontOptions (10.0f));
         const bool roomy = fader.getHeight() > 170;
         for (const auto db : { 6, 0, -5, -10, -15, -20, -30, -40, -60 })
         {
@@ -904,38 +881,33 @@ void ChannelStrip::paint (juce::Graphics& g)
             const auto y = (float) fader.getY() + fader.yForValue (db);
             if (y < (float) area.getY() || y > (float) area.getBottom())
                 continue;
-            g.setColour ((db == 0 ? text : dim).withAlpha (0.9f));
+            g.setColour (text.withAlpha (0.85f));
             g.fillRect ((float) fader.getRight() - 6.0f, y - 0.5f, 5.0f, 1.0f);
-            g.drawText (db == 0 ? juce::String ("U") : juce::String (std::abs (db)),
-                        juce::Rectangle<float> ((float) fader.getRight() - 1.0f, y - 6.0f, 18.0f, 12.0f), juce::Justification::centred, false);
+            g.drawText (db == 0 ? juce::String ("0") : juce::String (db),
+                        juce::Rectangle<float> ((float) fader.getRight() - 1.0f, y - 6.0f, 22.0f, 12.0f), juce::Justification::centredLeft, false);
         }
     }
 
-    // The level display: a dark window in the face
-    {
-        const auto r = dbLabel.getBounds().toFloat();
-        g.setColour (juce::Colour (0xff2a2d30));
-        g.fillRoundedRectangle (r, 2.5f);
-        g.setColour (juce::Colours::black.withAlpha (0.6f));
-        g.drawRoundedRectangle (r.reduced (0.5f), 2.5f, 1.0f);
-        g.setColour (juce::Colours::white.withAlpha (0.45f));
-        g.drawLine (r.getX() + 2.0f, r.getBottom() + 0.5f, r.getRight() - 2.0f, r.getBottom() + 0.5f, 1.0f);
-    }
+    // The level box, from the picture
+    g.setOpacity (1.0f);
+    g.drawImage (skin::dbBox(), dbLabel.getBounds().toFloat());
 
-    // The name, printed at the foot of the strip, with the track's colour as a stripe above it
-    const auto plate = bounds.toFloat().withTop ((float) (getHeight() - nameHeight)).reduced (3.0f, 2.0f);
+    // The name, printed at the foot of the strip (a thin line of the track's colour under it)
+    const auto plate = bounds.toFloat().withTop ((float) (getHeight() - nameHeight)).reduced (3.0f, 1.0f);
+    g.setColour (juce::Colours::black.withAlpha (0.25f));
+    g.fillRect (plate.getX(), plate.getY(), plate.getWidth(), 1.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.35f));
+    g.fillRect (plate.getX(), plate.getY() + 1.0f, plate.getWidth(), 1.0f);
     const auto base = isMaster() ? theme::knobArc : model::trackColour (track);
-    g.setColour (juce::Colours::black.withAlpha (0.08f));
-    g.fillRoundedRectangle (plate, 2.0f);
-    g.setColour (base.withAlpha (selected ? 1.0f : 0.85f));
-    g.fillRoundedRectangle (plate.withHeight (3.0f), 1.0f);
+    g.setColour (base.withAlpha (selected ? 1.0f : 0.8f));
+    g.fillRect (plate.getX() + 4.0f, plate.getBottom() - 2.5f, plate.getWidth() - 8.0f, 2.0f);
 
     const auto name = isMaster() ? juce::String ("Master") : track[ids::name].toString();
     g.setColour (text);
-    g.setFont (juce::FontOptions (13.5f));
-    g.drawFittedText (name, plate.withTrimmedTop (3.0f).reduced (3.0f, 0.0f).toNearestInt(), juce::Justification::centred, 1, 0.75f);
+    g.setFont (juce::FontOptions (15.0f));
+    g.drawFittedText (name, plate.withTrimmedBottom (3.0f).reduced (2.0f, 0.0f).toNearestInt(), juce::Justification::centred, 1, 0.7f);
 
-    // The selected track: a blue frame round the strip
+    // The selected track: a steel-blue frame round the strip
     if (selected)
     {
         g.setColour (theme::knobArc.withAlpha (0.3f));
@@ -943,36 +915,31 @@ void ChannelStrip::paint (juce::Graphics& g)
         g.setColour (theme::knobArc);
         g.drawRect (bounds.toFloat().reduced (1.5f), 1.6f);
     }
-
-    // Edges between strips: a light bevel and a dark gap
-    g.setColour (juce::Colours::white.withAlpha (0.4f));
-    g.fillRect (0, 0, 1, getHeight());
-    g.setColour (juce::Colour (0xff2a2c2f));
-    g.fillRect (getWidth() - 2, 0, 2, getHeight());
 }
 
 void ChannelStrip::resized()
 {
     if (! isMaster())
     {
+        // Where things are on the picture's strip (art coordinates, 196 wide).
         auto knobAt = [this] (juce::Slider& k, float x, float y, float r) { k.setBounds (fromArt (x - r, y - r, r * 2.0f, r * 2.0f)); };
-        knobAt (hfKnob, 79.0f, 146.0f, 41.0f);
-        knobAt (hmfKnob, 76.0f, 276.0f, 41.0f);
-        knobAt (lmfKnob, 77.0f, 391.0f, 41.0f);
-        knobAt (lfKnob, 76.0f, 529.0f, 41.0f);
-        knobAt (dynKnob, 98.0f, 762.0f, 43.0f);
+        knobAt (hfKnob, 76.3f, 140.7f, 31.5f);
+        knobAt (hmfKnob, 75.6f, 264.6f, 31.5f);
+        knobAt (lmfKnob, 76.3f, 384.3f, 31.5f);
+        knobAt (lfKnob, 75.9f, 517.3f, 31.5f);
+        knobAt (dynKnob, 98.0f, 752.0f, 43.0f);
 
-        consoleInButton.setBounds (fromArt (145.0f, 33.0f, 34.0f, 34.0f));
-        stripInButton.setBounds (fromArt (14.0f, 31.0f, 52.0f, 38.0f));
-        dynInButton.setBounds (fromArt (145.0f, 440.0f, 34.0f, 34.0f));
-        muteButton.setBounds (fromArt (32.0f, 610.0f, 61.0f, 40.0f));
-        soloButton.setBounds (fromArt (101.0f, 610.0f, 60.0f, 40.0f));
-        dynLabel.setBounds (fromArt (24.0f, 816.0f, 71.0f, 44.0f));
-        dynLabel.setFont (juce::FontOptions ((float) dynLabel.getHeight() * 0.56f));
-        panKnob.setBounds (fromArt (107.0f, 816.0f, 66.0f, 44.0f));
+        stripInButton.setBounds (fromArt (66.0f, 26.0f, 53.0f, 41.0f));
+        consoleInButton.setBounds (fromArt (140.0f, 22.0f, 42.0f, 45.0f));
+        dynInButton.setBounds (fromArt (140.0f, 432.0f, 42.0f, 36.0f));
+        muteButton.setBounds (fromArt (28.0f, 591.0f, 71.0f, 62.0f));
+        soloButton.setBounds (fromArt (98.0f, 591.0f, 71.0f, 62.0f));
+        dynLabel.setBounds (fromArt (6.0f, 790.0f, 92.0f, 50.0f));
+        dynLabel.setFont (juce::FontOptions ((float) dynLabel.getHeight() * 0.62f));
+        panKnob.setBounds (fromArt (104.0f, 790.0f, 86.0f, 50.0f));
     }
 
-    auto area = getLocalBounds().reduced (4, 0).withTrimmedTop (topHeight + 6);
+    auto area = getLocalBounds().reduced (3, 0).withTrimmedTop (topHeight + 4);
 
     for (auto* b : slots)
     {
@@ -988,17 +955,17 @@ void ChannelStrip::resized()
         if (hasSends())
         {
             sendLevels[i]->setBounds (row.removeFromRight (16));
-            row.removeFromRight (2);
+            row.removeFromRight (1);
             sendButtons[i]->setBounds (row);
         }
         area.removeFromTop (2);
     }
 
-    // Fader on the left half, meter on the right, the level display under the meter
+    // Fader on the left, the scale, then the meter; the level box under the meter (as in the picture)
     const auto fa = faderArea();
-    fader.setBounds (juce::Rectangle<int> (4, fa.getY(), (int) (getWidth() * 0.5f), fa.getHeight()));
-    meter.setBounds (juce::Rectangle<int> ((int) (getWidth() * 0.73f), fa.getY() + 6, 12, fa.getHeight() - 12));
-    dbLabel.setBounds (juce::Rectangle<int> (getWidth() - 46, fa.getBottom() + 2, 40, 17));
+    fader.setBounds (juce::Rectangle<int> (2, fa.getY(), (int) (getWidth() * 0.46f), fa.getHeight()));
+    meter.setBounds (juce::Rectangle<int> ((int) (getWidth() * 0.76f), fa.getY() + 6, 12, fa.getHeight() - 12));
+    dbLabel.setBounds (juce::Rectangle<int> (getWidth() - 46, fa.getBottom() + 2, 42, 19));
     if (! isMaster())
         automationButton.setBounds (juce::Rectangle<int> (6, fa.getY() - automationRow + 1, getWidth() - 12, automationRow - 3));
 }
@@ -1160,10 +1127,9 @@ void MasterBusCompressorPanel::paint (juce::Graphics& g)
 {
     auto bounds = getLocalBounds();
 
-    // The centre section: a black panel.
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff222326), 0.0f, 0.0f,
-                                             juce::Colour (0xff141517), (float) getWidth(), (float) getHeight(), false));
-    g.fillRect (bounds);
+    // The centre section: the picture's black panel.
+    g.setOpacity (1.0f);
+    g.drawImage (skin::panel(), bounds.toFloat());
     g.setColour (theme::consoleDark);
     g.fillRect (0, 0, 1, getHeight());
     g.fillRect (getWidth() - 1, 0, 1, getHeight());

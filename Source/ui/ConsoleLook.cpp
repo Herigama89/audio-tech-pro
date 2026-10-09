@@ -1,6 +1,7 @@
 #include "ConsoleLook.h"
 #include "Theme.h"
 #include "ToolIcons.h"
+#include "Skin.h"
 
 namespace riff
 {
@@ -118,6 +119,26 @@ void ConsoleLook::drawButtonBackground (juce::Graphics& g, juce::Button& button,
     const auto onColour = button.findColour (juce::TextButton::buttonOnColourId);
 
     auto area = button.getLocalBounds().toFloat().reduced (0.5f);
+
+    // Inserts and sends: the picture's slots.
+    if (style == look::Key::slot)
+        if (const auto kind = button.getProperties().getWithDefault ("atpSkin", {}).toString(); kind.isNotEmpty())
+        {
+            const auto image = kind == "send" ? skin::send() : skin::slot();
+            g.setOpacity (backgroundColour == theme::stripSlot ? 0.92f : 1.0f);
+            g.drawImage (image, area);
+            if (backgroundColour == theme::stripSlotOn)
+            {
+                g.setColour (theme::knobArc.withAlpha (0.18f));
+                g.fillRoundedRectangle (area.reduced (1.5f), 2.0f);
+            }
+            if (over)
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.07f));
+                g.fillRoundedRectangle (area, 2.5f);
+            }
+            return;
+        }
 
     if (style == look::Key::slot)
     {
@@ -273,9 +294,21 @@ namespace look
                         juce::jmax (0.8f, outer * (major ? 0.07f : 0.05f)));
         }
 
-        // The value ring, just inside the scale.
-        const auto from = startAngle + (fromCentre ? 0.5f : 0.0f) * (endAngle - startAngle);
+        // The knob itself: the picture's knob (black, or white), with its pointer.
         const auto to = startAngle + proportion * (endAngle - startAngle);
+        juce::ignoreUnused (fromCentre);
+        // On the grey face: black knobs (silver for the white ones); on a black panel: the panel's white knobs.
+        const bool white = silver || ! light;
+        if (const auto body = silver ? skin::knobWhite() : (light ? skin::knobBlack() : skin::knobBus()); body.isValid())
+        {
+            const auto knobArea = area.withSizeKeepingCentre (outer * 1.5f, outer * 1.5f);
+            g.setColour (juce::Colours::black.withAlpha (0.35f * alpha));
+            g.fillEllipse (knobArea.translated (outer * 0.03f, outer * 0.08f).reduced (outer * 0.06f));
+            skin::drawKnob (g, body, knobArea, to, white ? juce::Colour (0xff141516) : juce::Colours::white, alpha);
+            return;
+        }
+
+        const auto from = startAngle + (fromCentre ? 0.5f : 0.0f) * (endAngle - startAngle);
         if (std::abs (to - from) > 0.01f)
         {
             juce::Path arc;
@@ -334,6 +367,14 @@ namespace look
 
     void drawFaderCap (juce::Graphics& g, juce::Rectangle<float> cap, bool vertical)
     {
+        // The picture's fader cap.
+        if (const auto image = skin::faderCap(); image.isValid())
+        {
+            g.setOpacity (1.0f);
+            g.drawImage (image, cap.withSizeKeepingCentre (juce::jmin (cap.getWidth(), cap.getHeight() * 21.0f / 36.0f), cap.getHeight()));
+            return;
+        }
+
         // A light grey plastic cap with a dark line across its middle.
         g.setColour (juce::Colours::black.withAlpha (0.45f));
         g.fillRoundedRectangle (cap.translated (1.0f, 2.5f), 2.5f);
@@ -655,73 +696,29 @@ void GainReductionMeter::paint (juce::Graphics& g)
     g.drawRoundedRectangle (bounds.reduced (0.5f), 6.0f, 1.0f);
 
     auto face = bounds.reduced (9.0f, 8.0f).withTrimmedBottom (10.0f);
-    juce::Path faceShape;
-    faceShape.addRoundedRectangle (face, 3.0f);
 
-    // A warm cream face, lit from behind, like a classic VU
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xfff6e7bf), face.getCentreX(), face.getY(),
-                                             juce::Colour (0xffe2c98d), face.getCentreX(), face.getBottom(), false));
-    g.fillPath (faceShape);
-    const auto meterInk = juce::Colour (0xff1c1a16);
-
+    // The picture's VU face (its needle taken off); the needle is drawn here.
+    g.setOpacity (1.0f);
+    g.drawImage (skin::vuFace(), face);
     {
         juce::Graphics::ScopedSaveState state (g);
-        g.reduceClipRegion (faceShape);
+        g.reduceClipRegion (face.toNearestInt());
 
-        // Scale: 0 dB of reduction on the right, 20 on the left.
-        const auto pivot = juce::Point<float> (face.getCentreX(), face.getBottom() + face.getHeight() * 0.42f);
-        const auto radius = face.getHeight() * 1.08f;
-        constexpr float sweep = 0.82f;   // radians either side of straight up
+        // 0 dB of reduction rests on the right (the face's 0), 20 swings to the left end.
+        const auto pivot = juce::Point<float> (face.getCentreX(), face.getBottom() + face.getHeight() * 0.55f);
+        const auto radius = face.getHeight() * 1.35f;
+        constexpr float left = -0.72f, rest = 0.38f;
+        const auto pos = 1.0f - std::log10 (1.0f + needle) / std::log10 (1.0f + fullScaleDb);
+        const auto a = left + (rest - left) * pos;
 
-        auto angleFor = [] (float db)
-        {
-            const auto pos = 1.0f - std::log10 (1.0f + db) / std::log10 (1.0f + fullScaleDb);
-            return -sweep + 2.0f * sweep * pos;
-        };
-
-        // Heavy compression zone
-        {
-            juce::Path zone;
-            zone.addCentredArc (pivot.x, pivot.y, radius * 0.9f, radius * 0.9f, 0.0f, angleFor (fullScaleDb), angleFor (10.0f), true);
-            g.setColour (juce::Colour (0xffc8322b));
-            g.strokePath (zone, juce::PathStrokeType (4.0f));
-        }
-
-        juce::Path arc;
-        arc.addCentredArc (pivot.x, pivot.y, radius * 0.86f, radius * 0.86f, 0.0f, -sweep, sweep, true);
-        g.setColour (meterInk);
-        g.strokePath (arc, juce::PathStrokeType (1.2f));
-
-        g.setFont (juce::FontOptions (juce::jmax (8.0f, face.getHeight() * 0.13f)));
-        for (const auto db : { 0.0f, 1.0f, 2.0f, 3.0f, 5.0f, 7.0f, 10.0f, 20.0f })
-        {
-            const auto a = angleFor (db);
-            g.setColour (db >= 10.0f ? juce::Colour (0xffc0261e) : meterInk);
-            g.drawLine (juce::Line<float> (onCircle (pivot, radius * 0.86f, a), onCircle (pivot, radius * 0.94f, a)), 1.4f);
-            const auto label = onCircle (pivot, radius * 1.02f, a);
-            g.drawText (juce::String ((int) db), juce::Rectangle<float> (22.0f, 12.0f).withCentre (label), juce::Justification::centred, false);
-        }
-
-        g.setColour (meterInk.withAlpha (0.85f));
-        g.setFont (juce::FontOptions (face.getHeight() * 0.2f, juce::Font::bold));
-        g.drawText ("VU", face.withTrimmedTop (face.getHeight() * 0.45f).withTrimmedBottom (face.getHeight() * 0.12f),
-                    juce::Justification::centred, false);
-
-        // Needle
-        const auto a = angleFor (needle);
-        g.setColour (juce::Colours::black.withAlpha (0.18f));
         const juce::Point<float> shadow (1.5f, 1.5f);
-        g.drawLine (juce::Line<float> (onCircle (pivot, radius * 0.45f, a) + shadow, onCircle (pivot, radius * 0.97f, a) + shadow), 1.6f);
+        g.setColour (juce::Colours::black.withAlpha (0.2f));
+        g.drawLine (juce::Line<float> (onCircle (pivot, radius * 0.55f, a) + shadow, onCircle (pivot, radius * 0.97f, a) + shadow), 1.6f);
         g.setColour (juce::Colour (0xff141414));
-        g.drawLine (juce::Line<float> (onCircle (pivot, radius * 0.45f, a), onCircle (pivot, radius * 0.97f, a)), 1.4f);
-
-        // Inner shadow round the window, and glass
-        g.setColour (juce::Colours::black.withAlpha (0.25f));
-        g.drawRoundedRectangle (face.reduced (0.5f), 3.0f, 2.0f);
-        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.18f), face.getX(), face.getY(),
-                                                 juce::Colours::transparentWhite, face.getX(), face.getCentreY(), false));
-        g.fillRect (face);
+        g.drawLine (juce::Line<float> (onCircle (pivot, radius * 0.55f, a), onCircle (pivot, radius * 0.97f, a)), 1.4f);
     }
+    g.setColour (juce::Colours::black.withAlpha (0.5f));
+    g.drawRoundedRectangle (face, 2.0f, 1.5f);
 
     // Screw under the window
     const auto screw = juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ bounds.getCentreX(), bounds.getBottom() - 8.5f });

@@ -109,7 +109,19 @@ juce_add_binary_data(AudioTechProData
     HEADER_NAME BinaryData.h
     NAMESPACE   BinaryData
     SOURCES     Resources/Logo.png
-                README.md)
+                README.md
+                # The mixer skin, cut from Resources/skin/source.jpg by Tools/make_skin_from_image.py
+                Resources/skin/strip_top.png
+                Resources/skin/strip_face.png
+                Resources/skin/slot.png
+                Resources/skin/send.png
+                Resources/skin/db_box.png
+                Resources/skin/fader_cap.png
+                Resources/skin/knob_black.png
+                Resources/skin/knob_white.png
+                Resources/skin/knob_bus.png
+                Resources/skin/vu_face.png
+                Resources/skin/panel.png)
 
 # Everything on screen except the app's entry point (the snapshot tool reuses it).
 set(RIFF_UI_SOURCES

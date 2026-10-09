@@ -1,5 +1,6 @@
 #include "StripParts.h"
 #include "ConsoleLook.h"
+#include "Skin.h"
 
 namespace riff::strip
 {
@@ -17,6 +18,14 @@ PointerKnob::PointerKnob (juce::Colour pointerColour) : pointer (pointerColour)
 
 void PointerKnob::paint (juce::Graphics& g)
 {
+    if (skinBody.isValid())
+    {
+        const auto params = getRotaryParameters();
+        const auto angle = params.startAngleRadians + (float) valueToProportionOfLength (getValue()) * (params.endAngleRadians - params.startAngleRadians);
+        skin::drawKnob (g, skinBody, getLocalBounds().toFloat(), angle, skinPointer, isEnabled() ? 1.0f : 0.5f);
+        return;
+    }
+
     // A neon-ring encoder (EQ gains light from the centre, both ways).
     const auto params = getRotaryParameters();
     look::drawNeonKnob (g, getLocalBounds().toFloat(), (float) valueToProportionOfLength (getValue()),
@@ -33,6 +42,28 @@ LampKey::LampKey (const juce::String& name, juce::Colour lampColour) : juce::But
 
 void LampKey::paintButton (juce::Graphics& g, bool over, bool down)
 {
+    if (onArt)
+    {
+        // The printed lamp lights up.
+        const auto r = getLocalBounds().toFloat().reduced (getWidth() * 0.12f);
+        if (getToggleState())
+        {
+            g.setColour (lamp.withAlpha (0.35f));
+            g.fillRoundedRectangle (r.expanded (2.0f), 3.0f);
+            g.setColour (lamp.brighter (0.5f));
+            g.fillRoundedRectangle (r, 1.5f);
+            g.setColour (juce::Colours::white.withAlpha (0.4f));
+            g.fillRoundedRectangle (r.reduced (r.getWidth() * 0.25f), 1.0f);
+        }
+        else
+        {
+            g.setColour (juce::Colours::black.withAlpha (over ? 0.1f : 0.3f));
+            g.fillRoundedRectangle (r, 1.5f);
+        }
+        juce::ignoreUnused (down);
+        return;
+    }
+
     // A small backlit key: dark when off, glowing in its colour when on.
     const auto r = getLocalBounds().toFloat().reduced (getWidth() * 0.12f);
     look::drawKey (g, r, look::Key::console, getToggleState(), lamp, over, down);
@@ -47,6 +78,26 @@ CreamKey::CreamKey (const juce::String& letter, juce::Colour litColour) : juce::
 
 void CreamKey::paintButton (juce::Graphics& g, bool over, bool down)
 {
+    if (onArt)
+    {
+        // The key is on the art; light it in its colour when on, and print its letter.
+        const auto face = getLocalBounds().toFloat().reduced (getWidth() * 0.1f, getHeight() * 0.14f);
+        if (getToggleState())
+        {
+            g.setColour (lit.withAlpha (0.85f));
+            g.fillRoundedRectangle (face, 2.0f);
+        }
+        else if (over || down)
+        {
+            g.setColour (juce::Colours::white.withAlpha (down ? 0.05f : 0.08f));
+            g.fillRoundedRectangle (face, 2.0f);
+        }
+        g.setColour (getToggleState() && lit.getPerceivedBrightness() > 0.6f ? juce::Colour (0xff111214) : juce::Colour (0xffe6e9ea));
+        g.setFont (juce::FontOptions (face.getHeight() * 0.6f, juce::Font::bold));
+        g.drawText (getName(), face, juce::Justification::centred, false);
+        return;
+    }
+
     // A backlit rubber key (mute, solo), lit in its colour when on.
     const auto face = getLocalBounds().toFloat().reduced (getWidth() * 0.07f, getHeight() * 0.12f);
     look::drawKey (g, face, look::Key::console, getToggleState(), lit, over, down);
@@ -88,7 +139,7 @@ Fader::Fader()
 
 float Fader::capHeight() const
 {
-    return juce::jlimit (20.0f, 34.0f, (float) getWidth() * 0.78f);
+    return juce::jlimit (24.0f, 40.0f, (float) getWidth() * 1.1f);
 }
 
 float Fader::yForValue (double value)
@@ -109,8 +160,8 @@ void Fader::paint (juce::Graphics& g)
     g.setColour (juce::Colours::white.withAlpha (0.12f));
     g.drawLine (slot.getRight() + 0.5f, slot.getY() + 2.0f, slot.getRight() + 0.5f, slot.getBottom() - 2.0f, 1.0f);
 
-    // The cap
-    const auto capWidth = bounds.getWidth() * 0.62f;
+    // The cap (the picture's cap keeps its shape: 20 x 34)
+    const auto capWidth = capHeight() * 21.0f / 36.0f;
     look::drawFaderCap (g, juce::Rectangle<float> (capWidth, capHeight()).withCentre ({ cx, yForValue (getValue()) }), true);
 }
 

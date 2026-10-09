@@ -14,15 +14,16 @@ namespace riff::theme
     // neon-blue LED rings and meters and backlit keys.
 
     // --- Dark areas (arrange window, menus, dialogs) --------------------------
-    inline const juce::Colour background { 0xff1d1e20 };
-    inline const juce::Colour toolbar    { 0xff2b2c2f };   // charcoal
-    inline const juce::Colour toolbarDark{ 0xff1f2022 };
-    inline const juce::Colour panel      { 0xff2e3033 };
-    inline const juce::Colour laneA      { 0xff222326 };
-    inline const juce::Colour laneB      { 0xff26272a };
-    inline const juce::Colour outline    { 0xff3e4045 };
-    inline const juce::Colour gridBar    { 0xff45474c };
-    inline const juce::Colour gridBeat   { 0xff2f3134 };
+    // (colours taken from the reference picture: a dark slate with a touch of teal)
+    inline const juce::Colour background { 0xff1e2829 };
+    inline const juce::Colour toolbar    { 0xff2a3334 };
+    inline const juce::Colour toolbarDark{ 0xff1f2829 };
+    inline const juce::Colour panel      { 0xff2c3637 };
+    inline const juce::Colour laneA      { 0xff212b2c };
+    inline const juce::Colour laneB      { 0xff252f30 };
+    inline const juce::Colour outline    { 0xff3d494a };
+    inline const juce::Colour gridBar    { 0xff465253 };
+    inline const juce::Colour gridBeat   { 0xff2e3839 };
     inline const juce::Colour text       { 0xffe8e9ec };
     inline const juce::Colour dimText    { 0xff9a9ca3 };
     inline const juce::Colour accent     { 0xff2f8cff };   // neon blue
@@ -45,8 +46,8 @@ namespace riff::theme
     inline const juce::Colour goldDark   { 0xff1d5fbf };
 
     // --- Ruler ---------------------------------------------------------------
-    inline const juce::Colour ruler      { 0xff3a3c40 };
-    inline const juce::Colour rulerDark  { 0xff2a2b2e };
+    inline const juce::Colour ruler      { 0xff364042 };
+    inline const juce::Colour rulerDark  { 0xff283132 };
 
     // --- Console (mixer) -----------------------------------------------------
     inline const juce::Colour console      { 0xff2f3134 };
@@ -55,13 +56,13 @@ namespace riff::theme
     inline const juce::Colour slotDark     { 0xff18191b };   // insert slots, small displays
 
     // --- The studio-grey channel face (mixer strips, track headers) -------------
-    inline const juce::Colour stripFace    { 0xffb7bbbf };   // light brushed grey
-    inline const juce::Colour stripFaceLow { 0xffa5a9ad };
-    inline const juce::Colour stripEdge    { 0xff6a6e72 };
+    inline const juce::Colour stripFace    { 0xff959c9c };   // the picture's strip grey
+    inline const juce::Colour stripFaceLow { 0xff818888 };
+    inline const juce::Colour stripEdge    { 0xff4e5556 };
     inline const juce::Colour stripInk     { 0xff101214 };   // black print on the face
     inline const juce::Colour stripInkDim  { 0xff3c4044 };
-    inline const juce::Colour stripSlot    { 0xff383c40 };   // dark insert / send / name slots
-    inline const juce::Colour stripSlotOn  { 0xff2c3034 };
+    inline const juce::Colour stripSlot    { 0xff2b3436 };   // dark insert / send / name slots
+    inline const juce::Colour stripSlotOn  { 0xff253032 };
     inline const juce::Colour knobArc      { 0xff4a7aa6 };   // the thin value ring round a knob
 
     // --- Displays ------------------------------------------------------------

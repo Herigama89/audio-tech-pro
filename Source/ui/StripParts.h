@@ -10,7 +10,7 @@
 namespace riff::strip
 {
     /** The strip's top section is laid out in this space (then scaled to the strip's width). */
-    constexpr float artWidth = 195.0f, artHeight = 887.0f;
+    constexpr float artWidth = 196.0f, artHeight = 861.0f;   // the strip art cut from the picture (Skin.h)
 
     /** An encoder with a neon LED ring in the given colour (EQ gains light from the centre). */
     class PointerKnob final : public juce::Slider
@@ -19,8 +19,13 @@ namespace riff::strip
         explicit PointerKnob (juce::Colour pointerColour = juce::Colour (0xfff4f2ea));
         void paint (juce::Graphics&) override;
 
+        /** Draw the picture's knob (its scale is printed on the strip art underneath). */
+        void useSkin (juce::Image body, juce::Colour pointerLine) { skinBody = body; skinPointer = pointerLine; repaint(); }
+
     private:
         juce::Colour pointer;
+        juce::Image skinBody;
+        juce::Colour skinPointer;
     };
 
     /** A small backlit key (EQ in, Dynamics in). Toggle state = lit. */
@@ -29,6 +34,9 @@ namespace riff::strip
     public:
         LampKey (const juce::String& name, juce::Colour lampColour);
         void paintButton (juce::Graphics&, bool over, bool down) override;
+
+        /** The key is printed on the strip art: only light it up. */
+        bool onArt = false;
 
     private:
         juce::Colour lamp;
@@ -40,6 +48,9 @@ namespace riff::strip
     public:
         CreamKey (const juce::String& letter, juce::Colour litColour);
         void paintButton (juce::Graphics&, bool over, bool down) override;
+
+        /** The key is printed on the strip art: draw only its letter, and its light when on. */
+        bool onArt = false;
 
     private:
         juce::Colour lit;
