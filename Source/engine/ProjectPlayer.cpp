@@ -406,6 +406,42 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
             if (model::isRegionMuted (region))
                 continue;
 
+            // A comped take folder: each stretch plays from its own take (a few ms of fade where they meet).
+            if (const auto pieces = model::compPieces (region); ! pieces.empty())
+            {
+                const double regionStart = region[ids::start];
+                const auto boundaryFade = toSamples (0.004);
+                for (size_t i = 0; i < pieces.size(); ++i)
+                {
+                    const auto& piece = pieces[i];
+                    const auto take = region.getChild (piece.take);
+                    if (! take.hasType (ids::TAKE))
+                        continue;
+
+                    PlaybackGraph::Region r;
+                    r.audio = cache.get (juce::File (take[ids::file].toString()));
+                    if (r.audio == nullptr)
+                        continue;
+                    r.start = toSamples (regionStart + piece.from);
+                    r.length = toSamples (piece.to - piece.from);
+                    const auto fileRate = r.audio->sampleRate;
+                    r.resample = std::abs (fileRate - sampleRate) > 0.5;
+                    r.step = r.resample ? fileRate / sampleRate : 1.0;
+                    r.sourcePosition = ((double) take[ids::offset] + piece.from) * fileRate;
+                    r.sourceOffset = (juce::int64) std::llround (r.sourcePosition);
+                    r.gain = (float) (double) region.getProperty (ids::gain, 1.0);
+
+                    const auto first = i == 0, last = i + 1 == pieces.size();
+                    r.fadeIn = juce::jmin (r.length / 2, first ? toSamples ((double) region.getProperty (ids::fadeIn, 0.0)) : boundaryFade);
+                    r.fadeOut = juce::jmin (r.length - r.fadeIn, last ? toSamples ((double) region.getProperty (ids::fadeOut, 0.0)) : boundaryFade);
+                    r.fadeInCurve = first ? (float) (double) region.getProperty (ids::fadeInCurve, 0.0) : 0.0f;
+                    r.fadeOutCurve = last ? (float) (double) region.getProperty (ids::fadeOutCurve, 0.0) : 0.0f;
+                    if (r.length > 0)
+                        t.regions.push_back (std::move (r));
+                }
+                continue;
+            }
+
             PlaybackGraph::Region r;
             r.audio        = cache.get (juce::File (region[ids::file].toString()));
             r.start        = toSamples (region[ids::start]);

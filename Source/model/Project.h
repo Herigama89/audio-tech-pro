@@ -133,6 +133,16 @@ namespace riff::model
     int numTakes (const juce::ValueTree& region);
     void setActiveTake (juce::ValueTree region, int index, juce::UndoManager* um);
 
+    /** Quick Swipe comping: in an open take folder, this take plays from `from` to `to` (seconds from the region's start). */
+    void compSwipe (juce::ValueTree region, int takeIndex, double from, double to, juce::UndoManager* um);
+
+    /** The comp, start to end: which take plays where (empty when there's no comp). */
+    struct CompPiece { double from, to; int take; };
+    std::vector<CompPiece> compPieces (const juce::ValueTree& region);
+
+    /** Turns a comp into ordinary regions, one per stretch (Logic's Flatten). Returns them. */
+    juce::Array<juce::ValueTree> flattenComp (juce::ValueTree region, juce::UndoManager* um);
+
     /** Keeps the active take and removes the others. */
     void flattenTakes (juce::ValueTree region, juce::UndoManager* um);
 

@@ -541,6 +541,74 @@ void ArrangeCanvas::paintCycle (juce::Graphics& g)
     }
 }
 
+void ArrangeCanvas::paintTakeLanes (juce::Graphics& g, const juce::ValueTree& region, juce::Rectangle<float> body)
+{
+    const auto takes = model::numTakes (region);
+    const auto laneHeight = body.getHeight() / (float) takes;
+    const auto colour = model::trackColour (region.getParent());
+    auto pieces = model::compPieces (region);
+    if (pieces.empty())
+        pieces.push_back ({ 0.0, (double) region[ids::length], (int) region.getProperty (ids::activeTake, 0) });
+
+    const double regionStart = region[ids::start];
+    for (int i = 0; i < takes; ++i)
+    {
+        const auto take = region.getChild (i);
+        const auto lane = juce::Rectangle<float> (body.getX(), body.getY() + laneHeight * (float) i, body.getWidth(), laneHeight);
+        g.setColour (juce::Colours::black.withAlpha (i % 2 == 0 ? 0.35f : 0.25f));
+        g.fillRect (lane);
+
+        // The parts of this take the comp uses.
+        for (const auto& p : pieces)
+            if (p.take == i)
+            {
+                const auto x0 = timeline.timeToX (regionStart + p.from), x1 = timeline.timeToX (regionStart + p.to);
+                g.setColour (colour.withAlpha (0.55f));
+                g.fillRect (juce::Rectangle<float> (x0, lane.getY(), x1 - x0, lane.getHeight()));
+            }
+
+        // Its waveform.
+        const juce::File file (take[ids::file].toString());
+        auto& thumb = waveforms.get (file);
+        const auto x0 = juce::jmax (lane.getX(), 0.0f), x1 = juce::jmin (lane.getRight(), (float) getWidth());
+        if (thumb.getTotalLength() > 0.0 && x1 > x0)
+        {
+            const double offset = take[ids::offset];
+            const auto tStart = offset + (x0 - lane.getX()) / timeline.pixelsPerSecond;
+            const auto tEnd = offset + (x1 - lane.getX()) / timeline.pixelsPerSecond;
+            g.setColour (juce::Colours::white.withAlpha (0.75f));
+            thumb.drawChannels (g, juce::Rectangle<float> (x0, lane.getY() + 1.0f, x1 - x0, lane.getHeight() - 2.0f).toNearestInt(),
+                                tStart, tEnd, (float) (double) region.getProperty (ids::gain, 1.0));
+        }
+
+        g.setColour (juce::Colours::white.withAlpha (0.85f));
+        g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+        g.drawText (take[ids::name].toString(), lane.reduced (4.0f, 0.0f).withWidth (80.0f), juce::Justification::topLeft, false);
+        g.setColour (juce::Colours::black.withAlpha (0.5f));
+        g.fillRect (lane.getX(), lane.getBottom() - 1.0f, lane.getWidth(), 1.0f);
+    }
+}
+
+int ArrangeCanvas::takeLaneAt (const juce::ValueTree& region, int trackIndex, juce::Point<float> pos) const
+{
+    if (model::isMidiRegion (region) || ! (bool) region.getProperty (ids::takesOpen, false))
+        return -1;
+    const auto takes = model::numTakes (region);
+    const auto body = regionBounds (region, trackIndex).withTrimmedTop ((float) regionHeader + 1.0f);
+    if (takes == 0 || ! body.contains (pos))
+        return -1;
+    return juce::jlimit (0, takes - 1, (int) ((pos.y - body.getY()) / (body.getHeight() / (float) takes)));
+}
+
+void ArrangeCanvas::restoreComp (juce::ValueTree region, const std::vector<model::CompPiece>& segments, juce::UndoManager* um)
+{
+    for (int i = region.getNumChildren(); --i >= 0;)
+        if (region.getChild (i).hasType (ids::COMPSEG))
+            region.removeChild (i, um);
+    for (const auto& s : segments)
+        model::compSwipe (region, s.take, s.from, s.to, um);
+}
+
 juce::Rectangle<float> ArrangeCanvas::punchBounds() const
 {
     const auto x0 = timeline.timeToX (project.getProperty (ids::punchIn, 0.0));
@@ -808,6 +876,15 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
     if (isMidi)
         paintMidiNotes (g, region, bounds.withTrimmedTop ((float) regionHeader + 1.0f).reduced (0.0f, 3.0f), colour);
 
+    // An open take folder: its takes as lanes, the comp lit.
+    if (! isMidi && (bool) region.getProperty (ids::takesOpen, false) && model::numTakes (region) > 0)
+    {
+        paintTakeLanes (g, region, bounds.withTrimmedTop ((float) regionHeader + 1.0f));
+        g.setColour (selected ? juce::Colours::white : base.darker (0.8f));
+        g.drawRoundedRectangle (bounds.reduced (0.5f), 3.0f, selected ? 2.0f : 1.0f);
+        return;
+    }
+
     // Waveform, drawn only for the visible part
     if (! missing && ! isMidi)
     {
@@ -1074,6 +1151,21 @@ void ArrangeCanvas::mouseDown (const juce::MouseEvent& e)
     if (model::numTakes (region) > 0 && e.position.y < regionBounds (region, trackIndex).getY() + 16.0f)
         clickedTakeHeader = true;
 
+    // Quick Swipe comping in an open take folder (away from its edges).
+    if (const auto lane = takeLaneAt (region, trackIndex, e.position); lane >= 0
+        && edgeActionAt (region, trackIndex, e.position) == DragMode::move)
+    {
+        dragRegion = region;
+        swipeLane = lane;
+        dragMouseDownTime = timeline.xToTime ((float) e.x);
+        compBefore.clear();
+        for (const auto& s : region)
+            if (s.hasType (ids::COMPSEG))
+                compBefore.push_back ({ (double) s[ids::from], (double) s[ids::to], (int) s[ids::take] });
+        dragMode = DragMode::compSwipe;
+        return;
+    }
+
     dragMode = edgeActionAt (region, trackIndex, e.position);
 
     undoManager.beginNewTransaction (dragMode == DragMode::move ? (e.mods.isAltDown() ? "Copy region" : "Move region")
@@ -1280,6 +1372,17 @@ void ArrangeCanvas::mouseDrag (const juce::MouseEvent& e)
             break;
         }
 
+        case DragMode::compSwipe:
+        {
+            if (! dragRegion.isValid() || e.getDistanceFromDragStart() < 3)
+                break;
+            const double regionStart = dragRegion[ids::start];
+            restoreComp (dragRegion, compBefore, nullptr);
+            model::compSwipe (dragRegion, swipeLane, maybeSnap (dragMouseDownTime) - regionStart,
+                              maybeSnap (timeline.xToTime ((float) e.x)) - regionStart, nullptr);
+            break;
+        }
+
         case DragMode::tempo:
         {
             if (! dragTempo.isValid() || e.getDistanceFromDragStart() < 3)
@@ -1367,6 +1470,28 @@ void ArrangeCanvas::mouseUp (const juce::MouseEvent& e)
             }
         }
         rubberBand = {};
+    }
+
+    if (dragMode == DragMode::compSwipe && dragRegion.isValid())
+    {
+        // The swipe as one undo step (the preview while dragging wasn't recorded).
+        std::vector<model::CompPiece> after;
+        for (const auto& s : dragRegion)
+            if (s.hasType (ids::COMPSEG))
+                after.push_back ({ (double) s[ids::from], (double) s[ids::to], (int) s[ids::take] });
+        restoreComp (dragRegion, compBefore, nullptr);
+
+        undoManager.beginNewTransaction ("Comp");
+        if (wasClick)
+        {
+            // A click on a take: all of it (no comp).
+            restoreComp (dragRegion, {}, &undoManager);
+            model::setActiveTake (dragRegion, swipeLane, &undoManager);
+        }
+        else
+        {
+            restoreComp (dragRegion, after, &undoManager);
+        }
     }
 
     if (dragMode == DragMode::solo && soloTrack.isValid())
@@ -1672,6 +1797,31 @@ void ArrangeCanvas::addTakeItems (juce::PopupMenu& menu, juce::ValueTree region)
         });
     }
 
+    menu.addSeparator();
+    const bool open = region.getProperty (ids::takesOpen, false);
+    menu.addItem (open ? "Close Take Folder" : "Open Take Folder (swipe across takes to comp)", [this, region, open]() mutable
+    {
+        region.setProperty (ids::takesOpen, ! open, nullptr);
+        // Room for the lanes.
+        auto track = region.getParent();
+        if (! open)
+            track.setProperty (ids::height, juce::jmax ((int) track.getProperty (ids::height, TimelineState::trackHeight),
+                                                        juce::jmin (TimelineState::maxTrackHeight, 30 + 28 * model::numTakes (region))), nullptr);
+        timeline.changed();
+    });
+    const bool comped = ! model::compPieces (region).empty();
+    menu.addItem ("Flatten Comp (into regions)", comped, false, [this, region]
+    {
+        undoManager.beginNewTransaction ("Flatten comp");
+        model::flattenComp (region, &undoManager);
+        timeline.selectOnlyRegion ({});
+        timeline.changed();
+    });
+    menu.addItem ("Clear Comp", comped, false, [this, region]
+    {
+        undoManager.beginNewTransaction ("Clear comp");
+        restoreComp (region, {}, &undoManager);
+    });
     menu.addSeparator();
     menu.addItem ("Keep only this take", [this, region]
     {

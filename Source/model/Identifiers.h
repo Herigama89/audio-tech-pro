@@ -58,6 +58,11 @@ namespace riff::ids
     RIFF_DECLARE_ID (MARKERS)         // after MIXER: the marker track
     RIFF_DECLARE_ID (MARKER)          // { id, name, time }
     RIFF_DECLARE_ID (TEMPO)           // after MIXER: the tempo track's changes
+    RIFF_DECLARE_ID (COMPSEG)         // in a take folder: { from, to (seconds from the region's start), take (index) }
+    RIFF_DECLARE_ID (from)
+    RIFF_DECLARE_ID (to)
+    RIFF_DECLARE_ID (take)
+    RIFF_DECLARE_ID (takesOpen)       // REGION: the take folder is open (its takes shown as lanes)
     RIFF_DECLARE_ID (ASSIGNMENTS)     // after MIXER: MIDI controller assignments
     RIFF_DECLARE_ID (ASSIGN)          // { channel, cc, target (track id or "master"), param ("volume", "pan", "mute", "solo") }
     RIFF_DECLARE_ID (cc)

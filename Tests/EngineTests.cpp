@@ -1860,3 +1860,44 @@ TEST_CASE ("Region and track transpose and velocity apply as MIDI plays", "[engi
     CHECK (note.pitch == 70);
     CHECK (note.velocity == 127);   // capped
 }
+
+TEST_CASE ("Comping: swiped stretches of takes play, and flatten into regions", "[engine][comp]")
+{
+    Fixture f;
+    // One file with two passes: 0.25 for the first second, 0.75 for the next.
+    const auto file = f.temp.dir.getChildFile ("takes.wav");
+    {
+        juce::AudioBuffer<float> b (2, 96000);
+        for (int i = 0; i < 96000; ++i)
+            b.setSample (0, i, i < 48000 ? 0.25f : 0.75f), b.setSample (1, i, i < 48000 ? 0.25f : 0.75f);
+        std::unique_ptr<juce::OutputStream> out (new juce::FileOutputStream (file));
+        juce::WavAudioFormat wav;
+        auto writer = wav.createWriterFor (out, juce::AudioFormatWriterOptions{}.withSampleRate (48000.0).withNumChannels (2).withBitsPerSample (24));
+        writer->writeFromAudioSampleBuffer (b, 0, 96000);
+    }
+
+    auto track = model::addTrack (f.project, "Vox", nullptr);
+    auto folder = model::addTakeFolder (track, file, 0.0, 1.0, { 0.0, 1.0 }, 0, nullptr);
+    model::compSwipe (folder, 1, 0.5, 0.8, nullptr);   // take 2 from 0.5 to 0.8 s
+    const auto pieces = model::compPieces (folder);
+    REQUIRE (pieces.size() == 3);
+    CHECK (pieces[1].take == 1);
+
+    f.project.setProperty (ids::masterGain, 1.0, nullptr);
+    f.player.setProject (f.project);
+    f.engine.setPlayheadSeconds (0.0);
+    f.engine.play();
+    const auto out = renderLeft (f.engine, 48000);
+    CHECK_THAT (out[12000], WithinAbs (0.25f, 1e-3));
+    CHECK_THAT (out[31000], WithinAbs (0.75f, 1e-3));   // the swiped stretch
+    CHECK_THAT (out[44000], WithinAbs (0.25f, 1e-3));
+
+    // Swiping over part of a stretch shortens it.
+    model::compSwipe (folder, 0, 0.7, 1.0, nullptr);
+    CHECK_THAT (model::compPieces (folder)[1].to, WithinAbs (0.7, 1e-9));
+
+    const auto regions = model::flattenComp (folder, nullptr);
+    CHECK (regions.size() == 3);
+    CHECK (track.getNumChildren() == 3);
+    CHECK_THAT ((double) regions[1][ids::offset], WithinAbs (1.5, 1e-9));
+}

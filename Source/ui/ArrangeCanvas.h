@@ -74,7 +74,12 @@ public:
 
 private:
     enum class DragMode { none, scrub, move, trimStart, trimEnd, cycleNew, cycleMove, automationPoint, rubberBand, pencilRegion, marker,
-                          fadeIn, fadeOut, loopEnd, punch, marquee, zoomRect, solo, tempo };
+                          fadeIn, fadeOut, loopEnd, punch, marquee, zoomRect, solo, tempo, compSwipe };
+    int takeLaneAt (const juce::ValueTree& region, int trackIndex, juce::Point<float> pos) const;   // -1: not on a take lane
+    void paintTakeLanes (juce::Graphics& g, const juce::ValueTree& region, juce::Rectangle<float> body);
+    void restoreComp (juce::ValueTree region, const std::vector<model::CompPiece>& segments, juce::UndoManager* um);
+    std::vector<model::CompPiece> compBefore;
+    int swipeLane = -1;
     void paintTempo (juce::Graphics& g);
     juce::ValueTree tempoChangeAt (float x) const;
     void tempoMouseDown (const juce::MouseEvent& e);

@@ -242,7 +242,8 @@ Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderC
 - [x] Cycle (loop) region in the ruler, and cycle recording into take folders
 - [x] Count-in before recording
 - [x] Loopback latency calibration, saved between sessions
-- [ ] Later: comping (stitching the best parts of several takes), and disk streaming for very long files
+- [x] Comping: open a take folder and swipe across its takes (Quick Swipe), flatten the comp into regions
+- [ ] Later: disk streaming for very long files
 
 ## Phase 2: MIDI and instruments
 
@@ -296,7 +297,8 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [x] Reorder tracks by dragging headers (several at once); double-click to rename; track colours (Option+C)
 - [x] Hide tracks (Ctrl+H hides and selects the next; H shows or leaves out hidden tracks)
 - [x] Inspector (I): the selected track's channel strip and the Stereo Out on the left
-- [ ] Inspector: region and track parameter boxes above the strips; track icons
+- [x] Inspector: Region box (mute, loop, gain, fades, MIDI transpose and velocity) and Track box (automation mode, routing, transpose, velocity, freeze)
+- [ ] Track icons
 - [x] Track stacks (folder: one fader, mute, solo; summing: an aux bus; fold them away with the triangle), track freeze
 - [x] Marker track: double-click to add or rename, drag to move, click to go there, right-click to set the cycle or delete; Create Marker (Option+'), next/previous marker (Option+. / Option+,)
 - [x] Time signature and key in the display (click to change); the MIDI generator starts in the song's key
@@ -342,7 +344,8 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 - [x] Autosave (every 2 minutes, with recovery after a crash), project backups (Revert to Backup), consolidate (collect audio into the project)
 - [x] Project alternatives, project templates
 - [x] Undo History window, Settings window (autosave, backups, recording format, stop behaviour, open last project)
-- [ ] Library and loop browser, Smart Controls
+- [x] Library (save a track's sound as a patch, put it on other tracks; Y) and Loop Browser (a folder of loops and samples, preview, drag onto tracks; O)
+- [ ] Smart Controls
 - [ ] Live Loops, Drummer and Session Players (instruments come last)
 
 ## Later phases

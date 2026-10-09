@@ -111,6 +111,23 @@ namespace
         for (auto take : region)
             if (take.hasType (ids::TAKE))
                 take.setProperty (ids::offset, (double) take[ids::offset] + delta, um);
+
+        // Comp segments are measured from the region's start, which moved by `delta`.
+        juce::Array<juce::ValueTree> gone;
+        for (auto seg : region)
+            if (seg.hasType (ids::COMPSEG))
+            {
+                const auto from = (double) seg[ids::from] - delta, to = (double) seg[ids::to] - delta;
+                if (to <= 0.0)
+                    gone.add (seg);
+                else
+                {
+                    seg.setProperty (ids::from, juce::jmax (0.0, from), um);
+                    seg.setProperty (ids::to, to, um);
+                }
+            }
+        for (auto& seg : gone)
+            region.removeChild (seg, um);
     }
 }
 
@@ -673,10 +690,108 @@ void setActiveTake (juce::ValueTree region, int index, juce::UndoManager* um)
                                                           : take[ids::name].toString(), um);
 }
 
+void compSwipe (juce::ValueTree region, int takeIndex, double from, double to, juce::UndoManager* um)
+{
+    if (to < from)
+        std::swap (from, to);
+    from = juce::jmax (0.0, from);
+    to = juce::jmin ((double) region[ids::length], to);
+    if (to - from < 0.005 || ! region.getChild (takeIndex).hasType (ids::TAKE))
+        return;
+
+    // What the new segment covers is taken away from the others.
+    juce::Array<juce::ValueTree> segments;
+    for (const auto& s : region)
+        if (s.hasType (ids::COMPSEG))
+            segments.add (s);
+
+    for (auto s : segments)
+    {
+        const double a = s[ids::from], b = s[ids::to];
+        if (b <= from || a >= to)
+            continue;
+        if (a >= from && b <= to)
+            region.removeChild (s, um);
+        else if (a < from && b > to)
+        {
+            juce::ValueTree right (ids::COMPSEG);
+            right.setProperty (ids::from, to, nullptr);
+            right.setProperty (ids::to, b, nullptr);
+            right.setProperty (ids::take, s[ids::take], nullptr);
+            region.appendChild (right, um);
+            s.setProperty (ids::to, from, um);
+        }
+        else if (a < from)
+            s.setProperty (ids::to, from, um);
+        else
+            s.setProperty (ids::from, to, um);
+    }
+
+    juce::ValueTree seg (ids::COMPSEG);
+    seg.setProperty (ids::from, from, nullptr);
+    seg.setProperty (ids::to, to, nullptr);
+    seg.setProperty (ids::take, takeIndex, nullptr);
+    region.appendChild (seg, um);
+}
+
+std::vector<CompPiece> compPieces (const juce::ValueTree& region)
+{
+    std::vector<CompPiece> pieces;
+    for (const auto& s : region)
+        if (s.hasType (ids::COMPSEG))
+            pieces.push_back ({ (double) s[ids::from], (double) s[ids::to], (int) s[ids::take] });
+    std::sort (pieces.begin(), pieces.end(), [] (const CompPiece& a, const CompPiece& b) { return a.from < b.from; });
+
+    // The gaps play the active take.
+    std::vector<CompPiece> full;
+    const int active = region.getProperty (ids::activeTake, 0);
+    double at = 0.0;
+    const double length = region[ids::length];
+    for (const auto& p : pieces)
+    {
+        if (p.from > at + 1.0e-6)
+            full.push_back ({ at, p.from, active });
+        full.push_back (p);
+        at = juce::jmax (at, p.to);
+    }
+    if (! pieces.empty() && at < length - 1.0e-6)
+        full.push_back ({ at, length, active });
+    return full;
+}
+
+juce::Array<juce::ValueTree> flattenComp (juce::ValueTree region, juce::UndoManager* um)
+{
+    juce::Array<juce::ValueTree> made;
+    auto track = region.getParent();
+    const auto pieces = compPieces (region);
+    if (pieces.empty() || ! track.isValid())
+        return made;
+
+    const double start = region[ids::start];
+    for (const auto& p : pieces)
+    {
+        const auto take = region.getChild (p.take);
+        if (! take.hasType (ids::TAKE))
+            continue;
+        auto r = addRegion (track, juce::File (take[ids::file].toString()), start + p.from, p.to - p.from, um);
+        r.setProperty (ids::offset, (double) take[ids::offset] + p.from, um);
+        r.setProperty (ids::gain, region.getProperty (ids::gain, 1.0), um);
+        r.setProperty (ids::name, region[ids::name].toString().upToFirstOccurrenceOf (":", false, false) + ": " + take[ids::name].toString(), um);
+        made.add (r);
+    }
+    if (! made.isEmpty())
+    {
+        made.getFirst().setProperty (ids::fadeIn, region.getProperty (ids::fadeIn, 0.0), um);
+        made.getLast().setProperty (ids::fadeOut, region.getProperty (ids::fadeOut, 0.0), um);
+    }
+    deleteRegion (region, um);
+    return made;
+}
+
 void flattenTakes (juce::ValueTree region, juce::UndoManager* um)
 {
     for (int i = region.getNumChildren(); --i >= 0;)
-        if (region.getChild (i).hasType (ids::TAKE))
+        if (region.getChild (i).hasType (ids::TAKE) || region.getChild (i).hasType (ids::COMPSEG))
             region.removeChild (i, um);
 
     region.removeProperty (ids::activeTake, um);
