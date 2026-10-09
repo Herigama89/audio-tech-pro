@@ -13,6 +13,7 @@
 #include "ui/PianoRoll.h"
 #include "ui/InstrumentWindows.h"
 #include "ui/Mixer.h"
+#include "ui/Inspector.h"
 #include "engine/EffectRack.h"
 #include "ui/ConsoleLook.h"
 #include "ui/GeneratorPanel.h"
@@ -152,7 +153,10 @@ private:
     void selectAdjacentTrack (int delta);
     void scrollToTrack (int index);
     void zoomVertically (int steps);
-    void selectTrackFromMixer (const juce::String& trackId);
+    void selectTrackFromMixer (const juce::String& trackId, juce::ModifierKeys mods = {});
+    void hideSelectedTracks();
+    void toggleInspector();
+    void showTrackColours();
     void moveByBars (int bars);
     void quantizeSelection();
     void setLocatorsBySelection();
@@ -218,6 +222,7 @@ private:
     LevelMeter inputMeter { "IN" }, outputMeter { "OUT" };
     PianoRoll pianoRoll { undoManager, engine };
     MixerPanel mixer { undoManager, engine, player, effectRack };
+    Inspector inspector { mixer };
 
     juce::TooltipWindow tooltips { this, 600 };
     std::unique_ptr<juce::FileChooser> fileChooser;

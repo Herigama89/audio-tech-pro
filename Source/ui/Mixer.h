@@ -64,6 +64,8 @@ private:
     };
     SelectOnClick selectOnClick { *this };
     bool selected = false;
+    std::map<juce::String, double> groupStart;   // other selected tracks' fader positions (dB) when a drag began
+    double dragStartDb = 0.0;
     bool hasSends() const;
     juce::ValueTree insertAt (int slot) const;
     juce::ValueTree sendAt (int index) const;
@@ -165,10 +167,16 @@ public:
     std::function<void()> onClose;
 
     /** A strip was clicked: select its track everywhere. */
-    std::function<void (const juce::String& trackId)> onSelectTrack;
+    std::function<void (const juce::String& trackId, juce::ModifierKeys mods)> onSelectTrack;
 
-    /** Highlights the selected track's strip and scrolls it into view. */
-    void setSelectedTrack (const juce::String& trackId);
+    /** Strips shown elsewhere (the Inspector's): they get meter levels and plugin knob updates too. */
+    void addExtraStrip (ChannelStrip* s)    { extraStrips.addIfNotAlreadyThere (s); }
+    void removeExtraStrip (ChannelStrip* s) { extraStrips.removeFirstMatchingValue (s); }
+
+    const juce::StringArray& getSelectedTrackIds() const noexcept { return selectedTrackIds; }
+
+    /** Highlights the selected tracks' strips and scrolls the main one into view. */
+    void setSelectedTracks (const juce::StringArray& trackIds, const juce::String& mainTrackId);
 
     void paint (juce::Graphics& g) override;
     void resized() override;
@@ -224,6 +232,8 @@ private:
     BusCompConsolePanel consolePanel;
     bool needsRebuild = false;
     juce::String selectedTrackId;
+    juce::StringArray selectedTrackIds;
+    juce::Array<ChannelStrip*> extraStrips;
 };
 
 } // namespace riff

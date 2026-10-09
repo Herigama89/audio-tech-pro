@@ -192,6 +192,23 @@ public:
             main.closeMixer();
             pump (main, 200);
             save (main, "tracks-resized.png");
+
+            // Several selected, the Inspector, a hidden track, a new colour.
+            main.timeline.selectOnly (main.project.getChild (0)[ids::id].toString());
+            main.timeline.extendTrackSelection (main.project.getChild (2)[ids::id].toString());
+            main.timeline.changed();
+            main.project.getChild (3).setProperty (ids::colour, model::trackPalette()[13].toString(), nullptr);
+            main.project.getChild (1).setProperty (ids::hidden, true, nullptr);
+            main.timeline.changed();
+            main.toggleInspector();
+            pump (main, 300);
+            save (main, "inspector-multiselect.png");
+            main.project.getChild (1).setProperty (ids::hidden, false, nullptr);
+            main.toggleInspector();
+            {
+                TrackColourPalette palette ({});
+                save (palette, "colour-palette.png", 2.0f);
+            }
         }
 
         // The Claude panel, with a scripted conversation (no network): real tools on the generated song.

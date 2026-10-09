@@ -516,6 +516,61 @@ void deleteTrack (juce::ValueTree track, juce::UndoManager* um)
         parent.removeChild (track, um);
 }
 
+void moveTracks (juce::ValueTree project, const juce::Array<juce::ValueTree>& tracks, int newIndex, juce::UndoManager* um)
+{
+    // Take them out in order and put them back together at the new place (tracks stay before the MIXER).
+    juce::Array<juce::ValueTree> moving;
+    for (const auto& t : tracks)
+        if (t.getParent() == project && t.hasType (ids::TRACK))
+            moving.addIfNotAlreadyThere (t);
+    std::sort (moving.begin(), moving.end(), [&project] (const auto& a, const auto& b) { return project.indexOf (a) < project.indexOf (b); });
+    if (moving.isEmpty())
+        return;
+
+    // The order we want: the tracks that stay, with the moved ones together at the insertion point.
+    juce::Array<juce::ValueTree> wanted;
+    const auto count = numTracks (project);
+    int insertAt = 0;
+    for (int i = 0; i < count; ++i)
+    {
+        const auto t = project.getChild (i);
+        if (moving.contains (t))
+            continue;
+        if (i < newIndex)
+            ++insertAt;
+        wanted.add (t);
+    }
+    for (int i = 0; i < moving.size(); ++i)
+        wanted.insert (insertAt + i, moving[i]);
+
+    // Reach it with moves only (no track is taken out, so instruments and plugins stay loaded).
+    for (int i = 0; i < wanted.size(); ++i)
+    {
+        const auto from = project.indexOf (wanted[i]);
+        if (from != i)
+            project.moveChild (from, i, um);
+    }
+}
+
+const juce::Array<juce::Colour>& trackPalette()
+{
+    // Logic-like colours: the console ones first, then lighter and deeper versions.
+    static const juce::Array<juce::Colour> colours = []
+    {
+        juce::Array<juce::Colour> c;
+        for (const auto& p : palette)
+            c.add (p);
+        for (const auto& p : palette)
+            c.add (p.brighter (0.45f));
+        for (const auto& p : palette)
+            c.add (p.darker (0.45f));
+        c.add (juce::Colour (0xff8c8c8c));
+        c.add (juce::Colour (0xff5a5f73));
+        return c;
+    }();
+    return colours;
+}
+
 //==============================================================================
 //==============================================================================
 int numTracks (const juce::ValueTree& project)

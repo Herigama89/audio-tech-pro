@@ -61,16 +61,20 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
 
         muteButton.setTooltip ("Mute");
         soloButton.setTooltip ("Solo");
-        muteButton.onClick = [this]
+        // Mute and solo act on every selected track when this one is among them (as in Logic).
+        auto toggle = [this] (const juce::Identifier& flag, const juce::String& undoName)
         {
-            owner.getUndoManager().beginNewTransaction ("Mute");
-            track.setProperty (ids::mute, ! (bool) track[ids::mute], &owner.getUndoManager());
+            auto& um = owner.getUndoManager();
+            um.beginNewTransaction (undoName);
+            const auto value = ! (bool) track[flag];
+            track.setProperty (flag, value, &um);
+            if (selected)
+                for (const auto& id : owner.getSelectedTrackIds())
+                    if (auto other = model::findById (project, id); other.isValid())
+                        other.setProperty (flag, value, &um);
         };
-        soloButton.onClick = [this]
-        {
-            owner.getUndoManager().beginNewTransaction ("Solo");
-            track.setProperty (ids::solo, ! (bool) track[ids::solo], &owner.getUndoManager());
-        };
+        muteButton.onClick = [toggle] { toggle (ids::mute, "Mute"); };
+        soloButton.onClick = [toggle] { toggle (ids::solo, "Solo"); };
         addAndMakeVisible (muteButton);
         addAndMakeVisible (soloButton);
 
@@ -136,14 +140,35 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     fader.setDoubleClickReturnValue (true, 0.0);
     fader.setPopupDisplayEnabled (true, true, nullptr);
     fader.textFromValueFunction = [] (double db) { return db <= minDb + 0.01 ? juce::String ("-inf dB") : juce::String (db, 1) + " dB"; };
-    fader.onDragStart = [this] { owner.getUndoManager().beginNewTransaction (isMaster() ? "Master volume" : "Volume"); };
+    fader.onDragStart = [this]
+    {
+        owner.getUndoManager().beginNewTransaction (isMaster() ? "Master volume" : "Volume");
+
+        // With several tracks selected, the other selected faders follow this one (as in Logic).
+        groupStart.clear();
+        dragStartDb = fader.getValue();
+        if (! isMaster() && selected)
+            for (const auto& id : owner.getSelectedTrackIds())
+                if (id != track[ids::id].toString())
+                    if (const auto other = model::findById (project, id); other.isValid())
+                        groupStart[id] = gainToDb ((double) other.getProperty (ids::volume, 1.0));
+    };
+    fader.onDragEnd = [this] { groupStart.clear(); };
     fader.onValueChange = [this]
     {
         const auto gain = dbToGain (fader.getValue());
         if (isMaster())
+        {
             project.setProperty (ids::masterGain, gain, &owner.getUndoManager());
-        else
-            track.setProperty (ids::volume, gain, &owner.getUndoManager());
+            return;
+        }
+
+        track.setProperty (ids::volume, gain, &owner.getUndoManager());
+
+        const auto delta = fader.getValue() - dragStartDb;
+        for (const auto& [id, startDb] : groupStart)
+            if (auto other = model::findById (project, id); other.isValid() && startDb > minDb + 0.01)
+                other.setProperty (ids::volume, dbToGain (juce::jlimit (minDb, 6.0, startDb + delta)), &owner.getUndoManager());
     };
     addAndMakeVisible (fader);
     addAndMakeVisible (meter);
@@ -426,10 +451,10 @@ void ChannelStrip::showConsoleMenu()
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
 
-void ChannelStrip::SelectOnClick::mouseDown (const juce::MouseEvent&)
+void ChannelStrip::SelectOnClick::mouseDown (const juce::MouseEvent& e)
 {
-    if (strip.owner.onSelectTrack && ! strip.isMaster())
-        strip.owner.onSelectTrack (strip.track[ids::id].toString());
+    if (strip.owner.onSelectTrack && ! strip.isMaster() && ! e.mods.isPopupMenu())
+        strip.owner.onSelectTrack (strip.track[ids::id].toString(), e.mods);
 }
 
 void ChannelStrip::setSelected (bool shouldBeSelected)
@@ -1163,17 +1188,18 @@ void MixerPanel::handleAsyncUpdate()
         masterStrip->refresh();
 }
 
-void MixerPanel::setSelectedTrack (const juce::String& trackId)
+void MixerPanel::setSelectedTracks (const juce::StringArray& trackIds, const juce::String& trackId)
 {
     selectedTrackId = trackId;
+    selectedTrackIds = trackIds;
 
     for (auto* s : strips)
     {
-        const bool on = s->getTrack()[ids::id].toString() == trackId;
-        s->setSelected (on);
+        const auto id = s->getTrack()[ids::id].toString();
+        s->setSelected (trackIds.contains (id) || id == trackId);
 
-        // Scroll it into view.
-        if (on)
+        // Scroll the main one into view.
+        if (id == trackId)
         {
             const auto x = s->getX(), right = s->getRight();
             const auto viewX = viewport.getViewPositionX(), viewW = viewport.getViewWidth();
@@ -1193,7 +1219,7 @@ void MixerPanel::rebuild()
         if (track.hasType (ids::TRACK))
         {
             auto* strip = strips.add (new ChannelStrip (*this, project, track));
-            strip->setSelected (track[ids::id].toString() == selectedTrackId);
+            strip->setSelected (track[ids::id].toString() == selectedTrackId || selectedTrackIds.contains (track[ids::id].toString()));
             strip->setComponentID ("strip" + juce::String (strips.size() - 1));
             stripHolder.addAndMakeVisible (strip);
         }
@@ -1205,13 +1231,40 @@ void MixerPanel::rebuild()
 
 void MixerPanel::timerCallback()
 {
-    if (! isShowing())
+    bool extraShowing = false;
+    for (auto* s : extraStrips)
+        extraShowing = extraShowing || s->isShowing();
+
+    if (! isShowing() && ! extraShowing)
         return;
+
+    // Each track's level is read once and goes to every strip showing that track.
+    std::map<juce::String, std::pair<float, float>> levels;
+    auto levelOf = [this, &levels] (const juce::String& owner)
+    {
+        if (auto it = levels.find (owner); it != levels.end())
+            return it->second;
+        return levels[owner] = engine.takeTrackLevel (player.slotOf (owner));
+    };
 
     for (auto* s : strips)
     {
-        const auto [l, r] = engine.takeTrackLevel (player.slotOf (s->getOwnerId()));
+        const auto [l, r] = levelOf (s->getOwnerId());
         s->pushLevels (l, r);
+    }
+    for (auto* s : extraStrips)
+        if (s->getTrack().isValid())
+        {
+            const auto [l, r] = levelOf (s->getOwnerId());
+            s->pushLevels (l, r);
+        }
+
+    if (! isShowing())
+    {
+        if (++syncCounter % 3 == 0)
+            for (auto* s : extraStrips)
+                s->syncFromPlugin();
+        return;
     }
 
     if (consolePanel.isVisible())
@@ -1221,14 +1274,21 @@ void MixerPanel::timerCallback()
 
     // Console mode: follow knobs turned in the plugins' own windows (10 times a second).
     if (++syncCounter % 3 == 0)
+    {
         for (auto* s : strips)
             s->syncFromPlugin();
+        for (auto* s : extraStrips)
+            s->syncFromPlugin();
+    }
 }
 
 void MixerPanel::setMasterLevels (float left, float right)
 {
     if (masterStrip != nullptr)
         masterStrip->pushLevels (left, right);
+    for (auto* s : extraStrips)
+        if (! s->getTrack().isValid())
+            s->pushLevels (left, right);
     consolePanel.setOutputLevel (juce::jmax (left, right));
 }
 

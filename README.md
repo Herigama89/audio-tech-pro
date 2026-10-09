@@ -290,10 +290,12 @@ Working through Logic Pro's user guide, area by area. [x] done, [ ] to do.
 **Tracks area and track headers**
 - [x] Resize a track by dragging the lower edge of its header (Option-drag: every track); Zoom Vertical In/Out (Cmd+Down / Cmd+Up)
 - [x] One track selection shared by the tracks area and the mixer (click a strip to select its track; the mixer follows)
-- [ ] Select several tracks (Shift / Cmd-click) and act on all of them (mute, solo, delete, colour, arm)
-- [ ] Reorder tracks by dragging headers; double-click to rename; track colours and icons
-- [ ] Track stacks (folder and summing stacks), hide tracks (H), track freeze
-- [ ] Inspector (I): the selected track's region and track parameters and its channel strip on the left
+- [x] Select several tracks (Shift / Cmd-click, in the tracks area or the mixer) and act on all of them: mute, solo, arm, delete, hide, colour; their mixer faders move together
+- [x] Reorder tracks by dragging headers (several at once); double-click to rename; track colours (Option+C)
+- [x] Hide tracks (Ctrl+H hides and selects the next; H shows or leaves out hidden tracks)
+- [x] Inspector (I): the selected track's channel strip and the Stereo Out on the left
+- [ ] Inspector: region and track parameter boxes above the strips; track icons
+- [ ] Track stacks (folder and summing stacks), track freeze
 - [ ] Global tracks: arrangement markers, markers, tempo track with tempo changes, time signature and key changes
 - [ ] Bounce in place, export tracks as audio files (stems), import tracks from other projects
 

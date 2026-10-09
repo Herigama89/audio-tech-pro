@@ -71,11 +71,11 @@ void ArrangeCanvas::paint (juce::Graphics& g)
     for (int i = 0; i < numTracks; ++i)
     {
         const auto top = timeline.trackTop (i);
-        if (top + timeline.heightOf (i) < TimelineState::rulerHeight || top > getHeight())
+        if (timeline.heightOf (i) == 0 || top + timeline.heightOf (i) < TimelineState::rulerHeight || top > getHeight())
             continue;
 
         const auto track = project.getChild (i);
-        const bool selected = timeline.selectedTrackId == track[ids::id].toString();
+        const bool selected = timeline.isTrackSelected (track[ids::id].toString());
 
         g.setColour (selected ? theme::selection.withAlpha (0.6f) : (i % 2 == 0 ? theme::laneA : theme::laneB));
         g.fillRect (0, top, getWidth(), timeline.heightOf (i));

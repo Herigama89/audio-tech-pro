@@ -108,6 +108,7 @@ set(RIFF_UI_SOURCES
     Source/ui/ScreenRecorder.cpp
     Source/ui/ScreenRecordPanel.cpp
     Source/ui/CombineInterfacesPanel.cpp
+    Source/ui/Inspector.cpp
     Source/ui/TrackHeaders.cpp
     Source/ui/ArrangeCanvas.cpp
     Source/ui/LatencyCalibrator.cpp

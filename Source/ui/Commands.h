@@ -20,11 +20,12 @@ namespace riff::commands
         // Track
         newAudioTrack = 0x2201, newInstrumentTrack, newAuxBus, deleteTrack,
         muteTrack, soloTrack, armTrack, showAutomation, selectPreviousTrack, selectNextTrack, generateMidi,
+        hideTrack, showHiddenTracks, trackColours,
         // Transport (Logic calls this menu "Record" and "Navigate")
         play = 0x2301, record, goToStart, rewindBar, forwardBar, toggleCycle, toggleMetronome, toggleCountIn,
         // View / window
         showMixer = 0x2401, showPianoRoll, zoomIn, zoomOut, keyCommands, audioSettings, calibrateLatency, scanPlugins, showAssistant, recordScreen, combineInterfaces,
-        zoomVerticalIn, zoomVerticalOut
+        zoomVerticalIn, zoomVerticalOut, toggleInspector
     };
 
     struct Info

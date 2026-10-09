@@ -22,8 +22,84 @@ struct TimelineState : public juce::ChangeBroadcaster
     double scrollSeconds = 0.0;      // time at the left edge of the tracks area
     int scrollY = 0;                 // pixels scrolled down in the track list
 
-    juce::String selectedTrackId;
+    juce::String selectedTrackId;    // the selected track (with several selected: the one clicked last)
     juce::String selectedRegionId;
+
+    /** Several selected tracks (Shift / Cmd-click). Only counts while it holds selectedTrackId,
+        so setting selectedTrackId directly simply selects that one track. */
+    juce::StringArray selectedTracks;
+
+    /** Show hidden tracks (Logic's H): they're drawn dimmed instead of left out. */
+    bool showHiddenTracks = false;
+
+    bool isTrackSelected (const juce::String& id) const
+    {
+        return id.isNotEmpty() && (id == selectedTrackId || (selectedTracks.contains (selectedTrackId) && selectedTracks.contains (id)));
+    }
+
+    /** The selected tracks, top to bottom. */
+    juce::StringArray selectedTrackIds() const
+    {
+        juce::StringArray result;
+        for (const auto& t : project)
+            if (t.hasType (ids::TRACK) && isTrackSelected (t[ids::id].toString()))
+                result.add (t[ids::id].toString());
+        return result;
+    }
+
+    void selectOnly (const juce::String& id)
+    {
+        selectedTrackId = id;
+        selectedTracks = { id };
+    }
+
+    /** Cmd-click: adds or removes one track. */
+    void toggleTrackSelection (const juce::String& id)
+    {
+        auto current = selectedTrackIds();
+        if (current.contains (id) && current.size() > 1)
+        {
+            current.removeString (id);
+            selectedTracks = current;
+            selectedTrackId = current[current.size() - 1];
+        }
+        else
+        {
+            current.addIfNotAlreadyThere (id);
+            selectedTracks = current;
+            selectedTrackId = id;
+        }
+    }
+
+    /** Shift-click: everything from the selected track to this one. */
+    void extendTrackSelection (const juce::String& id)
+    {
+        int from = -1, to = -1, i = 0;
+        for (const auto& t : project)
+        {
+            if (! t.hasType (ids::TRACK))
+                continue;
+            if (t[ids::id].toString() == selectedTrackId) from = i;
+            if (t[ids::id].toString() == id) to = i;
+            ++i;
+        }
+        if (from < 0 || to < 0)
+        {
+            selectOnly (id);
+            return;
+        }
+
+        selectedTracks.clear();
+        for (int k = juce::jmin (from, to); k <= juce::jmax (from, to); ++k)
+            if (! isHidden (k))
+                selectedTracks.add (project.getChild (k)[ids::id].toString());
+        selectedTrackId = id;
+    }
+
+    bool isHidden (int index) const
+    {
+        return ! showHiddenTracks && (bool) project.getChild (index).getProperty (ids::hidden, false);
+    }
 
     /** The project, for each track's own height (its "height" property, set by dragging its lower edge). */
     juce::ValueTree project;
@@ -37,6 +113,8 @@ struct TimelineState : public juce::ChangeBroadcaster
         const auto track = project.getChild (index);
         if (! track.hasType (ids::TRACK))
             return trackHeight;
+        if (isHidden (index))
+            return 0;
         return juce::jlimit (minTrackHeight, maxTrackHeight, (int) track.getProperty (ids::height, trackHeight));
     }
 

@@ -121,6 +121,12 @@ namespace riff::model
     void deleteRegion (juce::ValueTree region, juce::UndoManager* um);
     void deleteTrack (juce::ValueTree track, juce::UndoManager* um);
 
+    /** Moves tracks (kept in their order, together) so the first lands at `newIndex` of the track list as it is now. */
+    void moveTracks (juce::ValueTree project, const juce::Array<juce::ValueTree>& tracks, int newIndex, juce::UndoManager* um);
+
+    /** The colours offered for tracks. */
+    const juce::Array<juce::Colour>& trackPalette();
+
     // --- Mixer ----------------------------------------------------------------
     inline const juce::String masterOwner { "master" };
 

@@ -80,16 +80,19 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
     monitorButton.onClick = [this] { track.setProperty (ids::monitor, ! (bool) track[ids::monitor], nullptr); };
     armButton.addMouseListener (this, false);
 
-    muteButton.onClick = [this]
+    // On a selected track, mute and solo act on all the selected tracks (as in Logic).
+    auto toggle = [this] (const juce::Identifier& flag, const juce::String& undoName)
     {
-        undoManager.beginNewTransaction ("Mute");
-        track.setProperty (ids::mute, ! (bool) track[ids::mute], &undoManager);
+        undoManager.beginNewTransaction (undoName);
+        const auto value = ! (bool) track[flag];
+        track.setProperty (flag, value, &undoManager);
+        if (timeline.isTrackSelected (track[ids::id].toString()))
+            for (const auto& id : timeline.selectedTrackIds())
+                if (auto other = model::findById (track.getParent(), id); other.isValid())
+                    other.setProperty (flag, value, &undoManager);
     };
-    soloButton.onClick = [this]
-    {
-        undoManager.beginNewTransaction ("Solo");
-        track.setProperty (ids::solo, ! (bool) track[ids::solo], &undoManager);
-    };
+    muteButton.onClick = [toggle] { toggle (ids::mute, "Mute"); };
+    soloButton.onClick = [toggle] { toggle (ids::solo, "Solo"); };
 
     volumeSlider.setSliderStyle (juce::Slider::LinearHorizontal);
     look::onLight (volumeSlider);
@@ -160,7 +163,7 @@ void TrackHeader::refresh()
 
 void TrackHeader::paint (juce::Graphics& g)
 {
-    const bool selected = timeline.selectedTrackId == track[ids::id].toString();
+    const bool selected = timeline.isTrackSelected (track[ids::id].toString());
     auto area = getLocalBounds();
 
     // Cream body
@@ -188,6 +191,16 @@ void TrackHeader::paint (juce::Graphics& g)
     g.setFont (juce::FontOptions (10.5f));
     const auto kind = isBus ? "Aux bus" : (isInstrument ? "" : "Audio");
     g.drawText (kind, nameLabel.getBounds().translated (3, 18).withHeight (12), juce::Justification::centredLeft, false);
+
+    // A hidden track, shown because Show Hidden Tracks is on: dimmed, with an H.
+    if ((bool) track[ids::hidden])
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.25f));
+        g.fillRect (getLocalBounds().withTrimmedLeft (numberWidth));
+        g.setColour (theme::ink);
+        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        g.drawText ("H", number.withTrimmedTop (getHeight() - 18), juce::Justification::centred, false);
+    }
 
     // Divider
     g.setColour (theme::creamDeep.darker (0.15f));
@@ -249,7 +262,17 @@ void TrackHeader::mouseExit (const juce::MouseEvent&)
 void TrackHeader::mouseDrag (const juce::MouseEvent& e)
 {
     if (! resizing)
+    {
+        // Drag the header up or down to move the track (and the other selected ones).
+        if (e.mods.isPopupMenu() || e.eventComponent != this)
+            return;
+        if (! reordering && std::abs (e.getDistanceFromDragStartY()) > 4)
+            reordering = true;
+        if (reordering)
+            if (auto* list = findParentComponentOfClass<TrackHeaderList>())
+                list->reorderDrag (*this, e);
         return;
+    }
 
     const auto h = juce::jlimit (TimelineState::minTrackHeight, TimelineState::maxTrackHeight,
                                  heightAtDragStart + e.getDistanceFromDragStartY());
@@ -269,9 +292,21 @@ void TrackHeader::mouseDrag (const juce::MouseEvent& e)
     timeline.changed();
 }
 
-void TrackHeader::mouseUp (const juce::MouseEvent&)
+void TrackHeader::mouseUp (const juce::MouseEvent& e)
 {
-    resizing = false;
+    if (reordering)
+    {
+        if (auto* list = findParentComponentOfClass<TrackHeaderList>())
+            list->reorderDrop (*this, e);
+    }
+    else if (clickKeptSelection && ! resizing && e.mouseWasClicked())
+    {
+        // A plain click on one of several selected tracks (not a drag): just this one.
+        timeline.selectOnly (track[ids::id].toString());
+        timeline.changed();
+    }
+
+    resizing = reordering = clickKeptSelection = false;
 }
 
 void TrackHeader::mouseDown (const juce::MouseEvent& e)
@@ -285,7 +320,23 @@ void TrackHeader::mouseDown (const juce::MouseEvent& e)
     }
 
     lastClickWasPopup = e.mods.isPopupMenu();
-    select();
+
+    // Selecting: Cmd-click adds or removes, Shift-click selects a range, a plain click selects
+    // just this one (unless it's part of the selection, so all of it can be dragged).
+    const auto id = track[ids::id].toString();
+    if (e.mods.isCommandDown() && ! e.mods.isPopupMenu())
+        timeline.toggleTrackSelection (id);
+    else if (e.mods.isShiftDown() && ! e.mods.isPopupMenu())
+        timeline.extendTrackSelection (id);
+    else if (timeline.isTrackSelected (id) && timeline.selectedTrackIds().size() > 1)
+    {
+        timeline.selectedTrackId = id;
+        clickKeptSelection = ! e.mods.isPopupMenu() && e.eventComponent == this;
+    }
+    else
+        timeline.selectOnly (id);
+    timeline.selectedRegionId = {};
+    timeline.changed();
 
     if (e.mods.isPopupMenu())
     {
@@ -300,7 +351,7 @@ void TrackHeader::mouseDown (const juce::MouseEvent& e)
 
 void TrackHeader::select()
 {
-    timeline.selectedTrackId = track[ids::id].toString();
+    timeline.selectOnly (track[ids::id].toString());
     timeline.changed();
 }
 
@@ -416,13 +467,42 @@ void TrackHeader::showMenu()
     if (! isInstrument)
         menu.addItem ("Choose input...", [this] { showInputMenu(); });
     menu.addItem ("Rename", [this] { nameLabel.showEditor(); });
-    menu.addSeparator();
-    menu.addItem ("Delete track", [t = track, &um = undoManager]
+    menu.addItem ("Colour...", [this] { showColours(); });
+
+    const auto selection = timeline.selectedTrackIds();
+    const auto plural = selection.size() > 1 ? juce::String (" ") + juce::String (selection.size()) + " tracks" : juce::String (" track");
+    const bool hidden = track[ids::hidden];
+    menu.addItem ((hidden ? "Show" : "Hide") + plural, [this, selection, hidden]
     {
-        um.beginNewTransaction ("Delete track");
-        model::deleteTrack (t, &um);
+        auto project = track.getParent();
+        undoManager.beginNewTransaction (hidden ? "Show tracks" : "Hide tracks");
+        for (const auto& id : selection)
+            model::findById (project, id).setProperty (ids::hidden, ! hidden, &undoManager);
+        timeline.changed();
+    });
+    menu.addSeparator();
+    menu.addItem ("Delete" + plural, [this, selection]
+    {
+        auto project = track.getParent();
+        undoManager.beginNewTransaction ("Delete track");
+        for (const auto& id : selection)
+            model::deleteTrack (model::findById (project, id), &undoManager);
     });
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+}
+
+void TrackHeader::showColours()
+{
+    auto project = track.getParent();
+    auto selection = timeline.selectedTrackIds();
+    auto& um = undoManager;
+    auto palette = std::make_unique<TrackColourPalette> ([project, selection, &um] (juce::Colour c)
+    {
+        um.beginNewTransaction ("Track colour");
+        for (const auto& id : selection)
+            model::findById (project, id).setProperty (ids::colour, c.toString(), &um);
+    });
+    juce::CallOutBox::launchAsynchronously (std::move (palette), nameLabel.getScreenBounds(), nullptr);
 }
 
 //==============================================================================
@@ -481,7 +561,119 @@ void TrackHeaderList::resized()
     content.setBounds (getLocalBounds().withTrimmedTop (TimelineState::rulerHeight));
 
     for (int i = 0; i < headers.size(); ++i)
-        headers[i]->setBounds (0, timeline.trackTop (i) - TimelineState::rulerHeight, getWidth(), timeline.heightOf (i));
+    {
+        const auto h = timeline.heightOf (i);
+        headers[i]->setVisible (h > 0);
+        headers[i]->setBounds (0, timeline.trackTop (i) - TimelineState::rulerHeight, getWidth(), h);
+    }
+}
+
+void TrackHeaderList::showColoursForSelection()
+{
+    for (auto* h : headers)
+        if (h->getTrack()[ids::id].toString() == timeline.selectedTrackId && h->isVisible())
+        {
+            h->showColours();
+            return;
+        }
+}
+
+int TrackHeaderList::dropIndexAt (int yInList) const
+{
+    // The gap nearest the mouse: before track i, or after the last one.
+    const auto count = headers.size();
+    for (int i = 0; i < count; ++i)
+    {
+        const auto h = timeline.heightOf (i);
+        if (h > 0 && yInList < timeline.trackTop (i) + h / 2)
+            return i;
+    }
+    return count;
+}
+
+void TrackHeaderList::reorderDrag (TrackHeader& header, const juce::MouseEvent& e)
+{
+    dropIndex = dropIndexAt (e.getEventRelativeTo (this).y);
+    juce::ignoreUnused (header);
+    repaint();
+}
+
+void TrackHeaderList::reorderDrop (TrackHeader& header, const juce::MouseEvent& e)
+{
+    const auto index = dropIndexAt (e.getEventRelativeTo (this).y);
+    dropIndex = -1;
+    repaint();
+
+    juce::Array<juce::ValueTree> moving;
+    for (const auto& id : timeline.selectedTrackIds())
+        moving.add (model::findById (project, id));
+    if (moving.isEmpty())
+        moving.add (header.getTrack());
+
+    undoManager.beginNewTransaction (moving.size() > 1 ? "Move tracks" : "Move track");
+    model::moveTracks (project, moving, index, &undoManager);
+}
+
+void TrackHeaderList::paintOverChildren (juce::Graphics& g)
+{
+    if (dropIndex < 0)
+        return;
+
+    const auto y = dropIndex < headers.size() ? timeline.trackTop (dropIndex) : timeline.trackTop (headers.size());
+    g.setColour (theme::gold);
+    g.fillRect (0, juce::jmax (TimelineState::rulerHeight, y - 2), getWidth(), 4);
+}
+
+//==============================================================================
+TrackColourPalette::TrackColourPalette (std::function<void (juce::Colour)> onPick)
+    : pick (std::move (onPick))
+{
+    const auto count = model::trackPalette().size();
+    const auto rows = (count + columns - 1) / columns;
+    setSize (columns * (cellSize + gap) + gap, rows * (cellSize + gap) + gap);
+}
+
+juce::Rectangle<int> TrackColourPalette::cell (int index) const
+{
+    return { gap + (index % columns) * (cellSize + gap), gap + (index / columns) * (cellSize + gap), cellSize, cellSize };
+}
+
+int TrackColourPalette::indexAt (juce::Point<int> p) const
+{
+    for (int i = 0; i < model::trackPalette().size(); ++i)
+        if (cell (i).contains (p))
+            return i;
+    return -1;
+}
+
+void TrackColourPalette::paint (juce::Graphics& g)
+{
+    const auto& colours = model::trackPalette();
+    for (int i = 0; i < colours.size(); ++i)
+    {
+        const auto r = cell (i).toFloat();
+        g.setColour (colours[i]);
+        g.fillRoundedRectangle (r, 4.0f);
+        g.setColour (i == hover ? juce::Colours::white : juce::Colours::black.withAlpha (0.4f));
+        g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, i == hover ? 2.0f : 1.0f);
+    }
+}
+
+void TrackColourPalette::mouseMove (const juce::MouseEvent& e)
+{
+    hover = indexAt (e.getPosition());
+    repaint();
+}
+
+void TrackColourPalette::mouseDown (const juce::MouseEvent& e)
+{
+    const auto index = indexAt (e.getPosition());
+    if (index < 0)
+        return;
+    if (pick)
+        pick (model::trackPalette()[index]);
+    if (auto* box = findParentComponentOfClass<juce::CallOutBox>())
+        box->dismiss();
 }
 
 void TrackHeaderList::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)

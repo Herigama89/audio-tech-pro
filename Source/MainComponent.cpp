@@ -230,8 +230,9 @@ MainComponent::MainComponent (bool openAudioDevice)
         showEffectMenu (owner, slot, existing, target);
     };
     mixer.onClose = [this] { closeMixer(); };
-    mixer.onSelectTrack = [this] (const juce::String& id) { selectTrackFromMixer (id); };
+    mixer.onSelectTrack = [this] (const juce::String& id, juce::ModifierKeys mods) { selectTrackFromMixer (id, mods); };
     addChildComponent (mixer);
+    addChildComponent (inspector);
     headers.inputNames = [this] { return engine.getActiveInputChannelNames(); };
     waveforms.onChange = [this] { canvas.repaint(); };
 
@@ -316,6 +317,8 @@ MainComponent::MainComponent (bool openAudioDevice)
     setProject (model::createProject(), {});
     statusLabel.setText (deviceStatusText(), juce::dontSendNotification);
     createAssistant();
+    if (appProperties.getUserSettings()->getBoolValue ("inspector", false))
+        toggleInspector();
     screenRecorder = ScreenRecorder::create();
 
     setWantsKeyboardFocus (true);
@@ -495,6 +498,10 @@ void MainComponent::resized()
     // The Claude panel down the right side
     if (assistantPanel != nullptr && assistantPanel->isVisible())
         assistantPanel->setBounds (area.removeFromRight (AssistantPanel::preferredWidth));
+
+    // The Inspector down the left side, beside the tracks and the editors, as in Logic
+    if (inspector.isVisible())
+        inspector.setBounds (area.removeFromLeft (Inspector::preferredWidth));
 
     if (pianoRoll.isVisible())
         pianoRoll.setBounds (area.removeFromBottom (juce::jlimit (200, 360, getHeight() / 3)));
@@ -1112,7 +1119,7 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
     if (source == &timeline)
     {
-        mixer.setSelectedTrack (timeline.selectedTrackId);   // one selection, as in Logic
+        mixer.setSelectedTracks (timeline.selectedTrackIds(), timeline.selectedTrackId);   // one selection, as in Logic
         updateScrollBars();
         commandManager.commandStatusChanged(); // the selection changed what the Track commands act on
     }
@@ -1148,6 +1155,8 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 void MainComponent::timerCallback()
 {
     updateLiveMidiTrack();
+    if (inspector.isVisible())
+        inspector.setTrack (project, model::findById (project, timeline.selectedTrackId));
     updateScreenRecording();
 
     if (pianoRoll.isVisible())

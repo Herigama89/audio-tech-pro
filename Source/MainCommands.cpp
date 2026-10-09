@@ -58,6 +58,10 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::toggleCountIn:   info.setTicked ((bool) project[ids::countIn]); break;
 
         case commands::showMixer:       info.setTicked (mixer.isVisible()); break;
+        case commands::showHiddenTracks: info.setTicked (timeline.showHiddenTracks); break;
+        case commands::hideTrack:       info.setActive (track.isValid()); break;
+        case commands::trackColours:    info.setActive (track.isValid()); break;
+        case commands::toggleInspector: info.setTicked (inspector.isVisible()); break;
         case commands::recordScreen:    info.setTicked (screenRecorder != nullptr && screenRecorder->isRecording());
                                         if (screenRecorder != nullptr && screenRecorder->isRecording())
                                             info.shortName = "Stop Screen Recording";
@@ -94,6 +98,10 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::soloTrack:              toggleTrackFlag (ids::solo, "Solo"); break;
         case commands::armTrack:               toggleTrackFlag (ids::armed, {}); break;
         case commands::showAutomation:         toggleTrackFlag (ids::showAutomation, {}); break;
+        case commands::hideTrack:              hideSelectedTracks(); break;
+        case commands::showHiddenTracks:       timeline.showHiddenTracks = ! timeline.showHiddenTracks; timeline.changed(); break;
+        case commands::trackColours:           headers.showColoursForSelection(); break;
+        case commands::toggleInspector:        toggleInspector(); break;
         case commands::selectPreviousTrack:    selectAdjacentTrack (-1); break;
         case commands::selectNextTrack:        selectAdjacentTrack (1); break;
 
@@ -166,6 +174,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             menu.addSeparator();
             add ({ commands::muteTrack, commands::soloTrack, commands::armTrack, commands::showAutomation });
             menu.addSeparator();
+            add ({ commands::trackColours, commands::hideTrack, commands::showHiddenTracks });
+            menu.addSeparator();
             add ({ commands::selectPreviousTrack, commands::selectNextTrack });
             menu.addSeparator();
             add ({ commands::deleteTrack });
@@ -190,6 +200,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             break;
 
         case 6:
+            add ({ commands::toggleInspector });
             add ({ commands::showPianoRoll, commands::zoomIn, commands::zoomOut, commands::zoomVerticalIn, commands::zoomVerticalOut });
             menu.addSeparator();
             add ({ commands::showAssistant, commands::recordScreen });
@@ -357,7 +368,15 @@ void MainComponent::toggleTrackFlag (const juce::Identifier& flag, const juce::S
     if (undoName.isNotEmpty())
         undoManager.beginNewTransaction (undoName);
 
-    track.setProperty (flag, ! (bool) track[flag], undoName.isNotEmpty() ? &undoManager : nullptr);
+    // Every selected track follows the main one, as in Logic.
+    const auto value = ! (bool) track[flag];
+    for (const auto& id : timeline.selectedTrackIds())
+    {
+        auto t = model::findById (project, id);
+        if (flag == ids::armed && model::isBusTrack (t))
+            continue;
+        t.setProperty (flag, value, undoName.isNotEmpty() ? &undoManager : nullptr);
+    }
 }
 
 void MainComponent::selectAdjacentTrack (int delta)
@@ -367,10 +386,16 @@ void MainComponent::selectAdjacentTrack (int delta)
         return;
 
     const auto current = selectedTrackIndex();
-    const auto next = current < 0 ? (delta > 0 ? 0 : count - 1)
-                                  : juce::jlimit (0, count - 1, current + delta);
+    auto next = current < 0 ? (delta > 0 ? 0 : count - 1)
+                            : juce::jlimit (0, count - 1, current + delta);
 
-    timeline.selectedTrackId = project.getChild (next)[ids::id].toString();
+    // Hidden tracks are skipped.
+    while (timeline.isHidden (next) && next + delta >= 0 && next + delta < count)
+        next += delta;
+    if (timeline.isHidden (next))
+        return;
+
+    timeline.selectOnly (project.getChild (next)[ids::id].toString());
     timeline.selectedRegionId = {};
 
     scrollToTrack (next);
@@ -389,15 +414,65 @@ void MainComponent::scrollToTrack (int index)
         timeline.scrollY = juce::jmax (0, top + height - visible);
 }
 
-void MainComponent::selectTrackFromMixer (const juce::String& trackId)
+void MainComponent::selectTrackFromMixer (const juce::String& trackId, juce::ModifierKeys mods)
 {
     const auto track = model::findById (project, trackId);
-    if (! track.isValid() || timeline.selectedTrackId == trackId)
+    if (! track.isValid())
         return;
 
-    timeline.selectedTrackId = trackId;
+    // The same rules as clicking track headers.
+    if (mods.isCommandDown())
+        timeline.toggleTrackSelection (trackId);
+    else if (mods.isShiftDown())
+        timeline.extendTrackSelection (trackId);
+    else if (timeline.isTrackSelected (trackId) && timeline.selectedTrackIds().size() > 1)
+        timeline.selectedTrackId = trackId;            // keep the others: their faders can move together
+    else if (timeline.selectedTrackId == trackId)
+        return;
+    else
+        timeline.selectOnly (trackId);
+
     timeline.selectedRegionId = {};
+    if (track[ids::hidden] && ! timeline.showHiddenTracks)
+        timeline.showHiddenTracks = true;              // show it rather than select something invisible
     scrollToTrack (project.indexOf (track));
+    timeline.changed();
+}
+
+void MainComponent::toggleInspector()
+{
+    inspector.setVisible (! inspector.isVisible());
+    if (inspector.isVisible())
+        inspector.setTrack (project, model::findById (project, timeline.selectedTrackId));
+    else
+        inspector.setTrack ({}, {});
+    appProperties.getUserSettings()->setValue ("inspector", inspector.isVisible());
+    resized();
+    commandManager.commandStatusChanged();
+}
+
+void MainComponent::hideSelectedTracks()
+{
+    const auto selection = timeline.selectedTrackIds();
+    if (selection.isEmpty())
+        return;
+
+    const auto last = project.indexOf (model::findById (project, selection[selection.size() - 1]));
+    const bool hide = ! (bool) model::findById (project, timeline.selectedTrackId)[ids::hidden];
+
+    undoManager.beginNewTransaction (hide ? "Hide tracks" : "Show tracks");
+    for (const auto& id : selection)
+        model::findById (project, id).setProperty (ids::hidden, hide, &undoManager);
+
+    // As in Logic: hide this one and select the next track.
+    if (hide && ! timeline.showHiddenTracks)
+        for (int i = last + 1; i < model::numTracks (project); ++i)
+            if (! (bool) project.getChild (i)[ids::hidden])
+            {
+                timeline.selectOnly (project.getChild (i)[ids::id].toString());
+                break;
+            }
+
     timeline.changed();
 }
 
@@ -493,9 +568,11 @@ void MainComponent::deleteSelectedTrack()
     if (! track.isValid() || engine.isRecording())
         return;
 
-    const auto index = project.indexOf (track);
-    undoManager.beginNewTransaction ("Delete track");
-    model::deleteTrack (track, &undoManager);
+    const auto selection = timeline.selectedTrackIds();
+    const auto index = project.indexOf (model::findById (project, selection[0]));
+    undoManager.beginNewTransaction (selection.size() > 1 ? "Delete tracks" : "Delete track");
+    for (const auto& id : selection)
+        model::deleteTrack (model::findById (project, id), &undoManager);
 
     // Select the track that took its place, so Cmd+Delete can be pressed again.
     const auto count = model::numTracks (project);

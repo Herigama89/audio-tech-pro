@@ -39,6 +39,9 @@ private:
     void refresh();
     void select();
     void showMenu();
+public:
+    void showColours();
+private:
     void showInputMenu();
     void showAutomationMenu();
     juce::String automationParamName (const juce::ValueTree& project, const juce::String& param);
@@ -52,7 +55,7 @@ private:
     InstrumentMenuFn instrumentMenu;
     bool isInstrument = false, isBus = false;
     bool lastClickWasPopup = false; // buttons also "click" on right-click; those open menus instead
-    bool resizing = false, resizingAll = false;
+    bool resizing = false, resizingAll = false, reordering = false, clickKeptSelection = false;
     int heightAtDragStart = 0;
     juce::TextButton muteButton { "M" }, soloButton { "S" }, armButton { "R" }, monitorButton { "I" }, automationButton { "A" };
     juce::TextButton instrumentButton;
@@ -77,7 +80,16 @@ public:
     TrackHeader::InstrumentMenuFn instrumentMenu;
 
     void paint (juce::Graphics& g) override;
+    void paintOverChildren (juce::Graphics& g) override;
     void resized() override;
+
+    /** Opens the colour palette for the selected tracks, next to the main one's header. */
+    void showColoursForSelection();
+
+    /** Dragging headers to reorder tracks (called by the header being dragged). */
+    void reorderDrag (TrackHeader& header, const juce::MouseEvent& e);
+    void reorderDrop (TrackHeader& header, const juce::MouseEvent& e);
+
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
 
     std::function<void (const juce::MouseEvent&, const juce::MouseWheelDetails&)> onWheel;
@@ -95,6 +107,27 @@ private:
     TimelineState& timeline;
     juce::Component content;
     juce::OwnedArray<TrackHeader> headers;
+    int dropIndex = -1;   // where dragged tracks would land (-1: not dragging)
+
+    int dropIndexAt (int yInList) const;
+};
+
+/** Logic's colour palette: click a colour for the selected tracks. */
+class TrackColourPalette final : public juce::Component
+{
+public:
+    explicit TrackColourPalette (std::function<void (juce::Colour)> onPick);
+    void paint (juce::Graphics& g) override;
+    void mouseDown (const juce::MouseEvent& e) override;
+    void mouseMove (const juce::MouseEvent& e) override;
+    void mouseExit (const juce::MouseEvent&) override { hover = -1; repaint(); }
+
+private:
+    int indexAt (juce::Point<int> p) const;
+    juce::Rectangle<int> cell (int index) const;
+    static constexpr int columns = 8, cellSize = 24, gap = 4;
+    std::function<void (juce::Colour)> pick;
+    int hover = -1;
 };
 
 } // namespace riff

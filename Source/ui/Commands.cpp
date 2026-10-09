@@ -31,6 +31,9 @@ const std::vector<Info>& all()
         { showAutomation,         "Show Automation",            "Track",     "Show or hide automation on the selected track" },
         { selectPreviousTrack,    "Select Previous Track",      "Track",     "Select the track above" },
         { selectNextTrack,        "Select Next Track",          "Track",     "Select the track below" },
+        { hideTrack,              "Hide Track",                 "Track",     "Hide the selected tracks and select the next one (they still play)" },
+        { showHiddenTracks,       "Show Hidden Tracks",         "Track",     "Show or leave out the tracks you hid" },
+        { trackColours,           "Track Colours...",           "Track",     "Choose a colour for the selected tracks" },
         { generateMidi,           "Generate MIDI...",           "Track",     "Write drums, bass, chords and a melody in a genre's style" },
 
         { play,                   "Play or Stop",               "Transport", "Start or stop playback" },
@@ -46,6 +49,7 @@ const std::vector<Info>& all()
         { showPianoRoll,          "Piano Roll",                 "View",      "Open the selected MIDI region in the piano roll, or close it" },
         { zoomIn,                 "Zoom In",                    "View",      "Zoom in horizontally" },
         { zoomOut,                "Zoom Out",                   "View",      "Zoom out horizontally" },
+        { toggleInspector,        "Inspector",                  "View",      "Show or hide the Inspector: the selected track's channel strip and the master's, on the left" },
         { zoomVerticalIn,         "Zoom Vertical In",           "View",      "Make every track taller" },
         { zoomVerticalOut,        "Zoom Vertical Out",          "View",      "Make every track shorter" },
         { keyCommands,            "Key Commands...",            "View",      "Show and edit the key commands" },
@@ -154,6 +158,12 @@ namespace
             case zoomOut:                return { key (KeyPress::leftKey, cmd) };
             case zoomVerticalIn:         return { key (KeyPress::downKey, cmd) };
             case zoomVerticalOut:        return { key (KeyPress::upKey, cmd) };
+            case toggleInspector:        return { key ('i') };
+            case showHiddenTracks:       return { key ('h') };
+            case trackColours:           return { key ('c', opt) };
+           #if JUCE_MAC
+            case hideTrack:              return { key ('h', ctrl) };
+           #endif
             case keyCommands:            return { key ('k', opt) };
             case audioSettings:          return { key (',', cmd) };
             case calibrateLatency:       return {};
