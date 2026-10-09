@@ -8,7 +8,7 @@ namespace riff
 /**
     The insert slot's plugin chooser, as in Logic and other DAWs: a search
     field at the top (type part of a name or a maker), the matches below,
-    grouped by maker. Up/Down to move, Return to choose, Escape to close.
+    grouped by maker (each maker's name over its plugins). Up/Down to move, Return to choose, Escape to close.
 */
 class PluginPicker final : public juce::Component,
                            private juce::ListBoxModel,
@@ -33,7 +33,7 @@ public:
 
 private:
     friend class SnapshotTool;
-    int getNumRows() override { return (int) shown.size(); }
+    int getNumRows() override { return (int) rows.size(); }
     void paintListBoxItem (int row, juce::Graphics&, int width, int height, bool selected) override;
     void listBoxItemClicked (int row, const juce::MouseEvent&) override;
     void returnKeyPressed (int row) override { choose (row); }
@@ -48,6 +48,9 @@ private:
 
     std::vector<Entry> entries;
     std::vector<int> shown;
+    struct Row { int entry = -1; juce::String header; };   // a plugin, or a maker's name over its plugins
+    std::vector<Row> rows;
+    void selectEntryRow (int from, int direction);
     juce::TextEditor search;
     juce::ListBox list { "Plugins", this };
     juce::TextButton scanButton { "Scan for plugins..." }, removeButton { "Remove" };

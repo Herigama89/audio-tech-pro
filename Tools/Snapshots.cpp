@@ -264,6 +264,11 @@ public:
             main.toggleInspector();
             pump (main, 300);
             save (main, "inspector-multiselect.png");
+            main.inspector.setWidthWanted (300);
+            main.resized();
+            pump (main, 100);
+            save (main, "inspector-wide.png");
+            main.inspector.setWidthWanted (Inspector::preferredWidth);
             main.project.getChild (1).setProperty (ids::hidden, false, nullptr);
             main.toggleInspector();
 

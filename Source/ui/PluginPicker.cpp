@@ -63,12 +63,18 @@ std::vector<int> PluginPicker::filter (const std::vector<Entry>& entries, const 
             result.push_back (i);
     }
 
-    // Names that start with what was typed come first.
+    // Kept in their makers' groups; in each, names that start with what was typed come first.
     if (words.size() > 0)
         std::stable_sort (result.begin(), result.end(), [&] (int a, int b)
         {
-            const bool sa = entries[(size_t) a].name.startsWithIgnoreCase (words[0]);
-            const bool sb = entries[(size_t) b].name.startsWithIgnoreCase (words[0]);
+            const auto& ea = entries[(size_t) a];
+            const auto& eb = entries[(size_t) b];
+            if (ea.format.isEmpty() != eb.format.isEmpty())
+                return ea.format.isEmpty();
+            if (const auto c = ea.maker.compareIgnoreCase (eb.maker); c != 0)
+                return c < 0;
+            const bool sa = ea.name.startsWithIgnoreCase (words[0]);
+            const bool sb = eb.name.startsWithIgnoreCase (words[0]);
             return sa && ! sb;
         });
     return result;
@@ -77,16 +83,52 @@ std::vector<int> PluginPicker::filter (const std::vector<Entry>& entries, const 
 void PluginPicker::refilter()
 {
     shown = filter (entries, search.getText());
+
+    // Each maker's name over its plugins.
+    rows.clear();
+    juce::String group;
+    for (auto i : shown)
+    {
+        const auto& e = entries[(size_t) i];
+        const auto g = e.format.isEmpty() ? e.maker + " (built in)" : e.maker;
+        if (g != group)
+        {
+            rows.push_back ({ -1, g });
+            group = g;
+        }
+        rows.push_back ({ i, {} });
+    }
     list.updateContent();
-    list.selectRow (shown.empty() ? -1 : 0);
+    list.deselectAllRows();
+    selectEntryRow (0, 1);
     list.repaint();
+}
+
+void PluginPicker::selectEntryRow (int from, int direction)
+{
+    for (int r = from; juce::isPositiveAndBelow (r, (int) rows.size()); r += direction)
+        if (rows[(size_t) r].entry >= 0)
+        {
+            list.selectRow (r);
+            return;
+        }
 }
 
 void PluginPicker::paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected)
 {
-    if (! juce::isPositiveAndBelow (row, (int) shown.size()))
+    if (! juce::isPositiveAndBelow (row, (int) rows.size()))
         return;
-    const auto& e = entries[(size_t) shown[(size_t) row]];
+    if (rows[(size_t) row].entry < 0)
+    {
+        // A maker's name
+        g.setColour (theme::dimText);
+        g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+        g.drawText (rows[(size_t) row].header.toUpperCase(), 8, 0, width - 16, height, juce::Justification::bottomLeft, true);
+        g.setColour (theme::outline);
+        g.fillRect (8, height - 1, width - 16, 1);
+        return;
+    }
+    const auto& e = entries[(size_t) rows[(size_t) row].entry];
     if (selected)
     {
         g.setColour (theme::accent.withAlpha (0.85f));
@@ -94,11 +136,10 @@ void PluginPicker::paintListBoxItem (int row, juce::Graphics& g, int width, int 
     }
     g.setColour (selected ? juce::Colours::white : theme::text);
     g.setFont (juce::FontOptions (13.5f));
-    g.drawText (e.name, 10, 0, width - 120, height, juce::Justification::centredLeft, true);
+    g.drawText (e.name, 18, 0, width - 70, height, juce::Justification::centredLeft, true);
     g.setColour (selected ? juce::Colours::white.withAlpha (0.8f) : theme::dimText);
     g.setFont (juce::FontOptions (11.0f));
-    g.drawText (e.format.isEmpty() ? juce::String ("Built-in") : e.maker + "  " + e.format, width - 116, 0, 110, height,
-                juce::Justification::centredRight, true);
+    g.drawText (e.format, width - 56, 0, 50, height, juce::Justification::centredRight, true);
 }
 
 void PluginPicker::listBoxItemClicked (int row, const juce::MouseEvent&)
@@ -111,12 +152,12 @@ bool PluginPicker::keyPressed (const juce::KeyPress& key, juce::Component*)
     const auto row = list.getSelectedRow();
     if (key == juce::KeyPress::downKey)
     {
-        list.selectRow (juce::jmin ((int) shown.size() - 1, row + 1));
+        selectEntryRow (row + 1, 1);
         return true;
     }
     if (key == juce::KeyPress::upKey)
     {
-        list.selectRow (juce::jmax (0, row - 1));
+        selectEntryRow (row - 1, -1);
         return true;
     }
     if (key == juce::KeyPress::returnKey)
@@ -134,9 +175,9 @@ bool PluginPicker::keyPressed (const juce::KeyPress& key, juce::Component*)
 
 void PluginPicker::choose (int row)
 {
-    if (! juce::isPositiveAndBelow (row, (int) shown.size()))
+    if (! juce::isPositiveAndBelow (row, (int) rows.size()) || rows[(size_t) row].entry < 0)
         return;
-    auto action = entries[(size_t) shown[(size_t) row]].choose;
+    auto action = entries[(size_t) rows[(size_t) row].entry].choose;
     close();
     if (action)
         action();

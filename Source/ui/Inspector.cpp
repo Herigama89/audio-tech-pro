@@ -20,6 +20,12 @@ Inspector::Inspector (MixerPanel& m)
     viewport.setScrollBarsShown (true, false);
     viewport.setScrollBarThickness (8);
     addAndMakeVisible (viewport);
+
+    edge.onStart = [this] { widthAtDragStart = getWidth(); };
+    edge.onDrag = [this] (int dx) { setWidthWanted (widthAtDragStart + dx); if (onWidthChanged) onWidthChanged (widthWanted); };
+    edge.onReset = [this] { setWidthWanted (preferredWidth); if (onWidthChanged) onWidthChanged (widthWanted); };
+    edge.setTooltip ("Drag to make the Inspector wider or narrower; double-click for the normal width");
+    addAndMakeVisible (edge);
 }
 
 Inspector::~Inspector()
@@ -198,7 +204,12 @@ void Inspector::resized()
     viewport.setBounds (area);
 
     const auto boxes = boxesHeight();
-    const auto height = juce::jmax (area.getHeight(), ChannelStrip::minimumHeightFor (mixer.showsConsole()) + boxes);
+    // The strips grow with the width, as far as the height lets them stay whole (then the fader gets longer instead).
+    const auto minStrip = (float) ChannelStrip::minimumHeightFor (mixer.showsConsole());
+    const auto byWidth = (float) (area.getWidth() - 12) / (float) (2 * ChannelStrip::stripWidth);
+    const auto byHeight = (float) juce::jmax (1, area.getHeight() - boxes) / minStrip;
+    const auto stripScale = juce::jlimit (0.6f, 2.6f, juce::jmin (byWidth, juce::jmax (0.8f, byHeight)));
+    const auto height = juce::jmax (area.getHeight(), (int) (minStrip * stripScale) + boxes);
     holder.setSize (area.getWidth() - (height > area.getHeight() ? viewport.getScrollBarThickness() : 0), height);
 
     // The Region and Track boxes, then the strips.
@@ -210,12 +221,24 @@ void Inspector::resized()
             all.removeFromTop (4);
         }
 
+    // The two strips grow (or shrink) with the Inspector's width.
     auto strips = all.reduced (4, 0);
-    if (trackStrip != nullptr)
-        trackStrip->setBounds (strips.removeFromLeft (ChannelStrip::stripWidth));
+    const auto scale = stripScale;
+    auto place = [scale] (ChannelStrip* s, juce::Rectangle<int> r)
+    {
+        if (s == nullptr)
+            return;
+        s->setTransform (juce::AffineTransform::scale (scale));
+        s->setBounds (juce::Rectangle<float> ((float) r.getX() / scale, (float) r.getY() / scale,
+                                              (float) ChannelStrip::stripWidth, (float) r.getHeight() / scale).toNearestInt());
+    };
+    const auto w = (int) std::floor (ChannelStrip::stripWidth * scale);
+    place (trackStrip.get(), strips.removeFromLeft (w));
     strips.removeFromLeft (4);
-    if (masterStrip != nullptr)
-        masterStrip->setBounds (strips.removeFromLeft (ChannelStrip::stripWidth));
+    place (masterStrip.get(), strips.removeFromLeft (w));
+
+    edge.setBounds (getWidth() - 6, 0, 6, getHeight());
+    edge.toFront (false);
 }
 
 } // namespace riff

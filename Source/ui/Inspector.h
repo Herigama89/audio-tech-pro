@@ -28,8 +28,31 @@ public:
 
     static constexpr int headerHeight = 26;
     static constexpr int preferredWidth = 2 * ChannelStrip::stripWidth + 3 * 4 + 12;
+    static constexpr int minWidth = 150, maxWidth = 460;
+
+    /** Drag its right edge to make it wider or narrower (the strips grow with it). */
+    int getWidthWanted() const noexcept { return widthWanted; }
+    void setWidthWanted (int w) { widthWanted = juce::jlimit (minWidth, maxWidth, w); }
+    std::function<void (int newWidth)> onWidthChanged;
 
 private:
+    struct Edge final : juce::Component, juce::SettableTooltipClient
+    {
+        Edge() { setMouseCursor (juce::MouseCursor::LeftRightResizeCursor); setRepaintsOnMouseActivity (true); }
+        void paint (juce::Graphics& g) override
+        {
+            g.setColour (juce::Colours::white.withAlpha (isMouseOverOrDragging() ? 0.25f : 0.06f));
+            g.fillRect (getLocalBounds().withSizeKeepingCentre (2, getHeight()));
+        }
+        void mouseDown (const juce::MouseEvent&) override { if (onStart) onStart(); }
+        void mouseDrag (const juce::MouseEvent& e) override { if (onDrag) onDrag (e.getDistanceFromDragStartX()); }
+        void mouseDoubleClick (const juce::MouseEvent&) override { if (onReset) onReset(); }
+        std::function<void()> onStart, onReset;
+        std::function<void (int)> onDrag;
+    };
+    Edge edge;
+    int widthWanted = preferredWidth, widthAtDragStart = preferredWidth;
+
     void clear();
 
     MixerPanel& mixer;

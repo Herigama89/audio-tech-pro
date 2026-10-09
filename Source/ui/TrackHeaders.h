@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "TimelineState.h"
+#include "StripParts.h"
 
 namespace riff
 {
@@ -67,7 +68,7 @@ private:
     int heightAtDragStart = 0;
     juce::TextButton muteButton { "M" }, soloButton { "S" }, armButton { "R" }, monitorButton { "I" }, automationButton { "A" };
     juce::TextButton instrumentButton;
-    juce::Slider volumeSlider, panKnob;
+    strip::DragSlider volumeSlider, panKnob;   // dragged as in Logic (the pointer hides while you drag)
 };
 
 /** The column of track headers, kept in sync with the project's tracks and the vertical scroll. */

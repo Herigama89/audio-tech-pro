@@ -391,6 +391,12 @@ MainComponent::MainComponent (bool openAudioDevice)
     setProject (model::createProject(), {});
     statusLabel.setText (deviceStatusText(), juce::dontSendNotification);
     createAssistant();
+    inspector.setWidthWanted (appProperties.getUserSettings()->getIntValue ("inspectorWidth", Inspector::preferredWidth));
+    inspector.onWidthChanged = [this] (int w)
+    {
+        appProperties.getUserSettings()->setValue ("inspectorWidth", w);
+        resized();
+    };
     if (appProperties.getUserSettings()->getBoolValue ("inspector", true))
         toggleInspector();
     screenRecorder = ScreenRecorder::create();
@@ -706,7 +712,7 @@ void MainComponent::resized()
 
     // The Inspector down the left side, beside the tracks and the editors, as in Logic
     if (inspector.isVisible())
-        inspector.setBounds (area.removeFromLeft (Inspector::preferredWidth));
+        inspector.setBounds (area.removeFromLeft (inspector.getWidthWanted()));
 
     // Smart Controls at the very bottom.
     if (smartControls != nullptr && smartControls->isVisible())

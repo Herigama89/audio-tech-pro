@@ -6,6 +6,95 @@ namespace riff::strip
 {
 
 //==============================================================================
+bool DragSlider::dragsVertically() const
+{
+    const auto style = getSliderStyle();
+    return style != juce::Slider::LinearHorizontal && style != juce::Slider::LinearBar && style != juce::Slider::RotaryHorizontalDrag;
+}
+
+float DragSlider::dragTravel() const
+{
+    if (isRotary())
+        return 180.0f;
+    return (float) juce::jmax (40, (dragsVertically() ? getHeight() : getWidth()) - 14);
+}
+
+juce::Point<float> DragSlider::handlePosition() const
+{
+    if (isRotary())
+        return getLocalBounds().toFloat().getCentre();
+    const auto p = (float) const_cast<DragSlider*> (this)->valueToProportionOfLength (getValue());
+    const auto r = getLocalBounds().toFloat().reduced (7.0f);
+    return dragsVertically() ? juce::Point<float> (r.getCentreX(), r.getBottom() - p * r.getHeight())
+                             : juce::Point<float> (r.getX() + p * r.getWidth(), r.getCentreY());
+}
+
+void DragSlider::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu() || ! isEnabled())
+    {
+        Slider::mouseDown (e);
+        return;
+    }
+
+    // Option-click: back to the default (0 dB on a fader, centre on a pan knob).
+    if (e.mods.isAltDown() && isDoubleClickReturnEnabled())
+    {
+        if (onDragStart) onDragStart();
+        setValue (getDoubleClickReturnValue(), juce::sendNotificationSync);
+        if (onDragEnd) onDragEnd();
+        return;
+    }
+
+    dragging = true;
+    lastDelta = 0.0f;
+    proportion = valueToProportionOfLength (getValue());
+    if (onDragStart)
+        onDragStart();
+    e.source.enableUnboundedMouseMovement (true, false);   // the pointer hides while you drag
+}
+
+void DragSlider::mouseDrag (const juce::MouseEvent& e)
+{
+    if (! dragging)
+    {
+        Slider::mouseDrag (e);
+        return;
+    }
+    const auto delta = dragsVertically() ? (float) -e.getDistanceFromDragStartY() : (float) e.getDistanceFromDragStartX();
+    const auto step = delta - lastDelta;
+    lastDelta = delta;
+    const auto fine = e.mods.isShiftDown() ? 0.12 : 1.0;   // Shift: fine adjustment
+    proportion = juce::jlimit (0.0, 1.0, proportion + (double) step * fine / (double) juce::jmax (1.0f, dragTravel()));
+    setValue (proportionOfLengthToValue (proportion), juce::sendNotificationSync);
+}
+
+void DragSlider::mouseUp (const juce::MouseEvent& e)
+{
+    if (! dragging)
+    {
+        Slider::mouseUp (e);
+        return;
+    }
+    dragging = false;
+    e.source.enableUnboundedMouseMovement (false);
+    // The pointer comes back on the fader cap (or the knob), where the control now is.
+    juce::Desktop::setMousePosition (localPointToGlobal (handlePosition()).roundToInt());
+    if (onDragEnd)
+        onDragEnd();
+}
+
+void DragSlider::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (isDoubleClickReturnEnabled() && ! e.mods.isPopupMenu())
+    {
+        if (onDragStart) onDragStart();
+        setValue (getDoubleClickReturnValue(), juce::sendNotificationSync);
+        if (onDragEnd) onDragEnd();
+    }
+}
+
+//==============================================================================
 PointerKnob::PointerKnob (juce::Colour pointerColour) : pointer (pointerColour)
 {
     setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
