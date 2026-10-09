@@ -58,6 +58,7 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::toggleCountIn:   info.setTicked ((bool) project[ids::countIn]); break;
 
         case commands::showMixer:       info.setTicked (mixer.isVisible()); break;
+        case commands::showAssistant:   info.setTicked (assistantPanel != nullptr && assistantPanel->isVisible()); break;
         case commands::showPianoRoll:   info.setTicked (pianoRoll.isVisible()); break;
         default: break;
     }
@@ -107,6 +108,7 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::zoomOut:                zoomHorizontally (1.0 / 1.5); break;
         case commands::keyCommands:            showKeyCommands(); break;
         case commands::generateMidi:           showGenerator(); break;
+        case commands::showAssistant:          toggleAssistant(); break;
         case commands::audioSettings:          showAudioSettings(); break;
         case commands::calibrateLatency:       showLatencyCalibration(); break;
         case commands::scanPlugins:            showPluginScanner(); break;
@@ -181,6 +183,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
 
         case 6:
             add ({ commands::showPianoRoll, commands::zoomIn, commands::zoomOut });
+            menu.addSeparator();
+            add ({ commands::showAssistant });
             menu.addSeparator();
             add ({ commands::keyCommands, commands::audioSettings });
             break;

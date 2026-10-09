@@ -284,6 +284,48 @@ juce::String AudioEngine::renderOffline (const juce::File& file, double startSec
     return error;
 }
 
+AudioEngine::MixMeasurement AudioEngine::measureMix (double startSeconds, double endSeconds, std::function<bool (double)> progress)
+{
+    MixMeasurement result;
+    if (endSeconds <= startSeconds)
+        return result;
+
+    const auto rate = sampleRate.load();
+    measuredTracks.assign ((size_t) PlaybackGraph::maxTracks, {});
+    for (auto& s : measuredTracks)
+        s.prepare (rate);
+    measuredMaster.reset();
+    measuredMaster.prepare (rate);
+    measuring = true;
+
+    playheadSample.store ((juce::int64) std::llround (startSeconds * rate));
+    playing.store (true);
+
+    const auto total = (juce::int64) std::llround ((endSeconds - startSeconds) * rate);
+    juce::AudioBuffer<float> block (2, 1024);
+
+    juce::int64 done = 0;
+    while (done < total)
+    {
+        const auto n = (int) juce::jmin ((juce::int64) block.getNumSamples(), total - done);
+        render (nullptr, 0, block.getArrayOfWritePointers(), 2, n);
+        measuredMaster.add (block.getReadPointer (0), block.getReadPointer (1), n);
+        done += n;
+
+        if (progress && ! progress ((double) done / (double) total))
+            break;
+    }
+
+    measuring = false;
+    playing.store (false);
+
+    result.tracks = std::move (measuredTracks);
+    measuredTracks.clear();
+    result.master = measuredMaster;
+    result.seconds = (double) done / rate;
+    return result;
+}
+
 float AudioEngine::rmsOf (const float* left, const float* right, int n) noexcept
 {
     if (n <= 0)
@@ -1078,6 +1120,9 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
 
     juce::FloatVectorOperations::add (outL, tL, n);
     juce::FloatVectorOperations::add (outR, tR, n);
+
+    if (measuring && juce::isPositiveAndBelow (track.slot, (int) measuredTracks.size()))
+        measuredTracks[(size_t) track.slot].add (tL, tR, n);
 
     storeMax (trackPeaks[(size_t) track.slot * 2], peakL);
     storeMax (trackPeaks[(size_t) track.slot * 2 + 1], peakR);

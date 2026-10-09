@@ -16,6 +16,9 @@
 #include "engine/EffectRack.h"
 #include "ui/ConsoleLook.h"
 #include "ui/GeneratorPanel.h"
+#include "ui/AssistantPanel.h"
+#include "ai/Assistant.h"
+#include "ai/AssistantTools.h"
 #include "model/Generator.h"
 
 namespace riff
@@ -117,6 +120,12 @@ private:
     void showAudioSettings();
     void showKeyCommands();
     void showGenerator();
+    void toggleAssistant();
+    void showAssistantSettings();
+    void createAssistant();
+    ai::AppHooks makeAssistantHooks();
+    juce::String assistantManual() const;
+    void measureMixForAssistant (double start, double end, std::function<void (ai::AppHooks::Measurement)> done);
     void generateMidi (const GeneratorPanel::Request& request);
     void applyKeyPreset (const juce::String& preset);
     void saveKeyMappings();
@@ -177,6 +186,7 @@ private:
     IconButton editorButton    { "Editor",  IconButton::Icon::pianoRoll, juce::Colour (0xff5a9cff) };
     IconButton keysButton      { "Keys",    IconButton::Icon::keys };
     IconButton generateButton  { "Generate", IconButton::Icon::generate, juce::Colour (0xffd3ae55) };
+    IconButton claudeButton    { "Claude",  IconButton::Icon::chat,  juce::Colour (0xffd97757) };
 
     juce::Label positionLabel, clockLabel, tempoLabel, tempoCaption { {}, "BPM" },
                 masterCaption { {}, "Master" }, statusLabel;
@@ -209,6 +219,14 @@ private:
     generator::Settings generatorSettings;
     bool generatorUsesTempo = true;
     juce::Array<juce::ValueTree> lastGenerated;   // the tracks "Try another" replaces
+
+    // Claude assistant
+    std::unique_ptr<ai::HttpTransport> assistantTransport;
+    std::unique_ptr<ai::AssistantTools> assistantTools;
+    std::unique_ptr<ai::Assistant> assistant;
+    std::unique_ptr<AssistantPanel> assistantPanel;
+    std::unique_ptr<EditorWindow> assistantSettingsWindow;
+    std::unique_ptr<juce::Thread> mixMeasureJob;
     double recordingOffsetMs = 0.0;
 
     // The cycle as it was when recording started (it can't change while recording).

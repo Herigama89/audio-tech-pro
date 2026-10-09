@@ -32,6 +32,9 @@ endif()
 set(RIFF_CORE_SOURCES
     Source/model/Project.cpp
     Source/model/Generator.cpp
+    Source/ai/ClaudeApi.cpp
+    Source/ai/Assistant.cpp
+    Source/ai/AssistantTools.cpp
     Source/engine/AudioEngine.cpp
     Source/engine/AudioFileCache.cpp
     Source/engine/ProjectPlayer.cpp
@@ -85,17 +88,20 @@ juce_add_binary_data(AudioTechProData
     SOURCES     Resources/MasterBusCompressorPanel.png
                 Resources/StripTop.png
                 Resources/StripPlate.png
-                Resources/FaderCap.png)
+                Resources/FaderCap.png
+                README.md)
 
 # Everything on screen except the app's entry point (the snapshot tool reuses it).
 set(RIFF_UI_SOURCES
     Source/MainComponent.cpp
     Source/MainCommands.cpp
+    Source/MainAssistant.cpp
     Source/ui/Theme.cpp
     Source/ui/ConsoleLook.cpp
     Source/ui/Commands.cpp
     Source/ui/KeyCommands.cpp
     Source/ui/GeneratorPanel.cpp
+    Source/ui/AssistantPanel.cpp
     Source/ui/TrackHeaders.cpp
     Source/ui/ArrangeCanvas.cpp
     Source/ui/LatencyCalibrator.cpp
@@ -155,6 +161,7 @@ if(RIFF_BUILD_TESTS)
         Tests/CommandTests.cpp
         Tests/ConsoleTests.cpp
         Tests/GeneratorTests.cpp
+        Tests/AssistantTests.cpp
     )
 
     target_include_directories(AudioTechProTests PRIVATE Source)
@@ -162,7 +169,7 @@ if(RIFF_BUILD_TESTS)
 
     # Tests compare exact silence (0.0f) on purpose.
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        set_source_files_properties(Tests/ModelTests.cpp Tests/EngineTests.cpp Tests/GeneratorTests.cpp
+        set_source_files_properties(Tests/ModelTests.cpp Tests/EngineTests.cpp Tests/GeneratorTests.cpp Tests/AssistantTests.cpp
             PROPERTIES COMPILE_OPTIONS -Wno-float-equal)
     endif()
 

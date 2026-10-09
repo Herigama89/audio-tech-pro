@@ -8,6 +8,8 @@
 #include "engine/MasterBusCompressor.h"
 #include "ui/KeyCommands.h"
 #include "ui/GeneratorPanel.h"
+#include "ui/AssistantPanel.h"
+#include <deque>
 #include "ui/ConsoleLook.h"
 
 namespace riff
@@ -177,6 +179,69 @@ public:
             pump (main, 200);
             save (main, "generated-melody.png");
             main.closePianoRoll();
+        }
+
+        // The Claude panel, with a scripted conversation (no network): real tools on the generated song.
+        {
+            struct Scripted final : ai::Transport
+            {
+                std::deque<juce::String> replies;
+                juce::StringArray sent;
+                void post (const juce::String& body, std::function<void (int, const juce::String&)> done) override
+                {
+                    sent.add (body);
+                    const auto reply = replies.empty() ? juce::String (R"J({"content":[{"type":"text","text":"(end)"}],"stop_reason":"end_turn"})J") : replies.front();
+                    if (! replies.empty())
+                        replies.pop_front();
+                    done (200, reply);
+                }
+            } fake;
+
+            fake.replies = {
+                R"J({"content":[{"type":"text","text":"I'll set up a reverb bus and send the chords and melody to it, then measure the mix."},
+                    {"type":"tool_use","id":"a1","name":"add_tracks","input":{"tracks":[{"kind":"bus","name":"Reverb"}]}}],"stop_reason":"tool_use"})J",
+                R"J({"content":[{"type":"tool_use","id":"a2","name":"add_effect","input":{"track":"Reverb","effect":"reverb","params":{"mix":1,"size":0.7}}},
+                    {"type":"tool_use","id":"a3","name":"add_send","input":{"track":"Chords","bus":"Reverb","level_db":-10}},
+                    {"type":"tool_use","id":"a4","name":"add_send","input":{"track":"Melody","bus":"Reverb","level_db":-14}}],"stop_reason":"tool_use"})J",
+                R"J({"content":[{"type":"tool_use","id":"a5","name":"analyze_mix","input":{}}],"stop_reason":"tool_use"})J",
+                R"J({"content":[{"type":"text","text":"Done. The reverb bus is on track 5, with the chords sent at -10 dB and the melody at -14 dB.\n\nThe mix: the master peaks around -9 dBFS, so there's healthy headroom. The bass carries most of the low end, as it should. The chords are a little loud against the melody; try pulling track 3 down 2 dB, or I can do it for you."}],"stop_reason":"end_turn"})J"
+            };
+
+            main.removeChildComponent (main.assistantPanel.get());
+            main.assistantPanel.reset();
+            main.assistant = std::make_unique<ai::Assistant> (fake, *main.assistantTools);
+            main.assistant->model = "claude-sonnet-5-5";
+            main.assistantPanel = std::make_unique<AssistantPanel> (*main.assistant);
+            main.assistantPanel->hasApiKey = [] { return true; };
+            main.addChildComponent (*main.assistantPanel);
+            main.assistant->onChange = [&main] { main.assistantPanel->refresh(); };
+
+            main.toggleAssistant();
+            main.assistant->send ("Add a reverb bus for the chords and melody, then check my mix");
+            for (int i = 0; i < 100 && main.assistant->isBusy(); ++i)
+                pump (main, 50);
+            pump (main, 300);
+
+            // What analyze_mix told Claude
+            const auto last = juce::JSON::parse (fake.sent[fake.sent.size() - 1]);
+            const auto messages = last["messages"];
+            std::cout << "analyze_mix: " << messages[messages.size() - 1]["content"][0]["content"].toString() << std::endl;
+            std::cout << "busy after: " << (int) main.assistant->isBusy() << ", tracks: " << model::numTracks (main.project) << std::endl;
+
+            save (main, "assistant.png");
+            save (*main.assistantPanel, "assistant-panel.png", 2.0f);
+
+            main.assistant->clear();
+            main.toggleAssistant();
+            main.removeChildComponent (main.assistantPanel.get());
+            main.assistantPanel.reset();
+            main.assistant.reset();   // (the fake transport goes out of scope)
+        }
+
+        {
+            AssistantSettingsPanel settings ("sk-ant-example", "claude-sonnet-5-5", {});
+            pump (main, 50);
+            save (settings, "assistant-settings.png");
         }
 
         main.engine.stop();

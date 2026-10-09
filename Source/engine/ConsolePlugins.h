@@ -52,4 +52,18 @@ namespace riff::console
 
     /** The first number in a parameter's display text, e.g. "-12.5 dB" -> -12.5 (0 if none). */
     float numberIn (const juce::String& text);
+
+    /**
+        Sets a plugin parameter to what a person would type: a number as the
+        plugin shows it ("-6" for -6 dB, "4" for 4:1) or one of its words ("Auto", "On").
+        Searches the parameter's range using its own display text, so it works
+        for any plugin. Returns the text the parameter shows afterwards, or
+        empty if the value couldn't be matched.
+    */
+    /** The parameter a panel control drives on a loaded plugin: the one chosen by hand
+        (the insert's "map<N>" property) or else the one matched by name. */
+    juce::AudioProcessorParameter* parameterFor (juce::AudioPluginInstance* plugin, const juce::ValueTree& insert, Control c);
+    juce::AudioProcessorParameter* parameterFor (juce::AudioPluginInstance* plugin, const juce::ValueTree& insert, StripControl c);
+
+    juce::String setParameterFromText (juce::AudioProcessorParameter& parameter, const juce::String& wanted);
 }

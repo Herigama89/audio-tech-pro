@@ -133,6 +133,7 @@ Edit, Track, Navigate, Record, Mix, View.
 | Metronome | **K** or the **Click** button |
 | Cycle (loop) | Drag in the **top half of the ruler** to set the range. Click the bar, press **C**, or use **Cycle** to turn it on or off. |
 | Generate MIDI | Click **Generate** (top left) or choose **Track > Generate MIDI...**. Pick a genre, key, length and parts, then **Generate**. New instrument tracks appear at the playhead's bar. **Try another** replaces the last take with a new one. Drums use General MIDI notes (kick 36, snare 38, hats 42/46), so load any drum plugin on the Drums track. |
+| Ask Claude | Click **Claude** (top left) or choose **View > Claude Assistant**. The first time, paste your Anthropic API key (from console.anthropic.com) in **Settings**. Then type what you want: "set the tempo to 92 and loop bars 5 to 8", "write a sad piano progression in F minor", "add a reverb bus for the vocals", "analyze my mix", or any question about the app. Everything Claude changes in one go is one **Undo**. Right-click a message to copy it. **New chat** starts over. |
 | Loop recording | Turn Cycle on and record. Each pass becomes a take. Click a take folder's name bar (or right-click it, then **Takes**) to switch takes, or choose **Keep only this take**. |
 | Count-in | **Count** gives one bar of click before recording starts. |
 | Latency calibration | **Audio > Calibrate recording latency...** Connect a cable from output 1 to an input and click **Measure**. The app stores the difference from the driver's reported latency and applies it to every recording. |
@@ -189,6 +190,10 @@ Source/
     Identifiers.h         names used in the project tree
     Project.*             the project tree: edits (all undoable), queries, JSON save/load
     Generator.*           the MIDI genre generator (pure, repeatable per seed)
+  ai/
+    ClaudeApi.*           HTTPS to Anthropic's Messages API with the user's key
+    Assistant.*           the conversation and the tool-use loop
+    AssistantTools.*      what Claude can see and do: the project as JSON, edits, transport, mix measurement
   engine/
     AudioEngine.*         device I/O, real-time render, lock-free graph hand-over
     PlaybackGraph.h       immutable snapshot the audio thread renders
@@ -270,7 +275,7 @@ Tools/make_strip_art.py   builds the strip artwork (StripTop, StripPlate, FaderC
 - [x] Console mode for the master: your UA SSL G Bus Compressor plugin, with a hardware-style face
 - [x] Console mode for the strips: your UA SSL 4000 E channel strip plugin driven from each strip's console section
 - [ ] Console strips, part 2: an IN key on every strip (bypasses the whole channel strip plugin, keeps it loaded), and every 4000 E control in a separate strip window that opens from the strip (as in LUNA): filters, EQ frequencies, Q and bell switches, compressor, gate/expander, input and output
-- [ ] Claude AI assistant (with your own API key)
+- [x] Claude AI assistant (with your own API key): controls the DAW, writes MIDI, measures and advises on the mix, answers questions
 - [ ] Screen recording of the app with its audio, up to 4K (Mac)
 - [ ] Several audio interfaces at once (aggregate device)
 - [ ] The Audio Tech Pro plugin suite

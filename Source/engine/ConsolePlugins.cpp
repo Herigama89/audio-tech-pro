@@ -251,4 +251,118 @@ float numberIn (const juce::String& text)
     return start < 0 ? 0.0f : text.substring (start).getFloatValue();
 }
 
+namespace
+{
+    template <typename Match>
+    juce::AudioProcessorParameter* mappedParameter (juce::AudioPluginInstance* plugin, const juce::ValueTree& insert, int control, Match match)
+    {
+        if (plugin == nullptr)
+            return nullptr;
+
+        const auto& params = plugin->getParameters();
+        const juce::Identifier key ("map" + juce::String (control));
+        int index = -1;
+
+        if (insert.hasProperty (key))
+        {
+            index = insert[key];
+        }
+        else
+        {
+            juce::StringArray names;
+            for (auto* p : params)
+                names.add (p->getName (64));
+            index = match (names);
+        }
+
+        return juce::isPositiveAndBelow (index, params.size()) ? params[index] : nullptr;
+    }
+}
+
+juce::AudioProcessorParameter* parameterFor (juce::AudioPluginInstance* plugin, const juce::ValueTree& insert, Control c)
+{
+    return mappedParameter (plugin, insert, (int) c, [c] (const juce::StringArray& names) { return matchParameter (c, names); });
+}
+
+juce::AudioProcessorParameter* parameterFor (juce::AudioPluginInstance* plugin, const juce::ValueTree& insert, StripControl c)
+{
+    return mappedParameter (plugin, insert, (int) c, [c] (const juce::StringArray& names) { return matchStripParameter (c, names); });
+}
+
+juce::String setParameterFromText (juce::AudioProcessorParameter& parameter, const juce::String& wanted)
+{
+    const auto target = wanted.trim();
+    if (target.isEmpty())
+        return {};
+
+    const auto steps = parameter.getNumSteps();
+    const int samples = (steps > 1 && steps <= 400) ? steps : 400;
+    auto valueAt = [samples] (int i) { return (float) i / (float) (samples - 1); };
+
+    auto apply = [&parameter] (float v)
+    {
+        const bool attached = parameter.getParameterIndex() >= 0;   // (gestures need a processor)
+        if (attached) parameter.beginChangeGesture();
+        parameter.setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v));
+        if (attached) parameter.endChangeGesture();
+        return parameter.getCurrentValueAsText();
+    };
+
+    const bool isNumber = target.containsAnyOf ("0123456789")
+                          && target.retainCharacters ("-+0123456789.").length() >= target.retainCharacters ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ").length();
+
+    if (! isNumber)
+    {
+        // A word: the first position whose text matches.
+        for (int i = 0; i < samples; ++i)
+        {
+            const auto text = parameter.getText (valueAt (i), 64).trim();
+            if (text.equalsIgnoreCase (target) || text.startsWithIgnoreCase (target))
+                return apply (valueAt (i));
+        }
+        return {};
+    }
+
+    const auto number = target.retainCharacters ("-+0123456789.").getFloatValue();
+    int best = -1;
+    float bestDistance = std::numeric_limits<float>::max();
+    for (int i = 0; i < samples; ++i)
+    {
+        const auto text = parameter.getText (valueAt (i), 64);
+        if (! text.containsAnyOf ("0123456789"))
+            continue;
+        const auto distance = std::abs (numberIn (text) - number);
+        if (distance < bestDistance)
+        {
+            bestDistance = distance;
+            best = i;
+        }
+    }
+
+    if (best < 0)
+        return {};
+
+    // Continuous parameters: refine between the neighbours by bisection.
+    auto v = valueAt (best);
+    if (steps <= 1 || steps > 400)
+    {
+        auto lo = valueAt (juce::jmax (0, best - 1)), hi = valueAt (juce::jmin (samples - 1, best + 1));
+        const bool rising = numberIn (parameter.getText (hi, 64)) >= numberIn (parameter.getText (lo, 64));
+        for (int i = 0; i < 24; ++i)
+        {
+            const auto mid = 0.5f * (lo + hi);
+            const auto n = numberIn (parameter.getText (mid, 64));
+            if ((n < number) == rising)
+                lo = mid;
+            else
+                hi = mid;
+        }
+        const auto candidate = 0.5f * (lo + hi);
+        if (std::abs (numberIn (parameter.getText (candidate, 64)) - number) <= bestDistance)
+            v = candidate;
+    }
+
+    return apply (v);
+}
+
 } // namespace riff::console

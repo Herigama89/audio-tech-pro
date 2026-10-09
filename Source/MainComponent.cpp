@@ -27,7 +27,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     for (auto* b : std::initializer_list<juce::Button*> { &fileButton, &undoButton, &redoButton, &addTrackButton, &settingsButton,
                                                           &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
                                                           &recordButton, &cycleButton, &countInButton, &clickButton,
-                                                          &mixerButton, &editorButton, &keysButton, &generateButton })
+                                                          &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton })
     {
         b->setWantsKeyboardFocus (false); // keep Space for play/stop
         addAndMakeVisible (b);
@@ -50,6 +50,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     bind (editorButton, commands::showPianoRoll);
     bind (keysButton, commands::keyCommands);
     bind (generateButton, commands::generateMidi);
+    bind (claudeButton, commands::showAssistant);
     bind (undoButton, commands::undo);
     bind (redoButton, commands::redo);
     stopButton.onClick = [this]
@@ -88,6 +89,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     mixerButton.setTooltip ("Mixer (X)");
     editorButton.setTooltip ("Piano roll for the selected MIDI region (P)");
     keysButton.setTooltip ("Key commands (Option+K)");
+    claudeButton.setTooltip ("Claude: ask questions about your project, or tell it what to do");
     generateButton.setTooltip ("MIDI Generator: drums, bass, chords and a melody in a genre's style");
     addTrackButton.setTooltip ("New audio track, instrument track or aux bus");
     settingsButton.setTooltip ("Audio device settings, latency calibration, key commands");
@@ -296,6 +298,7 @@ MainComponent::MainComponent (bool openAudioDevice)
         engine.prepare (48000.0, 512);
     setProject (model::createProject(), {});
     statusLabel.setText (deviceStatusText(), juce::dontSendNotification);
+    createAssistant();
 
     setWantsKeyboardFocus (true);
     setSize (1440, 920);
@@ -318,6 +321,13 @@ MainComponent::~MainComponent()
    #endif
     keyCommandsWindow.reset();
     generatorWindow.reset();
+    assistantSettingsWindow.reset();
+    if (mixMeasureJob != nullptr)
+        mixMeasureJob->stopThread (10000);
+    assistantPanel.reset();
+    assistant.reset();
+    assistantTools.reset();
+    assistantTransport.reset();
     commandManager.getKeyMappings()->removeChangeListener (this);
     removeKeyListener (commandManager.getKeyMappings());
 
@@ -392,7 +402,7 @@ void MainComponent::paint (juce::Graphics& g)
     g.setFont (juce::FontOptions (11.0f));
     for (auto* b : std::initializer_list<juce::Button*> { &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
                                                           &recordButton, &cycleButton, &countInButton, &clickButton,
-                                                          &mixerButton, &editorButton, &keysButton, &generateButton })
+                                                          &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton })
     {
         g.setColour (b->getToggleState() ? theme::cream : theme::text.withAlpha (0.78f));
         g.drawText (b->getName(), b->getBounds().translated (0, b->getHeight() + 1).withHeight (13).expanded (8, 0),
@@ -446,6 +456,7 @@ void MainComponent::resized()
         }
 
         generateButton.setBounds (18, row.getY(), keyWidth, keyHeight);
+        claudeButton.setBounds (18 + keyWidth + gap + 4, row.getY(), keyWidth, keyHeight);
 
         x = getWidth() - 12 - 3 * keyWidth - 2 * gap;
         for (auto* c : { (juce::Component*) &mixerButton, (juce::Component*) &editorButton, (juce::Component*) &keysButton })
@@ -457,6 +468,10 @@ void MainComponent::resized()
 
     // Status line
     statusLabel.setBounds (area.removeFromBottom (statusHeight).reduced (10, 0));
+
+    // The Claude panel down the right side
+    if (assistantPanel != nullptr && assistantPanel->isVisible())
+        assistantPanel->setBounds (area.removeFromRight (AssistantPanel::preferredWidth));
 
     if (pianoRoll.isVisible())
         pianoRoll.setBounds (area.removeFromBottom (juce::jlimit (200, 360, getHeight() / 3)));
@@ -530,6 +545,9 @@ void MainComponent::setProject (juce::ValueTree newProject, const juce::File& fi
     editorWindows.clear();
     engine.stop();
     engine.setPlayheadSeconds (0.0);
+
+    if (assistant != nullptr)
+        assistant->cancel();   // its actions belong to the old project
 
     project.removeListener (this);
     project = newProject;
@@ -1114,11 +1132,13 @@ void MainComponent::timerCallback()
     mixerButton.setToggleState (mixer.isVisible(), juce::dontSendNotification);
     editorButton.setToggleState (pianoRoll.isVisible(), juce::dontSendNotification);
 
-    const auto playhead = engine.getPlayheadSeconds();
+    // (While the song renders offline, the playhead races ahead: keep showing where it was.)
+    const bool offline = engine.isRenderingOffline();
+    const auto playhead = offline ? juce::jmax (0.0, lastPaintedPlayhead) : engine.getPlayheadSeconds();
     positionLabel.setText (formatPosition (playhead), juce::dontSendNotification);
     clockLabel.setText (formatClock (playhead), juce::dontSendNotification);
 
-    const bool playing = engine.isPlaying();
+    const bool playing = engine.isPlaying() && ! offline;
     if (playing != playButton.getToggleState() || engine.isRecording() != recordButton.getToggleState())
         repaint (0, toolbarTopRow, getWidth(), toolbarHeight - toolbarTopRow);   // the captions under the keys
     playButton.setToggleState (playing, juce::dontSendNotification);

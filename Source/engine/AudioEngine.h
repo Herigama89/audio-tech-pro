@@ -8,6 +8,7 @@
 #include "DelayLine.h"
 #include "BuiltInEffects.h"
 #include "MasterBusCompressor.h"
+#include "MixAnalysis.h"
 #include <optional>
 
 namespace riff
@@ -48,6 +49,8 @@ public:
     void play() noexcept                      { playing.store (true); }
     void stop() noexcept                      { playing.store (false); }
     bool isPlaying() const noexcept           { return playing.load(); }
+    /** True while an export or a mix measurement renders the song offline. */
+    bool isRenderingOffline() const noexcept  { return bouncing.load(); }
     double getPlayheadSeconds() const noexcept;
     void setPlayheadSeconds (double seconds) noexcept;
 
@@ -171,6 +174,16 @@ public:
                                 std::function<bool (double)> progress);
     void endOfflineRender();
 
+    /** Measures every track and the master over [start, end) by rendering offline (between begin/endOfflineRender).
+        Track results are by graph slot (see ProjectPlayer::slotFor); the master is the last entry. */
+    struct MixMeasurement
+    {
+        std::vector<LevelStats> tracks;   // indexed by slot
+        LevelStats master;
+        double seconds = 0.0;
+    };
+    MixMeasurement measureMix (double startSeconds, double endSeconds, std::function<bool (double)> progress);
+
     // --- Rendering, public so tests can drive the engine without a device --
     void prepare (double newSampleRate, int maxBlockSize);
     void render (const float* const* inputs, int numInputs,
@@ -288,6 +301,9 @@ private:
     static float rmsOf (const float* left, const float* right, int n) noexcept;
     std::array<std::atomic<float>, PlaybackGraph::maxTracks * 2> trackPeaks {};
     std::atomic<bool> bouncing { false };
+    bool measuring = false;                       // only while measureMix renders
+    std::vector<LevelStats> measuredTracks;       // by slot
+    LevelStats measuredMaster;
     bool offlineWasAttached = false, offlineSavedPlaying = false;
     juce::int64 offlineSavedPlayhead = 0;
 

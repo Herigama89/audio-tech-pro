@@ -496,6 +496,25 @@ void IconButton::drawIcon (juce::Graphics& g, Icon icon, juce::Rectangle<float> 
             return;
         }
 
+        case Icon::chat:
+        {
+            // A speech bubble with three dots.
+            const auto b = r.withTrimmedBottom (r.getHeight() * 0.22f);
+            juce::Path bubble;
+            bubble.addRoundedRectangle (b, b.getHeight() * 0.3f);
+            bubble.startNewSubPath (b.getX() + b.getWidth() * 0.22f, b.getBottom() - 1.0f);
+            bubble.lineTo (b.getX() + b.getWidth() * 0.16f, r.getBottom());
+            bubble.lineTo (b.getX() + b.getWidth() * 0.44f, b.getBottom() - 1.0f);
+            bubble.closeSubPath();
+            g.fillPath (bubble);
+
+            g.setColour (juce::Colour (0xfff1e4c1));
+            const auto d = b.getHeight() * 0.18f;
+            for (int i = -1; i <= 1; ++i)
+                g.fillEllipse (b.getCentreX() + (float) i * d * 1.9f - d * 0.5f, b.getCentreY() - d * 0.5f, d, d);
+            return;
+        }
+
         case Icon::generate:
         {
             // A four-pointed spark and a small one: "make something".
