@@ -15,9 +15,11 @@ namespace riff
 class ThemePanel final : public juce::Component
 {
 public:
-    ThemePanel (theme::Settings initial, std::function<void (const theme::Settings&)> onChange);
+    /** `store` keeps your own presets (Save Preset...); without it the presets row is hidden. */
+    ThemePanel (theme::Settings initial, std::function<void (const theme::Settings&)> onChange, juce::PropertiesFile* store = nullptr);
 
     void paint (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override;
     void resized() override;
 
 private:
@@ -42,6 +44,21 @@ private:
     std::vector<Row> rows;
     juce::OwnedArray<juce::TextButton> presets;
     juce::TextButton resetButton { "Reset" };
+
+    // Meter colours: low, middle (near the top) and peak; each opens a colour picker.
+    juce::TextButton meterButtons[3];
+    juce::TextButton meterDefaultButton { "Skin's" };
+    void chooseMeterColour (int which);
+    void updateMeterButtons();
+
+    // Your presets, kept in the settings file
+    juce::PropertiesFile* store = nullptr;
+    juce::ComboBox myPresets;
+    juce::TextButton savePreset { "Save Preset..." }, deletePreset { "Delete" };
+    juce::StringPairArray loadPresets() const;
+    void savePresets (const juce::StringPairArray& all);
+    void refreshMyPresets();
+    std::unique_ptr<juce::AlertWindow> nameWindow;
 };
 
 } // namespace riff

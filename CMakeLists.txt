@@ -42,6 +42,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/clap/include)
 set(RIFF_CORE_SOURCES
     Source/engine/ClapFormat.cpp
     Source/engine/RegionVariants.cpp
+    Source/engine/AudioSuite.cpp
     Source/model/Project.cpp
     Source/model/Generator.cpp
     Source/model/ProjectFiles.cpp
@@ -140,6 +141,7 @@ set(RIFF_UI_SOURCES
     Source/MainExtras.cpp
     Source/MainScreenRecording.cpp
     Source/ui/PluginHostPanel.cpp
+    Source/ui/AudioSuitePanel.cpp
     Source/ui/StartupSplash.cpp
     Source/MainAudioDevices.cpp
     Source/ui/Theme.cpp

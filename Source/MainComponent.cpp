@@ -447,6 +447,9 @@ MainComponent::MainComponent (bool openAudioDevice)
     autosaveMinutes = appProperties.getUserSettings()->getIntValue ("autosaveMinutes", 2);
     engine.setRecordBitDepth (appProperties.getUserSettings()->getIntValue ("recordBitDepth", 24));
 
+    recentProjects.setMaxNumberOfItems (12);
+    recentProjects.restoreFromString (appProperties.getUserSettings()->getValue ("recentProjects"));
+
     // The list of plugins found by earlier scans.
     if (auto xml = appProperties.getUserSettings()->getXmlValue ("knownPlugins"))
         rack.getKnownPlugins().recreateFromXml (*xml);
@@ -1041,6 +1044,11 @@ void MainComponent::setProject (juce::ValueTree newProject, const juce::File& fi
     timeline.project = project;
     projectFile = file;
     project.addListener (this);
+    if (file.existsAsFile())
+    {
+        recentProjects.addFile (file);
+        saveRecentProjects();
+    }
 
     undoManager.clearUndoHistory();
 
@@ -1098,52 +1106,92 @@ void MainComponent::openProject()
         fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                                   [this] (const juce::FileChooser& chooser)
         {
-            const auto file = chooser.getResult();
-            if (! file.existsAsFile())
-                return;
-
-            juce::String error;
-            auto loaded = model::load (file, error);
-
-            if (! loaded.isValid())
-            {
-                showError ("Couldn't open project", error);
-                return;
-            }
-
-            loaded.setProperty (ids::name, file.getFileNameWithoutExtension(), nullptr);
-            appProperties.getUserSettings()->setValue ("lastProject", file.getFullPathName());
-
-            // A newer autosave (the app closed before saving): offer it.
-            if (const auto autosaved = model::files::newerAutosave (file); autosaved.existsAsFile())
-            {
-                messageBox = juce::AlertWindow::showScopedAsync (
-                    juce::MessageBoxOptions::makeOptionsYesNo (juce::MessageBoxIconType::QuestionIcon, "Recover unsaved changes?",
-                        "There's an autosave of \"" + file.getFileNameWithoutExtension() + "\" from "
-                            + autosaved.getLastModificationTime().formatted ("%H:%M on %d %b")
-                            + ", newer than the last save. Open the autosaved version?",
-                        "Open Autosave", "Open Last Save", this),
-                    [this, loaded, file, autosaved] (int result)
-                    {
-                        if (result == 1)
-                        {
-                            juce::String err;
-                            if (auto recovered = model::load (autosaved, err); recovered.isValid())
-                            {
-                                recovered.setProperty (ids::name, file.getFileNameWithoutExtension(), nullptr);
-                                setProject (recovered, file);
-                                markDirty();
-                                return;
-                            }
-                        }
-                        setProject (loaded, file);
-                    });
-                return;
-            }
-
-            setProject (loaded, file);
+            if (const auto file = chooser.getResult(); file.existsAsFile())
+                openProjectFile (file);
         });
     });
+}
+
+void MainComponent::openProjectFile (const juce::File& file)
+{
+    juce::String error;
+    auto loaded = model::load (file, error);
+
+    if (! loaded.isValid())
+    {
+        showError ("Couldn't open project", error);
+        return;
+    }
+
+    loaded.setProperty (ids::name, file.getFileNameWithoutExtension(), nullptr);
+    appProperties.getUserSettings()->setValue ("lastProject", file.getFullPathName());
+
+    // A newer autosave (the app closed before saving): offer it.
+    if (const auto autosaved = model::files::newerAutosave (file); autosaved.existsAsFile())
+    {
+        messageBox = juce::AlertWindow::showScopedAsync (
+            juce::MessageBoxOptions::makeOptionsYesNo (juce::MessageBoxIconType::QuestionIcon, "Recover unsaved changes?",
+                "There's an autosave of \"" + file.getFileNameWithoutExtension() + "\" from "
+                    + autosaved.getLastModificationTime().formatted ("%H:%M on %d %b")
+                    + ", newer than the last save. Open the autosaved version?",
+                "Open Autosave", "Open Last Save", this),
+            [this, loaded, file, autosaved] (int result)
+            {
+                if (result == 1)
+                {
+                    juce::String err;
+                    if (auto recovered = model::load (autosaved, err); recovered.isValid())
+                    {
+                        recovered.setProperty (ids::name, file.getFileNameWithoutExtension(), nullptr);
+                        setProject (recovered, file);
+                        markDirty();
+                        return;
+                    }
+                }
+                setProject (loaded, file);
+            });
+        return;
+    }
+
+    setProject (loaded, file);
+}
+
+void MainComponent::openRecent (const juce::File& file)
+{
+    if (! file.existsAsFile())
+    {
+        recentProjects.removeFile (file);
+        saveRecentProjects();
+        showError ("Project not found", "\"" + file.getFullPathName() + "\" isn't there any more (moved or deleted). It's off the list now.");
+        return;
+    }
+    confirmDiscardChanges ([this, file] { openProjectFile (file); });
+}
+
+void MainComponent::saveRecentProjects()
+{
+    appProperties.getUserSettings()->setValue ("recentProjects", recentProjects.toString());
+    appProperties.saveIfNeeded();
+}
+
+void MainComponent::addRecentItems (juce::PopupMenu& menu)
+{
+    // Logic's File > Open Recent: the projects you opened or saved last, newest first.
+    juce::PopupMenu recent;
+    for (int i = 0; i < recentProjects.getNumFiles(); ++i)
+    {
+        const auto f = recentProjects.getFile (i);
+        recent.addItem (f.getFileNameWithoutExtension() + "   (" + f.getParentDirectory().getFileName() + ")", true, f == projectFile,
+                        [this, f] { openRecent (f); });
+    }
+    if (recentProjects.getNumFiles() == 0)
+        recent.addItem ("No recent projects yet", false, false, [] {});
+    else
+    {
+        recent.addSeparator();
+        recent.addItem ("Clear Menu", [this] { recentProjects.clear(); saveRecentProjects(); });
+    }
+    menu.addSubMenu ("Open Recent", recent);
 }
 
 void MainComponent::saveProject (std::function<void()> then)
@@ -1194,6 +1242,8 @@ void MainComponent::saveProjectAs (std::function<void()> then)
 
         file = file.withFileExtension (model::fileExtension);
         projectFile = file;
+        recentProjects.addFile (file);
+        saveRecentProjects();
 
         project.removeListener (this); // renaming isn't an edit
         project.setProperty (ids::name, file.getFileNameWithoutExtension(), nullptr);
@@ -2539,6 +2589,7 @@ void MainComponent::showFileMenu()
     juce::PopupMenu menu;
     menu.addItem ("New", [this] { newProject(); });
     menu.addItem ("Open...", [this] { openProject(); });
+    addRecentItems (menu);
     menu.addItem ("Save", [this] { saveProject(); });
     menu.addItem ("Save As...", [this] { saveProjectAs(); });
     menu.addSeparator();

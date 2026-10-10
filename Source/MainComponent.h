@@ -24,6 +24,7 @@
 #include "ui/LibraryPanel.h"
 #include "ui/SidePanels.h"
 #include "ui/PerformanceMeter.h"
+#include "ui/AudioSuitePanel.h"
 #include "ui/SmartControls.h"
 #include "ui/CombineInterfacesPanel.h"
 #include "engine/AggregateDevice.h"
@@ -226,6 +227,13 @@ private:
     void hideSelectedTracks();
     void toggleInspector();
     void showCreateStackDialog();
+
+    // File > Open Recent
+    juce::RecentlyOpenedFilesList recentProjects;
+    void openProjectFile (const juce::File& file);
+    void openRecent (const juce::File& file);
+    void saveRecentProjects();
+    void addRecentItems (juce::PopupMenu& menu);
     void showInspectorTrackMenu (juce::ValueTree track, juce::Component& target);
 
     // Logic's local menus over the track headers: Edit, Functions, View
@@ -438,6 +446,18 @@ private:
     double lastPerformanceMs = 0.0;
     void updatePerformance();
     void showPerformanceWindow();
+
+    // AudioSuite (Pro Tools): offline processing of regions with an effect or plugin
+    AudioSuitePanel* audioSuitePanel = nullptr;   // owned by its window in editorWindows
+    juce::ValueTree audioSuiteSettings;            // a built-in effect's knobs
+    void showAudioSuite();
+    void chooseAudioSuiteEffect (juce::Component& target);
+    void setAudioSuiteBuiltIn (const juce::String& type);
+    void setAudioSuitePlugin (const juce::PluginDescription& description);
+    void renderAudioSuite();
+    void previewAudioSuite();
+    void addAudioSuiteItems (juce::PopupMenu& menu);
+    juce::Array<juce::ValueTree> audioSuiteRegions() const;
     std::unique_ptr<EditorWindow> scannerWindow;
     bool liveLoopsWasPlaying = false;
 

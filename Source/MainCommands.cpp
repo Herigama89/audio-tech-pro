@@ -241,6 +241,7 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::createTrackStack:       showCreateStackDialog(); break;
         case commands::showNotepad:            toggleNotepad(); break;
         case commands::showPerformance:        showPerformanceWindow(); break;
+        case commands::audioSuite:             showAudioSuite(); break;
         case commands::showBrowser:            toggleBrowser(); break;
         case commands::toggleQuickHelp:        quickHelpShown = ! quickHelpShown; quickHelpBox.setVisible (quickHelpShown); quickHelpBox.toFront (false); lastHelpTarget = nullptr; updateQuickHelp(); break;
         case commands::waveformZoom:
@@ -330,7 +331,7 @@ bool MainComponent::perform (const InvocationInfo& info)
 //==============================================================================
 juce::StringArray MainComponent::getMenuBarNames()
 {
-    return { "File", "Edit", "Track", "Navigate", "Record", "Mix", "View", "Window" };
+    return { "File", "Edit", "Track", "Navigate", "Record", "Mix", "View", "AudioSuite", "Window" };
 }
 
 juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
@@ -346,6 +347,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
     {
         case 0:
             add ({ commands::newProject, commands::openProject });
+            addRecentItems (menu);
             addTemplateAndAlternativeItems (menu);
             menu.addSeparator();
             add ({ commands::saveProject, commands::saveProjectAs, commands::saveAsTemplate, commands::newAlternative, commands::revertToBackup });
@@ -438,6 +440,11 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             break;
 
         case 7:
+            // Pro Tools' AudioSuite menu: every effect by kind; choosing one opens it for the selected regions.
+            addAudioSuiteItems (menu);
+            break;
+
+        case 8:
             // Logic's Window menu: the windows you can open beside the main one.
             add ({ commands::openMixerWindow, commands::openEditorWindow });
             menu.addSeparator();

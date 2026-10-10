@@ -500,7 +500,7 @@ void MainComponent::showThemeSettings()
                 safe->editorWindows.erase (id);
         });
     };
-    editorWindows[id] = std::make_unique<EditorWindow> ("Theme", new ThemePanel (theme::current(), [this] (const theme::Settings& s) { applyTheme (s); }),
+    editorWindows[id] = std::make_unique<EditorWindow> ("Theme", new ThemePanel (theme::current(), [this] (const theme::Settings& s) { applyTheme (s); }, appProperties.getUserSettings()),
                                                         false, closer);
 }
 
@@ -1061,7 +1061,7 @@ void MainComponent::showLocalMenu (int which, juce::Component& target)
         menu.addSectionHeader ("Region");
         add ({ commands::quantize, commands::muteRegions, commands::loopRegions, commands::regionGain, commands::removeFades });
         menu.addSeparator();
-        add ({ commands::bounceInPlace, commands::generateMidi });
+        add ({ commands::bounceInPlace, commands::audioSuite, commands::generateMidi });
         menu.addSectionHeader ("Track");
         add ({ commands::createTrackStack, commands::freezeTracks, commands::newVca, commands::duplicateTrack });
         menu.addSectionHeader ("Markers and Locators");
@@ -1234,6 +1234,223 @@ void MainComponent::showPerformanceWindow()
     editorWindows[id] = std::make_unique<EditorWindow> ("Performance",
                                                         new PerformancePanel ([this] { return lastReading; }, [this] { engine.resetLoadPeak(); }),
                                                         true, closer);
+}
+
+} // namespace riff
+
+#include "engine/BuiltInEffects.h"
+#include "ui/PluginHostPanel.h"
+#include "ui/PluginPicker.h"
+
+namespace riff
+{
+
+juce::Array<juce::ValueTree> MainComponent::audioSuiteRegions() const
+{
+    // The selected audio regions (MIDI regions have no audio to process).
+    juce::Array<juce::ValueTree> result;
+    for (const auto& r : timeline.selectedRegionTrees())
+        if (! model::isMidiRegion (r) && r[ids::file].toString().isNotEmpty())
+            result.add (r);
+    return result;
+}
+
+void MainComponent::showAudioSuite()
+{
+    const juce::String id ("audiosuite");
+    if (auto it = editorWindows.find (id); it != editorWindows.end())
+    {
+        it->second->toFront (true);
+        return;
+    }
+    auto* panel = new AudioSuitePanel();
+    audioSuitePanel = panel;
+    panel->onChooseEffect = [this] (juce::Component& target) { chooseAudioSuiteEffect (target); };
+    panel->onRender = [this] { renderAudioSuite(); };
+    panel->onPreview = [this] { previewAudioSuite(); };
+    panel->isPreviewing = [this] { return engine.isPreviewing(); };
+    panel->selectionText = [this]
+    {
+        const auto n = audioSuiteRegions().size();
+        return n == 0 ? juce::String ("No audio regions selected") : juce::String (n) + (n == 1 ? " region selected" : " regions selected");
+    };
+    auto closer = [this, id]
+    {
+        engine.stopPreview();
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this), id]
+        {
+            if (safe != nullptr)
+            {
+                safe->audioSuitePanel = nullptr;
+                safe->editorWindows.erase (id);
+            }
+        });
+    };
+    editorWindows[id] = std::make_unique<EditorWindow> ("AudioSuite", panel, false, closer);
+}
+
+void MainComponent::chooseAudioSuiteEffect (juce::Component& target)
+{
+    std::vector<PluginPicker::Entry> entries;
+    for (const auto& info : builtInEffects())
+    {
+        PluginPicker::Entry e { info.name, app::effectsName, {}, [this, type = info.type] { setAudioSuiteBuiltIn (type); } };
+        e.category = PluginPicker::categoryOf ({}, info.name);
+        e.key = "builtin:" + info.type;
+        entries.push_back (std::move (e));
+    }
+    for (const auto& type : rack.getKnownPlugins().getTypes())
+    {
+        if (type.isInstrument)
+            continue;
+        const auto format = type.pluginFormatName == "AudioUnit" ? juce::String ("AU") : type.pluginFormatName;
+        PluginPicker::Entry e { type.name, type.manufacturerName.isNotEmpty() ? type.manufacturerName : "Other", format,
+                                [this, type] { setAudioSuitePlugin (type); } };
+        e.category = PluginPicker::categoryOf (type.category, type.name);
+        e.key = type.createIdentifierString();
+        entries.push_back (std::move (e));
+    }
+    PluginPicker::Settings settings;
+    settings.favorites = juce::StringArray::fromLines (appProperties.getUserSettings()->getValue ("pluginFavorites"));
+    settings.favorites.removeEmptyStrings();
+    settings.view = (PluginPicker::View) juce::jlimit (0, 3, appProperties.getUserSettings()->getIntValue ("pluginView", 1));
+    auto picker = std::make_unique<PluginPicker> (std::move (entries), [this] { showPluginScanner(); }, nullptr, settings,
+                                                  [this] (const PluginPicker::Settings& changed)
+    {
+        appProperties.getUserSettings()->setValue ("pluginFavorites", changed.favorites.joinIntoString ("\n"));
+        appProperties.getUserSettings()->setValue ("pluginView", (int) changed.view);
+    });
+    juce::CallOutBox::launchAsynchronously (std::move (picker), target.getScreenBounds(), nullptr);
+}
+
+void MainComponent::setAudioSuiteBuiltIn (const juce::String& type)
+{
+    showAudioSuite();
+    if (audioSuitePanel == nullptr)
+        return;
+    std::shared_ptr<BuiltInEffect> effect (BuiltInEffect::create (type).release());
+    if (effect == nullptr)
+        return;
+    // Its knobs live in a little tree of their own (not in the project).
+    audioSuiteSettings = juce::ValueTree (ids::INSERT);
+    audioSuiteSettings.setProperty (ids::effect, type, nullptr);
+    audioSuiteSettings.setProperty (ids::id, "audiosuite", nullptr);
+    auto settings = audioSuiteSettings;
+    audioSuitePanel->setEffect (effect, effect->getName(), new EffectPanel (audioSuiteSettings, undoManager), [effect, settings]
+    {
+        const auto& params = effect->getInfo().params;
+        for (size_t p = 0; p < params.size(); ++p)
+            effect->setParameter ((int) p, (float) (double) settings.getProperty (params[p].id, params[p].defaultValue));
+    });
+}
+
+void MainComponent::setAudioSuitePlugin (const juce::PluginDescription& description)
+{
+    showAudioSuite();
+    if (audioSuitePanel == nullptr)
+        return;
+    juce::String error;
+    const auto rate = engine.getSampleRate() > 0.0 ? engine.getSampleRate() : 48000.0;
+    auto instance = rack.getFormatManager().createPluginInstance (description, rate, 512, error);
+    if (instance == nullptr)
+    {
+        showError ("Couldn't load the plugin", description.name + ": " + error);
+        return;
+    }
+    auto effect = std::make_shared<PluginEffect> (std::move (instance));
+    auto& plugin = effect->getPlugin();
+    auto* face = new PluginHostPanel (plugin, plugin.createEditorAndMakeActive(), { project, {}, {}, &undoManager });
+    audioSuitePanel->setEffect (effect, description.name, face);
+}
+
+void MainComponent::addAudioSuiteItems (juce::PopupMenu& menu)
+{
+    // Every effect, grouped by kind (as Pro Tools' AudioSuite menu is).
+    std::map<juce::String, juce::PopupMenu> groups;
+    for (const auto& info : builtInEffects())
+        groups[PluginPicker::categoryOf ({}, info.name)].addItem (info.name, [this, type = info.type] { setAudioSuiteBuiltIn (type); });
+    for (const auto& type : rack.getKnownPlugins().getTypes())
+        if (! type.isInstrument)
+            groups[PluginPicker::categoryOf (type.category, type.name)].addItem (type.name + "  (" + type.manufacturerName + ")",
+                                                                                 [this, type] { setAudioSuitePlugin (type); });
+    menu.addCommandItem (&commandManager, commands::audioSuite);
+    menu.addSeparator();
+    for (auto& [name, sub] : groups)
+        menu.addSubMenu (name, sub);
+}
+
+void MainComponent::renderAudioSuite()
+{
+    if (audioSuitePanel == nullptr || audioSuitePanel->getEffect() == nullptr)
+        return;
+    const auto regions = audioSuiteRegions();
+    if (regions.isEmpty())
+    {
+        audioSuitePanel->setStatus ("Select one or more audio regions first.");
+        return;
+    }
+    engine.stopPreview();
+    audioSuitePanel->prepareForUse();
+    auto& effect = *audioSuitePanel->getEffect();
+    const auto options = audioSuitePanel->getOptions();
+    const auto folder = recordingFolder().getChildFile ("AudioSuite");
+
+    undoManager.beginNewTransaction ("AudioSuite: " + effect.getName());
+    int done = 0;
+    juce::String lastError;
+    for (auto region : regions)
+    {
+        const juce::File source (region[ids::file].toString());
+        const auto name = juce::File::createLegalFileName (region[ids::name].toString() + " " + effect.getName());
+        const auto out = folder.getNonexistentChildFile (name, ".wav", false);
+        const auto result = audiosuite::render (engine.getFormatManager(), source, (double) region[ids::offset], (double) region[ids::length],
+                                                effect, options, out);
+        if (result.error.isNotEmpty())
+        {
+            lastError = result.error;
+            continue;
+        }
+        region.setProperty (ids::file, out.getFullPathName(), &undoManager);
+        region.setProperty (ids::offset, result.offset, &undoManager);
+        region.setProperty (ids::name, region[ids::name].toString() + "-" + effect.getName(), &undoManager);
+        ++done;
+    }
+    markDirty();
+    audioSuitePanel->setStatus (lastError.isNotEmpty() ? "Done " + juce::String (done) + "; " + lastError
+                                                       : "Rendered " + juce::String (done) + (done == 1 ? " region." : " regions.") + " Undo puts them back.");
+}
+
+void MainComponent::previewAudioSuite()
+{
+    if (engine.isPreviewing())
+    {
+        engine.stopPreview();
+        return;
+    }
+    if (audioSuitePanel == nullptr || audioSuitePanel->getEffect() == nullptr)
+        return;
+    const auto regions = audioSuiteRegions();
+    if (regions.isEmpty())
+    {
+        audioSuitePanel->setStatus ("Select an audio region to preview.");
+        return;
+    }
+    audioSuitePanel->prepareForUse();
+    auto options = audioSuitePanel->getOptions();
+    options.handleSeconds = 0.0;
+    options.wholeFile = false;
+    const auto region = regions.getFirst();
+    const auto temp = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("AudioTechPro AudioSuite Preview.wav");
+    const auto length = juce::jmin (30.0, (double) region[ids::length]);
+    const auto result = audiosuite::render (engine.getFormatManager(), juce::File (region[ids::file].toString()), (double) region[ids::offset],
+                                            length, *audioSuitePanel->getEffect(), options, temp);
+    if (result.error.isNotEmpty())
+    {
+        audioSuitePanel->setStatus (result.error);
+        return;
+    }
+    engine.previewFile (temp);
+    audioSuitePanel->setStatus ("Previewing " + region[ids::name].toString() + "...");
 }
 
 } // namespace riff

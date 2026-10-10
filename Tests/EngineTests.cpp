@@ -2194,3 +2194,51 @@ TEST_CASE ("Benchmark: rebuilding the playback graph with many tracks", "[.bench
     const auto ms = (juce::Time::getMillisecondCounterHiRes() - t0) / 20.0;
     WARN ("one rebuild with 64 tracks: " << ms << " ms");
 }
+
+#include "engine/AudioSuite.h"
+
+TEST_CASE ("AudioSuite: a region through an effect, with handles, tail and latency removed", "[engine]")
+{
+    // A test effect: half the level, 10 samples late, and an echo of 0.25 that rings past the end.
+    struct HalfLate final : Effect
+    {
+        std::vector<float> delayL, delayR;
+        int pos = 0;
+        void prepare (double rate, int) override { preparedRate = rate; delayL.assign (10, 0.0f); delayR.assign (10, 0.0f); pos = 0; }
+        void process (float* l, float* r, int n) noexcept override
+        {
+            for (int i = 0; i < n; ++i)
+            {
+                const auto inL = l[i], inR = r[i];
+                l[i] = delayL[(size_t) pos] * 0.5f;
+                r[i] = delayR[(size_t) pos] * 0.5f;
+                delayL[(size_t) pos] = inL;
+                delayR[(size_t) pos] = inR;
+                pos = (pos + 1) % 10;
+            }
+        }
+        juce::String getName() const override { return "Half"; }
+        int getLatencySamples() const override { return 10; }
+    } effect;
+
+    TempDir temp;
+    const auto source = writeConstantWav (temp.dir.getChildFile ("src.wav"), 48000.0, 48000 * 4, 0.8f);
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+
+    audiosuite::Options options;
+    options.handleSeconds = 1.0;
+    options.tailSeconds = 0.5;
+    const auto out = temp.dir.getChildFile ("out.wav");
+    const auto result = audiosuite::render (formats, source, 2.0, 1.0, effect, options, out);
+    REQUIRE (result.error.isEmpty());
+    CHECK_THAT (result.offset, WithinAbs (1.0, 1e-9));   // the region starts 1 s (the handle) into the new file
+
+    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (out));
+    REQUIRE (reader != nullptr);
+    CHECK (reader->numChannels == 1);                                     // mono in, mono out
+    CHECK (reader->lengthInSamples == 48000 * 3 + 24000);                // handle + region + handle (to the file's end) + tail
+    juce::AudioBuffer<float> b (1, 100);
+    reader->read (&b, 0, 100, 0, true, false);
+    CHECK_THAT (b.getSample (0, 0), WithinAbs (0.4f, 1e-4));             // no latency gap at the start
+}

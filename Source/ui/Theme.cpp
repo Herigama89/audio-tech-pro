@@ -91,6 +91,7 @@ namespace
         { &danger, juce::Colour (0xffe2463fu), juce::Colour (0xffe2463fu), Role::fixed },
         { &meterGreen, juce::Colour (0xff45c25au), juce::Colour (0xff5ccf4au), Role::meter },
         { &meterAmber, juce::Colour (0xffe8c53cu), juce::Colour (0xffffc23au), Role::meter },
+        { &meterRed, juce::Colour (0xffe2463fu), juce::Colour (0xffff4a3au), Role::meter },
         { &cream, juce::Colour (0xff3b3d41u), juce::Colour (0xff434c53u), Role::surface },
         { &creamShade, juce::Colour (0xff313336u), juce::Colour (0xff3a4248u), Role::surface },
         { &creamDeep, juce::Colour (0xff232427u), juce::Colour (0xff2b3237u), Role::surface },
@@ -195,6 +196,11 @@ void set (const Settings& s)
     const auto base = pick (table()[0]);   // the background
     for (auto& e : table())
         *e.colour = adjust (pick (e), e.role, s, base.getBrightness());
+
+    // Your own meter colours (still brightened or dimmed by Meters).
+    for (auto [chosen, target] : { std::pair { s.meterLow, &meterGreen }, std::pair { s.meterMid, &meterAmber }, std::pair { s.meterPeak, &meterRed } })
+        if (chosen != 0)
+            *target = adjust (juce::Colour (chosen), Role::meter, s, base.getBrightness());
 }
 
 const Settings& current() { return settingsNow(); }
@@ -213,7 +219,9 @@ juce::String Settings::toString() const
 {
     return juce::StringArray { juce::String ((int) skin), juce::String (hue), juce::String (saturation), juce::String (lightness),
                                juce::String (contrast), juce::String (textBrightness), juce::String (accentHue),
-                               juce::String (meterBrightness), juce::String (gridBrightness) }.joinIntoString (";");
+                               juce::String (meterBrightness), juce::String (gridBrightness),
+                               juce::String::toHexString ((int) meterLow), juce::String::toHexString ((int) meterMid),
+                               juce::String::toHexString ((int) meterPeak) }.joinIntoString (";");
 }
 
 Settings Settings::fromString (const juce::String& text)
@@ -231,6 +239,12 @@ Settings Settings::fromString (const juce::String& text)
     s.accentHue = juce::jlimit (-1.0f, 360.0f, v[6].getFloatValue());
     s.meterBrightness = juce::jlimit (0.3f, 1.6f, v[7].getFloatValue());
     s.gridBrightness = juce::jlimit (0.0f, 2.0f, v[8].getFloatValue());
+    if (v.size() >= 12)
+    {
+        s.meterLow = (juce::uint32) v[9].getHexValue32();
+        s.meterMid = (juce::uint32) v[10].getHexValue32();
+        s.meterPeak = (juce::uint32) v[11].getHexValue32();
+    }
     return s;
 }
 

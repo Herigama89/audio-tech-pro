@@ -12,6 +12,8 @@
 #include "engine/MasterBusCompressor.h"
 #include "ui/KeyCommands.h"
 #include "ui/Commands.h"
+#include "ui/AudioSuitePanel.h"
+#include "engine/BuiltInEffects.h"
 #include "ui/GeneratorPanel.h"
 #include "ui/AssistantPanel.h"
 #include "ui/ScreenRecordPanel.h"
@@ -503,6 +505,22 @@ public:
                 main.performanceMeter.setReading (0.42f, 0.08f);
                 pump (main, 30);
                 save (panel, "performance.png");
+            }
+
+            // AudioSuite with a built-in effect, and the Theme window with meter colours and presets.
+            {
+                AudioSuitePanel suite;
+                main.audioSuiteSettings = juce::ValueTree (ids::INSERT);
+                main.audioSuiteSettings.setProperty (ids::effect, builtInEffects().front().type, nullptr);
+                std::shared_ptr<BuiltInEffect> fx (BuiltInEffect::create (builtInEffects().front().type).release());
+                suite.setEffect (fx, fx->getName(), new EffectPanel (main.audioSuiteSettings, main.undoManager));
+                suite.selectionText = [] { return juce::String ("2 regions selected"); };
+                pump (main, 50);
+                save (suite, "audiosuite.png");
+
+                ThemePanel themed (theme::current(), {}, main.appProperties.getUserSettings());
+                pump (main, 30);
+                save (themed, "theme-panel-presets.png");
             }
 
             // The flat skin, and the Theme window.

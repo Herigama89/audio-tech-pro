@@ -33,6 +33,7 @@ namespace riff::theme
     inline juce::Colour danger     { 0xffe2463f };
     inline juce::Colour meterGreen { 0xff45c25a };   // meters: green, then yellow near the top
     inline juce::Colour meterAmber { 0xffe8c53c };
+    inline juce::Colour meterRed   { 0xffe2463f };   // the top of the meters (clipping)
 
     // --- Key and header surfaces (were cream; now dark rubber) ----------------
     inline juce::Colour cream      { 0xff3b3d41 };
@@ -98,6 +99,7 @@ namespace riff::theme
         float accentHue = -1.0f;   // degrees 0..360, or -1 for the skin's own accent
         float meterBrightness = 1.0f;  // 0.3..1.6
         float gridBrightness = 1.0f;   // 0..2: bar and beat lines
+        juce::uint32 meterLow = 0, meterMid = 0, meterPeak = 0;   // your own meter colours (ARGB); 0: the skin's
 
         juce::String toString() const;
         static Settings fromString (const juce::String&);

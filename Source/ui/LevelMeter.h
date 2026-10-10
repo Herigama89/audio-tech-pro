@@ -77,9 +77,9 @@ private:
             const auto proportion = (float) (i + 1) / (float) count;
             const auto segDb = juce::jmap (proportion, -60.0f, 0.0f);
             // Console LEDs: green, brighter green, yellow near the top, red at 0 dB.
-            const auto colour = segDb > -1.0f ? theme::danger
+            const auto colour = segDb > -1.0f ? theme::meterRed
                               : segDb > -6.0f ? theme::meterAmber
-                              : segDb > -18.0f ? juce::Colour (0xff7ad85a)
+                              : segDb > -18.0f ? theme::meterGreen.brighter (0.25f)
                               : theme::meterGreen;
             const auto y = r.getBottom() - (float) (i + 1) * (segment + gap) + gap;
             const bool on = proportion <= lit + 0.5f / (float) count;
