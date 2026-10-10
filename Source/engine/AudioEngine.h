@@ -236,6 +236,34 @@ public:
         (moving a fader no longer rebuilds everything). Cleared when the next graph arrives, which
         carries the value itself. */
     void setMasterMixValue (float value) noexcept { masterMix.store (value); }
+
+    /** The Performance meter: how much of each buffer's time the audio took (1 = all of it),
+        the highest since reset, how many buffers ran late, and each track's share. */
+    struct Load
+    {
+        float now = 0.0f, peak = 0.0f;
+        int overloads = 0;
+    };
+    Load takeLoad() noexcept
+    {
+        Load l;
+        l.now = loadNow.exchange (0.0f);
+        l.peak = loadPeak.load();
+        l.overloads = overloads.load();
+        return l;
+    }
+    void resetLoadPeak() noexcept { loadPeak.store (0.0f); overloads.store (0); }
+
+    /** Seconds of processing spent on a graph slot since the last call, and the audio time that covered. */
+    std::pair<double, double> takeTrackTime (int slot) noexcept
+    {
+        if (! juce::isPositiveAndBelow (slot, PlaybackGraph::maxTracks))
+            return {};
+        const auto ticks = trackTicks[(size_t) slot].exchange (0);
+        const auto samples = trackSamples[(size_t) slot].exchange (0);
+        const auto rate = sampleRate.load();
+        return { juce::Time::highResolutionTicksToSeconds (ticks), rate > 0.0 ? (double) samples / rate : 0.0 };
+    }
     void setMixValue (int slot, bool pan, float value) noexcept
     {
         if (juce::isPositiveAndBelow (slot, PlaybackGraph::maxTracks))
@@ -391,6 +419,9 @@ private:
     std::array<std::atomic<float>, PlaybackGraph::maxTracks> volumeOverride {}, panOverride {};   // NaN: none (set in the constructor)
     std::array<std::atomic<float>, PlaybackGraph::maxTracks> volumeMix {}, panMix {};             // NaN: the graph's own value
     std::atomic<float> masterMix { std::numeric_limits<float>::quiet_NaN() };
+    std::atomic<float> loadNow { 0.0f }, loadPeak { 0.0f };
+    std::atomic<int> overloads { 0 };
+    std::array<std::atomic<juce::int64>, PlaybackGraph::maxTracks> trackTicks {}, trackSamples {};
     bool measuring = false;                       // only while measureMix renders
     juce::AudioBuffer<float>* stemCapture = nullptr;   // only while renderStems renders: 2 channels per slot
     bool stemBeforeFader = false;

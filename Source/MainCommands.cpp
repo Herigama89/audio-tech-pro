@@ -240,6 +240,7 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::toggleInspector:        toggleInspector(); break;
         case commands::createTrackStack:       showCreateStackDialog(); break;
         case commands::showNotepad:            toggleNotepad(); break;
+        case commands::showPerformance:        showPerformanceWindow(); break;
         case commands::showBrowser:            toggleBrowser(); break;
         case commands::toggleQuickHelp:        quickHelpShown = ! quickHelpShown; quickHelpBox.setVisible (quickHelpShown); quickHelpBox.toFront (false); lastHelpTarget = nullptr; updateQuickHelp(); break;
         case commands::waveformZoom:
@@ -440,7 +441,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             // Logic's Window menu: the windows you can open beside the main one.
             add ({ commands::openMixerWindow, commands::openEditorWindow });
             menu.addSeparator();
-            add ({ commands::eventList, commands::undoHistory, commands::liveLoops, commands::signalFlow });
+            add ({ commands::eventList, commands::undoHistory, commands::liveLoops, commands::signalFlow, commands::showPerformance });
             menu.addSeparator();
             add ({ commands::keyCommands, commands::controllerAssignments, commands::audioSettings, commands::themeSettings });
             break;

@@ -773,7 +773,20 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
                                                     float* const* outputChannelData, int numOutputChannels,
                                                     int numSamples, const juce::AudioIODeviceCallbackContext&)
 {
+    const auto t0 = juce::Time::getHighResolutionTicks();
     render (inputChannelData, numInputChannels, outputChannelData, numOutputChannels, numSamples);
+
+    // The Performance meter: this buffer's processing time against the time it plays for.
+    const auto rate = sampleRate.load();
+    if (rate > 0.0 && numSamples > 0)
+    {
+        const auto load = (float) (juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - t0)
+                                   / ((double) numSamples / rate));
+        storeMax (loadNow, load);
+        storeMax (loadPeak, load);
+        if (load > 1.0f)
+            overloads.fetch_add (1, std::memory_order_relaxed);
+    }
 }
 
 //==============================================================================
@@ -1113,9 +1126,21 @@ void AudioEngine::renderChunk (const PlaybackGraph& graph, const float* const* i
         }
     }
 
+    // Each track's time is counted for the Performance meter's track list.
+    const auto timed = [&] (const PlaybackGraph::Track& track, float* l, float* r)
+    {
+        const auto t0 = juce::Time::getHighResolutionTicks();
+        renderTrack (track, inputs, numInputs, inputOffset, l, r, n, playingNow, resetNotes, withLiveMidi);
+        if (juce::isPositiveAndBelow (track.slot, PlaybackGraph::maxTracks))
+        {
+            trackTicks[(size_t) track.slot].fetch_add (juce::Time::getHighResolutionTicks() - t0, std::memory_order_relaxed);
+            trackSamples[(size_t) track.slot].fetch_add (n, std::memory_order_relaxed);
+        }
+    };
+
     for (const auto& track : graph.tracks)
         if (! track.isBus)
-            renderTrack (track, inputs, numInputs, inputOffset, dL, dR, n, playingNow, resetNotes, withLiveMidi);
+            timed (track, dL, dR);
 
     // Tracks heard directly wait for the slowest bus (delay compensation).
     if (graph.directDelay > 0)
@@ -1126,7 +1151,7 @@ void AudioEngine::renderChunk (const PlaybackGraph& graph, const float* const* i
 
     for (const auto& track : graph.tracks)
         if (track.isBus)
-            renderTrack (track, inputs, numInputs, inputOffset, mixL, mixR, n, playingNow, resetNotes, withLiveMidi);
+            timed (track, mixL, mixR);
 }
 
 void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* const* inputs, int numInputs, int inputOffset,

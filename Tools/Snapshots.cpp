@@ -493,6 +493,18 @@ public:
         }
 
         {
+            // The Performance window (a made-up reading).
+            {
+                PerformanceReading r;
+                r.cpu = 0.42f; r.peak = 0.71f; r.overloads = 2; r.disk = 0.08f;
+                r.device = "Quantum HD 2, 48.0 kHz, 128 samples (2.7 ms)";
+                r.tracks = { { "Lead Vox", 0.12f }, { "Drums", 0.09f }, { "Keys", 0.05f }, { "Bass", 0.02f } };
+                PerformancePanel panel ([r] { return r; }, {});
+                main.performanceMeter.setReading (0.42f, 0.08f);
+                pump (main, 30);
+                save (panel, "performance.png");
+            }
+
             // The flat skin, and the Theme window.
             theme::Settings flat;
             flat.skin = theme::Skin::flat;

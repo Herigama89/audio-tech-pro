@@ -57,12 +57,17 @@ public:
 
     static constexpr double secondsAhead = 4.0;
 
+    /** Time spent reading from disk (high-resolution ticks), for the Performance meter. */
+    std::atomic<juce::int64> busyTicks { 0 };
+
 private:
     void run() override
     {
         while (! threadShouldExit())
         {
+            const auto t0 = juce::Time::getHighResolutionTicks();
             readAhead (playhead() - 0.25, secondsAhead);
+            busyTicks.fetch_add (juce::Time::getHighResolutionTicks() - t0, std::memory_order_relaxed);
             wait (25);
         }
     }

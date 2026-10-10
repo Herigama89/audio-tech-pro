@@ -2150,6 +2150,22 @@ TEST_CASE ("Moving a fader or pan is heard at once, without rebuilding the graph
     CHECK_THAT (out.getSample (0, 100), WithinAbs (0.5f * 0.5f * 0.8f, 1e-4));
 }
 
+TEST_CASE ("The Performance meter counts each track's processing time", "[engine]")
+{
+    Fixture f;
+    const auto loud = writeConstantWav (f.temp.dir.getChildFile ("loud.wav"), 48000.0, 96000, 0.5f);
+    auto a = model::addTrack (f.project, "A", nullptr);
+    model::addRegion (a, loud, 0.0, 2.0, nullptr);
+    f.player.setProject (f.project);
+    f.engine.play();
+    f.engine.takeTrackTime (f.player.slotOf (a[ids::id].toString()));   // start from nothing
+    renderLeft (f.engine, 4800);
+    const auto [seconds, audio] = f.engine.takeTrackTime (f.player.slotOf (a[ids::id].toString()));
+    CHECK (seconds > 0.0);
+    CHECK_THAT (audio, WithinAbs (0.1, 1e-6));   // 4800 samples at 48 kHz
+    CHECK (f.engine.takeTrackTime (f.player.slotOf (a[ids::id].toString())).second == 0.0);   // read once
+}
+
 TEST_CASE ("Benchmark: rebuilding the playback graph with many tracks", "[.bench]")
 {
     Fixture f;

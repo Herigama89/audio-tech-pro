@@ -23,6 +23,7 @@
 #include "ui/ScreenRecordPanel.h"
 #include "ui/LibraryPanel.h"
 #include "ui/SidePanels.h"
+#include "ui/PerformanceMeter.h"
 #include "ui/SmartControls.h"
 #include "ui/CombineInterfacesPanel.h"
 #include "engine/AggregateDevice.h"
@@ -429,6 +430,14 @@ private:
     // Plugin and synth windows, by track id. Declared last so they close before
     // the instruments they show are destroyed.
     std::map<juce::String, std::unique_ptr<EditorWindow>> editorWindows;
+
+    // The Performance meter (CPU and disk) and its window
+    PerformanceMeter performanceMeter;
+    PerformanceReading lastReading;
+    std::map<juce::String, float> trackLoads;   // smoothed, by track id
+    double lastPerformanceMs = 0.0;
+    void updatePerformance();
+    void showPerformanceWindow();
     std::unique_ptr<EditorWindow> scannerWindow;
     bool liveLoopsWasPlaying = false;
 

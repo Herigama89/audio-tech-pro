@@ -291,6 +291,8 @@ MainComponent::MainComponent (bool openAudioDevice)
     addAndMakeVisible (vScroll);
     addAndMakeVisible (inputMeter);
     addAndMakeVisible (outputMeter);
+    addAndMakeVisible (performanceMeter);
+    performanceMeter.onClick = [this] { showPerformanceWindow(); };
     outputMeter.usePhotoLeds (true);   // the main output: the photo's blue LEDs (Studio White)
 
     hScroll.addListener (this);
@@ -713,7 +715,7 @@ void MainComponent::applyPanelVisibility()
 {
     // The control bar's two rows
     for (auto* c : std::initializer_list<juce::Component*> { &fileButton, &undoButton, &redoButton, &addTrackButton, &settingsButton,
-                                                            &masterSlider, &masterCaption, &positionLabel, &clockLabel, &tempoLabel,
+                                                            &masterSlider, &masterCaption, &performanceMeter, &positionLabel, &clockLabel, &tempoLabel,
                                                             &tempoCaption, &signatureLabel })
         c->setVisible (showControlBar);
     for (auto* c : std::initializer_list<juce::Component*> { &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
@@ -829,7 +831,8 @@ void MainComponent::resized()
 
         right (settingsButton, 62, 14);
         right (masterSlider, 120, 4);
-        right (masterCaption, 52);
+        right (masterCaption, 52, 14);
+        right (performanceMeter, 120);
 
         auto lcd = lcdBounds().reduced (6, 2);
         auto numbers = lcd.withTrimmedBottom (12);
@@ -1930,6 +1933,7 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 void MainComponent::timerCallback()
 {
     updateLiveMidiTrack();
+    updatePerformance();
     updateQuickHelp();
     if (! verticalZoom.isMouseButtonDown() && ! horizontalZoom.isMouseButtonDown())
         syncZoomSliders();

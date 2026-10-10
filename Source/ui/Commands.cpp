@@ -66,6 +66,7 @@ const std::vector<Info>& all()
         { openMixerWindow,        "Open Mixer Window",          "View",      "The mixer in a window of its own (resize it, put it on another screen)" },
         { openEditorWindow,       "Open Editor Window",         "View",      "The piano roll (and the other region editors) in a window of its own" },
         { themeSettings,          "Theme...",                   "View",      "The skin (studio grey or flat dark) and its colours: hue, lightness, contrast, text, accent, meters, grid" },
+        { showPerformance,        "Performance...",             "View",      "How hard the computer works: audio load, its peak, overloads, the disk, and the heaviest tracks" },
         { showNotepad,            "Notepad",                    "View",      "Project notes: lyrics, ideas, what to fix (saved with the project)" },
         { showBrowser,            "Browser",                    "View",      "Find audio files on your computer and put them on the selected track" },
         { toggleQuickHelp,        "Quick Help",                 "View",      "A box that explains whatever is under the mouse" },

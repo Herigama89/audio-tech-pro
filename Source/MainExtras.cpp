@@ -1166,3 +1166,74 @@ void MainComponent::syncZoomSliders()
 }
 
 } // namespace riff
+
+namespace riff
+{
+
+void MainComponent::updatePerformance()
+{
+    // The engine's load, the disk's, and each track's share (the main window is the one reader).
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    const auto elapsed = lastPerformanceMs > 0.0 ? (now - lastPerformanceMs) / 1000.0 : 0.0;
+    lastPerformanceMs = now;
+
+    const auto load = engine.takeLoad();
+    const auto diskSeconds = juce::Time::highResolutionTicksToSeconds (player.getReadAhead().busyTicks.exchange (0));
+    PerformanceReading r;
+    r.cpu = load.now;
+    r.peak = load.peak;
+    r.overloads = load.overloads;
+    r.disk = elapsed > 0.0 ? (float) juce::jlimit (0.0, 1.0, diskSeconds / elapsed) : 0.0f;
+
+    for (const auto& track : project)
+    {
+        if (! track.hasType (ids::TRACK))
+            continue;
+        const auto id = track[ids::id].toString();
+        const auto [seconds, audio] = engine.takeTrackTime (player.slotOf (id));
+        const auto share = audio > 0.0 ? (float) (seconds / audio) : 0.0f;
+        auto& smoothed = trackLoads[id];
+        smoothed = juce::jmax (share, smoothed * 0.93f);
+        if (smoothed > 0.0005f)
+            r.tracks.push_back ({ track[ids::name].toString(), smoothed });
+    }
+    std::sort (r.tracks.begin(), r.tracks.end(), [] (const auto& a, const auto& b) { return a.load > b.load; });
+    if (r.tracks.size() > 12)
+        r.tracks.resize (12);
+
+    if (auto* device = engine.getDeviceManager().getCurrentAudioDevice())
+    {
+        const auto rate = device->getCurrentSampleRate();
+        const auto buffer = device->getCurrentBufferSizeSamples();
+        r.device = device->getName() + ", " + juce::String (rate / 1000.0, 1) + " kHz, " + juce::String (buffer) + " samples ("
+                 + juce::String (rate > 0.0 ? buffer * 1000.0 / rate : 0.0, 1) + " ms)";
+    }
+    else
+        r.device = "No audio device open";
+
+    lastReading = std::move (r);
+    performanceMeter.setReading (lastReading.cpu, lastReading.disk);
+}
+
+void MainComponent::showPerformanceWindow()
+{
+    const juce::String id ("performance");
+    if (auto it = editorWindows.find (id); it != editorWindows.end())
+    {
+        it->second->toFront (true);
+        return;
+    }
+    auto closer = [this, id]
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this), id]
+        {
+            if (safe != nullptr)
+                safe->editorWindows.erase (id);
+        });
+    };
+    editorWindows[id] = std::make_unique<EditorWindow> ("Performance",
+                                                        new PerformancePanel ([this] { return lastReading; }, [this] { engine.resetLoadPeak(); }),
+                                                        true, closer);
+}
+
+} // namespace riff
