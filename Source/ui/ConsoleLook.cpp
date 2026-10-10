@@ -288,6 +288,14 @@ namespace look
     void drawNeonKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
                        juce::Colour ringColour, bool fromCentre, bool enabled, bool light)
     {
+        // Studio White: every knob is the photo's knob with its LED ring.
+        if (theme::whiteSkin())
+        {
+            juce::ignoreUnused (ringColour, light);
+            skin::drawPhotoKnob (g, area, proportion, startAngle, endAngle, fromCentre, enabled);
+            return;
+        }
+
         // A studio console knob: a scale of ticks printed round it, a thin value ring,
         // and a knurled black knob (or a silver one) with a pointer line.
         const auto size = juce::jmin (area.getWidth(), area.getHeight());
@@ -451,7 +459,15 @@ namespace look
                 top = theme::cream.brighter (0.15f); bottom = theme::creamShade; edge = theme::creamDeep.darker (0.45f);
                 break;
             case Key::console:
-                top = juce::Colour (0xff53575c); bottom = juce::Colour (0xff33363a); edge = juce::Colour (0xff15171a);
+                if (theme::whiteSkin())
+                {
+                    // Studio White: light grey keys, as on the white console.
+                    top = juce::Colour (0xfff7f6f3); bottom = juce::Colour (0xffdcd9d2); edge = juce::Colour (0xffa9a59c);
+                }
+                else
+                {
+                    top = juce::Colour (0xff53575c); bottom = juce::Colour (0xff33363a); edge = juce::Colour (0xff15171a);
+                }
                 corner = 2.5f;
                 break;
             case Key::dark:

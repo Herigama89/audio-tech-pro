@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Theme.h"
+#include "Skin.h"
 
 namespace riff
 {
@@ -15,8 +16,15 @@ public:
     {
         levelL = juce::jmax (left,  levelL * 0.85f);
         levelR = juce::jmax (right, levelR * 0.85f);
+        if (juce::jmax (left, right) >= 0.999f)
+            clipHold = 60;   // the clip light stays on for about two seconds
+        else if (clipHold > 0)
+            --clipHold;
         repaint();
     }
+
+    /** The master meter in Studio White: the photo's blue LED segments and red clip light. */
+    void usePhotoLeds (bool shouldUse) { photoLeds = shouldUse; repaint(); }
 
     void paint (juce::Graphics& g) override
     {
@@ -38,6 +46,13 @@ public:
 
         auto bars = housing.reduced (2.0f, 3.0f);
         const auto barWidth = (bars.getWidth() - 2.0f) / 2.0f;
+        if (photoLeds && theme::whiteSkin())
+        {
+            drawPhotoBar (g, bars.removeFromLeft (barWidth), levelL, clipHold > 0);
+            bars.removeFromLeft (2.0f);
+            drawPhotoBar (g, bars.removeFromLeft (barWidth), levelR, clipHold > 0);
+            return;
+        }
         drawBar (g, bars.removeFromLeft (barWidth), levelL);
         bars.removeFromLeft (2.0f);
         drawBar (g, bars.removeFromLeft (barWidth), levelR);
@@ -73,7 +88,31 @@ private:
         }
     }
 
+    static void drawPhotoBar (juce::Graphics& g, juce::Rectangle<float> r, float linear, bool clipped)
+    {
+        // The clip light on top, then the blue segments (lit ones bright, the rest faint).
+        const auto led = skin::quarterTurn (skin::whiteLed()), clip = skin::quarterTurn (skin::whiteClip());
+        const auto segHeight = juce::jmax (3.0f, r.getWidth() * (float) led.getHeight() / (float) led.getWidth());
+        const auto clipArea = r.removeFromTop (juce::jmax (3.0f, r.getWidth() * (float) clip.getHeight() / (float) clip.getWidth()));
+        g.setOpacity (clipped ? 1.0f : 0.22f);
+        g.drawImage (clip, clipArea);
+        r.removeFromTop (2.0f);
+
+        const auto lit = juce::jmap (juce::Decibels::gainToDecibels (linear, -60.0f), -60.0f, 0.0f, 0.0f, 1.0f);
+        const auto count = juce::jmax (1, (int) (r.getHeight() / segHeight));
+        for (int i = 0; i < count; ++i)
+        {
+            const auto proportion = (float) (i + 1) / (float) count;
+            const bool on = proportion <= lit + 0.5f / (float) count;
+            g.setOpacity (on ? 1.0f : 0.14f);
+            g.drawImage (led, juce::Rectangle<float> (r.getX(), r.getBottom() - (float) (i + 1) * segHeight, r.getWidth(), segHeight));
+        }
+        g.setOpacity (1.0f);
+    }
+
     juce::String label;
+    bool photoLeds = false;
+    int clipHold = 0;
     float levelL = 0, levelR = 0;
 };
 

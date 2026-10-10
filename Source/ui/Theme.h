@@ -85,7 +85,7 @@ namespace riff::theme
     // settings: the colours above are worked out from a skin's own palette and
     // these adjustments, and change while the app runs.
     //==========================================================================
-    enum class Skin { studio, flat };   // the picture's grey console, or a flat dark look
+    enum class Skin { studio, flat, white };   // the picture's grey console, a flat dark look, or Studio White (your photos' faders, knobs and meters)
 
     struct Settings
     {
@@ -110,4 +110,10 @@ namespace riff::theme
 
     /** True when the console pieces come from the picture (the studio skin); false draws them flat. */
     bool imageSkin();
+
+    /** Studio White: a light console with the fader caps, knobs and LED meters cut from your photos. */
+    bool whiteSkin();
+
+    /** Every theme colour (to repaint controls that copied one when the theme changes). */
+    std::vector<juce::Colour*> allColours();
 }

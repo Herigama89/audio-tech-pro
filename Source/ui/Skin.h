@@ -25,7 +25,72 @@ namespace riff::skin
     RIFF_SKIN_IMAGE (vuFace,    vu_face_png)
     RIFF_SKIN_IMAGE (panel,     panel_png)        // the black centre panel (tiled)
 
+    // Studio White (Tools/make_white_skin.py): cut from your photos
+    RIFF_SKIN_IMAGE (whiteCap,      white_fader_cap_png)        // the long-throw fader's cap, in a white shade
+    RIFF_SKIN_IMAGE (whiteCapBlack, white_fader_cap_black_png)  // the same cap as photographed
+    RIFF_SKIN_IMAGE (whiteRail,     white_fader_rail_png)       // the fader's rail (tiled down the slot)
+    RIFF_SKIN_IMAGE (whiteKnobBody, white_knob_body_png)        // the knob: knurled edge, lit inner ring
+    RIFF_SKIN_IMAGE (whiteKnobRing, white_knob_ring_png)        // its LED ring (lit up to the value)
+    RIFF_SKIN_IMAGE (whiteLed,      white_led_on_png)           // one lit meter segment
+    RIFF_SKIN_IMAGE (whiteClip,     white_led_clip_png)         // the clip light
+
     #undef RIFF_SKIN_IMAGE
+
+    /**
+        Studio White's knob: the photo's knob, and its LED ring lit from the start of its travel to the
+        value (the rest of the ring dim). `start`/`end` are the rotary range in radians (0 = up, clockwise).
+        From the centre for knobs like pan (lit from the top to the value).
+    */
+    inline void drawPhotoKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion, float start, float end,
+                               bool fromCentre, bool enabled = true)
+    {
+        const auto size = juce::jmin (area.getWidth(), area.getHeight());
+        const auto r = area.withSizeKeepingCentre (size, size);
+        const auto body = whiteKnobBody(), ring = whiteKnobRing();
+        juce::Graphics::ScopedSaveState state (g);
+        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+
+        // The ring: dim all round, then lit over the value's arc.
+        g.setOpacity (enabled ? 0.18f : 0.1f);
+        g.drawImage (ring, r);
+        const auto angle = start + proportion * (end - start);
+        auto a0 = start, a1 = angle;
+        if (fromCentre)
+        {
+            const auto mid = (start + end) * 0.5f;
+            a0 = juce::jmin (mid, angle);
+            a1 = juce::jmax (mid, angle);
+        }
+        if (a1 - a0 > 0.01f)
+        {
+            juce::Path wedge;
+            wedge.addPieSegment (r.expanded (2.0f), a0, a1, 0.0f);
+            juce::Graphics::ScopedSaveState clip (g);
+            g.reduceClipRegion (wedge);
+            g.setOpacity (enabled ? 1.0f : 0.5f);
+            g.drawImage (ring, r);
+        }
+
+        // The knob itself (round, so it looks the same at any angle).
+        g.setOpacity (enabled ? 1.0f : 0.6f);
+        g.drawImage (body, r);
+    }
+
+    /** An image turned a quarter turn (the photo's meter runs sideways; ours run upwards). Cached. */
+    inline juce::Image quarterTurn (const juce::Image& source)
+    {
+        static std::map<juce::String, juce::Image> cache;
+        const auto key = juce::String ((juce::int64) source.getPixelData().get());
+        if (auto it = cache.find (key); it != cache.end())
+            return it->second;
+        juce::Image out (juce::Image::ARGB, source.getHeight(), source.getWidth(), true);
+        {
+            juce::Graphics g (out);
+            g.drawImageTransformed (source, juce::AffineTransform::rotation (-juce::MathConstants<float>::halfPi)
+                                                .translated (0.0f, (float) source.getWidth()));
+        }
+        return cache[key] = out;
+    }
 
     /** The art's scale: the picture's strip (56 px wide) is drawn 3.5x into a 196-wide space. */
     constexpr float artScale = 3.5f;

@@ -126,6 +126,32 @@ namespace
 
     Settings& settingsNow() { static Settings s; return s; }
 
+    /** Studio White's own colours (the light console in your pictures); the rest follow the flat skin. */
+    juce::Colour whiteValue (const juce::Colour* c, juce::Colour fallback)
+    {
+        using namespace juce;
+        static const std::vector<std::pair<const Colour*, Colour>> values {
+            { &background, Colour (0xffe6e4de) }, { &toolbar, Colour (0xfff2f0eb) }, { &toolbarDark, Colour (0xffe4e2dc) },
+            { &panel, Colour (0xffeeece7) }, { &laneA, Colour (0xfff4f3ef) }, { &laneB, Colour (0xffecebe6) },
+            { &outline, Colour (0xffc6c3bb) }, { &gridBar, Colour (0xffc0bdb5) }, { &gridBeat, Colour (0xffdcd9d2) },
+            { &text, Colour (0xff26282c) }, { &dimText, Colour (0xff767980) }, { &accent, Colour (0xff3b8fe2) },
+            { &selection, Colour (0xffcde0f6) }, { &meterGreen, Colour (0xff4cc35b) }, { &meterAmber, Colour (0xffe8b93a) },
+            { &cream, Colour (0xffe2dfd8) }, { &creamShade, Colour (0xffd7d4cc) }, { &creamDeep, Colour (0xffc8c4bb) },
+            { &ink, Colour (0xff26282c) }, { &inkDim, Colour (0xff6c6f75) }, { &gold, Colour (0xff3b8fe2) },
+            { &goldDark, Colour (0xff2a6db3) }, { &ruler, Colour (0xffebe8e1) }, { &rulerDark, Colour (0xffdedbd3) },
+            { &console, Colour (0xffe9e7e1) }, { &consoleShade, Colour (0xffdfdcd5) }, { &consoleDark, Colour (0xffc5c2ba) },
+            { &slotDark, Colour (0xffdedbd4) }, { &stripFace, Colour (0xfff1efea) }, { &stripFaceLow, Colour (0xffe3e0d9) },
+            { &stripEdge, Colour (0xffbcb8af) }, { &stripInk, Colour (0xff26282c) }, { &stripInkDim, Colour (0xff6c6f75) },
+            { &stripSlot, Colour (0xffdcd9d1) }, { &stripSlotOn, Colour (0xffcfe0f3) }, { &knobArc, Colour (0xff3b8fe2) },
+            { &lcd, Colour (0xff1b2124) }, { &lcdText, Colour (0xffdfe6f2) }, { &lcdDim, Colour (0xff7c8392) },
+            { &knobBlue, Colour (0xff3b8fe2) }, { &knobBlack, Colour (0xff3b8fe2) }, { &neon, Colour (0xff3b8fe2) },
+        };
+        for (const auto& [colour, value] : values)
+            if (colour == c)
+                return value;
+        return fallback;
+    }
+
     juce::Colour adjust (juce::Colour c, Role role, const Settings& s, float backgroundBrightness)
     {
         auto h = c.getHue(), sat = c.getSaturation(), b = c.getBrightness();
@@ -164,14 +190,24 @@ namespace
 void set (const Settings& s)
 {
     settingsNow() = s;
-    const bool flat = s.skin == Skin::flat;
-    const auto base = flat ? table()[0].flat : table()[0].studio;   // the background
+    const bool flat = s.skin == Skin::flat, white = s.skin == Skin::white;
+    const auto pick = [flat, white] (const Entry& e) { return white ? whiteValue (e.colour, e.flat) : flat ? e.flat : e.studio; };
+    const auto base = pick (table()[0]);   // the background
     for (auto& e : table())
-        *e.colour = adjust (flat ? e.flat : e.studio, e.role, s, base.getBrightness());
+        *e.colour = adjust (pick (e), e.role, s, base.getBrightness());
 }
 
 const Settings& current() { return settingsNow(); }
 bool imageSkin() { return settingsNow().skin == Skin::studio; }
+bool whiteSkin() { return settingsNow().skin == Skin::white; }
+
+std::vector<juce::Colour*> allColours()
+{
+    std::vector<juce::Colour*> result;
+    for (auto& e : table())
+        result.push_back (e.colour);
+    return result;
+}
 
 juce::String Settings::toString() const
 {
@@ -186,7 +222,7 @@ Settings Settings::fromString (const juce::String& text)
     const auto v = juce::StringArray::fromTokens (text, ";", "");
     if (v.size() < 9)
         return s;
-    s.skin = v[0].getIntValue() == 1 ? Skin::flat : Skin::studio;
+    s.skin = v[0].getIntValue() == 2 ? Skin::white : v[0].getIntValue() == 1 ? Skin::flat : Skin::studio;
     s.hue = juce::jlimit (-180.0f, 180.0f, v[1].getFloatValue());
     s.saturation = juce::jlimit (0.0f, 2.0f, v[2].getFloatValue());
     s.lightness = juce::jlimit (-1.0f, 1.0f, v[3].getFloatValue());

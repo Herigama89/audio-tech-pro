@@ -363,7 +363,38 @@ void MainComponent::showEventList()
 //==============================================================================
 void MainComponent::applyTheme (const theme::Settings& settings)
 {
+    // Controls that took a theme colour when they were made get the new one (matched by value).
+    std::vector<juce::Colour> before;
+    for (auto* c : theme::allColours())
+        before.push_back (*c);
     theme::set (settings);
+    std::map<juce::uint32, juce::Colour> remap;
+    {
+        const auto now = theme::allColours();
+        for (size_t i = 0; i < now.size(); ++i)
+            if (before[i] != *now[i])
+                remap.emplace (before[i].getARGB(), *now[i]);
+    }
+    std::function<void (juce::Component&)> recolour = [&] (juce::Component& c)
+    {
+        for (const int id : { (int) juce::TextButton::buttonColourId, (int) juce::TextButton::buttonOnColourId,
+                              (int) juce::TextButton::textColourOffId, (int) juce::TextButton::textColourOnId,
+                              (int) juce::Label::textColourId, (int) juce::Label::backgroundColourId, (int) juce::Label::outlineColourId,
+                              (int) juce::ComboBox::backgroundColourId, (int) juce::ComboBox::textColourId, (int) juce::ComboBox::outlineColourId,
+                              (int) juce::TextEditor::backgroundColourId, (int) juce::TextEditor::textColourId, (int) juce::TextEditor::outlineColourId,
+                              (int) juce::Slider::textBoxTextColourId, (int) juce::Slider::trackColourId, (int) juce::Slider::backgroundColourId,
+                              (int) juce::ToggleButton::textColourId, (int) juce::ToggleButton::tickColourId,
+                              (int) juce::ListBox::backgroundColourId })
+            if (c.isColourSpecified (id))
+                if (auto it = remap.find (c.findColour (id).getARGB()); it != remap.end())
+                    c.setColour (id, it->second);
+        for (auto* child : c.getChildren())
+            recolour (*child);
+    };
+    for (int i = 0; i < juce::TopLevelWindow::getNumTopLevelWindows(); ++i)
+        if (auto* w = juce::TopLevelWindow::getTopLevelWindow (i))
+            recolour (*w);
+    recolour (*this);
     theme::apply (juce::LookAndFeel::getDefaultLookAndFeel());
     appProperties.getUserSettings()->setValue ("theme", settings.toString());
 

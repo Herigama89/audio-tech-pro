@@ -6,10 +6,11 @@ namespace riff
 ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme::Settings&)> callback)
     : settings (initial), onChange (std::move (callback))
 {
-    skinBox.addItemList ({ "Studio Grey (from your picture)", "Flat Dark (FL Studio style)" }, 1);
+    skinBox.addItemList ({ "Studio Grey (from your picture)", "Flat Dark (FL Studio style)", "Studio White (your fader, knob and meter photos)" }, 1);
     skinBox.onChange = [this]
     {
-        settings.skin = skinBox.getSelectedItemIndex() == 1 ? theme::Skin::flat : theme::Skin::studio;
+        const auto index = skinBox.getSelectedItemIndex();
+        settings.skin = index == 2 ? theme::Skin::white : index == 1 ? theme::Skin::flat : theme::Skin::studio;
         changed();
     };
     addAndMakeVisible (skinBox);
@@ -47,6 +48,7 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
         { "Cool Blue",     { theme::Skin::flat, 10.0f, 1.8f, -0.1f, 0.15f, 0.1f, 195.0f, 1.0f, 1.0f } },
         { "High Contrast", { theme::Skin::flat, 0.0f, 0.6f, -0.2f, 0.8f, 0.6f, 50.0f, 1.3f, 1.4f } },
         { "Soft Light",    { theme::Skin::flat, 0.0f, 0.8f, 0.5f, -0.3f, 0.2f, 160.0f, 0.9f, 0.8f } },
+        { "Studio White",  { theme::Skin::white, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f } },
     };
     for (const auto& p : list)
     {
@@ -101,7 +103,7 @@ void ThemePanel::addRow (const juce::String& name, double min, double max, doubl
 
 void ThemePanel::refreshControls()
 {
-    skinBox.setSelectedItemIndex (settings.skin == theme::Skin::flat ? 1 : 0, juce::dontSendNotification);
+    skinBox.setSelectedItemIndex (settings.skin == theme::Skin::white ? 2 : settings.skin == theme::Skin::flat ? 1 : 0, juce::dontSendNotification);
     for (auto& r : rows)
     {
         r.slider->setValue (r.read (settings), juce::dontSendNotification);

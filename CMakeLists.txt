@@ -122,7 +122,15 @@ juce_add_binary_data(AudioTechProData
                 Resources/skin/knob_white.png
                 Resources/skin/knob_bus.png
                 Resources/skin/vu_face.png
-                Resources/skin/panel.png)
+                Resources/skin/panel.png
+                # The Studio White skin, cut from your pictures by Tools/make_white_skin.py
+                Resources/skin/white/white_fader_cap.png
+                Resources/skin/white/white_fader_cap_black.png
+                Resources/skin/white/white_fader_rail.png
+                Resources/skin/white/white_knob_body.png
+                Resources/skin/white/white_knob_ring.png
+                Resources/skin/white/white_led_on.png
+                Resources/skin/white/white_led_clip.png)
 
 # Everything on screen except the app's entry point (the snapshot tool reuses it).
 set(RIFF_UI_SOURCES

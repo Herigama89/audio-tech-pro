@@ -121,6 +121,15 @@ PointerKnob::PointerKnob (juce::Colour pointerColour) : pointer (pointerColour)
 
 void PointerKnob::paint (juce::Graphics& g)
 {
+    // Studio White: the photo's knob, its LED ring lit to the value (from the centre for EQ gains and pan).
+    if (theme::whiteSkin())
+    {
+        const auto params = getRotaryParameters();
+        skin::drawPhotoKnob (g, getLocalBounds().toFloat(), (float) valueToProportionOfLength (getValue()),
+                             params.startAngleRadians, params.endAngleRadians, getMinimum() < 0.0 && getMaximum() > 0.0, isEnabled());
+        return;
+    }
+
     if (skinBody.isValid() && theme::imageSkin())
     {
         const auto params = getRotaryParameters();
@@ -247,6 +256,12 @@ void DisplaySlider::paint (juce::Graphics& g)
     if (asKnob)
     {
         const auto proportion = (float) valueToProportionOfLength (getValue());
+        if (theme::whiteSkin())
+        {
+            skin::drawPhotoKnob (g, getLocalBounds().toFloat(), proportion, juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f),
+                                 true, isEnabled());
+            return;
+        }
         look::drawNeonKnob (g, getLocalBounds().toFloat(), proportion, juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f),
                             theme::knobBlack, true, isEnabled(), true);
         return;
@@ -283,6 +298,22 @@ void Fader::paint (juce::Graphics& g)
 {
     const auto bounds = getLocalBounds().toFloat();
     const auto cx = bounds.getCentreX();
+
+    // Studio White: the photo's rail and its cap (in a white shade), as photographed.
+    if (theme::whiteSkin())
+    {
+        const auto rail = skin::whiteRail();
+        const auto railWidth = juce::jlimit (5.0f, 9.0f, bounds.getWidth() * 0.22f);
+        skin::tileDown (g, rail, juce::Rectangle<float> (cx - railWidth * 0.5f, capHeight() * 0.5f - 6.0f, railWidth,
+                                                         bounds.getHeight() - capHeight() + 12.0f));
+        const auto cap = skin::whiteCap();
+        const auto h = capHeight() * 1.15f;
+        const auto w = h * (float) cap.getWidth() / (float) cap.getHeight();
+        g.setOpacity (isEnabled() ? 1.0f : 0.6f);
+        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+        g.drawImage (cap, juce::Rectangle<float> (w, h).withCentre ({ cx, yForValue (getValue()) }));
+        return;
+    }
 
     // The slot the cap runs in
     const auto slot = juce::Rectangle<float> (cx - 2.5f, capHeight() * 0.5f - 6.0f, 5.0f, bounds.getHeight() - capHeight() + 12.0f);

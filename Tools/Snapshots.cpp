@@ -521,6 +521,35 @@ public:
             pump (main, 200);
             save (main, "flat-warm.png");
             main.closeMixer();
+
+            // Studio White: the photo faders, knobs and LED meters; with EQ/Dyn and the bus compressor shown.
+            theme::Settings white;
+            white.skin = theme::Skin::white;
+            main.applyTheme (white);
+            main.project.setProperty ("mixerBusComp", true, nullptr);
+            main.showMixer();
+            main.mixer.relayoutStrips();
+            for (int i = 0; i < 20; ++i)
+            {
+                main.mixer.setMasterLevels (0.7f, 0.6f);
+                pump (main, 15);
+            }
+            save (main, "white-mixer.png");
+            main.project.setProperty ("mixerConsole", true, nullptr);
+            main.mixer.relayoutStrips();
+            pump (main, 200);
+            save (main, "white-mixer-console.png");
+            main.project.setProperty ("mixerConsole", false, nullptr);
+            main.project.setProperty ("mixerBusComp", false, nullptr);
+            main.closeMixer();
+            pump (main, 100);
+            save (main, "white-arrange.png");
+            {
+                auto t0 = main.project.getChild (0);
+                ConsoleStripWindow eq (t0, main.undoManager, [] (float*, int) { return 0; }, [] { return 48000.0; });
+                pump (main, 30);
+                save (eq, "white-strip-window.png");
+            }
             main.applyTheme ({});
             pump (main, 50);
         }

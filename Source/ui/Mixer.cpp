@@ -17,6 +17,9 @@ namespace
     double gainToDb (double g) { return g <= 0.0 ? minDb : juce::jmax (minDb, juce::Decibels::gainToDecibels (g)); }
     double dbToGain (double db) { return db <= minDb + 0.01 ? 0.0 : juce::Decibels::decibelsToGain (db); }
 
+    /** Text on the strip's slots: white on the dark slots, dark ink on Studio White's light ones. */
+    juce::Colour slotInk (bool used) { return theme::whiteSkin() ? (used ? theme::stripInk : theme::stripInkDim) : (used ? juce::Colours::white : juce::Colour (0xffd6d9dc)); }
+
     juce::String insertName (const juce::ValueTree& insert)
     {
         if (insert[ids::kind].toString() == model::pluginKind)
@@ -360,6 +363,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     };
     addAndMakeVisible (fader);
     addAndMakeVisible (meter);
+    meter.usePhotoLeds (isMaster());   // the master's meter: the photo's blue LEDs (Studio White)
 
     if (! isMaster() && ! isVca())
     {
@@ -997,7 +1001,7 @@ void ChannelStrip::refresh()
         const auto bus = model::findById (project, send[ids::target].toString());
         sendButtons[i]->setButtonText (bus.isValid() ? (bus[ids::name].toString() + ((bool) send[ids::pre] ? " (pre)" : ""))
                                                      : juce::String ("Send"));
-        sendButtons[i]->setColour (juce::TextButton::textColourOffId, bus.isValid() ? juce::Colours::white : juce::Colour (0xffd6d9dc));
+        sendButtons[i]->setColour (juce::TextButton::textColourOffId, slotInk (bus.isValid()));
         sendButtons[i]->setColour (juce::TextButton::buttonColourId, bus.isValid() ? theme::stripSlotOn : theme::stripSlot);
         sendLevels[i]->setEnabled (bus.isValid());
         sendLevels[i]->setValue (gainToDb (send.getProperty (ids::level, 0.0)), juce::dontSendNotification);
@@ -1014,14 +1018,21 @@ void ChannelStrip::refresh()
             b->setButtonText (insertName (insert));
             b->setTooltip (insertName (insert) + (off ? " (bypassed)" : "") + ". Click to open; right-click for bypass, replace and remove.");
             b->setColour (juce::TextButton::buttonColourId, off ? theme::stripSlot : theme::stripSlotOn);
-            b->setColour (juce::TextButton::textColourOffId, off ? juce::Colour (0xff8d9196) : juce::Colours::white);
+            b->setColour (juce::TextButton::textColourOffId, off ? juce::Colour (0xff8d9196) : slotInk (true));
         }
         else
         {
             b->setButtonText ({});
             b->setColour (juce::TextButton::buttonColourId, theme::stripSlot);
-            b->setColour (juce::TextButton::textColourOffId, juce::Colour (0xffd6d9dc));
+            b->setColour (juce::TextButton::textColourOffId, slotInk (false));
         }
+    }
+
+    // Input and Output slots follow the skin too.
+    for (auto* b : { &inputSlot, &outputSlot })
+    {
+        b->setColour (juce::TextButton::buttonColourId, theme::stripSlotOn);
+        b->setColour (juce::TextButton::textColourOffId, theme::whiteSkin() ? theme::stripInk : juce::Colour (0xffbfe0ff));
     }
 
     repaint();
@@ -2101,7 +2112,7 @@ void MixerPanel::setMasterLevels (float left, float right)
 
 void MixerPanel::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour (0xff2b2a2d));   // the console's frame, behind the strips
+    g.fillAll (theme::whiteSkin() ? theme::consoleDark : juce::Colour (0xff2b2a2d));   // the console's frame, behind the strips
 
     const auto header = getLocalBounds().removeFromTop (headerHeight).toFloat();
     g.setGradientFill (juce::ColourGradient (theme::toolbar.brighter (0.1f), 0.0f, 0.0f, theme::toolbarDark, 0.0f, header.getBottom(), false));

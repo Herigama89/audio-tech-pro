@@ -291,6 +291,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     addAndMakeVisible (vScroll);
     addAndMakeVisible (inputMeter);
     addAndMakeVisible (outputMeter);
+    outputMeter.usePhotoLeds (true);   // the main output: the photo's blue LEDs (Studio White)
 
     hScroll.addListener (this);
     vScroll.addListener (this);

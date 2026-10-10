@@ -38,7 +38,7 @@ Inspector::Inspector (MixerPanel& m)
     {
         b->setWantsKeyboardFocus (false);
         b->setColour (juce::TextButton::buttonColourId, theme::slotDark.brighter (0.15f));
-        b->setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+        b->setColour (juce::TextButton::textColourOffId, theme::text);
         addAndMakeVisible (b);
     }
 
@@ -496,7 +496,7 @@ int Inspector::boxesHeight() const
 
 void Inspector::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour (0xff2b2a2d));
+    g.fillAll (theme::whiteSkin() ? theme::consoleShade : juce::Colour (0xff2b2a2d));
 
     auto header = getLocalBounds().removeFromTop (headerHeight);
     g.setColour (theme::toolbarDark);
