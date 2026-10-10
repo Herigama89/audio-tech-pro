@@ -232,6 +232,16 @@ public:
         setAutomationOverride (slot, pan, std::numeric_limits<float>::quiet_NaN());
     }
 
+    /** A fader or pan moved: the engine plays the new value straight away, without a new graph
+        (moving a fader no longer rebuilds everything). Cleared when the next graph arrives, which
+        carries the value itself. */
+    void setMasterMixValue (float value) noexcept { masterMix.store (value); }
+    void setMixValue (int slot, bool pan, float value) noexcept
+    {
+        if (juce::isPositiveAndBelow (slot, PlaybackGraph::maxTracks))
+            (pan ? panMix : volumeMix)[(size_t) slot].store (value);
+    }
+
     /** Renders [start, end) offline and writes each listed graph slot's own output
         (after its plugins, fader and pan) to its own file: stems, or a bounce in
         place. Between begin/endOfflineRender. */
@@ -379,6 +389,8 @@ private:
     juce::StringArray inputLabels;
     std::atomic<ScreenAudioTap*> screenTap { nullptr };
     std::array<std::atomic<float>, PlaybackGraph::maxTracks> volumeOverride {}, panOverride {};   // NaN: none (set in the constructor)
+    std::array<std::atomic<float>, PlaybackGraph::maxTracks> volumeMix {}, panMix {};             // NaN: the graph's own value
+    std::atomic<float> masterMix { std::numeric_limits<float>::quiet_NaN() };
     bool measuring = false;                       // only while measureMix renders
     juce::AudioBuffer<float>* stemCapture = nullptr;   // only while renderStems renders: 2 channels per slot
     bool stemBeforeFader = false;

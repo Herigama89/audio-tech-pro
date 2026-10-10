@@ -172,6 +172,17 @@ private:
     juce::ValueTree dragPoint;
     int dragPointTrack = -1;
     int dropHighlightTrack = -2; // -2: none, -1 / out of range: "new track" zone
+
+    /** Whether a region's file is there (checked on disk at most every two seconds, not on every repaint). */
+    bool fileExists (const juce::File& file)
+    {
+        const auto now = juce::Time::getMillisecondCounter();
+        auto& entry = fileChecks[file.getFullPathName()];
+        if (entry.second == 0 || now - entry.second > 2000)
+            entry = { file.existsAsFile(), now == 0 ? 1u : now };
+        return entry.first;
+    }
+    std::map<juce::String, std::pair<bool, juce::uint32>> fileChecks;
 };
 
 } // namespace riff

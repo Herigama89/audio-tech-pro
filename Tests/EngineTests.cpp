@@ -2123,3 +2123,58 @@ TEST_CASE ("Audio regions: transpose, fine tune and Smart Tempo shape how they p
     CHECK (std::abs (RegionVariants::render (sine, 48000.0, { 0.0, 2.0, true }).getNumSamples() - 96000) < 10);
     CHECK (RegionVariants::render (sine, 48000.0, { 3.0, 1.0, false }).getNumSamples() == 48000);
 }
+
+TEST_CASE ("Moving a fader or pan is heard at once, without rebuilding the graph", "[engine]")
+{
+    Fixture f;
+    const auto loud = writeConstantWav (f.temp.dir.getChildFile ("loud.wav"), 48000.0, 96000, 0.5f);
+    auto a = model::addTrack (f.project, "A", nullptr);
+    model::addRegion (a, loud, 0.0, 2.0, nullptr);
+    f.player.setProject (f.project);
+    f.engine.play();
+    renderLeft (f.engine, 4800);
+
+    // No rebuildNow() here: the change goes straight to the engine.
+    a.setProperty (ids::volume, 0.5, nullptr);
+    a.setProperty (ids::pan, -1.0, nullptr);
+    renderLeft (f.engine, 4800);
+    juce::AudioBuffer<float> out (2, 256);
+    f.engine.render (nullptr, 0, out.getArrayOfWritePointers(), 2, 256);
+    CHECK_THAT (out.getSample (0, 100), WithinAbs (0.5f * 0.5f * 0.8f, 1e-4));
+    CHECK_THAT (out.getSample (1, 100), WithinAbs (0.0f, 1e-4));
+
+    // A later rebuild keeps the same values.
+    f.player.rebuildNow();
+    renderLeft (f.engine, 4800);
+    f.engine.render (nullptr, 0, out.getArrayOfWritePointers(), 2, 256);
+    CHECK_THAT (out.getSample (0, 100), WithinAbs (0.5f * 0.5f * 0.8f, 1e-4));
+}
+
+TEST_CASE ("Benchmark: rebuilding the playback graph with many tracks", "[.bench]")
+{
+    Fixture f;
+    const auto loop = writeConstantWav (f.temp.dir.getChildFile ("loop.wav"), 48000.0, 96000, 0.1f);
+    for (int t = 0; t < 64; ++t)
+    {
+        auto track = model::addTrack (f.project, "T" + juce::String (t), nullptr, -1, t % 2 ? model::instrumentKind : model::audioKind);
+        for (int r = 0; r < 20; ++r)
+        {
+            if (t % 2)
+            {
+                auto region = model::addMidiRegion (track, r * 4.0, 4.0, nullptr);
+                for (int n = 0; n < 32; ++n)
+                    model::addNote (region, 60 + n % 12, n * 0.125, 0.1, 100, nullptr);
+            }
+            else
+                model::addRegion (track, loop, r * 2.0, 2.0, nullptr);
+        }
+    }
+    f.player.setProject (f.project);
+    f.cache.waitUntilIdle (5000);
+    f.player.rebuildNow();
+    const auto t0 = juce::Time::getMillisecondCounterHiRes();
+    for (int i = 0; i < 20; ++i)
+        f.player.rebuildNow();
+    const auto ms = (juce::Time::getMillisecondCounterHiRes() - t0) / 20.0;
+    WARN ("one rebuild with 64 tracks: " << ms << " ms");
+}

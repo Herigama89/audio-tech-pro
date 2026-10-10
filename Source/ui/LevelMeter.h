@@ -14,8 +14,13 @@ public:
 
     void push (float left, float right)
     {
+        // Silent and already dark: nothing to draw (many quiet meters cost nothing).
+        if (left < 1.0e-4f && right < 1.0e-4f && levelL < 1.0e-4f && levelR < 1.0e-4f && clipHold == 0)
+            return;
         levelL = juce::jmax (left,  levelL * 0.85f);
         levelR = juce::jmax (right, levelR * 0.85f);
+        if (levelL < 1.0e-4f) levelL = 0.0f;
+        if (levelR < 1.0e-4f) levelR = 0.0f;
         if (juce::jmax (left, right) >= 0.999f)
             clipHold = 60;   // the clip light stays on for about two seconds
         else if (clipHold > 0)

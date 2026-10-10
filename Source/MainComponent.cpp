@@ -1966,8 +1966,6 @@ void MainComponent::timerCallback()
         smartControls->setTrack (project, model::findById (project, timeline.selectedTrackId));
     updateScreenRecording();
 
-    if (pianoRoll.isVisible())
-        pianoRoll.repaint();
 
     const auto levels = engine.takeLevels();
     inputMeter.push (levels.inL, levels.inR);
@@ -2026,8 +2024,18 @@ void MainComponent::timerCallback()
 
     if (! juce::exactlyEqual (playhead, lastPaintedPlayhead))
     {
+        // Only the strips where the playhead was and is now are drawn again (not every track and region).
+        const auto oldX = juce::roundToInt (timeline.timeToX (lastPaintedPlayhead)), newX = juce::roundToInt (timeline.timeToX (playhead));
         lastPaintedPlayhead = playhead;
-        canvas.repaint();
+        if (engine.isRecording())
+            canvas.repaint();   // the new region grows as you record
+        else
+        {
+            canvas.repaint (oldX - 8, 0, 16, canvas.getHeight());
+            canvas.repaint (newX - 8, 0, 16, canvas.getHeight());
+        }
+        if (pianoRoll.isVisible())
+            pianoRoll.repaint();   // (its playhead; the piano roll redraws when the song moves)
     }
 }
 

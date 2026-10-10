@@ -40,6 +40,19 @@ open "build/AudioTechPro_artefacts/Debug/Audio Tech Pro.app"
 - The first configure downloads JUCE and Catch2, which takes a few minutes.
 - After you change code, you only need `cmake --build build` again.
 
+### For making music: the Release build (much faster)
+
+The Debug build above is for finding bugs: nothing in it is optimised, so with
+many tracks and plugins it gets slow. To use the app, build Release once:
+
+```bash
+cmake -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-release
+open "build-release/AudioTechPro_artefacts/Release/Audio Tech Pro.app"
+```
+
+After an update, `cmake --build build-release` again.
+
 ### A Mac app for Apple Silicon and Intel (universal)
 
 ```bash

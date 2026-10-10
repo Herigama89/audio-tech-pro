@@ -603,6 +603,27 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
     return graph;
 }
 
+bool ProjectPlayer::applyMixMove (const juce::ValueTree& tree, const juce::Identifier& p)
+{
+    // The project's master fader
+    if (p == ids::masterGain && tree == project)
+    {
+        engine.setMasterMixValue ((float) (double) tree.getProperty (ids::masterGain, 0.8));
+        return true;
+    }
+    // A track's fader or pan (not a VCA's: that moves other tracks, so the graph is rebuilt)
+    if ((p != ids::volume && p != ids::pan) || ! tree.hasType (ids::TRACK) || model::isVcaTrack (tree) || tree.getParent() != project)
+        return false;
+    const auto it = slots.find (tree[ids::id].toString());
+    if (it == slots.end())
+        return false;
+    if (p == ids::pan)
+        engine.setMixValue (it->second, true, (float) juce::jlimit (-1.0, 1.0, (double) tree.getProperty (ids::pan, 0.0)));
+    else
+        engine.setMixValue (it->second, false, (float) (double) tree.getProperty (ids::volume, 1.0));
+    return true;
+}
+
 void ProjectPlayer::rebuildNow()
 {
     cancelPendingUpdate();

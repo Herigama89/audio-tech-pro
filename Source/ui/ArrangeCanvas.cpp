@@ -932,7 +932,9 @@ juce::Rectangle<float> ArrangeCanvas::regionBounds (const juce::ValueTree& regio
 void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& region, int trackIndex)
 {
     const auto bounds = regionBounds (region, trackIndex);
-    const auto visible = bounds.getIntersection (getLocalBounds().toFloat().withTrimmedTop ((float) TimelineState::rulerHeight));
+    // Only what's being repainted (the playhead's strip, say) is drawn.
+    const auto visible = bounds.getIntersection (getLocalBounds().toFloat().withTrimmedTop ((float) TimelineState::rulerHeight))
+                               .getIntersection (g.getClipBounds().toFloat().expanded (2.0f));
 
     if (visible.isEmpty())
         return;
@@ -942,7 +944,7 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
     const bool selected = timeline.isRegionSelected (region[ids::id].toString());
     const juce::File file (region[ids::file].toString());
     const bool isMidi = model::isMidiRegion (region);
-    const bool missing = ! isMidi && ! file.existsAsFile();
+    const bool missing = ! isMidi && ! fileExists (file);
 
     // Solid body in a deep shade of the track colour, a brighter name bar on top.
     const auto base = missing ? theme::danger : colour;

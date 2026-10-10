@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <set>
 #include "LevelMeter.h"
 #include "ConsoleLook.h"
 #include "BusCompConsolePanel.h"
@@ -283,11 +284,17 @@ public:
     bool showsBusComp() const { return (bool) project.getProperty ("mixerBusComp", false); }
 
 private:
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { triggerAsyncUpdate(); }
+    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& p) override { touched (tree, p, false); }
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree&) override        { changed (parent); }
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree&, int) override { changed (parent); }
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override         { changed (parent); }
     void changed (const juce::ValueTree& parent);
+
+    /** Only the strips a change is about are refreshed (moving one fader with 64 tracks
+        doesn't redo all 64); edits to regions and notes don't touch the mixer at all. */
+    void touched (const juce::ValueTree& tree, const juce::Identifier& property, bool structural);
+    std::set<juce::String> dirtyOwners;   // track ids (or "master") whose strips need refreshing
+    bool refreshAll = true, rowsMayChange = true;
 
     void handleAsyncUpdate() override;
     void timerCallback() override;

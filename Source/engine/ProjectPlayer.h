@@ -70,8 +70,10 @@ public:
     std::unique_ptr<PlaybackGraph> buildGraph (double sampleRate);
 
 private:
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier& p) override
+    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& p) override
     {
+        if (applyMixMove (tree, p))
+            return;   // a fader or pan: played straight away, no new graph
         if (p != ids::height && p != ids::hidden && p != ids::showAutomation && p != ids::automationParam && p != ids::collapsed && p != ids::icon && p != ids::takesOpen && p != ids::smartControls)   // view settings: nothing to hear
             triggerAsyncUpdate();
     }
@@ -84,6 +86,7 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
 
     int slotFor (const juce::String& trackId);
+    bool applyMixMove (const juce::ValueTree& tree, const juce::Identifier& p);
 
     AudioEngine& engine;
     AudioFileCache& cache;

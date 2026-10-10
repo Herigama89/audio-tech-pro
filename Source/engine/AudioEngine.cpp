@@ -12,7 +12,7 @@ AudioEngine::AudioEngine()
     for (auto& slot : takeSlots)
         slot.store (nullptr);
 
-    for (auto* overrides : { &volumeOverride, &panOverride })
+    for (auto* overrides : { &volumeOverride, &panOverride, &volumeMix, &panMix })
         for (auto& v : *overrides)
             v.store (std::numeric_limits<float>::quiet_NaN());
 
@@ -215,6 +215,12 @@ void AudioEngine::setGraph (std::unique_ptr<PlaybackGraph> newGraph)
                 trackDelays[(size_t) track.slot] = std::make_unique<DelayLine>();
 
     auto* old = currentGraph.exchange (newGraph.release(), std::memory_order_acq_rel);
+
+    // The new graph has the faders' values in it.
+    masterMix.store (std::numeric_limits<float>::quiet_NaN(), std::memory_order_relaxed);
+    for (auto* mix : { &volumeMix, &panMix })
+        for (auto& v : *mix)
+            v.store (std::numeric_limits<float>::quiet_NaN(), std::memory_order_relaxed);
 
     // The audio thread may be mid-block with `old`. It is safe to free once at
     // least one complete callback has started after this point.
@@ -865,7 +871,8 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
     if (graph != nullptr)
         masterGain.setTargetValue ((isPlayingNow && ! graph->masterVolumeAutomation.empty())
                                        ? graph->masterVolumeAutomation.valueAt (playheadSample.load())
-                                       : graph->masterGain);
+                                       : (std::isnan (masterMix.load (std::memory_order_relaxed)) ? graph->masterGain
+                                                                                                 : masterMix.load (std::memory_order_relaxed)));
 
     // Live MIDI that arrived since the last block lands at its start.
     liveMidi.clear();
@@ -1139,10 +1146,14 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
     // A control being written as automation right now wins over the curve.
     const auto volumeLive = volumeOverride[(size_t) track.slot].load (std::memory_order_relaxed);
     const auto panLive = panOverride[(size_t) track.slot].load (std::memory_order_relaxed);
+    const auto volumeMoved = volumeMix[(size_t) track.slot].load (std::memory_order_relaxed);
+    const auto panMoved = panMix[(size_t) track.slot].load (std::memory_order_relaxed);
     const auto volume = ! std::isnan (volumeLive) ? volumeLive
-                      : (playingNow && ! track.volumeAutomation.empty()) ? track.volumeAutomation.valueAt (blockStart) : track.volume;
+                      : (playingNow && ! track.volumeAutomation.empty()) ? track.volumeAutomation.valueAt (blockStart)
+                      : ! std::isnan (volumeMoved) ? volumeMoved : track.volume;
     const auto pan = ! std::isnan (panLive) ? panLive
-                   : (playingNow && ! track.panAutomation.empty()) ? track.panAutomation.valueAt (blockStart) : track.pan;
+                   : (playingNow && ! track.panAutomation.empty()) ? track.panAutomation.valueAt (blockStart)
+                   : ! std::isnan (panMoved) ? panMoved : track.pan;
     const auto gain = volume * track.vcaGain;
 
     if (playingNow)

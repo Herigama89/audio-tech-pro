@@ -1883,7 +1883,66 @@ void MixerPanel::changed (const juce::ValueTree& parent)
     if (parent == project)
         needsRebuild = true; // a track was added, removed or moved
 
-    triggerAsyncUpdate();
+    touched (parent, {}, true);
+}
+
+void MixerPanel::touched (const juce::ValueTree& tree, const juce::Identifier& property, bool structural)
+{
+    if (tree == project)
+    {
+        if (property == ids::masterGain)
+            dirtyOwners.insert (model::masterOwner);
+        else if (! structural || needsRebuild)
+            refreshAll = true;
+        triggerAsyncUpdate();
+        return;
+    }
+
+    // Which part of the project: a track (or something in it), or the mixer's chains.
+    juce::ValueTree t = tree;
+    while (t.isValid() && t.getParent() != project)
+        t = t.getParent();
+    if (! t.isValid())
+        return;
+
+    if (t.hasType (ids::TRACK))
+    {
+        if (tree != t)
+            return;   // a region or a note: nothing on the strips changes
+        if (property == ids::name || property == ids::kind || property == ids::colour)
+            refreshAll = true;   // (bus names show on other strips' sends and outputs)
+        else
+            dirtyOwners.insert (t[ids::id].toString());
+        triggerAsyncUpdate();
+        return;
+    }
+
+    if (t.hasType (ids::MIXER))
+    {
+        // An insert, a send or a chain: the strip it belongs to.
+        juce::ValueTree chain = tree;
+        while (chain.isValid() && ! chain.hasType (ids::CHAIN))
+            chain = chain.getParent();
+        if (! chain.isValid())
+        {
+            if (tree.hasType (ids::LANE) || (tree.getParent().isValid() && tree.getParent().hasType (ids::LANE)))
+                return;   // automation points: the strips follow them on their own
+            refreshAll = true;
+        }
+        else
+        {
+            auto owner = chain[ids::owner].toString();
+            if (owner.startsWith ("strip:"))
+                owner = owner.fromFirstOccurrenceOf ("strip:", false, false);
+            if (owner == model::busCompOwner)
+                refreshAll = true;
+            else
+                dirtyOwners.insert (owner);
+        }
+        if (structural || tree.hasType (ids::CHAIN))
+            rowsMayChange = true;
+        triggerAsyncUpdate();
+    }
 }
 
 void MixerPanel::setStripCandidates (const juce::Array<juce::PluginDescription>& found)
@@ -1924,6 +1983,25 @@ void MixerPanel::refreshConsoleBox()
 
 void MixerPanel::handleAsyncUpdate()
 {
+    const bool all = std::exchange (refreshAll, false) || needsRebuild;
+    const auto owners = std::exchange (dirtyOwners, {});
+
+    // A fader, pan, mute, insert or send on some tracks: just their strips.
+    if (! all && ! std::exchange (rowsMayChange, false))
+    {
+        auto refreshIfDirty = [&owners] (ChannelStrip* s)
+        {
+            if (s != nullptr && owners.count (s->getOwnerId()) > 0)
+                s->refresh();
+        };
+        for (auto* s : strips)
+            refreshIfDirty (s);
+        refreshIfDirty (masterStrip.get());
+        for (auto* s : extraStrips)
+            refreshIfDirty (s);
+        return;
+    }
+
     // An insert went in the last slot (or a send in the last send): every strip gets another.
     if (updateRows())
     {
@@ -2048,6 +2126,8 @@ void MixerPanel::timerCallback()
     const auto playhead = engine.getPlayheadSeconds();
     for (auto* s : strips)
     {
+        if (! isShowing())
+            break;   // (just the Inspector's strips while the mixer is closed)
         const auto [l, r] = levelOf (s->getOwnerId());
         s->pushLevels (l, r);
         s->pushGainReduction (reductionOf (s->getOwnerId()));
