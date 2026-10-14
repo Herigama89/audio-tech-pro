@@ -7,7 +7,7 @@ namespace riff
 {
 
 /** A stereo peak meter with instant attack and gentle release, -60..0 dBFS. */
-class LevelMeter final : public juce::Component
+class LevelMeter final : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     explicit LevelMeter (juce::String labelText) : label (std::move (labelText)) {}
@@ -27,6 +27,10 @@ public:
             --clipHold;
         repaint();
     }
+
+    /** Right-click: the meter's menu (e.g. hide the meters). */
+    std::function<void()> onMenu;
+    void mouseUp (const juce::MouseEvent& e) override { if (e.mods.isPopupMenu() && onMenu) onMenu(); }
 
     /** The master meter in Studio White: the photo's blue LED segments and red clip light. */
     void usePhotoLeds (bool shouldUse) { photoLeds = shouldUse; repaint(); }
@@ -51,6 +55,13 @@ public:
 
         auto bars = housing.reduced (2.0f, 3.0f);
         const auto barWidth = (bars.getWidth() - 2.0f) / 2.0f;
+        if (photoLeds && theme::xenonSkin())
+        {
+            drawXenonBar (g, bars.removeFromLeft (barWidth), levelL, clipHold > 0);
+            bars.removeFromLeft (2.0f);
+            drawXenonBar (g, bars.removeFromLeft (barWidth), levelR, clipHold > 0);
+            return;
+        }
         if (photoLeds && theme::whiteSkin())
         {
             drawPhotoBar (g, bars.removeFromLeft (barWidth), levelL, clipHold > 0);
@@ -90,6 +101,27 @@ private:
             }
             g.setColour (on ? colour : colour.withAlpha (0.13f));
             g.fillRect (r.getX(), y, r.getWidth(), segment);
+        }
+    }
+
+    /** Xenon: the picture's teal meter column, lit from the bottom to the level (the rest faint); red at the top when it clipped. */
+    static void drawXenonBar (juce::Graphics& g, juce::Rectangle<float> r, float linear, bool clipped)
+    {
+        const auto image = skin::xenonMeter();
+        const auto clipArea = r.removeFromTop (juce::jmax (3.0f, r.getWidth()));
+        g.setColour (theme::meterRed.withAlpha (clipped ? 1.0f : 0.18f));
+        g.fillRect (clipArea);
+        r.removeFromTop (2.0f);
+        const auto lit = juce::jlimit (0.0f, 1.0f, juce::jmap (juce::Decibels::gainToDecibels (linear, -60.0f), -60.0f, 0.0f, 0.0f, 1.0f));
+        juce::Graphics::ScopedSaveState state (g);
+        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+        g.setOpacity (0.16f);
+        g.drawImage (image, r, juce::RectanglePlacement::stretchToFit);
+        if (lit > 0.0f)
+        {
+            g.reduceClipRegion (r.withTop (r.getBottom() - r.getHeight() * lit).getSmallestIntegerContainer());
+            g.setOpacity (1.0f);
+            g.drawImage (image, r, juce::RectanglePlacement::stretchToFit);
         }
     }
 

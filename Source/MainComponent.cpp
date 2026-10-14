@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "ui/PluginHostPanel.h"
+#include "ui/Skin.h"
 #include "ui/ToolIcons.h"
 #include "ui/PluginPicker.h"
 #include "model/Project.h"
@@ -33,7 +34,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     // --- Toolbar ----------------------------------------------------------------
     for (auto* b : std::initializer_list<juce::Button*> { &fileButton, &undoButton, &redoButton, &addTrackButton, &settingsButton,
                                                           &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
-                                                          &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton, &replaceButton,
+                                                          &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton, &replaceButton, &clipStopButton,
                                                           &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton, &screenButton,
                                                           &inspectorButton, &libraryButton, &smartButton, &helpButton, &toolbarButton,
                                                           &listButton, &notesButton, &loopsButton, &browserButton })
@@ -57,6 +58,8 @@ MainComponent::MainComponent (bool openAudioDevice)
     bind (clickButton, commands::toggleMetronome);
     bind (punchButton, commands::toggleAutopunch);
     bind (replaceButton, commands::toggleReplace);
+    bind (clipStopButton, commands::toggleStopOnClip);
+    clipStopButton.setTooltip ("Clip Stop: recording stops by itself if an input clips (hits 0 dB)");
     punchButton.setTooltip ("Autopunch: record only between the punch locators (the red bar in the ruler, under the cycle)");
     replaceButton.setTooltip ("Replace: a recording replaces the parts of regions it covers");
     bind (mixerButton, commands::showMixer);
@@ -294,6 +297,16 @@ MainComponent::MainComponent (bool openAudioDevice)
     addAndMakeVisible (performanceMeter);
     performanceMeter.onClick = [this] { showPerformanceWindow(); };
     outputMeter.usePhotoLeds (true);   // the main output: the photo's blue LEDs (Studio White)
+    for (auto* m : { &inputMeter, &outputMeter })
+    {
+        m->setTooltip ("Input and output levels. Right-click to hide them (View > Show Input and Output Meters brings them back).");
+        m->onMenu = [this]
+        {
+            juce::PopupMenu menu;
+            menu.addCommandItem (&commandManager, commands::toggleMeters, "Show Input and Output Meters");
+            menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+        };
+    }
 
     hScroll.addListener (this);
     vScroll.addListener (this);
@@ -461,6 +474,8 @@ MainComponent::MainComponent (bool openAudioDevice)
     autosaveMinutes = appProperties.getUserSettings()->getIntValue ("autosaveMinutes", 2);
     engine.setRecordBitDepth (appProperties.getUserSettings()->getIntValue ("recordBitDepth", 24));
 
+    engine.setStopOnClip (appProperties.getUserSettings()->getBoolValue ("stopOnClip", false));
+    clipStopButton.setToggleState (engine.getStopOnClip(), juce::dontSendNotification);
     recentProjects.setMaxNumberOfItems (12);
     recentProjects.restoreFromString (appProperties.getUserSettings()->getValue ("recentProjects"));
 
@@ -737,7 +752,7 @@ void MainComponent::applyPanelVisibility()
         c->setVisible (showControlBar);
     for (auto* c : std::initializer_list<juce::Component*> { &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
                                                             &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton,
-                                                            &replaceButton, &mixerButton, &editorButton, &keysButton, &generateButton,
+                                                            &replaceButton, &clipStopButton, &mixerButton, &editorButton, &keysButton, &generateButton,
                                                             &claudeButton, &screenButton, &inspectorButton, &libraryButton, &smartButton,
                                                             &helpButton, &toolbarButton, &listButton, &notesButton, &loopsButton, &browserButton })
         c->setVisible (showControlBar);
@@ -787,6 +802,17 @@ void MainComponent::paint (juce::Graphics& g)
     g.setGradientFill (juce::ColourGradient (theme::toolbar.brighter (0.08f), 0.0f, bar.getY(),
                                              theme::toolbarDark, 0.0f, bar.getBottom(), false));
     g.fillRect (bar);
+    if (theme::xenonSkin())
+    {
+        // Xenon: the picture's carved bar, along the control bar.
+        const auto ornament = skin::xenonBar();
+        const auto h = bar.getHeight();
+        const auto w = h * (float) ornament.getWidth() / (float) ornament.getHeight();
+        juce::Graphics::ScopedSaveState s (g);
+        g.setOpacity (0.85f);
+        for (float x = 0.0f; x < bar.getWidth(); x += w)
+            g.drawImage (ornament, juce::Rectangle<float> (x, bar.getY(), w, h));
+    }
     g.setColour (juce::Colours::black.withAlpha (0.25f));
     g.fillRect (0, toolbarTopRow, getWidth(), 1);
     g.setColour (juce::Colours::white.withAlpha (0.05f));
@@ -819,7 +845,7 @@ void MainComponent::paint (juce::Graphics& g)
 
     // Captions under the keys
     for (auto* b : std::initializer_list<juce::Button*> { &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
-                                                          &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton, &replaceButton,
+                                                          &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton, &replaceButton, &clipStopButton,
                                                           &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton, &screenButton,
                                                           &inspectorButton, &libraryButton, &smartButton, &helpButton, &toolbarButton,
                                                           &listButton, &notesButton, &loopsButton, &browserButton })
@@ -868,7 +894,7 @@ void MainComponent::resized()
 
         const std::initializer_list<juce::Component*> transport { &rewindButton, &backBarButton, &forwardButton, &stopButton,
                                                                   &playButton, &recordButton, &cycleButton, &countInButton, &clickButton,
-                                                                  &punchButton, &replaceButton };
+                                                                  &punchButton, &replaceButton, &clipStopButton };
         const int totalWidth = (int) transport.size() * (keyWidth + gap) + 14;
         int x = getWidth() / 2 - totalWidth / 2;
 
@@ -2061,6 +2087,18 @@ void MainComponent::timerCallback()
     countInButton.setToggleState ((bool) project[ids::countIn], juce::dontSendNotification);
     punchButton.setToggleState ((bool) project[ids::autopunch], juce::dontSendNotification);
     replaceButton.setToggleState ((bool) project[ids::replaceMode], juce::dontSendNotification);
+
+    // An input clipped while recording: stop (Clip Stop on), or at least say so.
+    if (engine.isRecording() && engine.takeRecordingClipped())
+    {
+        if (engine.getStopOnClip())
+        {
+            finishRecording();
+            statusLabel.setText ("Recording stopped: the input clipped (Clip Stop is on). Turn the input gain down and record again.", juce::dontSendNotification);
+        }
+        else
+            statusLabel.setText ("The input clipped while recording (hit 0 dB). Turn on Clip Stop to stop recording when that happens.", juce::dontSendNotification);
+    }
 
     // Autopunch: recording stops at the punch-out locator (the region is cut exactly there).
     if (engine.isRecording() && (bool) project[ids::autopunch] && ! recordCycleOn

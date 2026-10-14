@@ -1,4 +1,5 @@
 #include "BusCompConsolePanel.h"
+#include "Skin.h"
 #include "Theme.h"
 #include "ConsoleLook.h"
 #include "../model/Project.h"
@@ -376,6 +377,18 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
         const juce::Rectangle<float> plate { 6.0f, 6.0f, 624.0f, 1472.0f };
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xff36383c), 0.0f, plate.getY(), juce::Colour (0xff222326), 0.0f, plate.getBottom(), false));
         g.fillRoundedRectangle (plate, 18.0f);
+        if (theme::xenonSkin())
+        {
+            // Xenon: the picture's dark panel texture on the faceplate.
+            juce::Graphics::ScopedSaveState s (g);
+            juce::Path rounded;
+            rounded.addRoundedRectangle (plate, 18.0f);
+            g.reduceClipRegion (rounded);
+            const auto tex = skin::xenonPanel();
+            for (float y = plate.getY(); y < plate.getBottom(); y += (float) tex.getHeight() * 2.0f)
+                for (float x = plate.getX(); x < plate.getRight(); x += (float) tex.getWidth() * 2.0f)
+                    g.drawImage (tex, juce::Rectangle<float> (x, y, (float) tex.getWidth() * 2.0f, (float) tex.getHeight() * 2.0f));
+        }
         g.setColour (juce::Colours::white.withAlpha (0.07f));
         g.drawRoundedRectangle (plate.reduced (2.0f), 16.0f, 2.0f);
         g.setColour (juce::Colours::black.withAlpha (0.8f));

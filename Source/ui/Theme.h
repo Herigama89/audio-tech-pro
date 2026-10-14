@@ -34,6 +34,7 @@ namespace riff::theme
     inline juce::Colour meterGreen { 0xff45c25a };   // meters: green, then yellow near the top
     inline juce::Colour meterAmber { 0xffe8c53c };
     inline juce::Colour meterRed   { 0xffe2463f };   // the top of the meters (clipping)
+    inline juce::Colour waveform   { 0xffeef3f8 };   // waveforms in regions (0: drawn in the track's colour)
 
     // --- Key and header surfaces (were cream; now dark rubber) ----------------
     inline juce::Colour cream      { 0xff3b3d41 };
@@ -86,7 +87,7 @@ namespace riff::theme
     // settings: the colours above are worked out from a skin's own palette and
     // these adjustments, and change while the app runs.
     //==========================================================================
-    enum class Skin { studio, flat, white };   // the picture's grey console, a flat dark look, or Studio White (your photos' faders, knobs and meters)
+    enum class Skin { studio, flat, white, xenon };   // the picture's grey console, a flat dark look, or Studio White (your photos' faders, knobs and meters)
 
     struct Settings
     {
@@ -100,6 +101,12 @@ namespace riff::theme
         float meterBrightness = 1.0f;  // 0.3..1.6
         float gridBrightness = 1.0f;   // 0..2: bar and beat lines
         juce::uint32 meterLow = 0, meterMid = 0, meterPeak = 0;   // your own meter colours (ARGB); 0: the skin's
+
+        // Waveforms: 0 the track's colour, 1 one colour (waveA), 2 a gradient across the region (waveA to waveB);
+        // -1: the skin's own. Glass regions: dark see-through regions with a lit outline (instead of filled in the track's colour).
+        int waveMode = -1;
+        juce::uint32 waveA = 0, waveB = 0;
+        int glassRegions = -1;   // -1: the skin's own, 0 off, 1 on
 
         juce::String toString() const;
         static Settings fromString (const juce::String&);
@@ -115,6 +122,15 @@ namespace riff::theme
 
     /** Studio White: a light console with the fader caps, knobs and LED meters cut from your photos. */
     bool whiteSkin();
+
+    /** Xenon: the dark glass console of your picture (its knobs, caps, slots, meters and textures). */
+    bool xenonSkin();
+
+    /** How waveforms and regions are drawn now (the settings, or the skin's own). */
+    int waveformMode();                 // 0 track colour, 1 one colour, 2 gradient
+    juce::Colour waveformA();
+    juce::Colour waveformB();
+    bool glassRegions();
 
     /** Every theme colour (to repaint controls that copied one when the theme changes). */
     std::vector<juce::Colour*> allColours();

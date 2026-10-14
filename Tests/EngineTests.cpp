@@ -276,18 +276,26 @@ TEST_CASE ("Recording writes the input to a WAV file", "[engine][record]")
     const auto live = f.engine.getLiveTakes();
     REQUIRE (live.size() == 1);
     CHECK_THAT (live[0].lengthSeconds, WithinAbs (1.0, 0.02));
+    // The live waveform: one peak per 512 samples, at the input's level (0.4 of 255); no clipping.
+    CHECK (live[0].peaks.size() == (size_t) (48000 / AudioEngine::peakBlock));
+    CHECK (std::abs ((int) live[0].peaks[10] - (int) (0.4f * 255.0f)) <= 1);
+    CHECK_FALSE (live[0].clipped);
+    CHECK_FALSE (f.engine.takeRecordingClipped());
+    renderWithInput (f.engine, 512, 1.0f);   // a sample at full scale
+    CHECK (f.engine.takeRecordingClipped());
+    CHECK (f.engine.getLiveTakes()[0].clipped);
 
     const auto takes = f.engine.stopRecording();
     CHECK_FALSE (f.engine.isRecording());
     REQUIRE (takes.size() == 1);
     CHECK (takes[0].trackId == "track-1");
     CHECK (takes[0].startSample == 0);
-    CHECK (takes[0].numSamples == 48000);
+    CHECK (takes[0].numSamples == 48000 + 512);
 
     auto reader = openReader (f.engine, file);
     REQUIRE (reader != nullptr);
     CHECK (reader->numChannels == 1);
-    CHECK (reader->lengthInSamples == 48000);
+    CHECK (reader->lengthInSamples == 48000 + 512);
     CHECK (reader->sampleRate == 48000.0);
 
     juce::AudioBuffer<float> data (1, 1000);

@@ -6,11 +6,12 @@ namespace riff
 ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme::Settings&)> callback, juce::PropertiesFile* presetStore)
     : settings (initial), onChange (std::move (callback)), store (presetStore)
 {
-    skinBox.addItemList ({ "Studio Grey (from your picture)", "Flat Dark (FL Studio style)", "Studio White (your fader, knob and meter photos)" }, 1);
+    skinBox.addItemList ({ "Studio Grey (from your picture)", "Flat Dark (FL Studio style)", "Studio White (your fader, knob and meter photos)",
+                           "Xenon (your dark glass console picture)" }, 1);
     skinBox.onChange = [this]
     {
         const auto index = skinBox.getSelectedItemIndex();
-        settings.skin = index == 2 ? theme::Skin::white : index == 1 ? theme::Skin::flat : theme::Skin::studio;
+        settings.skin = index == 3 ? theme::Skin::xenon : index == 2 ? theme::Skin::white : index == 1 ? theme::Skin::flat : theme::Skin::studio;
         changed();
     };
     addAndMakeVisible (skinBox);
@@ -49,6 +50,7 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
         { "High Contrast", { theme::Skin::flat, 0.0f, 0.6f, -0.2f, 0.8f, 0.6f, 50.0f, 1.3f, 1.4f } },
         { "Soft Light",    { theme::Skin::flat, 0.0f, 0.8f, 0.5f, -0.3f, 0.2f, 160.0f, 0.9f, 0.8f } },
         { "Studio White",  { theme::Skin::white, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f } },
+        { "Xenon",         { theme::Skin::xenon, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f } },
     };
     for (const auto& p : list)
     {
@@ -89,6 +91,32 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
         changed();
     };
     addAndMakeVisible (meterDefaultButton);
+
+    // Waveforms and regions
+    waveModeBox.addItemList ({ "Skin's own", "Track colour", "One colour", "Gradient" }, 1);
+    waveModeBox.setTooltip ("How waveforms are coloured: the track's colour, one colour of your own, or a gradient across each region");
+    waveModeBox.onChange = [this]
+    {
+        settings.waveMode = waveModeBox.getSelectedItemIndex() - 1;
+        changed();
+    };
+    addAndMakeVisible (waveModeBox);
+    const char* waveNames[] { "From", "To" };
+    for (int i = 0; i < 2; ++i)
+    {
+        waveButtons[i].setButtonText (waveNames[i]);
+        waveButtons[i].setTooltip (i == 0 ? "The waveform's colour (with Gradient, its colour at the left)" : "With Gradient: the waveform's colour at the right");
+        waveButtons[i].onClick = [this, i] { chooseMeterColour (3 + i); };
+        addAndMakeVisible (waveButtons[i]);
+    }
+    regionBox.addItemList ({ "Skin's own", "Filled", "Glass" }, 1);
+    regionBox.setTooltip ("Filled: regions in the track's colour. Glass: dark see-through regions with a lit outline.");
+    regionBox.onChange = [this]
+    {
+        settings.glassRegions = regionBox.getSelectedItemIndex() - 1;
+        changed();
+    };
+    addAndMakeVisible (regionBox);
 
     // Your presets
     if (store != nullptr)
@@ -138,14 +166,13 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
     }
 
     refreshControls();
-    setSize (460, 120 + (int) rows.size() * 34 + 110 + 40 + (store != nullptr ? 36 : 0));
+    setSize (460, 120 + (int) rows.size() * 34 + 110 + 40 + 68 + (store != nullptr ? 36 : 0));
 }
 
 void ThemePanel::chooseMeterColour (int which)
 {
     // A colour picker beside the button; the meters change as you pick.
-    auto& value = which == 0 ? settings.meterLow : which == 1 ? settings.meterMid : settings.meterPeak;
-    const auto current = value != 0 ? juce::Colour (value) : (which == 0 ? theme::meterGreen : which == 1 ? theme::meterAmber : theme::meterRed);
+    const auto current = colourNow (which);
 
     struct Picker final : juce::ColourSelector, juce::ChangeListener
     {
@@ -163,12 +190,35 @@ void ThemePanel::chooseMeterColour (int which)
     {
         if (safe == nullptr)
             return;
-        auto& v = which == 0 ? safe->settings.meterLow : which == 1 ? safe->settings.meterMid : safe->settings.meterPeak;
-        v = c.withAlpha (1.0f).getARGB();
+        safe->colourSlot (which) = c.withAlpha (1.0f).getARGB();
         safe->changed();
     });
     picker->setCurrentColour (current, juce::dontSendNotification);
-    juce::CallOutBox::launchAsynchronously (std::move (picker), meterButtons[which].getScreenBounds(), nullptr);
+    juce::CallOutBox::launchAsynchronously (std::move (picker), (which < 3 ? meterButtons[which] : waveButtons[which - 3]).getScreenBounds(), nullptr);
+}
+
+juce::uint32& ThemePanel::colourSlot (int which)
+{
+    switch (which)
+    {
+        case 0:  return settings.meterLow;
+        case 1:  return settings.meterMid;
+        case 2:  return settings.meterPeak;
+        case 3:  return settings.waveA;
+        default: return settings.waveB;
+    }
+}
+
+juce::Colour ThemePanel::colourNow (int which) const
+{
+    switch (which)
+    {
+        case 0:  return theme::meterGreen;
+        case 1:  return theme::meterAmber;
+        case 2:  return theme::meterRed;
+        case 3:  return theme::waveformA();
+        default: return theme::waveformB();
+    }
 }
 
 void ThemePanel::updateMeterButtons()
@@ -178,6 +228,12 @@ void ThemePanel::updateMeterButtons()
     {
         meterButtons[i].setColour (juce::TextButton::buttonColourId, colours[i]);
         meterButtons[i].setColour (juce::TextButton::textColourOffId, colours[i].getPerceivedBrightness() > 0.55f ? juce::Colours::black : juce::Colours::white);
+    }
+    for (int i = 0; i < 2; ++i)
+    {
+        const auto c = colourNow (3 + i);
+        waveButtons[i].setColour (juce::TextButton::buttonColourId, c);
+        waveButtons[i].setColour (juce::TextButton::textColourOffId, c.getPerceivedBrightness() > 0.55f ? juce::Colours::black : juce::Colours::white);
     }
 }
 
@@ -237,7 +293,10 @@ void ThemePanel::addRow (const juce::String& name, double min, double max, doubl
 
 void ThemePanel::refreshControls()
 {
-    skinBox.setSelectedItemIndex (settings.skin == theme::Skin::white ? 2 : settings.skin == theme::Skin::flat ? 1 : 0, juce::dontSendNotification);
+    skinBox.setSelectedItemIndex (settings.skin == theme::Skin::xenon ? 3 : settings.skin == theme::Skin::white ? 2 : settings.skin == theme::Skin::flat ? 1 : 0,
+                                  juce::dontSendNotification);
+    waveModeBox.setSelectedItemIndex (settings.waveMode + 1, juce::dontSendNotification);
+    regionBox.setSelectedItemIndex (settings.glassRegions + 1, juce::dontSendNotification);
     for (auto& r : rows)
     {
         r.slider->setValue (r.read (settings), juce::dontSendNotification);
@@ -265,6 +324,8 @@ void ThemePanel::paint (juce::Graphics& g)
     for (const auto& r : rows)
         g.drawText (r.name, 16, r.slider->getY(), 90, r.slider->getHeight(), juce::Justification::centredLeft);
     g.drawText ("Meter colours", 16, meterButtons[0].getY(), 94, meterButtons[0].getHeight(), juce::Justification::centredLeft);
+    g.drawText ("Waveforms", 16, waveModeBox.getY(), 94, waveModeBox.getHeight(), juce::Justification::centredLeft);
+    g.drawText ("Regions", 16, regionBox.getY(), 94, regionBox.getHeight(), juce::Justification::centredLeft);
 
     // A sample of the colours
     auto sample = juce::Rectangle<int> (16, getHeight() - 92, getWidth() - 32, 28);
@@ -320,6 +381,14 @@ void ThemePanel::resized()
     for (auto& b : meterButtons)
         b.setBounds (meterRow.removeFromLeft (mw).reduced (2, 0));
     meterDefaultButton.setBounds (meterRow.reduced (2, 0));
+
+    y += 34;
+    auto waveRow = juce::Rectangle<int> (110, y, getWidth() - 126, 26);
+    waveModeBox.setBounds (waveRow.removeFromLeft (waveRow.getWidth() / 2).reduced (2, 0));
+    for (auto& b : waveButtons)
+        b.setBounds (waveRow.removeFromLeft (waveRow.getWidth() / (&b == &waveButtons[0] ? 2 : 1)).reduced (2, 0));
+    y += 34;
+    regionBox.setBounds (112, y, (getWidth() - 126) / 2 - 4, 26);
 
     if (store != nullptr)
     {

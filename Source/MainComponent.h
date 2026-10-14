@@ -302,6 +302,7 @@ private:
     IconButton clickButton     { "Click",   IconButton::Icon::metronome, juce::Colour (0xff5a9cff) };
     IconButton punchButton     { "Punch",   IconButton::Icon::punch,  juce::Colour (0xffd8352d) };
     IconButton replaceButton   { "Replace", IconButton::Icon::replace, juce::Colour (0xffd8352d) };
+    IconButton clipStopButton  { "Clip Stop", IconButton::Icon::clipStop, juce::Colour (0xffd8352d) };
     IconButton mixerButton     { "Mixer",   IconButton::Icon::mixer,  juce::Colour (0xff5a9cff) };
     IconButton editorButton    { "Editor",  IconButton::Icon::pianoRoll, juce::Colour (0xff5a9cff) };
     IconButton keysButton      { "Keys",    IconButton::Icon::keys };

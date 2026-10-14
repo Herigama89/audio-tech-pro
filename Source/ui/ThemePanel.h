@@ -48,8 +48,14 @@ private:
     // Meter colours: low, middle (near the top) and peak; each opens a colour picker.
     juce::TextButton meterButtons[3];
     juce::TextButton meterDefaultButton { "Skin's" };
-    void chooseMeterColour (int which);
+    void chooseMeterColour (int which);   // 0-2 the meters, 3-4 the waveform's colours
     void updateMeterButtons();
+    juce::uint32& colourSlot (int which);
+    juce::Colour colourNow (int which) const;
+
+    // Waveforms: the skin's own, the track's colour, one colour or a gradient; regions filled or glass.
+    juce::ComboBox waveModeBox, regionBox;
+    juce::TextButton waveButtons[2];
 
     // Your presets, kept in the settings file
     juce::PropertiesFile* store = nullptr;

@@ -83,6 +83,7 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::toggleCountIn:   info.setTicked ((bool) project[ids::countIn]); break;
         case commands::toggleAutopunch: info.setTicked ((bool) project[ids::autopunch]); break;
         case commands::toggleReplace:   info.setTicked ((bool) project[ids::replaceMode]); break;
+        case commands::toggleStopOnClip: info.setTicked (engine.getStopOnClip()); break;
         case commands::toggleMidiMerge: info.setTicked ((bool) project[ids::midiMerge]); break;
         case commands::eventList:       info.setActive (region.isValid() && model::isMidiRegion (region)); break;
 
@@ -288,6 +289,11 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::toggleCountIn:          project.setProperty (ids::countIn, ! (bool) project[ids::countIn], nullptr); break;
         case commands::toggleAutopunch:        toggleAutopunch(); break;
         case commands::toggleReplace:          project.setProperty (ids::replaceMode, ! (bool) project[ids::replaceMode], nullptr); break;
+        case commands::toggleStopOnClip:
+            engine.setStopOnClip (! engine.getStopOnClip());
+            appProperties.getUserSettings()->setValue ("stopOnClip", engine.getStopOnClip());
+            clipStopButton.setToggleState (engine.getStopOnClip(), juce::dontSendNotification);
+            break;
         case commands::toggleMidiMerge:        project.setProperty (ids::midiMerge, ! (bool) project[ids::midiMerge], nullptr); break;
         case commands::undoHistory:            showUndoHistory(); break;
         case commands::preferences:            showPreferences(); break;
@@ -403,7 +409,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         case 4:
             add ({ commands::record, commands::toggleCountIn, commands::toggleMetronome });
             menu.addSeparator();
-            add ({ commands::toggleAutopunch, commands::toggleReplace, commands::toggleMidiMerge });
+            add ({ commands::toggleAutopunch, commands::toggleReplace, commands::toggleMidiMerge, commands::toggleStopOnClip });
             menu.addSeparator();
             add ({ commands::calibrateLatency });
             break;

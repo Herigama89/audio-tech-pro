@@ -116,7 +116,16 @@ public:
         juce::String trackId;
         double startSeconds = -1.0; // -1 until the first samples arrive
         double lengthSeconds = 0.0;
+        std::vector<juce::uint8> peaks;   // the waveform so far: the loudest sample per `peakBlock` samples (0..255)
+        bool clipped = false;             // some of it hit 0 dB
     };
+    static constexpr int peakBlock = 512;
+
+    /** Recording stops by itself when an input clips (the take keeps what came before). */
+    void setStopOnClip (bool on) noexcept { stopOnClip.store (on); }
+    bool getStopOnClip() const noexcept { return stopOnClip.load(); }
+    /** True (once) when a recorded input clipped; with Stop on Clip on, the main window then stops recording. */
+    bool takeRecordingClipped() noexcept { return recordClipped.exchange (false); }
 
     static constexpr int maxTakes = 64;
 
@@ -317,7 +326,16 @@ private:
         std::atomic<juce::int64> startSample { -1 };
         std::atomic<juce::int64> samplesWritten { 0 };
         bool isMidi = false;
+
+        // The live waveform: written by the audio thread, read by the screen (bins up to `peakCount` are complete).
+        static constexpr int maxPeaks = 48000 * 60 * 60 / peakBlock;   // an hour at 48 kHz (longer takes still record; the live picture stops there)
+        std::unique_ptr<std::atomic<juce::uint8>[]> peaks { new std::atomic<juce::uint8>[maxPeaks] };
+        std::atomic<int> peakCount { 0 };
+        float peakNow = 0.0f;
+        int peakFill = 0;
+        std::atomic<bool> clipped { false };
     };
+    std::atomic<bool> stopOnClip { false }, recordClipped { false };
 
     juce::int64 chunkPosition = 0;   // where the song is for the chunk being rendered, for plugins' playheads
     bool chunkPlaying = false;

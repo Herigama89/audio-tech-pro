@@ -1121,6 +1121,8 @@ void ChannelStrip::paint (juce::Graphics& g)
         // The flat skin: a plain panel, lit a touch at the top, with a dark gap between strips
         g.setGradientFill (juce::ColourGradient (theme::stripFace.brighter (0.06f), 0.0f, 0.0f, theme::stripFaceLow, 0.0f, (float) getHeight(), false));
         g.fillRect (bounds);
+        if (theme::xenonSkin())
+            skin::tileTexture (g, skin::xenonPanel(), bounds, 0.35f);   // the picture's dark grain
         g.setColour (theme::stripEdge);
         g.fillRect (getWidth() - 1, 0, 1, getHeight());
     }
@@ -1672,6 +1674,8 @@ void MasterBusCompressorPanel::paint (juce::Graphics& g)
         g.setOpacity (1.0f);
         g.drawImage (skin::panel(), bounds.toFloat());
     }
+    else if (theme::xenonSkin())
+        skin::tileTexture (g, skin::xenonPanel(), bounds);
     else
         g.fillAll (theme::consoleShade);
     g.setColour (theme::consoleDark);
@@ -2193,6 +2197,8 @@ void MixerPanel::setMasterLevels (float left, float right)
 void MixerPanel::paint (juce::Graphics& g)
 {
     g.fillAll (theme::whiteSkin() ? theme::consoleDark : juce::Colour (0xff2b2a2d));   // the console's frame, behind the strips
+    if (theme::xenonSkin())
+        skin::tileTexture (g, skin::xenonPanel(), getLocalBounds(), 0.55f);
 
     const auto header = getLocalBounds().removeFromTop (headerHeight).toFloat();
     g.setGradientFill (juce::ColourGradient (theme::toolbar.brighter (0.1f), 0.0f, 0.0f, theme::toolbarDark, 0.0f, header.getBottom(), false));

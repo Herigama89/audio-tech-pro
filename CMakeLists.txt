@@ -150,7 +150,14 @@ juce_add_binary_data(AudioTechProData
                 Resources/skin/white/white_knob_body.png
                 Resources/skin/white/white_knob_ring.png
                 Resources/skin/white/white_led_on.png
-                Resources/skin/white/white_led_clip.png)
+                Resources/skin/white/white_led_clip.png
+                # Xenon, cut from your picture by Tools/make_xenon_skin.py
+                Resources/skin/xenon/xenon_knob.png
+                Resources/skin/xenon/xenon_cap.png
+                Resources/skin/xenon/xenon_slot.png
+                Resources/skin/xenon/xenon_meter.png
+                Resources/skin/xenon/xenon_panel.png
+                Resources/skin/xenon/xenon_bar.png)
 
 # Everything on screen except the app's entry point (the snapshot tool reuses it).
 set(RIFF_UI_SOURCES

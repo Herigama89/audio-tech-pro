@@ -583,6 +583,40 @@ public:
                 pump (main, 30);
                 save (eq, "white-strip-window.png");
             }
+
+            // Xenon: the glass knobs, caps, lit slots, teal meters and panel texture; gradient waveforms in glass regions.
+            theme::Settings xenon;
+            xenon.skin = theme::Skin::xenon;
+            main.applyTheme (xenon);
+            main.project.setProperty ("mixerBusComp", true, nullptr);
+            main.showMixer();
+            main.mixer.relayoutStrips();
+            for (int i = 0; i < 20; ++i)
+            {
+                main.mixer.setMasterLevels (0.7f, 0.6f);
+                pump (main, 15);
+            }
+            save (main, "xenon-mixer.png");
+            main.project.setProperty ("mixerConsole", true, nullptr);
+            main.mixer.relayoutStrips();
+            pump (main, 200);
+            save (main, "xenon-mixer-console.png");
+            main.project.setProperty ("mixerConsole", false, nullptr);
+            main.project.setProperty ("mixerBusComp", false, nullptr);
+            main.closeMixer();
+            pump (main, 100);
+            save (main, "xenon-arrange.png");
+            {
+                auto t0 = main.project.getChild (0);
+                ConsoleStripWindow eq (t0, main.undoManager, [] (float*, int) { return 0; }, [] { return 48000.0; });
+                pump (main, 30);
+                save (eq, "xenon-strip-window.png");
+            }
+            {
+                ThemePanel tp (xenon, [] (const theme::Settings&) {});
+                pump (main, 30);
+                save (tp, "xenon-theme-panel.png");
+            }
             main.applyTheme ({});
             pump (main, 50);
         }

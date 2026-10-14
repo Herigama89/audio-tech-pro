@@ -572,6 +572,7 @@ bool AudioEngine::startRecording (const std::vector<RecordRequest>& requests, ju
     };
 
     bool anyMidi = false;
+    recordClipped.store (false);   // (a clip from an earlier take doesn't count)
 
     for (const auto& request : requests)
     {
@@ -680,9 +681,12 @@ std::vector<AudioEngine::LiveTake> AudioEngine::getLiveTakes() const
     for (const auto& take : takes)
     {
         const auto start = take->startSample.load();
-        live.push_back ({ take->trackId,
-                          start >= 0 ? (double) start / rate : -1.0,
-                          (double) take->samplesWritten.load() / rate });
+        LiveTake t { take->trackId, start >= 0 ? (double) start / rate : -1.0, (double) take->samplesWritten.load() / rate, {}, take->clipped.load() };
+        const auto count = take->peakCount.load (std::memory_order_acquire);
+        t.peaks.resize ((size_t) count);
+        for (int i = 0; i < count; ++i)
+            t.peaks[(size_t) i] = take->peaks[(size_t) i].load (std::memory_order_relaxed);
+        live.push_back (std::move (t));
     }
 
     return live;
@@ -1057,6 +1061,30 @@ void AudioEngine::recordChunk (const float* const* inputs, int numInputs, int in
 
         juce::int64 expected = -1;
         take->startSample.compare_exchange_strong (expected, blockStart);
+
+        // The live waveform and clip watch: the loudest sample in each block of 512.
+        for (int i = 0; i < n; ++i)
+        {
+            float v = 0.0f;
+            for (int c = 0; c < take->numChannels; ++c)
+                v = juce::jmax (v, std::abs (channels[c][i]));
+            take->peakNow = juce::jmax (take->peakNow, v);
+            if (v >= 0.999f && ! take->clipped.load (std::memory_order_relaxed))
+            {
+                take->clipped.store (true);
+                recordClipped.store (true);
+            }
+            if (++take->peakFill >= peakBlock)
+            {
+                if (const auto count = take->peakCount.load (std::memory_order_relaxed); count < Take::maxPeaks)
+                {
+                    take->peaks[(size_t) count].store ((juce::uint8) juce::jlimit (0, 255, (int) (take->peakNow * 255.0f)), std::memory_order_relaxed);
+                    take->peakCount.store (count + 1, std::memory_order_release);
+                }
+                take->peakNow = 0.0f;
+                take->peakFill = 0;
+            }
+        }
 
         if (take->writer->write (channels, n))
             take->samplesWritten.fetch_add (n);

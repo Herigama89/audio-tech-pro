@@ -120,12 +120,41 @@ namespace
         { &knobBlue, juce::Colour (0xff2f8cffu), juce::Colour (0xffff9a30u), Role::accent },
         { &knobRed, juce::Colour (0xffff5a4au), juce::Colour (0xffff5a4au), Role::fixed },
         { &knobBlack, juce::Colour (0xff2f8cffu), juce::Colour (0xffff9a30u), Role::accent },
-        { &neon, juce::Colour (0xff2f8cffu), juce::Colour (0xffff9a30u), Role::accent }
+        { &neon, juce::Colour (0xff2f8cffu), juce::Colour (0xffff9a30u), Role::accent },
+        { &waveform, juce::Colour (0xffeef3f8u), juce::Colour (0xffeef3f8u), Role::fixed }
         };
         return entries;
     }
 
     Settings& settingsNow() { static Settings s; return s; }
+
+    /** Xenon's own colours (sampled from your picture). */
+    juce::Colour xenonValue (const juce::Colour* c, juce::Colour fallback)
+    {
+        using namespace juce;
+        static const std::vector<std::pair<const Colour*, Colour>> values {
+            { &background, Colour (0xff13111c) }, { &toolbar, Colour (0xff221f2b) }, { &toolbarDark, Colour (0xff1a1822) },
+            { &panel, Colour (0xff1d1b27) }, { &laneA, Colour (0xff15131e) }, { &laneB, Colour (0xff181622) },
+            { &outline, Colour (0xff343346) }, { &gridBar, Colour (0xff3a3858) }, { &gridBeat, Colour (0xff23213a) },
+            { &text, Colour (0xffd9e6ef) }, { &dimText, Colour (0xff8a92a6) }, { &accent, Colour (0xff6fe2d2) },
+            { &selection, Colour (0xff27384a) }, { &meterGreen, Colour (0xff6fd8c8) }, { &meterAmber, Colour (0xffc9c25a) },
+            { &meterRed, Colour (0xffe2563f) },
+            { &cream, Colour (0xff23212d) }, { &creamShade, Colour (0xff1c1a25) }, { &creamDeep, Colour (0xff121018) },
+            { &ink, Colour (0xffd9e6ef) }, { &inkDim, Colour (0xff8a92a6) }, { &gold, Colour (0xff6fe2d2) },
+            { &goldDark, Colour (0xff3a9c90) }, { &ruler, Colour (0xff1c1a26) }, { &rulerDark, Colour (0xff15131d) },
+            { &console, Colour (0xff12161c) }, { &consoleShade, Colour (0xff0e1217) }, { &consoleDark, Colour (0xff0a0d11) },
+            { &slotDark, Colour (0xff10151a) }, { &stripFace, Colour (0xff111820) }, { &stripFaceLow, Colour (0xff0c1217) },
+            { &stripEdge, Colour (0xff050709) }, { &stripInk, Colour (0xffd2dde6) }, { &stripInkDim, Colour (0xff7d8794) },
+            { &stripSlot, Colour (0xff121a20) }, { &stripSlotOn, Colour (0xff1d4a44) }, { &knobArc, Colour (0xff6fe2d2) },
+            { &lcd, Colour (0xff1a2532) }, { &lcdText, Colour (0xff8fd6f4) }, { &lcdDim, Colour (0xff5f7a8e) },
+            { &knobBlue, Colour (0xff6fe2d2) }, { &knobBlack, Colour (0xff6fe2d2) }, { &neon, Colour (0xff6fe2d2) },
+            { &waveform, Colour (0xff7ae0de) },
+        };
+        for (const auto& [colour, value] : values)
+            if (colour == c)
+                return value;
+        return fallback;
+    }
 
     /** Studio White's own colours (the light console in your pictures); the rest follow the flat skin. */
     juce::Colour whiteValue (const juce::Colour* c, juce::Colour fallback)
@@ -191,8 +220,11 @@ namespace
 void set (const Settings& s)
 {
     settingsNow() = s;
-    const bool flat = s.skin == Skin::flat, white = s.skin == Skin::white;
-    const auto pick = [flat, white] (const Entry& e) { return white ? whiteValue (e.colour, e.flat) : flat ? e.flat : e.studio; };
+    const bool flat = s.skin == Skin::flat, white = s.skin == Skin::white, xenon = s.skin == Skin::xenon;
+    const auto pick = [flat, white, xenon] (const Entry& e)
+    {
+        return white ? whiteValue (e.colour, e.flat) : xenon ? xenonValue (e.colour, e.flat) : flat ? e.flat : e.studio;
+    };
     const auto base = pick (table()[0]);   // the background
     for (auto& e : table())
         *e.colour = adjust (pick (e), e.role, s, base.getBrightness());
@@ -206,6 +238,28 @@ void set (const Settings& s)
 const Settings& current() { return settingsNow(); }
 bool imageSkin() { return settingsNow().skin == Skin::studio; }
 bool whiteSkin() { return settingsNow().skin == Skin::white; }
+bool xenonSkin() { return settingsNow().skin == Skin::xenon; }
+
+int waveformMode()
+{
+    const auto& s = settingsNow();
+    return s.waveMode >= 0 ? s.waveMode : (s.skin == Skin::xenon ? 2 : 0);
+}
+juce::Colour waveformA()
+{
+    const auto& s = settingsNow();
+    return s.waveA != 0 ? juce::Colour (s.waveA) : (s.skin == Skin::xenon ? juce::Colour (0xff7ae0de) : waveform);
+}
+juce::Colour waveformB()
+{
+    const auto& s = settingsNow();
+    return s.waveB != 0 ? juce::Colour (s.waveB) : (s.skin == Skin::xenon ? juce::Colour (0xffa77fe0) : waveform);
+}
+bool glassRegions()
+{
+    const auto& s = settingsNow();
+    return s.glassRegions >= 0 ? s.glassRegions == 1 : s.skin == Skin::xenon;
+}
 
 std::vector<juce::Colour*> allColours()
 {
@@ -221,7 +275,9 @@ juce::String Settings::toString() const
                                juce::String (contrast), juce::String (textBrightness), juce::String (accentHue),
                                juce::String (meterBrightness), juce::String (gridBrightness),
                                juce::String::toHexString ((int) meterLow), juce::String::toHexString ((int) meterMid),
-                               juce::String::toHexString ((int) meterPeak) }.joinIntoString (";");
+                               juce::String::toHexString ((int) meterPeak),
+                               juce::String (waveMode), juce::String::toHexString ((int) waveA), juce::String::toHexString ((int) waveB),
+                               juce::String (glassRegions) }.joinIntoString (";");
 }
 
 Settings Settings::fromString (const juce::String& text)
@@ -230,7 +286,7 @@ Settings Settings::fromString (const juce::String& text)
     const auto v = juce::StringArray::fromTokens (text, ";", "");
     if (v.size() < 9)
         return s;
-    s.skin = v[0].getIntValue() == 2 ? Skin::white : v[0].getIntValue() == 1 ? Skin::flat : Skin::studio;
+    s.skin = v[0].getIntValue() == 3 ? Skin::xenon : v[0].getIntValue() == 2 ? Skin::white : v[0].getIntValue() == 1 ? Skin::flat : Skin::studio;
     s.hue = juce::jlimit (-180.0f, 180.0f, v[1].getFloatValue());
     s.saturation = juce::jlimit (0.0f, 2.0f, v[2].getFloatValue());
     s.lightness = juce::jlimit (-1.0f, 1.0f, v[3].getFloatValue());
@@ -244,6 +300,13 @@ Settings Settings::fromString (const juce::String& text)
         s.meterLow = (juce::uint32) v[9].getHexValue32();
         s.meterMid = (juce::uint32) v[10].getHexValue32();
         s.meterPeak = (juce::uint32) v[11].getHexValue32();
+    }
+    if (v.size() >= 16)
+    {
+        s.waveMode = juce::jlimit (-1, 2, v[12].getIntValue());
+        s.waveA = (juce::uint32) v[13].getHexValue32();
+        s.waveB = (juce::uint32) v[14].getHexValue32();
+        s.glassRegions = juce::jlimit (-1, 1, v[15].getIntValue());
     }
     return s;
 }

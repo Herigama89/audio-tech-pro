@@ -122,6 +122,13 @@ PointerKnob::PointerKnob (juce::Colour pointerColour) : pointer (pointerColour)
 void PointerKnob::paint (juce::Graphics& g)
 {
     // Studio White: the photo's knob, its LED ring lit to the value (from the centre for EQ gains and pan).
+    if (theme::xenonSkin())
+    {
+        const auto params = getRotaryParameters();
+        skin::drawXenonKnob (g, getLocalBounds().toFloat(), (float) valueToProportionOfLength (getValue()),
+                             params.startAngleRadians, params.endAngleRadians, isEnabled());
+        return;
+    }
     if (theme::whiteSkin())
     {
         const auto params = getRotaryParameters();
@@ -256,6 +263,12 @@ void DisplaySlider::paint (juce::Graphics& g)
     if (asKnob)
     {
         const auto proportion = (float) valueToProportionOfLength (getValue());
+        if (theme::xenonSkin())
+        {
+            skin::drawXenonKnob (g, getLocalBounds().toFloat(), proportion, juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f),
+                                 isEnabled());
+            return;
+        }
         if (theme::whiteSkin())
         {
             skin::drawPhotoKnob (g, getLocalBounds().toFloat(), proportion, juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f),
@@ -308,6 +321,23 @@ void Fader::paint (juce::Graphics& g)
                                                          bounds.getHeight() - capHeight() + 12.0f));
         const auto cap = skin::whiteCap();
         const auto h = capHeight() * 1.15f;
+        const auto w = h * (float) cap.getWidth() / (float) cap.getHeight();
+        g.setOpacity (isEnabled() ? 1.0f : 0.6f);
+        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+        g.drawImage (cap, juce::Rectangle<float> (w, h).withCentre ({ cx, yForValue (getValue()) }));
+        return;
+    }
+
+    // Xenon: a dark slot with a faint teal line, and the picture's cap.
+    if (theme::xenonSkin())
+    {
+        const auto slotArea = juce::Rectangle<float> (cx - 2.0f, capHeight() * 0.5f - 6.0f, 4.0f, bounds.getHeight() - capHeight() + 12.0f);
+        g.setColour (juce::Colour (0xff05080a));
+        g.fillRoundedRectangle (slotArea, 2.0f);
+        g.setColour (theme::accent.withAlpha (0.25f));
+        g.fillRect (slotArea.withSizeKeepingCentre (1.0f, slotArea.getHeight() - 4.0f));
+        const auto cap = skin::xenonCap();
+        const auto h = capHeight() * 1.2f;
         const auto w = h * (float) cap.getWidth() / (float) cap.getHeight();
         g.setOpacity (isEnabled() ? 1.0f : 0.6f);
         g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);

@@ -34,6 +34,14 @@ namespace riff::skin
     RIFF_SKIN_IMAGE (whiteLed,      white_led_on_png)           // one lit meter segment
     RIFF_SKIN_IMAGE (whiteClip,     white_led_clip_png)         // the clip light
 
+    // Xenon (Tools/make_xenon_skin.py): cut from your picture
+    RIFF_SKIN_IMAGE (xenonKnob,  xenon_knob_png)    // the glass knob, its lit edge on the left
+    RIFF_SKIN_IMAGE (xenonCap,   xenon_cap_png)     // the fader cap
+    RIFF_SKIN_IMAGE (xenonSlot,  xenon_slot_png)    // a lit insert slot
+    RIFF_SKIN_IMAGE (xenonMeter, xenon_meter_png)   // the teal meter column
+    RIFF_SKIN_IMAGE (xenonPanel, xenon_panel_png)   // the dark panel texture (tiled)
+    RIFF_SKIN_IMAGE (xenonBar,   xenon_bar_png)     // the carved bar ornament
+
     #undef RIFF_SKIN_IMAGE
 
     /**
@@ -74,6 +82,55 @@ namespace riff::skin
         // The knob itself (round, so it looks the same at any angle).
         g.setOpacity (enabled ? 1.0f : 0.6f);
         g.drawImage (body, r);
+    }
+
+    /**
+        Xenon's knob: the picture's glass knob turned so its lit edge points at the value
+        (`start`/`end`: the rotary range in radians, 0 = up, clockwise).
+    */
+    inline void drawXenonKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion, float start, float end,
+                               bool enabled = true)
+    {
+        const auto size = juce::jmin (area.getWidth(), area.getHeight());
+        const auto r = area.withSizeKeepingCentre (size, size);
+        const auto image = xenonKnob();
+        if (! image.isValid())
+            return;
+        juce::Graphics::ScopedSaveState state (g);
+        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+        g.setOpacity (enabled ? 1.0f : 0.55f);
+        const auto angle = start + proportion * (end - start);
+        const auto turn = angle + juce::MathConstants<float>::halfPi;   // its lit edge sits at the left (-90 degrees)
+        const auto scale = size / (float) image.getWidth();
+        g.drawImageTransformed (image, juce::AffineTransform::translation (-image.getWidth() * 0.5f, -image.getHeight() * 0.5f)
+                                           .rotated (turn)
+                                           .scaled (scale)
+                                           .translated (r.getCentreX(), r.getCentreY()));
+    }
+
+    /** Lays a texture over an area: the picture's piece tiled with every other tile mirrored, so no seams show. */
+    inline void tileTexture (juce::Graphics& g, const juce::Image& image, juce::Rectangle<int> area, float opacity = 1.0f)
+    {
+        if (! image.isValid() || area.isEmpty())
+            return;
+        juce::Graphics::ScopedSaveState state (g);
+        g.reduceClipRegion (area);
+        g.setOpacity (opacity);
+        const auto w = (float) image.getWidth(), h = (float) image.getHeight();
+        const auto clip = g.getClipBounds();
+        int row = 0;
+        for (float y = (float) area.getY(); y < (float) area.getBottom(); y += h, ++row)
+        {
+            if (y + h < (float) clip.getY() || y > (float) clip.getBottom())
+                continue;
+            int column = 0;
+            for (float x = (float) area.getX(); x < (float) area.getRight(); x += w, ++column)
+            {
+                const bool flipX = (column & 1) != 0, flipY = (row & 1) != 0;
+                g.drawImageTransformed (image, juce::AffineTransform::scale (flipX ? -1.0f : 1.0f, flipY ? -1.0f : 1.0f)
+                                                   .translated (flipX ? x + w : x, flipY ? y + h : y));
+            }
+        }
     }
 
     /** An image turned a quarter turn (the photo's meter runs sideways; ours run upwards). Cached. */

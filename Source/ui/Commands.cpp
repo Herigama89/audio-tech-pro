@@ -102,6 +102,7 @@ const std::vector<Info>& all()
         { toggleMetronome,        "Metronome",                  "Transport", "Turn the click on or off" },
         { toggleCountIn,          "Count-in",                   "Transport", "One bar of click before recording" },
         { toggleAutopunch,        "Autopunch",                  "Transport", "Record only between the punch locators (the red bar under the cycle; drag it in the ruler)" },
+        { toggleStopOnClip,       "Stop Recording on Clip",     "Transport", "Recording stops by itself if a mic or instrument input clips (hits 0 dB); the take keeps what came before" },
         { toggleReplace,          "Replace",                    "Transport", "A recording replaces the parts of regions it covers" },
         { toggleMidiMerge,        "Merge MIDI Recordings",      "Transport", "MIDI recorded over a MIDI region is merged into it" },
 

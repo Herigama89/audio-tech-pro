@@ -39,7 +39,7 @@ namespace riff::commands
         newDrummerTrack = 0x2c01, newBassPlayerTrack, newKeysPlayerTrack, liveLoops,
         openMixerWindow = 0x2d01, openEditorWindow, themeSettings,
         toggleControlBar = 0x2e01, toggleToolbar, toggleStatusBar, toggleMeters, toggleTrackHeaders, showAllPanels, hideAllPanels, createTrackStack,
-        showNotepad = 0x2f01, showBrowser, toggleQuickHelp, waveformZoom, zoomToFitAll, showPerformance, audioSuite
+        showNotepad = 0x2f01, showBrowser, toggleQuickHelp, waveformZoom, zoomToFitAll, showPerformance, audioSuite, toggleStopOnClip
     };
 
     struct Info

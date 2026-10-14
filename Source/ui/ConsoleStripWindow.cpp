@@ -255,6 +255,8 @@ void ConsoleStripWindow::paint (juce::Graphics& g)
     // A classic console strip's grey panel (or the flat skin's panel)
     const auto print = theme::imageSkin() ? theme::stripInk : theme::text;
     g.fillAll (panelColour());
+    if (theme::xenonSkin())
+        skin::tileTexture (g, skin::xenonPanel(), getLocalBounds(), 0.6f);
     if (theme::imageSkin())
     {
         juce::Random grain (7);

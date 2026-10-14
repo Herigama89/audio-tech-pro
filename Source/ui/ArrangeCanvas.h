@@ -140,6 +140,7 @@ private:
     void paintGrid (juce::Graphics& g);
     void paintRegion (juce::Graphics& g, const juce::ValueTree& region, int trackIndex);
     void paintMidiNotes (juce::Graphics& g, const juce::ValueTree& region, juce::Rectangle<float> body, juce::Colour colour);
+    void setWaveformFill (juce::Graphics&, juce::Colour trackColour, juce::Rectangle<float> area, bool live = false);
     void paintLiveTakes (juce::Graphics& g);
     void paintCycle (juce::Graphics& g);
     void showTakeMenu (juce::ValueTree region);

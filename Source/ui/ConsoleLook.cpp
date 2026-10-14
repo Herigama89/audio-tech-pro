@@ -141,6 +141,32 @@ void ConsoleLook::drawButtonBackground (juce::Graphics& g, juce::Button& button,
             return;
         }
 
+    // Xenon: a used slot is the picture's lit slot; an empty one a dark recess with a faint teal edge.
+    if (style == look::Key::slot && theme::xenonSkin())
+    {
+        if (backgroundColour == theme::stripSlotOn)
+        {
+            g.setColour (juce::Colour (0xff0b1014));
+            g.fillRoundedRectangle (area, 3.0f);
+            g.setOpacity (0.5f);   // (lit, but dim enough to read the name on it)
+            g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+            g.drawImage (skin::xenonSlot(), area);
+        }
+        else
+        {
+            g.setColour (juce::Colour (0xff0b1014));
+            g.fillRoundedRectangle (area, 3.0f);
+            g.setColour (theme::accent.withAlpha (0.22f));
+            g.drawRoundedRectangle (area.reduced (0.5f), 3.0f, 1.0f);
+        }
+        if (over)
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.08f));
+            g.fillRoundedRectangle (area, 3.0f);
+        }
+        return;
+    }
+
     if (style == look::Key::slot)
     {
         // Recessed: the slot's own colour says whether it holds something.
@@ -288,6 +314,13 @@ namespace look
     void drawNeonKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
                        juce::Colour ringColour, bool fromCentre, bool enabled, bool light)
     {
+        // Xenon: the picture's glass knob, turned to the value.
+        if (theme::xenonSkin())
+        {
+            juce::ignoreUnused (ringColour, light, fromCentre);
+            skin::drawXenonKnob (g, area, proportion, startAngle, endAngle, enabled);
+            return;
+        }
         // Studio White: every knob is the photo's knob with its LED ring.
         if (theme::whiteSkin())
         {
@@ -616,6 +649,11 @@ void IconButton::drawIcon (juce::Graphics& g, Icon icon, juce::Rectangle<float> 
         case Icon::replace:
             g.setFont (juce::FontOptions (r.getHeight() * 0.75f, juce::Font::bold));
             g.drawText ("REPL", r.expanded (r.getWidth() * 0.5f, 0.0f), juce::Justification::centred, false);
+            return;
+
+        case Icon::clipStop:
+            g.setFont (juce::FontOptions (r.getHeight() * 0.75f, juce::Font::bold));
+            g.drawText ("CLIP", r.expanded (r.getWidth() * 0.5f, 0.0f), juce::Justification::centred, false);
             return;
 
         case Icon::countIn:

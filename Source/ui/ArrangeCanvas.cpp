@@ -758,6 +758,17 @@ void ArrangeCanvas::paintMidiNotes (juce::Graphics& g, const juce::ValueTree& re
     }
 }
 
+void ArrangeCanvas::setWaveformFill (juce::Graphics& g, juce::Colour trackColour, juce::Rectangle<float> area, bool live)
+{
+    // Themes > Waveforms: the track's colour, one colour, or a gradient across the region.
+    switch (theme::waveformMode())
+    {
+        case 1:  g.setColour (theme::waveformA().withAlpha (0.95f)); break;
+        case 2:  g.setGradientFill (juce::ColourGradient (theme::waveformA(), area.getX(), 0.0f, theme::waveformB(), area.getRight(), 0.0f, false)); break;
+        default: g.setColour (live ? theme::waveform.withAlpha (0.95f) : trackColour.brighter (0.75f).withAlpha (0.95f)); break;
+    }
+}
+
 void ArrangeCanvas::paintLiveTakes (juce::Graphics& g)
 {
     for (const auto& take : engine.getLiveTakes())
@@ -774,10 +785,34 @@ void ArrangeCanvas::paintLiveTakes (juce::Graphics& g)
 
         g.setColour (theme::danger.withAlpha (0.3f));
         g.fillRoundedRectangle (r, 4.0f);
+
+        // The waveform as it comes in (as in Pro Tools), drawn from the engine's live peaks.
+        if (! take.peaks.empty() && engine.getSampleRate() > 0.0)
+        {
+            const auto binSeconds = (double) AudioEngine::peakBlock / engine.getSampleRate();
+            const auto body = r.withTrimmedTop (16.0f).reduced (0.0f, 2.0f);
+            const auto clip = g.getClipBounds().toFloat();
+            const auto x0 = juce::jmax (body.getX(), clip.getX()), x1 = juce::jmin (body.getRight(), clip.getRight());
+            setWaveformFill (g, theme::danger, r, true);
+            for (auto x = x0; x < x1; x += 1.0f)
+            {
+                const auto t0 = (double) (x - body.getX()) / timeline.pixelsPerSecond, t1 = t0 + 1.0 / timeline.pixelsPerSecond;
+                const auto b0 = (int) (t0 / binSeconds), b1 = juce::jmax (b0 + 1, (int) std::ceil (t1 / binSeconds));
+                int peak = 0;
+                for (int b = b0; b < b1 && b < (int) take.peaks.size(); ++b)
+                    peak = juce::jmax (peak, (int) take.peaks[(size_t) b]);
+                if (b0 >= (int) take.peaks.size())
+                    break;
+                const auto h = juce::jmin (1.0f, (float) peak / 255.0f * timeline.waveformZoom) * body.getHeight() * 0.5f;
+                g.fillRect (x, body.getCentreY() - h, 1.0f, juce::jmax (1.0f, h * 2.0f));
+            }
+        }
+
         g.setColour (theme::danger);
         g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.5f);
         g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
-        g.drawText ("Recording", r.withHeight (16.0f).reduced (5.0f, 0.0f), juce::Justification::centredLeft, true);
+        g.drawText (take.clipped ? juce::String ("Recording  -  CLIPPED") : juce::String ("Recording"),
+                    r.withHeight (16.0f).reduced (5.0f, 0.0f), juce::Justification::centredLeft, true);
     }
 }
 
@@ -946,17 +981,29 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
     const bool isMidi = model::isMidiRegion (region);
     const bool missing = ! isMidi && ! fileExists (file);
 
-    // Solid body in a deep shade of the track colour, a brighter name bar on top.
+    // Solid body in a deep shade of the track colour, a brighter name bar on top
+    // (or, with glass regions, a dark see-through body with a lit outline).
     const auto base = missing ? theme::danger : colour;
-    g.setGradientFill (juce::ColourGradient (base.darker (0.05f), 0.0f, bounds.getY(), base.darker (0.45f), 0.0f, bounds.getBottom(), false));
-    g.fillRoundedRectangle (bounds, 3.0f);
-
+    const bool glass = theme::glassRegions() && ! missing;
     auto header = bounds.withHeight ((float) regionHeader);
-    g.setColour (base.withMultipliedSaturation (0.9f).brighter (0.1f));
-    g.fillRoundedRectangle (header, 3.0f);
-    g.fillRect (header.withTrimmedTop (3.0f));
-
-    g.setColour (juce::Colour (0xff15161a));
+    if (glass)
+    {
+        g.setColour (juce::Colour (0xff0c0f1c).interpolatedWith (base, 0.14f).withAlpha (0.82f));
+        g.fillRoundedRectangle (bounds, 4.0f);
+        g.setColour (base.withAlpha (0.28f));
+        g.fillRoundedRectangle (header, 4.0f);
+        g.fillRect (header.withTrimmedTop (4.0f));
+        g.setColour (theme::text);
+    }
+    else
+    {
+        g.setGradientFill (juce::ColourGradient (base.darker (0.05f), 0.0f, bounds.getY(), base.darker (0.45f), 0.0f, bounds.getBottom(), false));
+        g.fillRoundedRectangle (bounds, 3.0f);
+        g.setColour (base.withMultipliedSaturation (0.9f).brighter (0.1f));
+        g.fillRoundedRectangle (header, 3.0f);
+        g.fillRect (header.withTrimmedTop (3.0f));
+        g.setColour (juce::Colour (0xff15161a));
+    }
     g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
     const auto textArea = header.withLeft (juce::jmax (header.getX(), 0.0f)).reduced (5.0f, 0.0f);
     auto label = region[ids::name].toString();
@@ -1000,7 +1047,7 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
             const auto tStart = offset + (x0 - body.getX()) / timeline.pixelsPerSecond;
             const auto tEnd   = offset + (x1 - body.getX()) / timeline.pixelsPerSecond;
 
-            g.setColour (colour.brighter (0.75f).withAlpha (0.95f));
+            setWaveformFill (g, colour, bounds);
             thumb.drawChannels (g, juce::Rectangle<float> (x0, body.getY(), x1 - x0, body.getHeight()).toNearestInt(),
                                 tStart, tEnd, (float) (double) region.getProperty (ids::gain, 1.0) * timeline.waveformZoom);
         }
@@ -1059,8 +1106,16 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
         }
     }
 
-    g.setColour (selected ? juce::Colours::white : base.darker (0.8f));
-    g.drawRoundedRectangle (bounds.reduced (0.5f), 3.0f, selected ? 2.0f : 1.0f);
+    if (glass)
+    {
+        g.setColour (selected ? juce::Colours::white : base.brighter (0.4f).withAlpha (0.85f));
+        g.drawRoundedRectangle (bounds.reduced (0.5f), 4.0f, selected ? 2.0f : 1.2f);
+    }
+    else
+    {
+        g.setColour (selected ? juce::Colours::white : base.darker (0.8f));
+        g.drawRoundedRectangle (bounds.reduced (0.5f), 3.0f, selected ? 2.0f : 1.0f);
+    }
 
     // A looped region's repeats: lighter copies of its outline, up to the loop end.
     if ((bool) region.getProperty (ids::loop, false))
