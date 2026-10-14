@@ -22,6 +22,17 @@ PluginEffect::PluginEffect (std::unique_ptr<juce::AudioPluginInstance> p)
 
     if (plugin->checkBusesLayoutSupported (layout))
         plugin->setBusesLayout (layout);
+    plugin->setPlayHead (&playHead);
+}
+
+void PluginEffect::withPluginStopped (const std::function<void()>& change)
+{
+    const juce::SpinLock::ScopedLockType lock (processLock);
+    if (prepared)
+        plugin->releaseResources();
+    change();
+    if (prepared)
+        plugin->prepareToPlay (preparedRate, preparedBlock);
 }
 
 PluginEffect::~PluginEffect()
@@ -30,6 +41,7 @@ PluginEffect::~PluginEffect()
         for (auto* p : plugin->getParameters())
             p->removeListener (watcher.get());
 
+    plugin->setPlayHead (nullptr);
     if (prepared)
         plugin->releaseResources();
 }
@@ -47,6 +59,9 @@ void PluginEffect::watchParameters (std::function<void (int, float, int)> callba
 
 void PluginEffect::prepare (double sampleRate, int maxBlockSize)
 {
+    const juce::SpinLock::ScopedLockType lock (processLock);
+    playHead.rate = sampleRate;
+    preparedBlock = maxBlockSize;
     if (prepared)
         plugin->releaseResources();
 
@@ -65,8 +80,17 @@ void PluginEffect::process (float* left, float* right, int numSamples) noexcept
 {
     numSamples = juce::jmin (numSamples, buffer.getNumSamples());
 
-    if (plugin->isSuspended())
-        return; // pass through
+    // Being changed (ARA regions added or removed): an ARA plugin is silent meanwhile, others pass through.
+    const juce::SpinLock::ScopedTryLockType lock (processLock);
+    if (! lock.isLocked() || plugin->isSuspended())
+    {
+        if (rendersRegions.load (std::memory_order_relaxed))
+        {
+            juce::FloatVectorOperations::clear (left, numSamples);
+            juce::FloatVectorOperations::clear (right, numSamples);
+        }
+        return;
+    }
 
     juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), numSamples);
     view.clear();
@@ -164,6 +188,8 @@ std::shared_ptr<Effect> EffectRack::effectFor (const juce::ValueTree& insert, do
 
     if (! sameKind && entry.effect != nullptr && onEffectReplaced)
         onEffectReplaced (id);
+    if (! sameKind)
+        dropAra (id);
 
     if (insert[ids::kind].toString() != model::pluginKind)
     {
@@ -212,7 +238,8 @@ void EffectRack::loadPlugin (const juce::ValueTree& insert, const juce::String& 
     std::weak_ptr<bool> weakAlive = alive;
 
     formatManager.createPluginInstanceAsync (description, sampleRate, maxBlockSize,
-        [this, weakAlive, id, key, sampleRate, maxBlockSize, state, name = description.name]
+        [this, weakAlive, id, key, sampleRate, maxBlockSize, state, name = description.name,
+         isAra = description.hasARAExtension, archive = insert[ids::araArchive].toString()]
         (std::unique_ptr<juce::AudioPluginInstance> instance, const juce::String& error)
     {
         if (weakAlive.expired())
@@ -240,7 +267,25 @@ void EffectRack::loadPlugin (const juce::ValueTree& insert, const juce::String& 
                 onPluginParameter (id, index, value, phase);
         });
         effect->prepare (sampleRate, maxBlockSize);
+        dropAra (id);
         it->second.effect = effect;
+
+        // An ARA plugin (Melodyne...): bind it to its track's regions.
+        if (isAra && araAvailable() && audioFormats != nullptr)
+            AraDocument::create (*effect, *audioFormats, name, archive,
+                                 [this, weakAlive, id, weakEffect = std::weak_ptr<PluginEffect> (effect)] (std::unique_ptr<AraDocument> doc)
+            {
+                if (weakAlive.expired() || doc == nullptr || weakEffect.expired())
+                    return;
+                auto e = entries.find (id);
+                if (e == entries.end() || e->second.effect != weakEffect.lock())
+                    return;
+                doc->onRequestPlayback = [this] (bool start) { if (onAraPlaybackRequest) onAraPlaybackRequest (start); };
+                doc->onRequestPosition = [this] (double t) { if (onAraPositionRequest) onAraPositionRequest (t); };
+                araDocs[id] = std::move (doc);
+                if (onAraReady)
+                    onAraReady();
+            });
 
         if (onEffectReady)
             onEffectReady();
@@ -260,6 +305,7 @@ void EffectRack::removeAllExcept (const juce::StringArray& insertIds)
         if (onEffectReplaced)
             onEffectReplaced (it->first);
 
+        dropAra (it->first);
         it = entries.erase (it);
     }
 }
@@ -276,8 +322,24 @@ void EffectRack::storePluginStates (juce::ValueTree mixer)
 
             if (auto* plugin = dynamic_cast<PluginEffect*> (it->second.effect.get()))
                 insert.setProperty (ids::pluginState, plugin->getStateBase64(), nullptr);
+
+            // An ARA plugin's edits (Melodyne's notes...) are kept with the project too.
+            if (auto doc = araDocs.find (insert[ids::id].toString()); doc != araDocs.end())
+                if (const auto archive = doc->second->storeArchive(); archive.isNotEmpty())
+                    insert.setProperty (ids::araArchive, archive, nullptr);
         }
     }
+}
+
+void EffectRack::syncAra (const juce::ValueTree& project)
+{
+    if (araDocs.empty())
+        return;
+    for (const auto& chain : model::mixerOf (project))
+        for (const auto& insert : chain)
+            if (auto doc = araDocs.find (insert[ids::id].toString()); doc != araDocs.end())
+                if (auto track = model::findById (project, chain[ids::owner].toString()); track.isValid())
+                    doc->second->sync (project, track);
 }
 
 juce::AudioPluginInstance* EffectRack::getPlugin (const juce::String& insertId)

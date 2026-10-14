@@ -2242,3 +2242,10 @@ TEST_CASE ("AudioSuite: a region through an effect, with handles, tail and laten
     reader->read (&b, 0, 100, 0, true, false);
     CHECK_THAT (b.getSample (0, 0), WithinAbs (0.4f, 1e-4));             // no latency gap at the start
 }
+
+#include "engine/AraHost.h"
+
+TEST_CASE ("This build can host ARA plugins", "[engine]")
+{
+    CHECK (araAvailable());
+}

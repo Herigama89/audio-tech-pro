@@ -29,6 +29,10 @@ public:
         Compressors and limiters report it; other effects say 0. Message thread. */
     virtual float takeGainReductionDb() noexcept { return 0.0f; }
 
+    /** Where the song is for the coming block (audio thread): plugins read it as their host's playhead
+        (tempo-synced delays, and ARA plugins that play the regions themselves). */
+    virtual void setPosition (juce::int64 /*samplePosition*/, bool /*playing*/, double /*bpm*/) noexcept {}
+
     /** How many samples late this effect's output is (for delay compensation). */
     virtual int getLatencySamples() const { return 0; }
 

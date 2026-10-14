@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include <map>
 #include "BuiltInEffects.h"
+#include "AraHost.h"
 #include "../model/Identifiers.h"
 
 namespace riff
@@ -17,6 +18,19 @@ public:
 
     void prepare (double sampleRate, int maxBlockSize) override;
     void process (float* left, float* right, int numSamples) noexcept override;
+    void setPosition (juce::int64 samplePosition, bool playing, double bpm) noexcept override
+    {
+        playHead.samples.store (samplePosition, std::memory_order_relaxed);
+        playHead.playing.store (playing, std::memory_order_relaxed);
+        playHead.bpm.store (bpm, std::memory_order_relaxed);
+    }
+
+    /** Runs `change` with the plugin stopped (not processing, its resources released), then starts it
+        again: ARA needs this to add or remove regions. The audio thread hears silence from it meanwhile. */
+    void withPluginStopped (const std::function<void()>& change);
+
+    /** Set for an ARA plugin playing its track's regions: it makes the sound itself (silence when it can't). */
+    void setRendersRegions (bool shouldRender) noexcept { rendersRegions.store (shouldRender); }
     juce::String getName() const override { return plugin->getName(); }
     int getLatencySamples() const override { return plugin->getLatencySamples(); }
     void setAutomatedParameter (int index, float value) noexcept override
@@ -38,6 +52,31 @@ public:
     void setStateBase64 (const juce::String& state);
 
 private:
+    /** The song's position, given to the plugin as its host's playhead. */
+    struct PlayHead final : juce::AudioPlayHead
+    {
+        std::atomic<juce::int64> samples { 0 };
+        std::atomic<bool> playing { false };
+        std::atomic<double> bpm { 120.0 };
+        double rate = 48000.0;
+        juce::Optional<PositionInfo> getPosition() const override
+        {
+            PositionInfo info;
+            const auto s = samples.load (std::memory_order_relaxed);
+            const auto tempo = bpm.load (std::memory_order_relaxed);
+            info.setTimeInSamples (s);
+            info.setTimeInSeconds ((double) s / rate);
+            info.setIsPlaying (playing.load (std::memory_order_relaxed));
+            info.setBpm (tempo);
+            info.setPpqPosition ((double) s / rate * tempo / 60.0);
+            info.setTimeSignature (juce::AudioPlayHead::TimeSignature { 4, 4 });
+            return info;
+        }
+    } playHead;
+    juce::SpinLock processLock;
+    std::atomic<bool> rendersRegions { false };
+    int preparedBlock = 0;
+
     std::unique_ptr<juce::AudioPluginInstance> plugin;
     juce::AudioBuffer<float> buffer;
     juce::MidiBuffer noMidi;
@@ -88,6 +127,20 @@ public:
     }
     BuiltInEffect* getBuiltIn (const juce::String& insertId);
 
+    /** ARA: plugins like Melodyne play their track's regions themselves. The rack reads audio files with these. */
+    void setAudioFormats (juce::AudioFormatManager* formats) noexcept { audioFormats = formats; }
+
+    /** True when this insert is an ARA plugin bound to its track's regions (the engine then leaves them to it). */
+    bool isAraInsert (const juce::String& insertId) const { return araDocs.count (insertId) > 0; }
+
+    /** Brings every ARA plugin's regions in line with its track (after the project changed). */
+    void syncAra (const juce::ValueTree& project);
+
+    /** An ARA plugin is ready (its regions follow), or asked to start / stop / move the playhead. */
+    std::function<void()> onAraReady;
+    std::function<void (bool start)> onAraPlaybackRequest;
+    std::function<void (double seconds)> onAraPositionRequest;
+
     /** An insert's gain reduction since the last call (dB), for the strip's meter. */
     float takeGainReduction (const juce::String& insertId);
 
@@ -112,6 +165,9 @@ private:
 
     juce::AudioPluginFormatManager& formatManager;
     std::map<juce::String, Entry> entries;
+    juce::AudioFormatManager* audioFormats = nullptr;
+    std::map<juce::String, std::unique_ptr<AraDocument>> araDocs;   // (declared after entries: they go first)
+    void dropAra (const juce::String& insertId) { araDocs.erase (insertId); }
     std::shared_ptr<bool> alive = std::make_shared<bool> (true);
 };
 

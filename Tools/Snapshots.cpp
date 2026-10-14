@@ -213,6 +213,9 @@ public:
             panel.setSize (620, 640);
             pump (main, 100);
             save (panel, "keycommands.png");
+            panel.search.setText ("split", true);
+            pump (main, 50);
+            save (panel, "keycommands-search.png");
         }
 
         // The MIDI generator: its window, and a Hip-Hop take in a fresh project.

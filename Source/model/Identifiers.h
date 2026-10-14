@@ -114,6 +114,7 @@ namespace riff::ids
     RIFF_DECLARE_ID (velHigh)
     RIFF_DECLARE_ID (noTranspose)      // TRACK (MIDI): transpose leaves it alone (drums)
     RIFF_DECLARE_ID (channelFormat)    // TRACK: "mono" or "stereo" (unset: stereo)
+    RIFF_DECLARE_ID (araArchive)       // INSERT: an ARA plugin's edits (base64), e.g. Melodyne's notes
     RIFF_DECLARE_ID (fineTune)         // REGION (audio): cents, -50 .. 50 (with transpose: the pitch it plays at)
     RIFF_DECLARE_ID (pitchSource)      // REGION (audio): follows the key track (true), from the key it was in when turned on
     RIFF_DECLARE_ID (pitchSourceKey)   // REGION (audio): that key's root (0..11)

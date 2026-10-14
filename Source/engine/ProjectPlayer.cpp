@@ -449,7 +449,13 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
             continue;
         }
 
-        for (const auto& region : regionsToPlay (track))
+        // An ARA plugin (Melodyne...) in an insert plays this track's regions itself.
+        bool araPlays = false;
+        if (effects != nullptr)
+            for (const auto& insert : model::insertsOf (model::findChain (project, trackId)))
+                araPlays = araPlays || effects->isAraInsert (insert[ids::id].toString());
+
+        for (const auto& region : araPlays ? juce::Array<juce::ValueTree>() : regionsToPlay (track))
         {
             if (model::isRegionMuted (region))
                 continue;
@@ -642,6 +648,8 @@ void ProjectPlayer::rebuildNow()
     readAhead.setItems (std::move (streamed));
 
     engine.setGraph (std::move (graph));
+    if (effects != nullptr)
+        effects->syncAra (project);   // ARA plugins' regions follow the tracks'
 
     builtForRate = rate;
 }

@@ -346,6 +346,20 @@ MainComponent::MainComponent (bool openAudioDevice)
     rack.onPluginReplaced = [this] (const juce::String& trackId) { editorWindows.erase (trackId); };
 
     // Effects and the mixer
+    // ARA (Melodyne, VocAlign, RX...): plugins read the regions' files; they can start, stop and move the song.
+    effectRack.setAudioFormats (&engine.getFormatManager());
+    effectRack.onAraReady = [this]
+    {
+        player.requestRebuild();   // the track's regions now play through the plugin
+        statusLabel.setText ("ARA plugin connected: it plays this track's regions now (edits are saved with the project).", juce::dontSendNotification);
+    };
+    effectRack.onAraPlaybackRequest = [this] (bool start)
+    {
+        if (start != engine.isPlaying())
+            commandManager.invokeDirectly (commands::play, false);
+    };
+    effectRack.onAraPositionRequest = [this] (double seconds) { engine.setPlayheadSeconds (juce::jmax (0.0, seconds)); };
+
     effectRack.onEffectReady = [this]
     {
         player.requestRebuild();

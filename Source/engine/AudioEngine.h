@@ -319,6 +319,9 @@ private:
         bool isMidi = false;
     };
 
+    juce::int64 chunkPosition = 0;   // where the song is for the chunk being rendered, for plugins' playheads
+    bool chunkPlaying = false;
+    double chunkBpm = 120.0;
     void renderChunk (const PlaybackGraph& graph, const float* const* inputs, int numInputs, int inputOffset,
                       float* mixL, float* mixR, int numSamples, bool playingNow,
                       bool resetNotes, bool withLiveMidi) noexcept;

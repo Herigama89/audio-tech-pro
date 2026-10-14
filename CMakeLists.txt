@@ -33,6 +33,20 @@ else()
     FetchContent_MakeAvailable(JUCE)
 endif()
 
+# ARA (Melodyne, VocAlign, RX... working right on the regions, as in Logic and Pro Tools): the ARA SDK
+# (Apache 2.0), fetched with its parts. Turn off with -DRIFF_ARA=OFF.
+option(RIFF_ARA "Host ARA plugins" ON)
+if(RIFF_ARA)
+    FetchContent_Declare(ara_sdk
+        GIT_REPOSITORY https://github.com/Celemony/ARA_SDK.git
+        GIT_TAG        releases/2.2.0
+        GIT_SHALLOW    TRUE
+        GIT_SUBMODULES_RECURSE TRUE
+        SOURCE_SUBDIR  do-not-build)   # (headers and library sources only; nothing of it is built on its own)
+    FetchContent_MakeAvailable(ara_sdk)
+    juce_set_ara_sdk_path("${ara_sdk_SOURCE_DIR}")
+endif()
+
 # ---------------------------------------------------------------------------
 # Sources shared by the app and the tests (model + engine; no UI)
 # ---------------------------------------------------------------------------
@@ -43,6 +57,7 @@ set(RIFF_CORE_SOURCES
     Source/engine/ClapFormat.cpp
     Source/engine/RegionVariants.cpp
     Source/engine/AudioSuite.cpp
+    Source/engine/AraHost.cpp
     Source/model/Project.cpp
     Source/model/Generator.cpp
     Source/model/ProjectFiles.cpp
@@ -90,6 +105,10 @@ endif()
 # Audio Units exist only on macOS.
 if(APPLE)
     list(APPEND RIFF_DEFINITIONS JUCE_PLUGINHOST_AU=1)
+endif()
+
+if(RIFF_ARA)
+    list(APPEND RIFF_DEFINITIONS JUCE_PLUGINHOST_ARA=1 RIFF_HAS_ARA=1)
 endif()
 
 # ---------------------------------------------------------------------------

@@ -1110,6 +1110,14 @@ void AudioEngine::renderChunk (const PlaybackGraph& graph, const float* const* i
                                float* mixL, float* mixR, int n, bool playingNow,
                                bool resetNotes, bool withLiveMidi) noexcept
 {
+    // The song's position for the plugins (their host playhead).
+    chunkPosition = playheadSample.load();
+    chunkPlaying = playingNow;
+    {
+        const auto rate = sampleRate.load();
+        chunkBpm = rate > 0.0 ? graph.tempo.bpmAt ((double) chunkPosition / rate) : 120.0;
+    }
+
     // Routing: ordinary tracks sum into `direct` and feed the bus buffers through
     // their sends; then each bus processes what it received; both reach the mix.
     auto* dL = directBuffer.getWritePointer (0);
@@ -1361,7 +1369,10 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
     // The strip's console EQ and Dynamics, then the insert effects, all before
     // the fader. Inserts run even on silence so delays and reverbs ring out.
     for (const auto& effect : track.stripPlugins)
+    {
+        effect->setPosition (chunkPosition, chunkPlaying, chunkBpm);
         effect->process (tL, tR, n);
+    }
 
     if (track.console.isActive())
     {
@@ -1381,7 +1392,10 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
     }
 
     for (const auto& effect : track.inserts)
+    {
+        effect->setPosition (chunkPosition, chunkPlaying, chunkBpm);
         effect->process (tL, tR, n);
+    }
 
     // Delay compensation: line this track up with the slowest one.
     const auto compensation = track.isBus ? track.postDelay : track.preDelay;
