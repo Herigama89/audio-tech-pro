@@ -1,4 +1,5 @@
 #include "PluginInstrument.h"
+#include "PluginBuses.h"
 
 namespace riff
 {
@@ -8,19 +9,8 @@ PluginInstrument::PluginInstrument (std::unique_ptr<juce::AudioPluginInstance> p
 {
     jassert (plugin != nullptr);
 
-    // Prefer one stereo output; keep the inputs as they are. If the plugin
-    // refuses this layout it keeps its own default.
-    auto layout = plugin->getBusesLayout();
-
-    if (! layout.outputBuses.isEmpty())
-    {
-        layout.outputBuses.getReference (0) = juce::AudioChannelSet::stereo();
-        for (int i = 1; i < layout.outputBuses.size(); ++i)
-            layout.outputBuses.getReference (i) = juce::AudioChannelSet::disabled();
-
-        if (plugin->checkBusesLayoutSupported (layout))
-            plugin->setBusesLayout (layout);
-    }
+    // A stereo main output; multi-output instruments (Groove Agent, Kontakt...) keep their other outputs on.
+    pluginbuses::setUp (*plugin);
 }
 
 PluginInstrument::~PluginInstrument()
@@ -37,8 +27,9 @@ void PluginInstrument::prepare (double sampleRate, int maxBlockSize)
     plugin->setRateAndBufferSizeDetails (sampleRate, maxBlockSize);
     plugin->prepareToPlay (sampleRate, maxBlockSize);
 
+    // (with room to spare, in case the plugin turns more outputs on while it plays)
     const auto channels = juce::jmax (2, plugin->getTotalNumInputChannels(), plugin->getTotalNumOutputChannels());
-    buffer.setSize (channels, maxBlockSize);
+    buffer.setSize (juce::jmax (channels, 64), maxBlockSize);
     midiCopy.ensureSize (16384);
 
     prepared = true;
@@ -50,18 +41,19 @@ void PluginInstrument::render (float* left, float* right, int numSamples, const 
     numSamples = juce::jmin (numSamples, buffer.getNumSamples());
 
     // A non-owning view of exactly numSamples, so the plugin sees the right block size.
-    juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), numSamples);
-    view.clear();
-
-    midiCopy.clear();
-    midiCopy.addEvents (midi, 0, numSamples, 0);
-
-    if (plugin->isSuspended())
+    if (plugin->isSuspended() || ! pluginbuses::fits (*plugin, buffer.getNumChannels()))
     {
         juce::FloatVectorOperations::clear (left, numSamples);
         juce::FloatVectorOperations::clear (right, numSamples);
         return;
     }
+
+    const auto used = juce::jmax (2, plugin->getTotalNumInputChannels(), plugin->getTotalNumOutputChannels());
+    juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), used, numSamples);
+    view.clear();
+
+    midiCopy.clear();
+    midiCopy.addEvents (midi, 0, numSamples, 0);
 
     plugin->processBlock (view, midiCopy);
 

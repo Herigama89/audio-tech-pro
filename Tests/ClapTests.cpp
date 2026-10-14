@@ -130,3 +130,60 @@ TEST_CASE ("A CLAP instrument plays notes at the right sample", "[clap]")
     CHECK (buffer.getSample (1, 200) == 0.0f);
     plugin->releaseResources();
 }
+
+//==============================================================================
+// Multi-output instruments (Groove Agent crashed when its extra outputs were switched off).
+#include "../Source/engine/PluginBuses.h"
+#include "../Source/engine/PluginInstrument.h"
+
+namespace
+{
+    /** An instrument with a stereo main out and three stereo extra outs, off to start with; it writes to every output channel it has. */
+    struct MultiOut final : juce::AudioPluginInstance
+    {
+        MultiOut()
+            : juce::AudioPluginInstance (BusesProperties().withOutput ("Main", juce::AudioChannelSet::stereo(), true)
+                                                          .withOutput ("Aux 1", juce::AudioChannelSet::stereo(), false)
+                                                          .withOutput ("Aux 2", juce::AudioChannelSet::stereo(), false)
+                                                          .withOutput ("Aux 3", juce::AudioChannelSet::stereo(), false)) {}
+        void fillInPluginDescription (juce::PluginDescription& d) const override { d.name = "MultiOut"; }
+        const juce::String getName() const override { return "MultiOut"; }
+        void prepareToPlay (double, int) override {}
+        void releaseResources() override {}
+        bool isBusesLayoutSupported (const BusesLayout&) const override { return true; }
+        void processBlock (juce::AudioBuffer<float>& b, juce::MidiBuffer&) override
+        {
+            REQUIRE (b.getNumChannels() >= getTotalNumOutputChannels());
+            for (int c = 0; c < getTotalNumOutputChannels(); ++c)
+                juce::FloatVectorOperations::fill (b.getWritePointer (c), 0.25f, b.getNumSamples());
+        }
+        double getTailLengthSeconds() const override { return 0; }
+        bool acceptsMidi() const override { return true; }
+        bool producesMidi() const override { return false; }
+        juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+        bool hasEditor() const override { return false; }
+        int getNumPrograms() override { return 1; }
+        int getCurrentProgram() override { return 0; }
+        void setCurrentProgram (int) override {}
+        const juce::String getProgramName (int) override { return {}; }
+        void changeProgramName (int, const juce::String&) override {}
+        void getStateInformation (juce::MemoryBlock&) override {}
+        void setStateInformation (const void*, int) override {}
+    };
+}
+
+TEST_CASE ("A multi-output instrument keeps every output on and plays its main out", "[plugins]")
+{
+    auto plugin = std::make_unique<MultiOut>();
+    auto* raw = plugin.get();
+    riff::PluginInstrument instrument (std::move (plugin));
+    for (int i = 0; i < raw->getBusCount (false); ++i)
+        REQUIRE (raw->getBus (false, i)->isEnabled());
+    REQUIRE (raw->getTotalNumOutputChannels() == 8);
+
+    instrument.prepare (48000.0, 256);
+    std::vector<float> l (256), r (256);
+    instrument.render (l.data(), r.data(), 256, {});
+    REQUIRE_THAT (l[100], WithinAbs (0.25, 1.0e-6));
+    REQUIRE_THAT (r[100], WithinAbs (0.25, 1.0e-6));
+}

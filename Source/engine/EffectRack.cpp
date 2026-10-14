@@ -1,5 +1,6 @@
 #include "EffectRack.h"
 #include "../model/Project.h"
+#include "PluginBuses.h"
 
 namespace riff
 {
@@ -10,18 +11,8 @@ namespace riff
 PluginEffect::PluginEffect (std::unique_ptr<juce::AudioPluginInstance> p)
     : plugin (std::move (p))
 {
-    // Stereo in, stereo out on the main buses; sidechains and extra outputs off.
-    auto layout = plugin->getBusesLayout();
-
-    for (int dir = 0; dir < 2; ++dir)
-    {
-        auto& buses = dir == 0 ? layout.inputBuses : layout.outputBuses;
-        for (int i = 0; i < buses.size(); ++i)
-            buses.getReference (i) = i == 0 ? juce::AudioChannelSet::stereo() : juce::AudioChannelSet::disabled();
-    }
-
-    if (plugin->checkBusesLayoutSupported (layout))
-        plugin->setBusesLayout (layout);
+    // Stereo in, stereo out on the main buses; sidechains and extra outputs stay on (fed silence).
+    pluginbuses::setUp (*plugin);
     plugin->setPlayHead (&playHead);
 }
 
@@ -82,7 +73,7 @@ void PluginEffect::process (float* left, float* right, int numSamples) noexcept
 
     // Being changed (ARA regions added or removed): an ARA plugin is silent meanwhile, others pass through.
     const juce::SpinLock::ScopedTryLockType lock (processLock);
-    if (! lock.isLocked() || plugin->isSuspended())
+    if (! lock.isLocked() || plugin->isSuspended() || ! pluginbuses::fits (*plugin, buffer.getNumChannels()))
     {
         if (rendersRegions.load (std::memory_order_relaxed))
         {
@@ -92,7 +83,8 @@ void PluginEffect::process (float* left, float* right, int numSamples) noexcept
         return;
     }
 
-    juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), numSamples);
+    const auto used = juce::jmax (2, plugin->getTotalNumInputChannels(), plugin->getTotalNumOutputChannels());
+    juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), used, numSamples);
     view.clear();
 
     const auto ins = plugin->getTotalNumInputChannels();
