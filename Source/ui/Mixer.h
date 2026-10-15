@@ -23,7 +23,8 @@ class MixerPanel;
     its IN lamp, the Dynamics and pan displays, insert slots, sends, the fader
     with its meter and level display, and a name plate in the track's colour.
 */
-class ChannelStrip final : public juce::Component
+class ChannelStrip final : public juce::Component,
+                           public juce::DragAndDropTarget
 {
 public:
     /** `track` is invalid for the master strip. */
@@ -41,7 +42,16 @@ public:
     void resized() override;
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
+    void mouseDrag (const juce::MouseEvent& e) override;
     void mouseDoubleClick (const juce::MouseEvent& e) override;
+    void paintOverChildren (juce::Graphics& g) override;
+
+    // Inserts dragged between slots and channels (Option: a copy), as in Logic
+    bool isInterestedInDragSource (const SourceDetails& details) override;
+    void itemDragMove (const SourceDetails& details) override;
+    void itemDragExit (const SourceDetails& details) override;
+    void itemDropped (const SourceDetails& details) override;
+    static constexpr const char* insertDragPrefix = "insert:";
 
     /** Shown highlighted: the track selected in the tracks area too. */
     void setSelected (bool shouldBeSelected);
@@ -135,10 +145,18 @@ private:
     juce::Label dynLabel;
 
     juce::OwnedArray<juce::TextButton> slots;
+    int dropSlot = -1;   // where a dragged insert would land (drawn while dragging)
+    int slotAt (juce::Point<int> position) const;
     juce::OwnedArray<juce::TextButton> sendButtons;
     juce::OwnedArray<strip::PointerKnob> sendLevels;
     std::map<juce::String, double> sendStart;   // the other selected tracks' send levels (dB) when a drag began
     std::map<juce::String, double> panStart;
+    std::map<juce::String, double> consoleStart;   // the other selected tracks' console knob (or strip plugin) values when a drag began
+    double consoleDragStart = 0.0;
+public:
+    /** The strip plugin's parameter for a control (console mode), for the other selected strips. */
+    juce::AudioProcessorParameter* stripParameterFor (console::StripControl c) const { return stripParameter (c); }
+private:
     double panDragStart = 0.0, sendDragStart = 0.0;
     int insertRows() const;
     int sendRows() const;
@@ -234,6 +252,12 @@ public:
     /** Option-click on a plugin (as in Pro Tools and Cubase): a copy, with its settings, in the same slot of every selected channel. */
     std::function<void (juce::ValueTree insert)> onCopyInsertToSelected;
 
+    /** An insert dragged to a slot (of this channel or another): moved, or copied with Option. */
+    std::function<void (juce::ValueTree insert, const juce::String& toOwner, int slot, bool copy)> onMoveInsert;
+
+    /** The header's Automix key: a balanced mix for a genre. */
+    std::function<void()> onAutomix;
+
     /** The master strip's MM key: the MultiMeter. */
     std::function<void()> onOpenMultiMeter;
 
@@ -247,6 +271,18 @@ public:
 
     /** Strips shown elsewhere (the Inspector's): they get meter levels and plugin knob updates too. */
     void addExtraStrip (ChannelStrip* s)    { extraStrips.addIfNotAlreadyThere (s); }
+
+    /** A track's strip (nullptr if it has none here). */
+    ChannelStrip* findStrip (const juce::String& trackId) const
+    {
+        for (auto* s : strips)
+            if (s->getOwnerId() == trackId)
+                return s;
+        return nullptr;
+    }
+
+    /** Captures the plugins' settings into the project (before a strip plugin is set aside, say). */
+    std::function<void()> onStorePluginStates;
     std::function<void()> onLayoutChanged;   // the strips' layout changed (EQ/Dyn shown or hidden)
 
     /** Lays every strip out again (after the skin changed). */
@@ -328,7 +364,8 @@ private:
     friend class SnapshotTool;
     juce::TextButton narrowButton { "Narrow" };   // smaller strips, to see more at once
     juce::TextButton consoleButton { "EQ/Dyn" };  // show the console section (EQ and Dynamics) on the strips
-    juce::TextButton busCompButton { "Bus Comp" }; // show the Master Bus Compressor beside the master
+    juce::TextButton busCompButton { "Bus Comp" };
+    juce::TextButton automixButton { "Automix" }; // show the Master Bus Compressor beside the master
     float stripScale() const;
     juce::Array<juce::PluginDescription> stripCandidates;
     int syncCounter = 0;

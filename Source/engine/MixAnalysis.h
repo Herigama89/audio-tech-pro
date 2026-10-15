@@ -22,6 +22,8 @@ struct LevelStats
         peak = 0.0f;
         sumSquares = low = mid = high = 0.0;
         samples = 0;
+        activeSquares = 0.0;
+        activeSamples = 0;
         lowState = highState = 0.0f;
     }
 
@@ -33,6 +35,7 @@ struct LevelStats
 
     void add (const float* left, const float* right, int n) noexcept
     {
+        const auto before = sumSquares;
         for (int i = 0; i < n; ++i)
         {
             const auto l = left[i], r = right[i];
@@ -48,7 +51,20 @@ struct LevelStats
             high += (double) highs * highs;
         }
         samples += n;
+
+        // While it plays (louder than -60 dBFS): its level when it's actually there, not averaged with its silences.
+        if (n > 0 && (sumSquares - before) / (double) n > 1.0e-6)
+        {
+            activeSquares += sumSquares - before;
+            activeSamples += n;
+        }
     }
+
+    double activeSquares = 0.0;
+    juce::int64 activeSamples = 0;
+
+    /** Its RMS level while it plays, in dB (its silent stretches left out). */
+    double activeRmsDb() const { return activeSamples > 0 ? toDb (std::sqrt (activeSquares / (double) activeSamples)) : -120.0; }
 
     static double toDb (double gain) { return gain > 1.0e-6 ? 20.0 * std::log10 (gain) : -120.0; }
 

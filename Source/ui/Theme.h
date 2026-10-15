@@ -36,7 +36,11 @@ namespace riff::theme
     inline juce::Colour meterRed   { 0xffe2463f };   // the top of the meters (clipping)
     inline juce::Colour waveform   { 0xffeef3f8 };
     inline juce::Colour locators   { 0xffe8892a };   // the cycle (Logic's locators) in the ruler
-    inline juce::Colour markers    { 0xff4b4e54 };   // markers in the marker track   // waveforms in regions (0: drawn in the track's colour)
+    inline juce::Colour markers    { 0xff4b4e54 };
+    inline juce::Colour rollWhite  { 0xff252f30 };   // the piano roll's rows: white keys
+    inline juce::Colour rollBlack  { 0xff19201f };   // ...and black keys
+    inline juce::Colour keysWhite  { 0xffe8e8e8 };   // the piano roll's keyboard
+    inline juce::Colour keysBlack  { 0xff1a1a1a };   // markers in the marker track   // waveforms in regions (0: drawn in the track's colour)
 
     // --- Key and header surfaces (were cream; now dark rubber) ----------------
     inline juce::Colour cream      { 0xff3b3d41 };
@@ -118,6 +122,9 @@ namespace riff::theme
 
         // The faders' caps, whatever the skin: -1 the skin's own, 0 classic, 1 Studio White, 2 Xenon, 3 the REAPER theme's.
         int faderStyle = -1;
+
+        // The edit windows (tracks area and editors): your own colours (ARGB), 0: the skin's.
+        juce::uint32 editBack = 0, gridBarColour = 0, gridBeatColour = 0, rollBack = 0;
 
         juce::String toString() const;
         static Settings fromString (const juce::String&);

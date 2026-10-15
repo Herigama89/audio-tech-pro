@@ -349,6 +349,34 @@ void set (const Settings& s)
             *target = adjust (juce::Colour (chosen), Role::meter, s, base.getBrightness());
     if (s.locatorColour != 0) locators = juce::Colour (s.locatorColour);
     if (s.markerColour != 0)  markers = juce::Colour (s.markerColour);
+
+    // The piano roll's rows: from the tracks' lanes, or a REAPER theme's MIDI editor colours.
+    rollWhite = laneB;
+    rollBlack = laneA.darker (0.25f);
+    keysWhite = juce::Colour (0xffe8e8e8);
+    keysBlack = juce::Colour (0xff1a1a1a);
+    if (skin == Skin::reaper)
+    {
+        if (const auto c = themepack::colour ("midi_pkey1")) keysWhite = *c;
+        if (const auto c = themepack::colour ("midi_pkey2")) keysBlack = *c;
+        if (const auto c = themepack::colour ("midi_trackbg1")) rollWhite = *c;
+        if (const auto c = themepack::colour ("midi_trackbg2")) rollBlack = *c;
+        if (const auto c = themepack::colour ("midi_grid2"); c && c->getBrightness() > 0.05f) gridBar = c->withMultipliedAlpha (0.45f);
+    }
+
+    // Your own edit window colours.
+    if (s.editBack != 0)
+    {
+        laneA = juce::Colour (s.editBack);
+        laneB = laneA.getBrightness() > 0.5f ? laneA.darker (0.05f) : laneA.brighter (0.07f);
+    }
+    if (s.gridBarColour != 0)  gridBar = juce::Colour (s.gridBarColour);
+    if (s.gridBeatColour != 0) gridBeat = juce::Colour (s.gridBeatColour);
+    if (s.rollBack != 0)
+    {
+        rollWhite = juce::Colour (s.rollBack);
+        rollBlack = rollWhite.getBrightness() > 0.5f ? rollWhite.darker (0.25f) : rollWhite.darker (0.45f);
+    }
 }
 
 const Settings& current() { return settingsNow(); }
@@ -397,6 +425,10 @@ std::vector<juce::Colour*> allColours()
     std::vector<juce::Colour*> result;
     for (auto& e : table())
         result.push_back (e.colour);
+    result.push_back (&rollWhite);
+    result.push_back (&rollBlack);
+    result.push_back (&keysWhite);
+    result.push_back (&keysBlack);
     return result;
 }
 
@@ -410,7 +442,9 @@ juce::String Settings::toString() const
                                juce::String (waveMode), juce::String::toHexString ((int) waveA), juce::String::toHexString ((int) waveB),
                                juce::String (glassRegions),
                                juce::String::toHexString ((int) locatorColour), juce::String::toHexString ((int) markerColour),
-                               juce::URL::addEscapeChars (themePack, false), juce::String (faderStyle) }.joinIntoString (";");
+                               juce::URL::addEscapeChars (themePack, false), juce::String (faderStyle),
+                               juce::String::toHexString ((int) editBack), juce::String::toHexString ((int) gridBarColour),
+                               juce::String::toHexString ((int) gridBeatColour), juce::String::toHexString ((int) rollBack) }.joinIntoString (";");
 }
 
 Settings Settings::fromString (const juce::String& text)
@@ -450,6 +484,13 @@ Settings Settings::fromString (const juce::String& text)
     {
         s.themePack = juce::URL::removeEscapeChars (v[18]);
         s.faderStyle = juce::jlimit (-1, 3, v[19].getIntValue());
+    }
+    if (v.size() >= 24)
+    {
+        s.editBack = (juce::uint32) v[20].getHexValue32();
+        s.gridBarColour = (juce::uint32) v[21].getHexValue32();
+        s.gridBeatColour = (juce::uint32) v[22].getHexValue32();
+        s.rollBack = (juce::uint32) v[23].getHexValue32();
     }
     return s;
 }

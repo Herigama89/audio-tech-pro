@@ -35,8 +35,8 @@ namespace
     constexpr float              outputSteps[numLeds]    = { -30, -24, -18, -12, -9, -6, -3, -1, 0 };
 
     // Light lettering on the dark faceplate
-    const juce::Colour ink { 0xffe6e8ec };
-    const juce::Colour engraved { 0xff9a9ca3 };
+    const juce::Colour lightInk { 0xffe6e8ec };
+    const juce::Colour darkInk { 0xff1d1e21 };
 
     float angleFor (float reductionDb)
     {
@@ -369,6 +369,10 @@ void BusCompConsolePanel::resized()
 void BusCompConsolePanel::paint (juce::Graphics& g)
 {
     g.fillAll (theme::consoleDark);
+    const auto plateTop = theme::stripFace.brighter (0.05f), plateBottom = theme::stripFaceLow.darker (0.12f);
+    const auto lightPlate = plateTop.interpolatedWith (plateBottom, 0.5f).getPerceivedBrightness() > 0.55f;
+    const auto ink = lightPlate ? darkInk : lightInk;
+    const auto engraved = ink.interpolatedWith (plateBottom, 0.35f);
 
     juce::Graphics::ScopedSaveState state (g);
     g.addTransform (juce::AffineTransform::scale (scale).translated (origin));
@@ -376,7 +380,8 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
     // --- The faceplate, drawn: dark charcoal, a bezelled meter window, four screws
     {
         const juce::Rectangle<float> plate { 6.0f, 6.0f, 624.0f, 1472.0f };
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff36383c), 0.0f, plate.getY(), juce::Colour (0xff222326), 0.0f, plate.getBottom(), false));
+        // The faceplate in the skin's own strip colours (Studio White's light, Xenon's glass, a REAPER theme's...)
+        g.setGradientFill (juce::ColourGradient (plateTop, 0.0f, plate.getY(), plateBottom, 0.0f, plate.getBottom(), false));
         g.fillRoundedRectangle (plate, 18.0f);
         if (theme::xenonSkin())
         {
@@ -415,7 +420,7 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
         g.fillRoundedRectangle (bezel, 14.0f);
         g.setColour (juce::Colours::black);
         g.drawRoundedRectangle (bezel, 14.0f, 2.0f);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff0b1830), 0.0f, meterFace.getY(), juce::Colour (0xff15396b), 0.0f, meterFace.getBottom(), false));
+        g.setGradientFill (juce::ColourGradient (theme::lcd.darker (0.5f), 0.0f, meterFace.getY(), theme::lcd.brighter (0.25f), 0.0f, meterFace.getBottom(), false));
         g.fillRoundedRectangle (meterFace, 6.0f);
         g.setColour (theme::neon.withAlpha (0.18f));
         g.fillRoundedRectangle (meterFace.withTrimmedTop (meterFace.getHeight() * 0.6f), 6.0f);
@@ -515,6 +520,7 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
 
     // --- The meter -------------------------------------------------------------
     {
+        const auto faceInk = theme::lcdText;   // the scale, lit on the meter's own face
         juce::Graphics::ScopedSaveState faceState (g);
         g.reduceClipRegion (meterFace.toNearestInt());
 
@@ -526,14 +532,14 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
 
         juce::Path arc;
         arc.addCentredArc (needlePivot.x, needlePivot.y, scaleRadius, scaleRadius, 0.0f, angleFor (20.0f), angleFor (0.0f), true);
-        g.setColour (ink);
+        g.setColour (faceInk);
         g.strokePath (arc, juce::PathStrokeType (2.6f));
 
         g.setFont (juce::FontOptions (24.0f));
         for (const auto db : { 20.0f, 10.0f, 7.0f, 5.0f, 3.0f, 2.0f, 1.0f, 0.0f })
         {
             const auto a = angleFor (db);
-            g.setColour (db >= 10.0f ? juce::Colour (0xffff6a5a) : ink);
+            g.setColour (db >= 10.0f ? juce::Colour (0xffff6a5a) : faceInk);
             g.drawLine (juce::Line<float> (polar (needlePivot, scaleRadius - 2.0f, a), polar (needlePivot, scaleRadius + 16.0f, a)), 3.0f);
             g.drawText (juce::String ((int) db), juce::Rectangle<float> (40.0f, 26.0f).withCentre (polar (needlePivot, scaleRadius + 36.0f, a)),
                         juce::Justification::centred, false);
@@ -542,11 +548,11 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
         for (int minor = 0; minor <= 20; ++minor)
         {
             const auto a = angleFor ((float) minor);
-            g.setColour (ink.withAlpha (0.8f));
+            g.setColour (faceInk.withAlpha (0.8f));
             g.drawLine (juce::Line<float> (polar (needlePivot, scaleRadius, a), polar (needlePivot, scaleRadius + 8.0f, a)), 1.6f);
         }
 
-        g.setColour (ink.withAlpha (0.9f));
+        g.setColour (faceInk.withAlpha (0.9f));
         g.setFont (juce::FontOptions (54.0f));
         g.drawText ("VU", juce::Rectangle<float> (needlePivot.x - 70.0f, 168.0f, 140.0f, 60.0f), juce::Justification::centred, false);
         g.setFont (juce::FontOptions (18.0f));
@@ -554,7 +560,7 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
 
         if (! loaded)
         {
-            g.setColour (ink.withAlpha (0.75f));
+            g.setColour (faceInk.withAlpha (0.75f));
             g.setFont (juce::FontOptions (20.0f));
             g.drawText (candidates.isEmpty() ? juce::String ("Plugin not found") : "Press IN to load " + candidates.getFirst().name,
                         meterFace.withTrimmedTop (meterFace.getHeight() - 30.0f), juce::Justification::centred, true);

@@ -22,6 +22,7 @@ const std::vector<Info>& all()
         { toggleHeaderInserts,    "Show Inserts in Edit Window", "View",     "Each track's insert slots beside its header (as in Pro Tools' Edit window)" },
         { toggleExclusiveSolo,    "Exclusive Solo",             "Mix",       "Soloing a track unsolos the others (as in LUNA)" },
         { showMultiMeter,         "MultiMeter",                 "Mix",       "The master's meters: levels, loudness (LUFS), spectrum, goniometer and phase correlation" },
+        { automix,                "Automix...",                 "Mix",       "A balanced starting mix for a genre: each track measured and its fader set (one undo step)" },
         { toggleMixerComments,    "Show Comments in Mixer",     "View",      "A notes field under each mixer channel (as in Pro Tools)" },
         { importProject,          "Open Project from Another Program...", "File", "Open an Ableton Live, FL Studio, Studio One, Pro Tools, Logic, Cubase, DAWproject or MIDI file project" },
         { bounceInPlace,          "Bounce in Place",            "Track",     "Render the selected track to a new audio track and mute the original" },

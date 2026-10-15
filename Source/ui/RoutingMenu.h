@@ -18,6 +18,31 @@ inline std::function<void()> openGroupSettings;
 /** Set by the main window: makes a track stack from the selected tracks. */
 inline std::function<void (bool summing)> createStack;
 
+/** "Track Output": record (or hear) another track's or bus's output on these tracks instead of an interface input
+    (the other track as it sounds, after its fader). Choosing an interface input clears it. */
+inline void addTrackInputItems (juce::PopupMenu& menu, juce::ValueTree project, juce::ValueTree track, juce::Array<juce::ValueTree> targets)
+{
+    const auto current = track[ids::inputTrack].toString();
+    juce::PopupMenu outputs;
+    for (const auto& t : project)
+    {
+        if (! t.hasType (ids::TRACK) || model::isVcaTrack (t) || t == track)
+            continue;
+        const auto id = t[ids::id].toString();
+        outputs.addItem ((model::isBusTrack (t) ? "Bus: " : "") + t[ids::name].toString(), true, id == current, [targets, id]() mutable
+        {
+            for (auto& target : targets)
+                if (! model::isBusTrack (target) && ! model::isInstrumentTrack (target) && target[ids::id].toString() != id)
+                {
+                    target.setProperty (ids::inputTrack, id, nullptr);
+                    target.setProperty (ids::inputStereo, true, nullptr);
+                    target.setProperty (ids::channelFormat, "stereo", nullptr);
+                }
+        });
+    }
+    menu.addSubMenu ("Track or Bus Output", outputs, outputs.getNumItems() > 0, nullptr, current.isNotEmpty());
+}
+
 /** The tracks a mute, solo or arm on `track` acts on: the selection (when the track is in it) and their groups. */
 inline juce::Array<juce::ValueTree> linkedTracks (const juce::ValueTree& project, const juce::ValueTree& track,
                                                   const juce::StringArray& selectedIds, const juce::String& what = {})

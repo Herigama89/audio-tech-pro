@@ -10,6 +10,8 @@
 #include "../Source/ui/MultiMeter.h"
 #include "../Source/ui/TrackHeaders.h"
 #include "../Source/ui/ThemePanel.h"
+#include "../Source/ui/AutomixPanel.h"
+#include "../Source/ui/InsertBar.h"
 #include <JuceHeader.h>
 #include "MainComponent.h"
 #include "model/Project.h"
@@ -606,6 +608,13 @@ public:
                 pump (main, 15);
             }
             save (main, "xenon-mixer.png");
+            save (main.mixer.getBusCompPanel(), "xenon-buscomp.png", 2.0f);
+            main.mixer.getConsolePanel().showFaceForTesting = true;
+            main.mixer.resized();
+            pump (main, 100);
+            save (main.mixer.getConsolePanel(), "xenon-buscomp-face.png");
+            main.mixer.getConsolePanel().showFaceForTesting = false;
+            main.mixer.resized();
             main.project.setProperty ("mixerConsole", true, nullptr);
             main.mixer.relayoutStrips();
             pump (main, 200);
@@ -731,6 +740,33 @@ public:
                 pump (main, 20);
             }
             save (meter, "multimeter.png");
+        }
+        {
+            // Automix, after a run
+            AutomixPanel panel (main.project);
+            std::vector<automix::Result> results;
+            int i = 0;
+            for (const auto& t : main.project)
+                if (t.hasType (ids::TRACK))
+                {
+                    automix::Track info;
+                    info.name = t[ids::name].toString();
+                    results.push_back ({ t[ids::id].toString(), info.name, automix::guessRole (info), 0.0, -3.0 - 2.5 * (double) (i++ % 4) });
+                }
+            panel.showResults (results, "Hip-Hop");
+            pump (main, 30);
+            save (panel, "automix.png");
+
+            // A plugin window's Pin / Bypass / Side Chain keys
+            auto track = main.project.getChild (1);
+            auto chain = model::chainFor (main.project, track[ids::id].toString());
+            auto insert = model::insertsOf (chain).isEmpty() ? model::addBuiltinInsert (chain, "compressor", 0, nullptr) : model::insertsOf (chain).getFirst();
+            insert.setProperty (ids::sidechain, main.project.getChild (0)[ids::id].toString(), nullptr);
+            InsertBar bar (insert, main.project, main.undoManager, true);
+            bar.setSize (InsertBar::preferredWidth, 24);
+            pump (main, 30);
+            save (bar, "insert-bar.png", 2.0f);
+            insert.removeProperty (ids::sidechain, nullptr);
         }
 
         {

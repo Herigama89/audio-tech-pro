@@ -131,6 +131,12 @@ struct PlaybackGraph
         Curve volumeAutomation, panAutomation;
         std::vector<ParamAutomation> paramAutomation;
 
+        /** Side chains: an insert, and the slot of the track whose output keys it. */
+        struct Sidechain { Effect* effect = nullptr; int sourceSlot = -1; };
+        std::vector<Sidechain> sidechains;
+
+        int inputTrackSlot = -1;    // its input is another track's output (that track's slot), not the device's
+
         bool monitorInput = false;  // armed + monitor: pass the input through this track
         int inputChannel = 0;       // index among the device's active inputs
         bool inputStereo = false;

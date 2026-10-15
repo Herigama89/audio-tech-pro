@@ -862,3 +862,45 @@ TEST_CASE ("A bus fader never moves track faders; edits go to every selected cha
     CHECK_FALSE (acting.contains (vca));
     CHECK (routing::actingTracks (project, a, { b[ids::id].toString() }).size() == 1);
 }
+
+TEST_CASE ("Dragging an insert: to another slot, onto another channel, or copied with Option", "[model][inserts]")
+{
+    auto project = model::createProject();
+    auto a = model::addTrack (project, "A", nullptr);
+    auto b = model::addTrack (project, "B", nullptr);
+    const auto aId = a[ids::id].toString(), bId = b[ids::id].toString();
+    juce::UndoManager um;
+
+    auto chainA = model::chainFor (project, aId);
+    auto eq = model::placeInsert (chainA, 0, [] (juce::ValueTree c, int i) { return model::addBuiltinInsert (c, "eq", i, nullptr); }, nullptr);
+    auto comp = model::placeInsert (chainA, 1, [] (juce::ValueTree c, int i) { return model::addBuiltinInsert (c, "compressor", i, nullptr); }, nullptr);
+    const auto compId = comp[ids::id].toString();
+    auto lane = model::laneFor (project, aId, model::insertParam (compId, "threshold"), true);
+
+    // Up: the compressor into slot 0, the EQ moves down one.
+    um.beginNewTransaction();
+    model::moveInsert (project, comp, aId, 0, false, &um);
+    CHECK (model::insertAtSlot (chainA, 0)[ids::id].toString() == compId);
+    CHECK (model::insertAtSlot (chainA, 1) == eq);
+    CHECK (model::insertsOf (chainA).getFirst()[ids::id].toString() == compId);   // the chain plays in slot order
+
+    // Onto B: it leaves A, keeps its id (and its settings), and its automation goes with it.
+    um.beginNewTransaction();
+    auto moved = model::moveInsert (project, comp, bId, 2, false, &um);
+    CHECK (moved[ids::id].toString() == compId);
+    CHECK (model::insertAtSlot (model::findChain (project, bId), 2) == moved);
+    CHECK_FALSE (model::insertAtSlot (chainA, 0).isValid());
+    CHECK (lane[ids::owner].toString() == bId);
+
+    // Option: a copy (a new id), the original stays.
+    um.beginNewTransaction();
+    auto copy = model::moveInsert (project, eq, bId, 2, true, &um);
+    CHECK (copy[ids::id].toString() != eq[ids::id].toString());
+    CHECK (model::insertAtSlot (chainA, 1) == eq);
+    CHECK (model::insertAtSlot (model::findChain (project, bId), 2) == copy);
+    CHECK (model::insertAtSlot (model::findChain (project, bId), 3) == moved);   // made room
+
+    // One undo puts each step back.
+    um.undo();
+    CHECK (model::insertAtSlot (model::findChain (project, bId), 2) == moved);
+}

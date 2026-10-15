@@ -5,6 +5,7 @@
 #include "model/Project.h"
 #include "ui/Commands.h"
 #include "engine/ConsolePlugins.h"
+#include "ui/AutomixPanel.h"
 #include <BinaryData.h>
 
 namespace riff
@@ -303,6 +304,112 @@ void MainComponent::measureMixForAssistant (double start, double end, std::funct
                 m.tracks[id] = result.tracks[(size_t) slot];
         }
         done (m);
+    });
+    mixMeasureJob->startThread();
+}
+
+//==============================================================================
+// Automix
+//==============================================================================
+void MainComponent::showAutomix()
+{
+    const juce::String id ("automix");
+    if (auto it = editorWindows.find (id); it != editorWindows.end())
+    {
+        it->second->toFront (true);
+        return;
+    }
+    auto closer = [this, id]
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this), id]
+        {
+            if (safe != nullptr)
+                safe->editorWindows.erase (id);
+        });
+    };
+    auto* panel = new AutomixPanel (project);
+    panel->onRun = [this] (const juce::String& genre, bool cycleOnly) { runAutomix (genre, cycleOnly); };
+    editorWindows[id] = std::make_unique<EditorWindow> ("Automix", panel, false, closer);
+}
+
+void MainComponent::runAutomix (const juce::String& genre, bool cycleOnly)
+{
+    auto panelNow = [this]() -> AutomixPanel*
+    {
+        if (auto it = editorWindows.find ("automix"); it != editorWindows.end())
+            return dynamic_cast<AutomixPanel*> (it->second->getContentComponent());
+        return nullptr;
+    };
+
+    if (engine.isRecording() || fileCache.isLoading() || (mixMeasureJob != nullptr && mixMeasureJob->isThreadRunning()))
+    {
+        statusLabel.setText ("Automix: wait for recording, loading or another measurement to finish", juce::dontSendNotification);
+        return;
+    }
+
+    double start = 0.0, end = model::projectEnd (project);
+    if (cycleOnly && (double) project.getProperty (ids::cycleEnd, 0.0) > (double) project.getProperty (ids::cycleStart, 0.0))
+    {
+        start = project.getProperty (ids::cycleStart, 0.0);
+        end = project.getProperty (ids::cycleEnd, 0.0);
+    }
+    if (end <= start + 0.5)
+    {
+        statusLabel.setText ("Automix: there's nothing to listen to yet", juce::dontSendNotification);
+        return;
+    }
+
+    if (auto* panel = panelNow())
+        panel->setBusy (true);
+    if (engine.isPlaying())
+        togglePlay();
+    player.setIgnoreSolo (true);   // every track heard, whatever's soloed
+    player.rebuildNow();
+    engine.beginOfflineRender();
+    statusLabel.setText ("Automix: listening to every track...", juce::dontSendNotification);
+
+    mixMeasureJob = std::make_unique<MixMeasureJob> (engine, start, end,
+        [safe = juce::Component::SafePointer<MainComponent> (this), genre, panelNow] (AudioEngine::MixMeasurement result)
+    {
+        if (safe == nullptr)
+            return;
+        safe->engine.endOfflineRender();
+        safe->player.setIgnoreSolo (false);
+        safe->player.rebuildNow();
+
+        std::vector<automix::Track> tracks;
+        for (const auto& track : safe->project)
+        {
+            if (! track.hasType (ids::TRACK) || model::isBusTrack (track) || model::isVcaTrack (track) || (bool) track[ids::mute])
+                continue;   // (buses keep their level: the tracks feeding them are balanced)
+            const auto id = track[ids::id].toString();
+            const auto slot = safe->player.slotOf (id);
+            if (! juce::isPositiveAndBelow (slot, (int) result.tracks.size()))
+                continue;
+            const auto& stats = result.tracks[(size_t) slot];
+            automix::Track t;
+            t.id = id;
+            t.name = track[ids::name].toString();
+            t.instrument = model::isInstrumentTrack (track);
+            t.activeRmsDb = stats.activeRmsDb();
+            t.faderDb = juce::Decibels::gainToDecibels ((double) track.getProperty (ids::volume, 1.0), -100.0);
+            stats.bandShares (t.lowShare, t.midShare, t.highShare);
+            tracks.push_back (t);
+        }
+
+        const auto results = automix::balance (tracks, genre);
+        if (! results.empty())
+        {
+            safe->undoManager.beginNewTransaction ("Automix (" + genre + ")");
+            for (const auto& r : results)
+                if (auto track = model::findById (safe->project, r.id); track.isValid())
+                    track.setProperty (ids::volume, juce::Decibels::decibelsToGain (r.toDb, -60.0), &safe->undoManager);
+        }
+        safe->statusLabel.setText (results.empty() ? juce::String ("Automix: nothing played, nothing changed")
+                                                   : "Automix: " + juce::String ((int) results.size()) + " faders set for " + genre,
+                                   juce::dontSendNotification);
+        if (auto* panel = panelNow())
+            panel->showResults (results, genre);
     });
     mixMeasureJob->startThread();
 }

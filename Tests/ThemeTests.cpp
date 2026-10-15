@@ -144,3 +144,23 @@ TEST_CASE ("The fader choice and the REAPER theme are kept with the theme settin
     CHECK (plain.faderStyle == -1);
     CHECK (plain.themePack.isEmpty());
 }
+
+TEST_CASE ("Edit window colours are kept with the theme and used", "[theme]")
+{
+    theme::Settings s;
+    s.editBack = 0xff102030;
+    s.gridBarColour = 0xff405060;
+    s.gridBeatColour = 0xff203040;
+    s.rollBack = 0xff303030;
+    const auto back = theme::Settings::fromString (s.toString());
+    CHECK (back.editBack == s.editBack);
+    CHECK (back.gridBarColour == s.gridBarColour);
+    CHECK (back.gridBeatColour == s.gridBeatColour);
+    CHECK (back.rollBack == s.rollBack);
+
+    theme::set (s);
+    CHECK (theme::laneA == juce::Colour (0xff102030));
+    CHECK (theme::gridBar == juce::Colour (0xff405060));
+    CHECK (theme::rollWhite == juce::Colour (0xff303030));
+    theme::set ({});
+}

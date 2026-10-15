@@ -33,6 +33,13 @@ public:
         (tempo-synced delays, and ARA plugins that play the regions themselves). */
     virtual void setPosition (juce::int64 /*samplePosition*/, bool /*playing*/, double /*bpm*/) noexcept {}
 
+    /** The side chain for the coming block (audio thread): another track's output, or nullptr for none.
+        Effects with a side-chain input (plugins with a second input bus) hear it there. */
+    virtual void setSidechain (const float* /*left*/, const float* /*right*/) noexcept {}
+
+    /** True if it has a side-chain input to feed. */
+    virtual bool acceptsSidechain() const { return false; }
+
     /** How many samples late this effect's output is (for delay compensation). */
     virtual int getLatencySamples() const { return 0; }
 

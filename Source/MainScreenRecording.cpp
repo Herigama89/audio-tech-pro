@@ -97,7 +97,11 @@ void MainComponent::startScreenRecording (const ScreenRecordSettings& chosen)
             safe->engine.setScreenAudioTap (nullptr);
             safe->statusLabel.setText (safe->deviceStatusText(), juce::dontSendNotification);
 
-            if (error.contains ("permission"))
+            if (error == "Recording cancelled.")
+            {
+                safe->statusLabel.setText ("Screen recording cancelled", juce::dontSendNotification);
+            }
+            else if (error.contains ("permission"))
             {
                 safe->messageBox = juce::AlertWindow::showScopedAsync (
                     juce::MessageBoxOptions::makeOptionsOkCancel (juce::MessageBoxIconType::WarningIcon, "Allow screen recording",

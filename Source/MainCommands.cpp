@@ -263,6 +263,7 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::toggleMeters:           setPanelShown ("viewMeters", showMeters, ! showMeters); break;
         case commands::toggleTrackHeaders:     setPanelShown ("viewTrackHeaders", showTrackHeaders, ! showTrackHeaders); break;
         case commands::showMultiMeter:         showMultiMeter(); break;
+        case commands::automix:                showAutomix(); break;
         case commands::toggleMixerComments:
             mixer.setShowComments (! mixer.getShowComments());
             appProperties.getUserSettings()->setValue ("mixerComments", mixer.getShowComments());
@@ -451,7 +452,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             menu.addSeparator();
             add ({ commands::groupSettings, commands::ioLabels, commands::controllerAssignments });
             menu.addSeparator();
-            add ({ commands::toggleExclusiveSolo, commands::showMultiMeter, commands::toggleMixerComments });
+            add ({ commands::toggleExclusiveSolo, commands::showMultiMeter, commands::automix, commands::toggleMixerComments });
             menu.addSeparator();
             add ({ commands::scanPlugins });
             {

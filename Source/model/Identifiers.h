@@ -192,6 +192,9 @@ namespace riff::ids
     RIFF_DECLARE_ID (owner)
     RIFF_DECLARE_ID (effect)          // built-in effect type: "eq", "compressor", "delay", "reverb", "limiter"
     RIFF_DECLARE_ID (bypass)
+    RIFF_DECLARE_ID (parkedStrip)    // the channel strip plugin set aside for Built-in (its settings, to come back)
+    RIFF_DECLARE_ID (sidechain)      // an insert's side chain: the track (id) whose output keys it
+    RIFF_DECLARE_ID (inputTrack)     // a track recording or hearing another track's output instead of an input
     RIFF_DECLARE_ID (slot)          // an insert's slot on the strip (0 at the top); slots can be left empty above it
     RIFF_DECLARE_ID (target)
     RIFF_DECLARE_ID (level)

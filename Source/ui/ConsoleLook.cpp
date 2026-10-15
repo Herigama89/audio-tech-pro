@@ -969,6 +969,33 @@ void GainReductionMeter::paint (juce::Graphics& g)
         g.setColour (theme::lcdDim);
         g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
         g.drawText ("GAIN REDUCTION", face.withTrimmedTop (face.getHeight() * 0.55f), juce::Justification::centred, false);
+
+        // The scale: dB of reduction, 20 at the left to 0 at the right (on the needle's own arc)
+        juce::Graphics::ScopedSaveState state (g);
+        g.reduceClipRegion (face.toNearestInt());
+        const auto pivot = juce::Point<float> (face.getCentreX(), face.getBottom() + face.getHeight() * 0.55f);
+        const auto radius = face.getHeight() * 1.35f;
+        constexpr float left = -0.72f, rest = 0.38f;
+        auto angleOf = [] (float db)
+        {
+            const auto pos = 1.0f - std::log10 (1.0f + db) / std::log10 (1.0f + fullScaleDb);
+            return left + (rest - left) * pos;
+        };
+        juce::Path arc;
+        arc.addCentredArc (pivot.x, pivot.y, radius * 0.93f, radius * 0.93f, 0.0f, angleOf (fullScaleDb), angleOf (0.0f), true);
+        g.setColour (theme::lcdText.withAlpha (0.7f));
+        g.strokePath (arc, juce::PathStrokeType (1.0f));
+        g.setFont (juce::FontOptions (juce::jlimit (8.0f, 12.0f, face.getHeight() * 0.13f), juce::Font::bold));
+        for (const auto db : { 20.0f, 10.0f, 7.0f, 5.0f, 3.0f, 2.0f, 1.0f, 0.0f })
+        {
+            if (db > fullScaleDb)
+                continue;
+            const auto a = angleOf (db);
+            g.setColour (db >= 10.0f ? juce::Colour (0xffff6a5a) : theme::lcdText);
+            g.drawLine (juce::Line<float> (onCircle (pivot, radius * 0.93f, a), onCircle (pivot, radius * 0.98f, a)), 1.2f);
+            g.drawText (juce::String ((int) db), juce::Rectangle<float> (22.0f, 12.0f).withCentre (onCircle (pivot, radius * 0.86f, a)),
+                        juce::Justification::centred, false);
+        }
     }
     {
         juce::Graphics::ScopedSaveState state (g);

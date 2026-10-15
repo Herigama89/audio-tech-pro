@@ -21,8 +21,14 @@ private:
     bool menuClick = false;
 };
 
-/** A floating window for a plugin's editor or the synth controls. */
-class EditorWindow final : public juce::DocumentWindow
+/**
+    A floating window for a plugin's editor or the synth controls.
+    Pinned (plugin windows, as in Logic): it floats above the app's main window, so clicking
+    the tracks or the mixer doesn't send it behind; it stops floating while you're in another
+    app. Several stay open at once, each until you close it.
+*/
+class EditorWindow final : public juce::DocumentWindow,
+                           private juce::Timer
 {
 public:
     EditorWindow (const juce::String& title, juce::Component* contentToOwn, bool canResize,
@@ -44,8 +50,38 @@ public:
             onClose(); // the owner deletes this window
     }
 
+    /** Plugin windows open pinned or not as the last one was left (the pin key in their header). */
+    inline static bool pinByDefault = true;
+
+    void setPinned (bool shouldPin)
+    {
+        pinned = shouldPin;
+        if (pinned)
+            startTimerHz (4);
+        else
+            stopTimer();
+        timerCallback();
+    }
+    bool isPinned() const noexcept { return pinned; }
+
+    /** Stacks a new window a little below and right of the last one, so they don't open on top of each other. */
+    void cascadeFrom (const juce::Component* previous)
+    {
+        if (previous != nullptr)
+            setTopLeftPosition (previous->getX() + 28, previous->getY() + 28);
+    }
+
 private:
+    void timerCallback() override
+    {
+        // Above the main window while the app is in front; an ordinary window when you switch away.
+        const auto shouldFloat = pinned && juce::Process::isForegroundProcess();
+        if (isAlwaysOnTop() != shouldFloat)
+            setAlwaysOnTop (shouldFloat);
+    }
+
     std::function<void()> onClose;
+    bool pinned = false;
 };
 
 /** Controls for the built-in instruments (Tech Synth, Drum Kit, Sampler), bound (undoably) to the track's properties. */

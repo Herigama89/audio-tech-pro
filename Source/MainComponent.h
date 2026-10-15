@@ -184,6 +184,8 @@ private:
 
     /** The master's MultiMeter (levels, LUFS loudness, goniometer, spectrum), in its own window. */
     void showMultiMeter();
+    void showAutomix();
+    void runAutomix (const juce::String& genre, bool cycleOnly);
 
     /** Cubase's Extensions: an ARA plugin (Melodyne...) on just the chosen audio regions; the rest of the track plays as usual. */
     void addExtensionItems (juce::PopupMenu& menu, juce::Array<juce::ValueTree> regions);
@@ -466,6 +468,7 @@ private:
     // Plugin and synth windows, by track id. Declared last so they close before
     // the instruments they show are destroyed.
     std::map<juce::String, std::unique_ptr<EditorWindow>> editorWindows;
+    juce::Component::SafePointer<juce::Component> lastInsertWindow;   // new plugin windows open cascaded from it
 
     // The Performance meter (CPU and disk) and its window
     PerformanceMeter performanceMeter;

@@ -336,7 +336,7 @@ void PianoRoll::paint (juce::Graphics& g)
             if (y > area.getBottom() || y + rowHeight < area.getY())
                 continue;
 
-            g.setColour (isBlackKey (p) ? theme::laneA.darker (0.25f) : theme::laneB);
+            g.setColour (isBlackKey (p) ? theme::rollBlack : theme::rollWhite);
             g.fillRect (area.getX(), y, area.getWidth(), rowHeight);
 
             if (p % 12 == 0)
@@ -430,7 +430,7 @@ void PianoRoll::paint (juce::Graphics& g)
                 continue;
 
             const bool black = isBlackKey (p);
-            g.setColour (p == keyboardNote ? theme::accent : black ? juce::Colour (0xff1a1a1a) : juce::Colour (0xffe8e8e8));
+            g.setColour (p == keyboardNote ? theme::accent : black ? theme::keysBlack : theme::keysWhite);
             g.fillRect (0, y, black ? keyboardWidth - 16 : keyboardWidth, rowHeight - 1);
 
             if (p % 12 == 0)

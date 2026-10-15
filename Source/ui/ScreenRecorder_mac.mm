@@ -355,6 +355,53 @@ API_AVAILABLE(macos(12.3))
 @end
 
 //==============================================================================
+// macOS 14+: the system's content picker. What you pick there may be recorded without the
+// Screen Recording permission, so recording works even when macOS won't confirm that switch.
+API_AVAILABLE(macos(14.0))
+@interface ATPPickerObserver : NSObject <SCContentSharingPickerObserver>
+@property (copy) void (^onFilter)(SCContentFilter* filter);
+@property (copy) void (^onFail)(NSString* reason);
+@end
+
+@implementation ATPPickerObserver
+- (void)finish:(SCContentSharingPicker*)picker
+{
+    [picker removeObserver: self];
+    picker.active = NO;
+}
+
+- (void)contentSharingPicker:(SCContentSharingPicker*)picker didUpdateWithFilter:(SCContentFilter*)filter forStream:(SCStream*)stream
+{
+    [self finish: picker];
+    auto done = self.onFilter;
+    self.onFilter = nil;
+    self.onFail = nil;
+    if (done != nil)
+        done (filter);
+}
+
+- (void)contentSharingPicker:(SCContentSharingPicker*)picker didCancelForStream:(SCStream*)stream
+{
+    [self finish: picker];
+    auto fail = self.onFail;
+    self.onFilter = nil;
+    self.onFail = nil;
+    if (fail != nil)
+        fail (@"Recording cancelled.");
+}
+
+- (void)contentSharingPickerStartDidFailWithError:(NSError*)error
+{
+    [self finish: SCContentSharingPicker.sharedPicker];
+    auto fail = self.onFail;
+    self.onFilter = nil;
+    self.onFail = nil;
+    if (fail != nil)
+        fail (error.localizedDescription ?: @"The screen picker couldn't open.");
+}
+@end
+
+//==============================================================================
 namespace riff
 {
 
@@ -413,15 +460,21 @@ namespace
                     return;
                 }
 
-                // macOS's quick check can say "no" when the switch is on (for a rebuilt app, until it's reopened),
-                // so it doesn't stop us: ask once, then try; the capture itself says if it's really refused.
-                if (! CGPreflightScreenCaptureAccess())
+                // macOS's own check can say "no" even with the switch on (a rebuilt or moved app, until it's
+                // reopened, or macOS 15's monthly confirmation). Then, on macOS 14 and later, the system's
+                // picker is used instead: what you pick there is recorded with no permission needed at all.
+                // Never asks for the permission itself (that's the prompt that kept coming back).
+                const bool permitted = CGPreflightScreenCaptureAccess();
+                bool usePicker = false;
+                if (@available (macOS 14.0, *))
+                    usePicker = ! permitted;
+                if (! permitted && ! usePicker)
                 {
                     static bool asked = false;
                     if (! asked)
                     {
                         asked = true;
-                        CGRequestScreenCaptureAccess();   // the system asks, or lists the app in Settings
+                        CGRequestScreenCaptureAccess();   // (macOS 12.3 to 13: the only way)
                     }
                 }
 
@@ -459,12 +512,83 @@ namespace
                     });
                 };
 
+                // Records what a filter shows (a display, or this app's windows), its size in pixels.
+                void (^begin)(SCContentFilter*, size_t, size_t) = ^(SCContentFilter* filter, size_t pixelWidth, size_t pixelHeight)
+                {
+                    const auto size = ScreenRecorder::fitSize ((int) pixelWidth, (int) pixelHeight, opts.maxHeight);
+                    const int fps = juce::jlimit (1, 120, opts.frameRate);
+
+                    SCStreamConfiguration* config = [[SCStreamConfiguration alloc] init];
+                    config.width = (size_t) size.x;
+                    config.height = (size_t) size.y;
+                    config.minimumFrameInterval = CMTimeMake (1, fps);
+                    config.pixelFormat = kCVPixelFormatType_32BGRA;
+                    config.showsCursor = YES;
+                    config.queueDepth = 8;
+
+                    ATPRecordingSession* newSession = [[ATPRecordingSession alloc] initWithTap: tapPointer sampleRate: opts.sampleRate];
+                    NSURL* url = [NSURL fileURLWithPath: [NSString stringWithUTF8String: opts.file.getFullPathName().toRawUTF8()]];
+
+                    [newSession startWithFilter: filter configuration: config file: url width: size.x height: size.y frameRate: fps
+                                     completion: ^(NSString* startError)
+                    {
+                        report (startError == nil ? newSession : nil, size, toJuce (startError));
+                    }];
+                };
+
+                // The system's picker: choose the screen, a window or an app, and recording starts.
+                void (^presentPicker)(void) = ^
+                {
+                    if (@available (macOS 14.0, *))
+                    {
+                        ATPPickerObserver* observer = [[ATPPickerObserver alloc] init];
+                        pickerObserver = observer;
+                        observer.onFilter = ^(SCContentFilter* filter)
+                        {
+                            if (@available (macOS 14.0, *))
+                            {
+                                const CGRect rect = filter.contentRect;
+                                const double scale = filter.pointPixelScale > 0 ? (double) filter.pointPixelScale : 2.0;
+                                begin (filter, (size_t) std::lround (rect.size.width * scale), (size_t) std::lround (rect.size.height * scale));
+                            }
+                        };
+                        observer.onFail = ^(NSString* reason)
+                        {
+                            report (nil, {}, toJuce (reason));
+                        };
+
+                        SCContentSharingPicker* picker = SCContentSharingPicker.sharedPicker;
+                        SCContentSharingPickerConfiguration* pickerConfig = [[SCContentSharingPickerConfiguration alloc] init];
+                        pickerConfig.allowedPickerModes = SCContentSharingPickerModeSingleDisplay
+                                                        | SCContentSharingPickerModeSingleWindow
+                                                        | SCContentSharingPickerModeSingleApplication;
+                        picker.defaultConfiguration = pickerConfig;
+                        [picker addObserver: observer];
+                        picker.active = YES;
+                        [picker present];
+                        return;
+                    }
+                    report (nil, {}, juce::String (permissionText));
+                };
+
+                if (usePicker)
+                {
+                    presentPicker();
+                    return;
+                }
+
                 [SCShareableContent getShareableContentExcludingDesktopWindows: NO
                                                            onScreenWindowsOnly: YES
                                                              completionHandler: ^(SCShareableContent* content, NSError* error)
                 {
                     if (content == nil)
                     {
+                        // Refused: on macOS 14 and later the picker still works, without the permission.
+                        if (@available (macOS 14.0, *))
+                        {
+                            dispatch_async (dispatch_get_main_queue(), presentPicker);
+                            return;
+                        }
                         report (nil, {}, error != nil && error.code == SCStreamErrorUserDeclined
                                             ? juce::String (permissionText)
                                             : toJuce (error.localizedDescription ?: @"Couldn't see the screen.") + "\n\n" + permissionText);
@@ -511,26 +635,7 @@ namespace
                         pixelHeight = CGDisplayModeGetPixelHeight (mode);
                         CGDisplayModeRelease (mode);
                     }
-
-                    const auto size = ScreenRecorder::fitSize ((int) pixelWidth, (int) pixelHeight, opts.maxHeight);
-                    const int fps = juce::jlimit (1, 120, opts.frameRate);
-
-                    SCStreamConfiguration* config = [[SCStreamConfiguration alloc] init];
-                    config.width = (size_t) size.x;
-                    config.height = (size_t) size.y;
-                    config.minimumFrameInterval = CMTimeMake (1, fps);
-                    config.pixelFormat = kCVPixelFormatType_32BGRA;
-                    config.showsCursor = YES;
-                    config.queueDepth = 8;
-
-                    ATPRecordingSession* newSession = [[ATPRecordingSession alloc] initWithTap: tapPointer sampleRate: opts.sampleRate];
-                    NSURL* url = [NSURL fileURLWithPath: [NSString stringWithUTF8String: opts.file.getFullPathName().toRawUTF8()]];
-
-                    [newSession startWithFilter: filter configuration: config file: url width: size.x height: size.y frameRate: fps
-                                     completion: ^(NSString* startError)
-                    {
-                        report (startError == nil ? newSession : nil, size, toJuce (startError));
-                    }];
+                    begin (filter, pixelWidth, pixelHeight);
                 }];
                 return;
             }
@@ -576,6 +681,7 @@ namespace
 
     private:
         id session = nil;
+        id pickerObserver = nil;   // (kept alive while the system's picker is up)
         bool starting = false, stopping = false;
         juce::Point<int> videoSize;
         juce::File currentFile;

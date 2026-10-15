@@ -609,6 +609,7 @@ bool AudioEngine::startRecording (const std::vector<RecordRequest>& requests, ju
         take->file = request.file;
         take->firstChannel = request.firstChannel;
         take->numChannels = request.numChannels;
+        take->sourceSlot = request.sourceSlot;
 
         // Four seconds of FIFO between the audio thread and the disk thread.
         take->writer = std::make_unique<juce::AudioFormatWriter::ThreadedWriter> (writer.release(), diskThread,
@@ -815,6 +816,8 @@ void AudioEngine::prepare (double newSampleRate, int)
     mixBuffer.setSize (2, maxBlockSize);
     directBuffer.setSize (2, maxBlockSize);
     busBuffer.setSize (PlaybackGraph::maxBuses * 2, maxBlockSize);
+    slotOutputs.setSize (PlaybackGraph::maxTracks * 2, maxBlockSize);
+    slotOutputs.clear();
 
     if (directDelayLine == nullptr)
         directDelayLine = std::make_unique<DelayLine>();
@@ -944,7 +947,8 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
         juce::FloatVectorOperations::clear (mixL, n);
         juce::FloatVectorOperations::clear (mixR, n);
 
-        if (isRecordingNow && isPlayingNow && position >= recordStart)
+        const bool recordingChunk = isRecordingNow && isPlayingNow && position >= recordStart;
+        if (recordingChunk)
             recordChunk (inputs, numInputs, offset, n);
 
         // Any jump (start, stop, locate, cycle wrap) silences notes from regions,
@@ -955,6 +959,10 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
         {
             renderChunk (*graph, inputs, numInputs, offset, mixL, mixR, n, isPlayingNow, resetNotes, liveMidiPending);
             liveMidiPending = false;
+
+            // Takes recording another track's output: what that track just played.
+            if (recordingChunk)
+                recordChunk (inputs, numInputs, offset, n, true);
 
             // The master chain (e.g. a limiter) on the sum of every track; the click comes after it.
             for (const auto& effect : graph->masterInserts)
@@ -1043,7 +1051,7 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
     callbackCounter.fetch_add (1, std::memory_order_release);
 }
 
-void AudioEngine::recordChunk (const float* const* inputs, int numInputs, int inputOffset, int n) noexcept
+void AudioEngine::recordChunk (const float* const* inputs, int numInputs, int inputOffset, int n, bool fromTracks) noexcept
 {
     const auto blockStart = playheadSample.load();
 
@@ -1052,6 +1060,9 @@ void AudioEngine::recordChunk (const float* const* inputs, int numInputs, int in
         auto* take = slot.load (std::memory_order_acquire);
         if (take == nullptr)
             continue;
+
+        if ((take->sourceSlot >= 0) != fromTracks)
+            continue;   // (inputs before the tracks play, other tracks' outputs after)
 
         if (take->isMidi)
         {
@@ -1068,8 +1079,11 @@ void AudioEngine::recordChunk (const float* const* inputs, int numInputs, int in
         for (int c = 0; c < take->numChannels; ++c)
         {
             const auto source = take->firstChannel + c;
-            channels[c] = (source < numInputs && inputs[source] != nullptr) ? inputs[source] + inputOffset
-                                                                             : silence.getReadPointer (c);
+            if (take->sourceSlot >= 0)
+                channels[c] = take->numChannels == 1 ? slotOutput (take->sourceSlot, 0) : slotOutput (take->sourceSlot, c);
+            else
+                channels[c] = (source < numInputs && inputs[source] != nullptr) ? inputs[source] + inputOffset
+                                                                                 : silence.getReadPointer (c);
         }
 
         juce::int64 expected = -1;
@@ -1222,6 +1236,14 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
     auto* tL = trackBuffer.getWritePointer (0);
     auto* tR = trackBuffer.getWritePointer (1);
     auto& state = trackStates[(size_t) track.slot];
+    auto clearSlotOutput = [this, &track, n]
+    {
+        if (track.slot * 2 + 1 < slotOutputs.getNumChannels() && n <= slotOutputs.getNumSamples())
+        {
+            juce::FloatVectorOperations::clear (slotOutputs.getWritePointer (track.slot * 2), n);
+            juce::FloatVectorOperations::clear (slotOutputs.getWritePointer (track.slot * 2 + 1), n);
+        }
+    };
 
     // Automation (read once per chunk; the gain smoothing below hides the steps).
     // A control being written as automation right now wins over the curve.
@@ -1301,7 +1323,10 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         // Silent and not fading, with no effect tails or sends to keep running: nothing to do.
         if (! hasInserts && track.sends.empty() && ! state.gainL.isSmoothing() && ! state.gainR.isSmoothing()
             && state.gainL.getCurrentValue() <= 0.0f && state.gainR.getCurrentValue() <= 0.0f)
+        {
+            clearSlotOutput();
             return;
+        }
 
         if (playingNow)
         {
@@ -1402,7 +1427,14 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         }
 
         // Input monitoring: hear what's coming in, through this track's volume and pan.
-        if (track.monitorInput && track.inputChannel < numInputs && inputs[track.inputChannel] != nullptr)
+        if (track.monitorInput && track.inputTrackSlot >= 0 && track.inputTrackSlot != track.slot)
+        {
+            // ...another track's output, as its input
+            juce::FloatVectorOperations::add (tL, slotOutput (track.inputTrackSlot, 0), n);
+            juce::FloatVectorOperations::add (tR, slotOutput (track.inputTrackSlot, track.inputStereo ? 1 : 0), n);
+            anyAudio = true;
+        }
+        else if (track.monitorInput && track.inputChannel < numInputs && inputs[track.inputChannel] != nullptr)
         {
             const auto* inL = inputs[track.inputChannel] + inputOffset;
             const auto rightIndex = track.inputStereo ? track.inputChannel + 1 : track.inputChannel;
@@ -1442,7 +1474,15 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
     for (const auto& effect : track.inserts)
     {
         effect->setPosition (chunkPosition, chunkPlaying, chunkBpm);
+        const PlaybackGraph::Track::Sidechain* side = nullptr;
+        for (const auto& s : track.sidechains)
+            if (s.effect == effect.get())
+                side = &s;
+        if (side != nullptr && side->sourceSlot != track.slot)
+            effect->setSidechain (slotOutput (side->sourceSlot, 0), slotOutput (side->sourceSlot, 1));
         effect->process (tL, tR, n);
+        if (side != nullptr)
+            effect->setSidechain (nullptr, nullptr);
     }
 
     // Delay compensation: line this track up with the slowest one.
@@ -1456,6 +1496,7 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         // Still advance the gain ramps so they stay in sync with time.
         state.gainL.skip (n);
         state.gainR.skip (n);
+        clearSlotOutput();
         return;
     }
 
@@ -1494,6 +1535,13 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         tR[i] *= state.gainR.getNextValue();
         peakL = juce::jmax (peakL, std::abs (tL[i]));
         peakR = juce::jmax (peakR, std::abs (tR[i]));
+    }
+
+    // Kept for side chains and tracks recording this one's output.
+    if (track.slot * 2 + 1 < slotOutputs.getNumChannels() && n <= slotOutputs.getNumSamples())
+    {
+        juce::FloatVectorOperations::copy (slotOutputs.getWritePointer (track.slot * 2), tL, n);
+        juce::FloatVectorOperations::copy (slotOutputs.getWritePointer (track.slot * 2 + 1), tR, n);
     }
 
     // Post-fader sends.

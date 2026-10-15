@@ -1,4 +1,5 @@
 #include "Mixer.h"
+#include "InsertBar.h"
 #include "Skin.h"
 #include "RoutingMenu.h"
 #include "ControlMenu.h"
@@ -441,8 +442,29 @@ void ChannelStrip::setupConsoleKnob (juce::Slider& knob, const juce::Identifier&
                 return (p->getName (32) + "  " + p->getText ((float) v, 24) + " " + p->getLabel()).trim();
         return name + "  " + (v > 0.05 && suffix.isNotEmpty() ? "+" : "") + juce::String (v, 1) + suffix;
     };
-    knob.onDragStart = [this, control, name]
+    knob.onDragStart = [this, &knob, property, control, name]
     {
+        // The other selected channels move with it, each from where it was (as the faders do).
+        consoleStart.clear();
+        consoleDragStart = knob.getValue();
+        for (const auto& t : acting())
+        {
+            const auto id = t[ids::id].toString();
+            if (t == track)
+                continue;
+            if (pluginMode)
+            {
+                if (auto* other = owner.findStrip (id))
+                    if (auto* p = other->stripParameterFor (control))
+                    {
+                        consoleStart[id] = p->getValue();
+                        p->beginChangeGesture();
+                    }
+            }
+            else
+                consoleStart[id] = (double) t.getProperty (property, 0.0);
+        }
+
         if (pluginMode)
         {
             if (auto* p = stripParameter (control))
@@ -456,19 +478,34 @@ void ChannelStrip::setupConsoleKnob (juce::Slider& knob, const juce::Identifier&
     knob.onDragEnd = [this, control]
     {
         if (pluginMode)
+        {
             if (auto* p = stripParameter (control))
                 p->endChangeGesture();
+            for (const auto& [id, start] : consoleStart)
+                if (auto* other = owner.findStrip (id))
+                    if (auto* p = other->stripParameterFor (control))
+                        p->endChangeGesture();
+        }
+        consoleStart.clear();
     };
-    knob.onValueChange = [this, &knob, property, control]
+    knob.onValueChange = [this, &knob, property, control, min, max]
     {
+        const auto delta = knob.getValue() - consoleDragStart;
         if (pluginMode)
         {
             if (auto* p = stripParameter (control))
                 p->setValueNotifyingHost ((float) knob.getValue());
+            for (const auto& [id, start] : consoleStart)
+                if (auto* other = owner.findStrip (id))
+                    if (auto* p = other->stripParameterFor (control))
+                        p->setValueNotifyingHost ((float) juce::jlimit (0.0, 1.0, start + delta));
         }
         else
         {
             track.setProperty (property, knob.getValue(), &owner.getUndoManager());
+            for (const auto& [id, start] : consoleStart)
+                if (auto t = model::findById (project, id); t.isValid())
+                    t.setProperty (property, juce::jlimit (min, max, start + delta), &owner.getUndoManager());
         }
     };
     if (auto* drag = dynamic_cast<strip::DragSlider*> (&knob))
@@ -663,9 +700,15 @@ void ChannelStrip::showConsoleMenu()
     // This strip: built-in or a plugin
     const auto& candidates = owner.getStripCandidates();
     juce::PopupMenu use;
-    use.addItem ("Built-in console strip", true, ! insert.isValid(), [&um, t, proj, trackId]() mutable
+    use.addItem ("Built-in console strip", true, ! insert.isValid(), [this, &um, t, proj, trackId, insert]() mutable
     {
+        // The plugin's settings are kept with the track, and come back when you choose it again.
+        if (owner.onStorePluginStates)
+            owner.onStorePluginStates();
         um.beginNewTransaction ("Built-in console strip");
+        if (insert.isValid())
+            if (auto xml = insert.createXml())
+                t.setProperty (ids::parkedStrip, xml->toString (juce::XmlElement::TextFormat().singleLine()), &um);
         t.setProperty (ids::builtInStrip, true, &um);
         model::setStripPlugin (proj, trackId, {}, &um);
     });
@@ -676,10 +719,27 @@ void ChannelStrip::showConsoleMenu()
         {
             um.beginNewTransaction ("Console strip plugin");
             t.removeProperty (ids::builtInStrip, &um);
-            model::setStripPlugin (proj, trackId, xml, &um);
+            auto added = model::setStripPlugin (proj, trackId, xml, &um);
+            // Its settings from before you switched to Built-in.
+            if (const auto parked = juce::ValueTree::fromXml (t[ids::parkedStrip].toString()); parked.isValid() && added.isValid()
+                && parked[ids::pluginDescription].toString() == xml)
+                for (int i = 0; i < parked.getNumProperties(); ++i)
+                    if (const auto name = parked.getPropertyName (i); name != ids::id)
+                        added.setProperty (name, parked[name], &um);
         });
     }
     menu.addSubMenu ("This strip uses", use);
+
+    // Bypass: the strip (plugin or built-in) out of the signal, on every selected channel
+    {
+        const bool in = (bool) track.getProperty (ids::stripIn, true);
+        menu.addItem ("Bypass Channel Strip", true, ! in, [this, &um, in]
+        {
+            um.beginNewTransaction (in ? "Bypass Channel Strip" : "Activate Channel Strip");
+            for (auto t2 : acting())
+                t2.setProperty (ids::stripIn, ! in, &um);
+        });
+    }
 
     if (auto* p = stripInstance())
     {
@@ -997,6 +1057,8 @@ void ChannelStrip::refresh()
             }
             inputSlot.setButtonText (name);
         }
+        else if (const auto source = model::findById (project, track[ids::inputTrack].toString()); source.isValid())
+            inputSlot.setButtonText (source[ids::name].toString());   // another track's output
         else
             inputSlot.setButtonText (model::inputName (track, owner.inputNames ? owner.inputNames() : juce::StringArray()));
         const auto out = model::findById (project, track[ids::output].toString());
@@ -1078,6 +1140,79 @@ void ChannelStrip::refresh()
     repaint();
 }
 
+void ChannelStrip::mouseDrag (const juce::MouseEvent& e)
+{
+    // Dragging a slot's plugin: to another slot, up and down, or onto another channel.
+    const auto index = slots.indexOf (dynamic_cast<juce::TextButton*> (e.eventComponent));
+    if (index < 0 || e.mods.isPopupMenu() || e.getDistanceFromDragStart() < 6)
+        return;
+    const auto insert = insertAt (index);
+    if (! insert.isValid())
+        return;
+    if (auto* container = juce::DragAndDropContainer::findParentDragContainerFor (this); container != nullptr && ! container->isDragAndDropActive())
+    {
+        auto* slot = slots[index];
+        juce::ScaledImage image (slot->createComponentSnapshot (slot->getLocalBounds()));
+        container->startDragging (juce::String (insertDragPrefix) + insert[ids::id].toString(), slot, image, true);
+    }
+}
+
+int ChannelStrip::slotAt (juce::Point<int> position) const
+{
+    for (int i = 0; i < slots.size(); ++i)
+        if (slots[i]->isVisible() && slots[i]->getBounds().expanded (0, 1).contains (position))
+            return i;
+    return -1;
+}
+
+bool ChannelStrip::isInterestedInDragSource (const SourceDetails& details)
+{
+    return ! isVca() && details.description.toString().startsWith (insertDragPrefix);
+}
+
+void ChannelStrip::itemDragMove (const SourceDetails& details)
+{
+    const auto slot = slotAt (details.localPosition);
+    if (slot != dropSlot)
+    {
+        dropSlot = slot;
+        repaint();
+    }
+}
+
+void ChannelStrip::itemDragExit (const SourceDetails&)
+{
+    dropSlot = -1;
+    repaint();
+}
+
+void ChannelStrip::itemDropped (const SourceDetails& details)
+{
+    const auto slot = slotAt (details.localPosition);
+    dropSlot = -1;
+    repaint();
+    if (slot < 0 || ! owner.onMoveInsert)
+        return;
+    const auto id = details.description.toString().fromFirstOccurrenceOf (insertDragPrefix, false, false);
+    for (const auto& chain : model::mixerOf (project))
+        for (const auto& insert : chain)
+            if (insert.hasType (ids::INSERT) && insert[ids::id].toString() == id)
+            {
+                owner.onMoveInsert (insert, getOwnerId(), slot, juce::ModifierKeys::getCurrentModifiers().isAltDown());
+                return;
+            }
+}
+
+void ChannelStrip::paintOverChildren (juce::Graphics& g)
+{
+    if (! juce::isPositiveAndBelow (dropSlot, slots.size()))
+        return;
+    const auto r = slots[dropSlot]->getBounds().toFloat().expanded (1.0f);
+    g.setColour (theme::accent);
+    g.drawRoundedRectangle (r, 3.0f, 2.0f);
+    g.fillRect (r.withHeight (2.0f).translated (0.0f, -2.0f));   // it goes in above what's there
+}
+
 void ChannelStrip::mouseUp (const juce::MouseEvent& e)
 {
     const auto index = slots.indexOf (dynamic_cast<juce::TextButton*> (e.eventComponent));
@@ -1127,6 +1262,12 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
             owner.onChooseEffect (ownerId, index, insert, *button);
     });
     menu.addItem ("Copy to Selected Channels (Option-click)", [this, insert] { if (owner.onCopyInsertToSelected) owner.onCopyInsertToSelected (insert); });
+    {
+        juce::PopupMenu side;
+        InsertBar::addSidechainItems (side, insert, project, um);
+        const auto source = model::findById (project, insert[ids::sidechain].toString());
+        menu.addSubMenu ("Side Chain" + (source.isValid() ? ": " + source[ids::name].toString() : juce::String()), side);
+    }
     menu.addSeparator();
     menu.addItem (same.size() > 1 ? "Remove (" + juce::String (same.size()) + " channels)" : juce::String ("Remove"), [same, &um]
     {
@@ -1398,18 +1539,22 @@ void ChannelStrip::showInputMenu()
         for (auto& t : targets)
             if (! model::isBusTrack (t) && ! model::isInstrumentTrack (t))
             {
+                t.removeProperty (ids::inputTrack, nullptr);
                 t.setProperty (ids::input, channel, nullptr);
                 t.setProperty (ids::inputStereo, isStereo, nullptr);
                 t.setProperty (ids::channelFormat, isStereo ? "stereo" : "mono", nullptr);
             }
     };
     juce::PopupMenu mono, both;
+    const bool fromTrack = track[ids::inputTrack].toString().isNotEmpty();
     for (int i = 0; i < names.size(); ++i)
-        mono.addItem (names[i], true, ! stereo && current == i, [setInput, i]() mutable { setInput (i, false); });
+        mono.addItem (names[i], true, ! fromTrack && ! stereo && current == i, [setInput, i]() mutable { setInput (i, false); });
     for (int i = 0; i + 1 < names.size(); i += 2)
-        both.addItem (names[i] + " + " + names[i + 1], true, stereo && current == i, [setInput, i]() mutable { setInput (i, true); });
+        both.addItem (names[i] + " + " + names[i + 1], true, ! fromTrack && stereo && current == i, [setInput, i]() mutable { setInput (i, true); });
     menu.addSubMenu ("Mono", mono);
     menu.addSubMenu ("Stereo", both, names.size() >= 2);
+    menu.addSeparator();
+    routing::addTrackInputItems (menu, project, track, acting());
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&inputSlot));
 }
 
@@ -1925,6 +2070,11 @@ MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p,
         addAndMakeVisible (button);
     }
 
+    automixButton.setTooltip ("Automix: set the faders to a balanced starting mix for a genre");
+    automixButton.setWantsKeyboardFocus (false);
+    automixButton.onClick = [this] { if (onAutomix) onAutomix(); };
+    addAndMakeVisible (automixButton);
+
     title.setText ("Mixer", juce::dontSendNotification);
     title.setFont (juce::FontOptions (13.0f, juce::Font::bold));
     title.setColour (juce::Label::textColourId, theme::text);
@@ -2356,6 +2506,8 @@ void MixerPanel::resized()
     consoleButton.setBounds (header.removeFromLeft (64));
     header.removeFromLeft (6);
     busCompButton.setBounds (header.removeFromLeft (76));
+    header.removeFromLeft (6);
+    automixButton.setBounds (header.removeFromLeft (70));
 
     // Narrow strips are the same strips, drawn smaller.
     const auto scale = stripScale();

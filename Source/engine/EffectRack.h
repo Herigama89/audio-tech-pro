@@ -18,6 +18,9 @@ public:
 
     void prepare (double sampleRate, int maxBlockSize) override;
     void process (float* left, float* right, int numSamples) noexcept override;
+    void setSidechain (const float* l, const float* r) noexcept override { sideL = l; sideR = r; }
+    bool acceptsSidechain() const override { return plugin->getBusCount (true) > 1; }
+
     void setPosition (juce::int64 samplePosition, bool playing, double bpm) noexcept override
     {
         playHead.samples.store (samplePosition, std::memory_order_relaxed);
@@ -102,6 +105,8 @@ private:
     };
     std::unique_ptr<Watcher> watcher;
     juce::AudioProcessorParameter* grParameter = nullptr;
+    const float* sideL = nullptr;
+    const float* sideR = nullptr;
     bool grSearched = false;
 };
 

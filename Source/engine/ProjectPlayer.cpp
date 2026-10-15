@@ -258,12 +258,18 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         t.monitorInput = (bool) track[ids::armed] && (bool) track[ids::monitor];
         t.inputChannel = juce::jmax (0, (int) track.getProperty (ids::input, 0));
         t.inputStereo  = track.getProperty (ids::inputStereo, false);
+        if (const auto source = model::findById (project, track[ids::inputTrack].toString()); source.isValid() && source != track)
+            t.inputTrackSlot = slotFor (source[ids::id].toString());
 
         if (t.slot < 0)
             continue;
 
         const auto trackId = track[ids::id].toString();
         t.inserts = buildChain (trackId, sampleRate, insertIds, effectsById);
+        for (const auto& insert : model::insertsOf (model::findChain (project, trackId)))
+            if (const auto key = model::findById (project, insert[ids::sidechain].toString()); key.isValid() && key != track)
+                if (auto it = effectsById.find (insert[ids::id].toString()); it != effectsById.end() && it->second != nullptr)
+                    t.sidechains.push_back ({ it->second.get(), slotFor (key[ids::id].toString()) });
         t.stripPlugins = buildChain (model::stripOwner (trackId), sampleRate, insertIds, effectsById);
         if (model::stripPlugin (project, trackId).isValid())
             t.console.enabled = false;   // the plugin replaces the built-in strip (dry while it loads)

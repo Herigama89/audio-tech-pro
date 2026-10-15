@@ -290,6 +290,13 @@ namespace riff::model
     juce::ValueTree placeInsert (juce::ValueTree chain, int slot,
                                  const std::function<juce::ValueTree (juce::ValueTree chain, int index)>& make, juce::UndoManager* um);
 
+    /** Dragging an insert (as in Logic): to another slot of its channel or of another channel (the owner's id),
+        the inserts from that slot down moving down one to make room. `copy` (Option held) leaves the original
+        where it was and places a copy with its settings. Its automation goes with a moved insert.
+        Returns the insert in its new place. One undo step: the caller begins the transaction. */
+    juce::ValueTree moveInsert (juce::ValueTree project, juce::ValueTree insert, const juce::String& toOwner, int slot,
+                                bool copy, juce::UndoManager* um);
+
     // --- Buses and sends --------------------------------------------------------
     bool isBusTrack (const juce::ValueTree& track);
 

@@ -97,6 +97,15 @@ void PluginEffect::process (float* left, float* right, int numSamples) noexcept
         if (ins == 1) juce::FloatVectorOperations::addWithMultiply (view.getWritePointer (0), right, 1.0f, numSamples);
     }
 
+    // The side chain, into the plugin's second input bus (its key input).
+    if (sideL != nullptr && plugin->getBusCount (true) > 1)
+        if (const auto* bus = plugin->getBus (true, 1); bus != nullptr && bus->isEnabled())
+        {
+            const auto first = bus->getChannelIndexInProcessBlockBuffer (0);
+            for (int c = 0; c < bus->getNumberOfChannels() && first + c < view.getNumChannels(); ++c)
+                juce::FloatVectorOperations::copy (view.getWritePointer (first + c), (c % 2 == 0 || sideR == nullptr) ? sideL : sideR, numSamples);
+        }
+
     noMidi.clear();
     plugin->processBlock (view, noMidi);
 

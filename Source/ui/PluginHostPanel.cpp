@@ -45,6 +45,12 @@ PluginHostPanel::PluginHostPanel (juce::AudioPluginInstance& p, juce::AudioProce
     };
     addAndMakeVisible (touchedButton);
 
+    if (context.insert.isValid() && context.um != nullptr)
+    {
+        insertBar = std::make_unique<InsertBar> (context.insert, context.project, *context.um, plugin.getBusCount (true) > 1);
+        addAndMakeVisible (*insertBar);
+    }
+
     // The Controls view: a slider per parameter (made now, shown on request).
     const auto& params = plugin.getParameters();
     for (int i = 0; i < juce::jmin (maxRows, params.size()); ++i)
@@ -180,7 +186,7 @@ void PluginHostPanel::fitToContent()
 {
     const juce::ScopedValueSetter<bool> guard (fitting, true);
     if (! showingControls && editor != nullptr)
-        setSize (juce::jmax (420, editor->getWidth()), editor->getHeight() + headerHeight);
+        setSize (juce::jmax (insertBar != nullptr ? 640 : 420, editor->getWidth()), editor->getHeight() + headerHeight);
     else
         setSize (juce::jmax (getWidth(), 520), juce::jlimit (160, 640, rows.size() * rowHeight + headerHeight + 12));
 
@@ -197,6 +203,23 @@ void PluginHostPanel::componentMovedOrResized (juce::Component&, bool, bool wasR
 
 void PluginHostPanel::timerCallback()
 {
+    // Linked: the knob you're turning moves the same plugin on the other selected channels.
+    if (const int touched = lastTouched.load(); context.onLinkedChange && touched >= 0)
+    {
+        const auto& params = plugin.getParameters();
+        if (juce::isPositiveAndBelow (touched, params.size()))
+        {
+            const auto v = params[touched]->getValue();
+            if (touched != shownTouched)
+                sentValue = v;   // (just touched: nothing to pass on yet)
+            else if (std::abs (v - sentValue) > 1.0e-5f)
+            {
+                sentValue = v;
+                context.onLinkedChange (touched, v);
+            }
+        }
+    }
+
     if (const int touched = lastTouched.load(); touched != shownTouched)
     {
         shownTouched = touched;
@@ -235,6 +258,11 @@ void PluginHostPanel::resized()
     header.removeFromLeft (10);
     automationButton.setBounds (header.removeFromLeft (92));
     header.removeFromLeft (10);
+    if (insertBar != nullptr)
+    {
+        insertBar->setBounds (header.removeFromRight (juce::jmin (InsertBar::preferredWidth, header.getWidth() / 2 + 60)));
+        header.removeFromRight (10);
+    }
     touchedButton.setBounds (header.removeFromLeft (juce::jmin (260, header.getWidth())));
 
     if (editor != nullptr && ! showingControls && ! fitting)

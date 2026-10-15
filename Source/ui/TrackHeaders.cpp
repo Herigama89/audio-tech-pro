@@ -522,21 +522,28 @@ void TrackHeader::showInputMenu()
     if (names.isEmpty())
         menu.addItem ("No inputs. Check Audio settings.", false, false, [] {});
 
+    const bool fromTrack = track[ids::inputTrack].toString().isNotEmpty();
     auto setInput = [t = track] (int channel, bool isStereo) mutable
     {
+        t.removeProperty (ids::inputTrack, nullptr);
         t.setProperty (ids::input, channel, nullptr);
         t.setProperty (ids::inputStereo, isStereo, nullptr);
     };
 
     for (int i = 0; i < names.size(); ++i)
-        menu.addItem (names[i], true, ! stereo && current == i, [setInput, i]() mutable { setInput (i, false); });
+        menu.addItem (names[i], true, ! fromTrack && ! stereo && current == i, [setInput, i]() mutable { setInput (i, false); });
 
     if (names.size() >= 2)
     {
         menu.addSeparator();
         for (int i = 0; i + 1 < names.size(); i += 2)
-            menu.addItem (names[i] + " + " + names[i + 1] + " (stereo)", true, stereo && current == i,
+            menu.addItem (names[i] + " + " + names[i + 1] + " (stereo)", true, ! fromTrack && stereo && current == i,
                           [setInput, i]() mutable { setInput (i, true); });
+    }
+    if (! model::isInstrumentTrack (track) && ! model::isBusTrack (track))
+    {
+        menu.addSeparator();
+        routing::addTrackInputItems (menu, track.getParent(), track, { track });
     }
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&armButton));

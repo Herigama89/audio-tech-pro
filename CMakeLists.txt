@@ -72,6 +72,7 @@ set(RIFF_CORE_SOURCES
     Source/engine/AudioSuite.cpp
     Source/engine/AraHost.cpp
     Source/model/Project.cpp
+    Source/model/Automix.cpp
     Source/model/Generator.cpp
     Source/model/ProjectFiles.cpp
     Source/engine/AggregateDevice.cpp
@@ -186,6 +187,8 @@ set(RIFF_UI_SOURCES
     Source/MainAudioDevices.cpp
     Source/ui/Theme.cpp
     Source/ui/ThemePack.cpp
+    Source/ui/InsertBar.cpp
+    Source/ui/AutomixPanel.cpp
     Source/ui/ConsoleLook.cpp
     Source/ui/Commands.cpp
     Source/ui/KeyCommands.cpp
@@ -276,6 +279,7 @@ if(RIFF_BUILD_TESTS)
         Tests/ClapTests.cpp
         Tests/ImportTests.cpp
         Tests/ThemeTests.cpp
+        Tests/AutomixTests.cpp
         Source/ui/Theme.cpp
         Source/ui/ThemePack.cpp
         Source/ui/ScreenRecordPanel.cpp

@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "InstrumentWindows.h"
+#include "InsertBar.h"
 
 namespace riff
 {
@@ -28,6 +29,9 @@ public:
         juce::String owner;      // the track id (or "master")
         juce::String insertId;   // the insert: its parameters can be automated; empty for an instrument
         juce::UndoManager* um = nullptr;
+        juce::ValueTree insert;  // the INSERT node: the header's Bypass and Side Chain keys (none for an instrument)
+        /** A knob turned in the plugin's face (parameter, value 0..1): the same plugin on the other selected channels follows. */
+        std::function<void (int index, float value)> onLinkedChange;
     };
 
     PluginHostPanel (juce::AudioPluginInstance& plugin, juce::AudioProcessorEditor* editorToOwn, Context context);
@@ -64,8 +68,10 @@ private:
 
     juce::TextButton editorButton { "Editor" }, controlsButton { "Controls" }, automationButton { "Automation" };
     juce::TextButton touchedButton;
+    std::unique_ptr<InsertBar> insertBar;
     std::atomic<int> lastTouched { -1 };
     int shownTouched = -2;
+    float sentValue = -1.0f;   // the touched knob's value last passed to the other selected channels
     bool showingControls = false, fitting = false;
 
     struct Row

@@ -59,6 +59,8 @@ private:
 
     // The cycle (locators) and marker colours
     juce::TextButton markButtons[2], markDefaultButton { "Skin's" };
+    juce::TextButton editButtons[4], editDefaultButton { "Skin's" };   // the edit windows: tracks, bar lines, beat lines, piano roll
+    juce::TextButton& colourButton (int which);
 
     // REAPER themes: load one (copied into the app's folder), or choose one loaded before
     juce::TextButton loadReaperButton { "Load REAPER Theme..." };

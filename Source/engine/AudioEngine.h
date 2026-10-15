@@ -93,6 +93,7 @@ public:
         int firstChannel = 0;   // index among the device's active inputs
         int numChannels = 1;    // 1 or 2
         bool midi = false;      // record the live MIDI input instead of audio (no file)
+        int sourceSlot = -1;    // record another track's output (its slot) instead of the device's input
     };
 
     struct MidiEventRecord
@@ -339,6 +340,7 @@ private:
         juce::String trackId;
         juce::File file;
         int firstChannel = 0, numChannels = 1;
+        int sourceSlot = -1;
         std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> writer;
         std::atomic<juce::int64> startSample { -1 };
         std::atomic<juce::int64> samplesWritten { 0 };
@@ -364,7 +366,7 @@ private:
     void renderTrack (const PlaybackGraph::Track& track, const float* const* inputs, int numInputs, int inputOffset,
                       float* outL, float* outR, int numSamples, bool playingNow,
                       bool resetNotes, bool withLiveMidi) noexcept;
-    void recordChunk (const float* const* inputs, int numInputs, int inputOffset, int numSamples) noexcept;
+    void recordChunk (const float* const* inputs, int numInputs, int inputOffset, int numSamples, bool fromTracks = false) noexcept;
     void renderClick (const PlaybackGraph& graph, float* mixL, float* mixR, int numSamples) noexcept;
     void renderMeasurement (const float* const* inputs, int numInputs,
                             float* const* outputs, int numOutputs, int numSamples) noexcept;
@@ -429,6 +431,12 @@ private:
 
     // --- Audio-thread state (sized in prepare) --------------------------------
     juce::AudioBuffer<float> trackBuffer, regionBuffer, mixBuffer, silence, directBuffer, busBuffer;
+    juce::AudioBuffer<float> slotOutputs;   // every track's output (after its fader) this block, by slot: side chains and track inputs
+    const float* slotOutput (int slot, int channel) const noexcept
+    {
+        return juce::isPositiveAndBelow (slot, PlaybackGraph::maxTracks) && slot * 2 + 1 < slotOutputs.getNumChannels()
+                   ? slotOutputs.getReadPointer (slot * 2 + channel) : silence.getReadPointer (channel);
+    }
     juce::AudioBuffer<float> streamBuffer;   // a streamed file's audio for one block
     std::array<std::unique_ptr<DelayLine>, PlaybackGraph::maxTracks> trackDelays;
     std::unique_ptr<DelayLine> directDelayLine;

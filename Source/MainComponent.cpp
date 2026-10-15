@@ -433,7 +433,15 @@ MainComponent::MainComponent (bool openAudioDevice)
     effectRack.onEffectReplaced = [this] (const juce::String& insertId) { editorWindows.erase (insertId); };
     mixer.onOpenInsert = [this] (juce::ValueTree insert) { openInsertWindow (insert); };
     mixer.onCopyInsertToSelected = [this] (juce::ValueTree insert) { copyInsertToSelected (insert); };
+    mixer.onStorePluginStates = [this] { effectRack.storePluginStates (model::mixerOf (project)); };
+    mixer.onMoveInsert = [this] (juce::ValueTree insert, const juce::String& toOwner, int slot, bool copy)
+    {
+        effectRack.storePluginStates (model::mixerOf (project));   // (a copy takes its settings as they are now)
+        undoManager.beginNewTransaction (copy ? "Copy Plugin" : "Move Plugin");
+        model::moveInsert (project, insert, toOwner, slot, copy, &undoManager);
+    };
     mixer.onOpenMultiMeter = [this] { showMultiMeter(); };
+    mixer.onAutomix = [this] { showAutomix(); };
     HeaderInserts::chooseEffect = [this] (const juce::String& owner, int slot, juce::ValueTree existing, juce::Component& target)
     {
         showEffectMenu (owner, slot, existing, target);
@@ -1946,6 +1954,21 @@ void MainComponent::beginRecording()
             continue;
         }
 
+        // Recording another track's output (Track or Bus Output as the input): no interface input needed.
+        if (const auto source = model::findById (project, track[ids::inputTrack].toString()); source.isValid() && source != track)
+        {
+            AudioEngine::RecordRequest request;
+            request.trackId = track[ids::id].toString();
+            request.file = nextTakeFile (track);
+            request.numChannels = 2;
+            request.sourceSlot = player.slotOf (source[ids::id].toString());
+            if (request.sourceSlot >= 0)
+            {
+                requests.push_back (request);
+                continue;
+            }
+        }
+
         if (numInputs == 0)
         {
             showError ("No audio input",
@@ -2985,14 +3008,65 @@ void MainComponent::openInsertWindow (const juce::ValueTree& insert)
         }
 
         // As in Logic: a header over the plugin's own face with Editor / Controls and its parameters' automation.
-        auto* host = new PluginHostPanel (*plugin, plugin->createEditorAndMakeActive(), { project, owner, id, &undoManager });
-        editorWindows[id] = std::make_unique<EditorWindow> (where + ": " + plugin->getName(), host, host->isResizableHost(), closer);
+        PluginHostPanel::Context context { project, owner, id, &undoManager, insert };
+        context.onLinkedChange = [this, insert] (int index, float value)
+        {
+            // The same plugin, in the same slot (or as the channel strip), on the other selected channels.
+            const auto chainOwner = insert.getParent()[ids::owner].toString();
+            const bool strip = chainOwner.startsWith ("strip:");
+            const auto trackId = strip ? chainOwner.fromFirstOccurrenceOf ("strip:", false, false) : chainOwner;
+            const auto selectedIds = timeline.selectedTrackIds();
+            if (! selectedIds.contains (trackId))
+                return;
+            const auto description = insert[ids::pluginDescription].toString();
+            for (const auto& other : selectedIds)
+            {
+                if (other == trackId)
+                    continue;
+                const auto otherInsert = strip ? model::stripPlugin (project, other)
+                                               : model::insertAtSlot (model::findChain (project, other), model::insertSlot (insert));
+                if (! otherInsert.isValid() || otherInsert[ids::pluginDescription].toString() != description)
+                    continue;
+                if (auto* p = effectRack.getPlugin (otherInsert[ids::id].toString()))
+                    if (const auto& params = p->getParameters(); juce::isPositiveAndBelow (index, params.size()))
+                        params[index]->setValueNotifyingHost (value);
+            }
+        };
+        auto* host = new PluginHostPanel (*plugin, plugin->createEditorAndMakeActive(), context);
+        auto window = std::make_unique<EditorWindow> (where + ": " + plugin->getName(), host, host->isResizableHost(), closer);
+        window->cascadeFrom (lastInsertWindow.getComponent());
+        window->setPinned (EditorWindow::pinByDefault);
+        lastInsertWindow = window.get();
+        editorWindows[id] = std::move (window);
         return;
     }
 
+    // A built-in effect: its knobs, under the same Pin / Bypass / Side Chain keys.
     const auto* info = findBuiltInEffect (insert[ids::effect].toString());
-    editorWindows[id] = std::make_unique<EditorWindow> (where + ": " + (info != nullptr ? info->name : juce::String ("Effect")),
-                                                        new EffectPanel (insert, undoManager), false, closer);
+    struct Host final : juce::Component
+    {
+        Host (juce::ValueTree i, juce::ValueTree p, juce::UndoManager& um)
+            : bar (i, p, um, i[ids::effect].toString() == "compressor"), panel (i, um)
+        {
+            addAndMakeVisible (bar);
+            addAndMakeVisible (panel);
+            setSize (juce::jmax (panel.getWidth(), InsertBar::preferredWidth + 12), panel.getHeight() + 32);
+        }
+        void paint (juce::Graphics& g) override { g.fillAll (theme::toolbarDark); }
+        void resized() override
+        {
+            bar.setBounds (6, 4, InsertBar::preferredWidth, 24);
+            panel.setBounds (0, 32, getWidth(), getHeight() - 32);
+        }
+        InsertBar bar;
+        EffectPanel panel;
+    };
+    auto window = std::make_unique<EditorWindow> (where + ": " + (info != nullptr ? info->name : juce::String ("Effect")),
+                                                  new Host (insert, project, undoManager), false, closer);
+    window->cascadeFrom (lastInsertWindow.getComponent());
+    window->setPinned (EditorWindow::pinByDefault);
+    lastInsertWindow = window.get();
+    editorWindows[id] = std::move (window);
 }
 
 //==============================================================================

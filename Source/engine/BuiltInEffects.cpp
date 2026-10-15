@@ -202,8 +202,9 @@ public:
 
         for (int i = 0; i < n; ++i)
         {
-            // Stereo-linked peak detection, smoothed in decibels.
-            const auto level = juce::jmax (std::abs (l[i]), std::abs (r[i]));
+            // Stereo-linked peak detection, smoothed in decibels: of the side chain when one is set (ducking).
+            const auto level = keyL != nullptr ? juce::jmax (std::abs (keyL[i]), std::abs (keyR[i]))
+                                               : juce::jmax (std::abs (l[i]), std::abs (r[i]));
             const auto levelDb = juce::Decibels::gainToDecibels (level, -120.0f);
             const auto target = juce::jmax (0.0f, levelDb - threshold) * slope;
             const auto coeff = target > reductionDb ? attack : release;
@@ -219,8 +220,12 @@ public:
     }
 
     float takeGainReductionDb() noexcept override { return meter.exchange (0.0f); }
+    void setSidechain (const float* left, const float* right) noexcept override { keyL = left; keyR = right != nullptr ? right : left; }
+    bool acceptsSidechain() const override { return true; }
 
 private:
+    const float* keyL = nullptr;
+    const float* keyR = nullptr;
     float reductionDb = 0.0f, peakReduction = 0.0f;
     std::atomic<float> meter { 0.0f };
 };

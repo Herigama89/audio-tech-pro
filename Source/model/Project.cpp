@@ -2045,6 +2045,68 @@ juce::ValueTree placeInsert (juce::ValueTree chain, int slot,
     return insert;
 }
 
+juce::ValueTree moveInsert (juce::ValueTree project, juce::ValueTree insert, const juce::String& toOwner, int slot,
+                            bool copy, juce::UndoManager* um)
+{
+    if (! insert.isValid() || slot < 0)
+        return {};
+    auto from = insert.getParent();
+    const auto fromOwner = from[ids::owner].toString();
+    if (! copy && fromOwner == toOwner && insertSlot (insert) == slot)
+        return insert;   // dropped where it was
+
+    auto chain = chainFor (project, toOwner);
+    for (auto c : insertsOf (chain))
+        if (! c.hasProperty (ids::slot))
+            c.setProperty (ids::slot, insertSlot (c), um);
+
+    juce::ValueTree moving;
+    if (copy)
+    {
+        moving = insert.createCopy();
+        moving.setProperty (ids::id, juce::Uuid().toString(), nullptr);
+        moving.removeProperty (ids::araArchive, nullptr);
+    }
+    else
+    {
+        moving = insert;
+        from.removeChild (insert, um);
+    }
+
+    // Make room: what's in that slot and below moves down one (only as far as the first gap).
+    {
+        int next = slot;
+        juce::Array<juce::ValueTree> shift;
+        while (true)
+        {
+            const auto there = insertAtSlot (chain, next);
+            if (! there.isValid())
+                break;
+            shift.add (there);
+            ++next;
+        }
+        for (int i = shift.size(); --i >= 0;)
+            shift.getReference (i).setProperty (ids::slot, insertSlot (shift[i]) + 1, um);
+    }
+
+    int index = 0;
+    for (int i = 0; i < chain.getNumChildren(); ++i)
+        if (const auto c = chain.getChild (i); c.hasType (ids::INSERT) && insertSlot (c) < slot)
+            index = i + 1;
+    moving.setProperty (ids::slot, slot, um);
+    chain.addChild (moving, index, um);
+
+    // Its automation lanes follow it to the other channel.
+    if (! copy && fromOwner != toOwner)
+    {
+        const auto prefix = insertParam (insert[ids::id].toString(), {});
+        for (auto lane : mixerOf (project))
+            if (lane.hasType (ids::LANE) && lane[ids::owner].toString() == fromOwner && lane[ids::param].toString().startsWith (prefix))
+                lane.setProperty (ids::owner, toOwner, um);
+    }
+    return moving;
+}
+
 //==============================================================================
 juce::String insertParam (const juce::String& insertId, const juce::String& paramId)
 {

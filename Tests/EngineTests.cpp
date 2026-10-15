@@ -2313,3 +2313,86 @@ TEST_CASE ("Loudness: a stereo 1 kHz tone at -23 dBFS reads -23 LUFS", "[engine]
     meter.process (silence.data(), silence.data(), (int) silence.size());
     CHECK_THAT (meter.integrated(), WithinAbs (-23.0, 0.2));
 }
+
+TEST_CASE ("Side chain: a compressor keyed by another track ducks under it", "[engine][sidechain]")
+{
+    Fixture f;
+    EffectRack effects (f.rack.getFormatManager());
+    ProjectPlayer player (f.engine, f.cache, &f.rack, &effects);
+    f.project.setProperty (ids::masterGain, 1.0, nullptr);
+
+    const auto loud = writeConstantWav (f.temp.dir.getChildFile ("kick.wav"), 48000.0, 96000, 0.9f);
+    const auto quiet = writeConstantWav (f.temp.dir.getChildFile ("bass.wav"), 48000.0, 96000, 0.25f);
+    auto kick = model::addTrack (f.project, "Kick", nullptr);
+    model::addRegion (kick, loud, 0.0, 2.0, nullptr);
+    kick.setProperty (ids::pan, -1.0, nullptr);   // the kick on the left...
+    auto bass = model::addTrack (f.project, "Bass", nullptr);
+    model::addRegion (bass, quiet, 0.0, 2.0, nullptr);
+    bass.setProperty (ids::pan, 1.0, nullptr);    // ...the bass on the right
+
+    // Under the threshold on its own (0.25 is -12 dB): untouched...
+    auto comp = model::addBuiltinInsert (model::chainFor (f.project, bass[ids::id]), "compressor", 0, nullptr);
+    comp.setProperty ("threshold", -10.0, nullptr);
+    comp.setProperty ("ratio", 20.0, nullptr);
+    comp.setProperty ("attack", 0.1, nullptr);
+    comp.setProperty ("makeup", 0.0, nullptr);
+    player.setProject (f.project);
+    f.engine.play();
+    juce::AudioBuffer<float> out (2, 512);
+    for (int i = 0; i < 20; ++i)
+        f.engine.render (nullptr, 0, out.getArrayOfWritePointers(), 2, 512);
+    CHECK_THAT (out.getSample (1, 400), WithinAbs (0.25f, 1e-3));
+
+    // ...keyed by the kick (0.9, well over): ducked by about 8 dB.
+    comp.setProperty (ids::sidechain, kick[ids::id].toString(), nullptr);
+    player.rebuildNow();
+    for (int i = 0; i < 20; ++i)
+        f.engine.render (nullptr, 0, out.getArrayOfWritePointers(), 2, 512);
+    CHECK (out.getSample (1, 400) < 0.25f * 0.5f);
+    CHECK_THAT (out.getSample (0, 400), WithinAbs (0.9f, 1e-3));   // the kick itself untouched
+}
+
+TEST_CASE ("A track can hear and record another track's output", "[engine][record]")
+{
+    Fixture f;
+    f.project.setProperty (ids::masterGain, 1.0, nullptr);
+    const auto wav = writeConstantWav (f.temp.dir.getChildFile ("a.wav"), 48000.0, 96000, 0.5f);
+    auto source = model::addTrack (f.project, "Source", nullptr);
+    model::addRegion (source, wav, 0.0, 2.0, nullptr);
+    auto taker = model::addTrack (f.project, "Resample", nullptr);
+    taker.setProperty (ids::inputTrack, source[ids::id].toString(), nullptr);
+    taker.setProperty (ids::inputStereo, true, nullptr);
+    taker.setProperty (ids::armed, true, nullptr);
+    taker.setProperty (ids::monitor, true, nullptr);
+    taker.setProperty (ids::pan, -1.0, nullptr);
+    f.player.setProject (f.project);
+
+    // Monitoring: the source's sound comes through the new track too (here on the left only).
+    f.engine.play();
+    juce::AudioBuffer<float> out (2, 512);
+    for (int i = 0; i < 10; ++i)
+        f.engine.render (nullptr, 0, out.getArrayOfWritePointers(), 2, 512);
+    CHECK_THAT (out.getSample (0, 300), WithinAbs (1.0f, 1e-3));
+    CHECK_THAT (out.getSample (1, 300), WithinAbs (0.5f, 1e-3));
+
+    // Recording it: the take holds the source's output, no interface input needed.
+    const auto file = f.temp.dir.getChildFile ("resample.wav");
+    AudioEngine::RecordRequest request;
+    request.trackId = taker[ids::id].toString();
+    request.file = file;
+    request.numChannels = 2;
+    request.sourceSlot = f.player.slotOf (source[ids::id].toString());
+    juce::String error;
+    REQUIRE (f.engine.startRecording ({ request }, error));
+    for (int i = 0; i < 40; ++i)
+        f.engine.render (nullptr, 0, out.getArrayOfWritePointers(), 2, 512);
+    const auto takes = f.engine.stopRecording();
+    REQUIRE (takes.size() == 1);
+    auto reader = openReader (f.engine, file);
+    REQUIRE (reader != nullptr);
+    CHECK (reader->numChannels == 2);
+    juce::AudioBuffer<float> data (2, 1000);
+    reader->read (&data, 0, 1000, 5000, true, true);
+    CHECK_THAT (data.getSample (0, 500), WithinAbs (0.5f, 1e-3));
+    CHECK_THAT (data.getSample (1, 500), WithinAbs (0.5f, 1e-3));
+}
