@@ -36,7 +36,7 @@ MainComponent::MainComponent (bool openAudioDevice)
 {
     // --- Toolbar ----------------------------------------------------------------
     for (auto* b : std::initializer_list<juce::Button*> { &fileButton, &undoButton, &redoButton, &addTrackButton, &settingsButton,
-                                                          &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
+                                                          &rewindButton, &backBarButton, &forwardButton, &stopButton, &returnButton, &playButton,
                                                           &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton, &replaceButton, &clipStopButton,
                                                           &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton, &screenButton,
                                                           &inspectorButton, &libraryButton, &smartButton, &helpButton, &toolbarButton,
@@ -213,6 +213,9 @@ MainComponent::MainComponent (bool openAudioDevice)
     backBarButton.setTooltip ("Back one bar (,)");
     forwardButton.setTooltip ("Forward one bar (.)");
     stopButton.setTooltip ("Stop. Press again to go to the beginning.");
+    returnButton.setClickingTogglesState (false);
+    returnButton.setTooltip ("Return to start: when on, stopping jumps back to where playback started (as Pro Tools and Logic can)");
+    returnButton.onClick = [this] { setStopReturnsToStart (! stopReturnsToStart); };
     playButton.setTooltip ("Play / stop (Space)");
     recordButton.setTooltip ("Record on armed tracks (R). Arms the selected track if none are armed.");
     cycleButton.setTooltip ("Cycle (C). Drag in the top half of the ruler to set the range.\n"
@@ -515,6 +518,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     if (! commands::presetNames().contains (keyPreset))
         keyPreset = commands::presetNames()[0];
     stopReturnsToStart = appProperties.getUserSettings()->getBoolValue ("stopReturnsToStart", commands::stopReturnsToStart (keyPreset));
+    returnButton.setToggleState (stopReturnsToStart, juce::dontSendNotification);
 
     commandManager.registerAllCommandsForTarget (this);
     commandManager.setFirstCommandTarget (this);
@@ -775,7 +779,7 @@ void MainComponent::applyPanelVisibility()
                                                             &masterSlider, &masterCaption, &performanceMeter, &positionLabel, &clockLabel, &tempoLabel,
                                                             &tempoCaption, &signatureLabel })
         c->setVisible (showControlBar);
-    for (auto* c : std::initializer_list<juce::Component*> { &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
+    for (auto* c : std::initializer_list<juce::Component*> { &rewindButton, &backBarButton, &forwardButton, &stopButton, &returnButton, &playButton,
                                                             &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton,
                                                             &replaceButton, &clipStopButton, &mixerButton, &editorButton, &keysButton, &generateButton,
                                                             &claudeButton, &screenButton, &inspectorButton, &libraryButton, &smartButton,
@@ -830,13 +834,17 @@ void MainComponent::paint (juce::Graphics& g)
     if (theme::xenonSkin())
     {
         // Xenon: the picture's carved bar, along the control bar.
+        // (drawn once into a picture of the bar's size: the clock and the meters repaint over it all the time)
         const auto ornament = skin::xenonBar();
-        const auto h = bar.getHeight();
-        const auto w = h * (float) ornament.getWidth() / (float) ornament.getHeight();
-        juce::Graphics::ScopedSaveState s (g);
-        g.setOpacity (0.85f);
-        for (float x = 0.0f; x < bar.getWidth(); x += w)
-            g.drawImage (ornament, juce::Rectangle<float> (x, bar.getY(), w, h));
+        skin::drawCached (g, "xenonBar" + juce::String ((juce::int64) ornament.getPixelData().get()), bar.toNearestInt(),
+                          [ornament, bar] (juce::Graphics& ig)
+        {
+            const auto h = bar.getHeight();
+            const auto w = h * (float) ornament.getWidth() / (float) ornament.getHeight();
+            ig.setOpacity (0.85f);
+            for (float x = 0.0f; x < bar.getWidth(); x += w)
+                ig.drawImage (ornament, juce::Rectangle<float> (x, 0.0f, w, h));
+        });
     }
     g.setColour (juce::Colours::black.withAlpha (0.25f));
     g.fillRect (0, toolbarTopRow, getWidth(), 1);
@@ -917,14 +925,22 @@ void MainComponent::resized()
         constexpr int keyWidth = 44, keyHeight = 30, gap = 6;
         auto row = toolbar.withTrimmedTop (5).withHeight (keyHeight);
 
-        const std::initializer_list<juce::Component*> transport { &rewindButton, &backBarButton, &forwardButton, &stopButton,
+        const std::initializer_list<juce::Component*> transport { &rewindButton, &backBarButton, &forwardButton, &stopButton, &returnButton,
                                                                   &playButton, &recordButton, &cycleButton, &countInButton, &clickButton,
                                                                   &punchButton, &replaceButton, &clipStopButton };
-        const int totalWidth = (int) transport.size() * (keyWidth + gap) + 14;
+        const int totalWidth = ((int) transport.size() - 1) * (keyWidth + gap) + 14 + 20;   // (the Return key is a small one)
         int x = getWidth() / 2 - totalWidth / 2;
 
         for (auto* c : transport)
         {
+            if (c == &returnButton)
+            {
+                // the small square key, tucked in by Stop
+                constexpr int small = 22;
+                c->setBounds (x - gap + 2, row.getY() + (keyHeight - small) / 2, small, small);
+                x += small - gap + 4;
+                continue;
+            }
             c->setBounds (x, row.getY(), keyWidth, keyHeight);
             x += keyWidth + gap + (c == &recordButton ? 14 : 0);
         }
@@ -947,6 +963,15 @@ void MainComponent::resized()
         {
             c->setBounds (x, row.getY(), keyWidth, keyHeight);
             x -= keyWidth + gap + (c == &generateButton ? 14 : 0);
+        }
+
+        // On a narrower window the centred transport would run into the keys at the right: move it left.
+        if (const auto overlap = clipStopButton.getRight() + 16 - listButton.getX(); overlap > 0)
+        {
+            const auto room = rewindButton.getX() - (editorButton.getRight() + 16);
+            const auto shift = juce::jmin (overlap, juce::jmax (0, room));
+            for (auto* c : transport)
+                c->setTopLeftPosition (c->getX() - shift, c->getY());
         }
     }
 
@@ -3468,6 +3493,17 @@ void MainComponent::showAudioSettings()
     options.useNativeTitleBar = true;
     options.resizable = false;
     options.launchAsync();
+}
+
+void MainComponent::setStopReturnsToStart (bool on)
+{
+    stopReturnsToStart = on;
+    returnButton.setToggleState (on, juce::dontSendNotification);
+    appProperties.getUserSettings()->setValue ("stopReturnsToStart", on);
+    appProperties.saveIfNeeded();
+    if (keyCommandsWindow != nullptr)
+        if (auto* panel = dynamic_cast<KeyCommandsPanel*> (keyCommandsWindow->getContentComponent()))
+            panel->setStopReturnsToStart (on);
 }
 
 } // namespace riff

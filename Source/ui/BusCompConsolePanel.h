@@ -33,6 +33,7 @@ public:
 
     /** True if the panel has something to control: an installed plugin, or one already in the project. */
     bool isAvailable() const;
+    bool showFaceForTesting = false;   // (the snapshot tool: the console face without a plugin chosen)
 
     /** Re-reads the project (plugin chosen, knob assignments). */
     void refresh();

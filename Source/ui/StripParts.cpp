@@ -1,6 +1,7 @@
 #include "StripParts.h"
 #include "ConsoleLook.h"
 #include "Skin.h"
+#include "ThemePack.h"
 
 namespace riff::strip
 {
@@ -121,6 +122,14 @@ PointerKnob::PointerKnob (juce::Colour pointerColour) : pointer (pointerColour)
 
 void PointerKnob::paint (juce::Graphics& g)
 {
+    if (theme::reaperSkin())
+    {
+        const auto params = getRotaryParameters();
+        juce::ignoreUnused (params);
+        if (themepack::drawKnob (g, getLocalBounds().toFloat(), (float) valueToProportionOfLength (getValue()),
+                                 getMinimum() < 0.0 && getMaximum() > 0.0, isEnabled()))
+            return;
+    }
     // Studio White: the photo's knob, its LED ring lit to the value (from the centre for EQ gains and pan).
     if (theme::xenonSkin())
     {
@@ -217,6 +226,14 @@ CreamKey::CreamKey (const juce::String& letter, juce::Colour litColour) : juce::
 
 void CreamKey::paintButton (juce::Graphics& g, bool over, bool down)
 {
+    // A REAPER theme's own mute / solo / record / monitor button
+    if (theme::reaperSkin())
+    {
+        const auto letter = getName();
+        const auto kind = letter == "M" ? "mute" : letter == "S" ? "solo" : letter == "R" ? "recarm" : letter == "I" ? "monitor" : "";
+        if (juce::String (kind).isNotEmpty() && themepack::drawButton (g, kind, getToggleState(), over, down, getLocalBounds().toFloat()))
+            return;
+    }
     if (onArt)
     {
         // The key is on the art; light it in its colour when on, and print its letter.
@@ -263,6 +280,8 @@ void DisplaySlider::paint (juce::Graphics& g)
     if (asKnob)
     {
         const auto proportion = (float) valueToProportionOfLength (getValue());
+        if (theme::reaperSkin() && themepack::drawKnob (g, getLocalBounds().toFloat(), proportion, true, isEnabled()))
+            return;
         if (theme::xenonSkin())
         {
             skin::drawXenonKnob (g, getLocalBounds().toFloat(), proportion, juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f),
@@ -312,8 +331,26 @@ void Fader::paint (juce::Graphics& g)
     const auto bounds = getLocalBounds().toFloat();
     const auto cx = bounds.getCentreX();
 
+    const auto style = theme::faderStyle();
+
+    // A REAPER theme's fader cap on a thin slot
+    if (style == 3)
+    {
+        const auto& cap = themepack::piece ({ "mcp_volthumb", "gen_volthumb_vert" });
+        if (cap.isValid())
+        {
+            const auto slotArea = juce::Rectangle<float> (cx - 2.0f, capHeight() * 0.5f - 6.0f, 4.0f, bounds.getHeight() - capHeight() + 12.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.75f));
+            g.fillRoundedRectangle (slotArea, 2.0f);
+            const auto h = juce::jmin (capHeight() * 1.25f, cap.logicalHeight());
+            const auto w = juce::jmin (bounds.getWidth(), h * cap.logicalWidth() / juce::jmax (1.0f, cap.logicalHeight()));
+            themepack::draw (g, cap, 0, juce::Rectangle<float> (w, h).withCentre ({ cx, yForValue (getValue()) }), false, isEnabled() ? 1.0f : 0.6f);
+            return;
+        }
+    }
+
     // Studio White: the photo's rail and its cap (in a white shade), as photographed.
-    if (theme::whiteSkin())
+    if (style == 1)
     {
         const auto rail = skin::whiteRail();
         const auto railWidth = juce::jlimit (5.0f, 9.0f, bounds.getWidth() * 0.22f);
@@ -329,7 +366,7 @@ void Fader::paint (juce::Graphics& g)
     }
 
     // Xenon: a dark slot with a faint teal line, and the picture's cap.
-    if (theme::xenonSkin())
+    if (style == 2)
     {
         const auto slotArea = juce::Rectangle<float> (cx - 2.0f, capHeight() * 0.5f - 6.0f, 4.0f, bounds.getHeight() - capHeight() + 12.0f);
         g.setColour (juce::Colour (0xff05080a));

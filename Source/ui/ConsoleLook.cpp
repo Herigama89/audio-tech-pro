@@ -2,6 +2,7 @@
 #include "Theme.h"
 #include "ToolIcons.h"
 #include "Skin.h"
+#include "ThemePack.h"
 #include "PluginNames.h"
 
 namespace riff
@@ -121,6 +122,24 @@ void ConsoleLook::drawButtonBackground (juce::Graphics& g, juce::Button& button,
 
     auto area = button.getLocalBounds().toFloat().reduced (0.5f);
 
+    // A REAPER theme: its mute / solo / record / monitor buttons, and its insert slots.
+    if (theme::reaperSkin())
+    {
+        if (const auto kind = button.getProperties().getWithDefault ("packKind", {}).toString(); kind.isNotEmpty())
+            if (themepack::drawButton (g, kind, on, over, down, button.getLocalBounds().toFloat()))
+                return;
+        if (style == look::Key::slot)
+        {
+            const auto used = backgroundColour == theme::stripSlotOn;
+            const auto& p = used ? themepack::piece ({ "mcp_fxlist_norm", "tcp_fxlist_norm" }) : themepack::piece ({ "mcp_fxlist_empty", "tcp_fxlist_empty" });
+            if (p.isValid())
+            {
+                themepack::draw (g, p, down ? 2 : over ? 1 : 0, area, true);
+                return;
+            }
+        }
+    }
+
     // Inserts and sends: the picture's slots.
     if (style == look::Key::slot && theme::imageSkin())
         if (const auto kind = button.getProperties().getWithDefault ("atpSkin", {}).toString(); kind.isNotEmpty())
@@ -195,6 +214,15 @@ void ConsoleLook::drawButtonBackground (juce::Graphics& g, juce::Button& button,
 
 void ConsoleLook::drawButtonText (juce::Graphics& g, juce::TextButton& button, bool over, bool down)
 {
+    // A REAPER theme's picture already shows the button's letter (mute, solo...).
+    if (theme::reaperSkin())
+        if (const auto kind = button.getProperties().getWithDefault ("packKind", {}).toString(); kind.isNotEmpty())
+        {
+            const auto suffix = button.getToggleState() ? "_on" : "_off";
+            if (themepack::piece ({ ("mcp_" + kind + suffix).toRawUTF8(), ("track_" + kind + suffix).toRawUTF8(), ("gen_" + kind + suffix).toRawUTF8() }).isValid())
+                return;
+        }
+
     if (button.getProperties().getWithDefault ("atpSkin", {}).toString().isEmpty())
     {
         LookAndFeel_V4::drawButtonText (g, button, over, down);
@@ -321,6 +349,9 @@ namespace look
             skin::drawXenonKnob (g, area, proportion, startAngle, endAngle, enabled);
             return;
         }
+        // A REAPER theme's knob
+        if (theme::reaperSkin() && themepack::drawKnob (g, area, proportion, fromCentre, enabled))
+            return;
         // Studio White: every knob is the photo's knob with its LED ring.
         if (theme::whiteSkin())
         {
@@ -556,6 +587,33 @@ void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
 {
     const auto area = getLocalBounds().toFloat().reduced (0.5f, 0.5f).withTrimmedBottom (1.0f);
     const bool on = getToggleState();
+
+    // A REAPER theme's transport buttons
+    if (theme::reaperSkin())
+    {
+        const char* name = nullptr;
+        const char* nameOn = nullptr;
+        switch (icon)
+        {
+            case Icon::toStart: name = "transport_home"; break;
+            case Icon::rewind:  name = "transport_previous"; break;
+            case Icon::forward: name = "transport_next"; break;
+            case Icon::stop:    name = "transport_stop"; break;
+            case Icon::play:    name = "transport_play"; nameOn = "transport_play_on"; break;
+            case Icon::record:  name = "transport_record"; nameOn = "transport_record_on"; break;
+            case Icon::cycle:   name = "transport_repeat_off"; nameOn = "transport_repeat_on"; break;
+            default: break;
+        }
+        if (name != nullptr)
+        {
+            const auto& p = on && nameOn != nullptr ? themepack::piece ({ nameOn, name }) : themepack::piece ({ name });
+            if (p.isValid())
+            {
+                themepack::draw (g, p, down ? 2 : (over && isEnabled()) ? 1 : 0, getLocalBounds().toFloat(), false, isEnabled() ? 1.0f : 0.4f);
+                return;
+            }
+        }
+    }
     look::drawKey (g, area, look::Key::cream, on, onColour, over && isEnabled(), down);
 
     auto colour = on ? (onColour.getPerceivedBrightness() > 0.6f ? theme::ink : juce::Colours::white) : theme::ink;
@@ -650,6 +708,23 @@ void IconButton::drawIcon (juce::Graphics& g, Icon icon, juce::Rectangle<float> 
             g.setFont (juce::FontOptions (r.getHeight() * 0.75f, juce::Font::bold));
             g.drawText ("REPL", r.expanded (r.getWidth() * 0.5f, 0.0f), juce::Justification::centred, false);
             return;
+
+        case Icon::returnToStart:
+        {
+            // A bar at the left and an arrow curling back to it.
+            const auto w = r.getWidth(), h = r.getHeight();
+            g.fillRect (r.getX(), r.getY() + h * 0.1f, w * 0.12f, h * 0.8f);
+            juce::Path hook;
+            hook.startNewSubPath (r.getX() + w * 0.36f, r.getCentreY() + h * 0.12f);
+            hook.lineTo (r.getRight() - w * 0.2f, r.getCentreY() + h * 0.12f);
+            hook.quadraticTo (r.getRight(), r.getCentreY() + h * 0.12f, r.getRight(), r.getCentreY() - h * 0.12f);
+            hook.quadraticTo (r.getRight(), r.getY() + h * 0.12f, r.getRight() - w * 0.25f, r.getY() + h * 0.12f);
+            g.strokePath (hook, juce::PathStrokeType (w * 0.11f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            p.addTriangle (r.getX() + w * 0.2f, r.getCentreY() + h * 0.12f,
+                           r.getX() + w * 0.42f, r.getCentreY() - h * 0.12f,
+                           r.getX() + w * 0.42f, r.getCentreY() + h * 0.36f);
+            break;
+        }
 
         case Icon::clipStop:
             g.setFont (juce::FontOptions (r.getHeight() * 0.75f, juce::Font::bold));

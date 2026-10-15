@@ -1,4 +1,5 @@
 #include "Theme.h"
+#include "ThemePack.h"
 
 namespace riff::theme
 {
@@ -191,6 +192,45 @@ namespace
         return fromTable (values, c, fallback);
     }
 
+    /** A REAPER theme's colours (its .ReaperTheme file), by what each of ours is for. */
+    juce::Colour reaperValue (const juce::Colour* c, juce::Colour fallback)
+    {
+        using namespace juce;
+        const auto get = [] (const char* key, Colour otherwise) { return themepack::colour (key).value_or (otherwise); };
+        if (c == &background)  return get ("col_arrangebg", fallback);
+        if (c == &laneA)       return get ("col_tr1_bg", fallback);
+        if (c == &laneB)       return get ("col_tr2_bg", fallback);
+        if (c == &toolbar || c == &panel || c == &cream) return get ("col_main_bg2", fallback);
+        if (c == &toolbarDark || c == &creamShade) return get ("col_trans_bg", get ("col_main_bg2", fallback)).darker (0.08f);
+        if (c == &creamDeep)   return get ("col_main_bg2", fallback).darker (0.35f);
+        if (c == &outline)     return get ("col_tr1_divline", fallback).darker (0.2f);
+        if (c == &gridBar)     return get ("col_tl_fg", fallback).withMultipliedAlpha (0.8f);
+        if (c == &gridBeat)    return get ("arrange_vgrid", fallback);
+        if (c == &text || c == &ink || c == &stripInk) return get ("col_main_text", fallback);
+        if (c == &dimText || c == &inkDim || c == &stripInkDim) return get ("col_main_text2", fallback);
+        if (c == &accent || c == &gold || c == &knobArc || c == &knobBlue || c == &knobBlack || c == &neon)
+            return get ("col_toolbar_text_on", fallback);
+        if (c == &goldDark)    return get ("col_toolbar_text_on", fallback).darker (0.4f);
+        if (c == &selection)   return get ("col_seltrack", fallback);
+        if (c == &meterGreen)  return get ("col_vubot", fallback);
+        if (c == &meterAmber)  return get ("col_vumid", fallback);
+        if (c == &meterRed)    return get ("col_vuclip", fallback);
+        if (c == &ruler)       return get ("col_tl_bg", fallback);
+        if (c == &rulerDark)   return get ("col_tl_bg", fallback).darker (0.2f);
+        if (c == &console || c == &stripFace) return get ("col_mixerbg", fallback);
+        if (c == &consoleShade || c == &stripFaceLow) return get ("col_mixerbg", fallback).darker (0.12f);
+        if (c == &consoleDark || c == &stripEdge) return get ("col_mixerbg", fallback).darker (0.5f);
+        if (c == &slotDark || c == &stripSlot) return get ("col_main_editbk", fallback).darker (0.25f);
+        if (c == &stripSlotOn) return get ("col_main_3dhl", fallback).brighter (0.2f);
+        if (c == &lcd)         return get ("col_trans_bg", fallback).darker (0.4f);
+        if (c == &lcdText)     return get ("col_trans_fg", fallback).brighter (0.5f);
+        if (c == &lcdDim)      return get ("col_trans_fg", fallback);
+        if (c == &waveform)    return get ("col_tr1_peaks", fallback);
+        if (c == &markers)     return get ("marker", fallback);
+        if (c == &locators)    return get ("col_toolbar_text_on", fallback);
+        return fallback;
+    }
+
     /** Xenon's own colours (sampled from your picture). */
     juce::Colour xenonValue (const juce::Colour* c, juce::Colour fallback)
     {
@@ -283,6 +323,7 @@ namespace
 void set (const Settings& s)
 {
     settingsNow() = s;
+    themepack::use (s.skin == Skin::reaper && s.themePack.isNotEmpty() ? juce::File (s.themePack) : juce::File());
     const auto skin = s.skin;
     const auto pick = [skin] (const Entry& e)
     {
@@ -292,6 +333,7 @@ void set (const Settings& s)
             case Skin::xenon:    return xenonValue (e.colour, e.flat);
             case Skin::protools: return protoolsValue (e.colour, e.flat);
             case Skin::ableton:  return abletonValue (e.colour, e.flat);
+            case Skin::reaper:   return reaperValue (e.colour, e.flat);
             case Skin::flat:     return e.flat;
             case Skin::studio:   break;
         }
@@ -313,6 +355,21 @@ const Settings& current() { return settingsNow(); }
 bool imageSkin() { return settingsNow().skin == Skin::studio; }
 bool whiteSkin() { return settingsNow().skin == Skin::white; }
 bool xenonSkin() { return settingsNow().skin == Skin::xenon; }
+bool reaperSkin() { return settingsNow().skin == Skin::reaper && themepack::active(); }
+
+int faderStyle()
+{
+    const auto& s = settingsNow();
+    if (s.faderStyle >= 0)
+        return s.faderStyle == 3 && ! themepack::active() ? 0 : s.faderStyle;
+    switch (s.skin)
+    {
+        case Skin::white:  return 1;
+        case Skin::xenon:  return 2;
+        case Skin::reaper: return themepack::active() ? 3 : 0;
+        default:           return 0;
+    }
+}
 
 int waveformMode()
 {
@@ -352,7 +409,8 @@ juce::String Settings::toString() const
                                juce::String::toHexString ((int) meterPeak),
                                juce::String (waveMode), juce::String::toHexString ((int) waveA), juce::String::toHexString ((int) waveB),
                                juce::String (glassRegions),
-                               juce::String::toHexString ((int) locatorColour), juce::String::toHexString ((int) markerColour) }.joinIntoString (";");
+                               juce::String::toHexString ((int) locatorColour), juce::String::toHexString ((int) markerColour),
+                               juce::URL::addEscapeChars (themePack, false), juce::String (faderStyle) }.joinIntoString (";");
 }
 
 Settings Settings::fromString (const juce::String& text)
@@ -361,7 +419,7 @@ Settings Settings::fromString (const juce::String& text)
     const auto v = juce::StringArray::fromTokens (text, ";", "");
     if (v.size() < 9)
         return s;
-    s.skin = (Skin) juce::jlimit (0, (int) Skin::ableton, v[0].getIntValue());
+    s.skin = (Skin) juce::jlimit (0, (int) Skin::reaper, v[0].getIntValue());
     s.hue = juce::jlimit (-180.0f, 180.0f, v[1].getFloatValue());
     s.saturation = juce::jlimit (0.0f, 2.0f, v[2].getFloatValue());
     s.lightness = juce::jlimit (-1.0f, 1.0f, v[3].getFloatValue());
@@ -387,6 +445,11 @@ Settings Settings::fromString (const juce::String& text)
     {
         s.locatorColour = (juce::uint32) v[16].getHexValue32();
         s.markerColour = (juce::uint32) v[17].getHexValue32();
+    }
+    if (v.size() >= 20)
+    {
+        s.themePack = juce::URL::removeEscapeChars (v[18]);
+        s.faderStyle = juce::jlimit (-1, 3, v[19].getIntValue());
     }
     return s;
 }

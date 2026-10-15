@@ -2,6 +2,8 @@
 // be checked on a build machine. Build with -DRIFF_BUILD_SNAPSHOTS=ON, then:
 //     Snapshots <output folder>
 
+#include "../Source/ui/Skin.h"
+#include "../Source/ui/ThemePack.h"
 #include "../Source/ui/LiveLoopsGrid.h"
 #include "../Source/ui/ToolIcons.h"
 #include "../Source/ui/PluginPicker.h"
@@ -118,6 +120,7 @@ public:
             d.pluginFormatName = "AudioUnit";
             auto& console = main.mixer.getConsolePanel();
             console.setCandidates ({ d });
+            console.showFaceForTesting = true;   // (as when the plugin's chosen: with Built-in, the built-in knobs show)
             juce::PluginDescription strip;
             strip.name = "UADx SSL 4000 E Channel Strip";
             strip.manufacturerName = "Universal Audio";
@@ -134,6 +137,7 @@ public:
             save (main, "mixer-console.png");
             save (console, "console-panel.png", 2.0f);
             console.setCandidates ({});
+            console.showFaceForTesting = false;
             main.mixer.setStripCandidates ({});
             main.mixer.resized();
         }
@@ -622,6 +626,56 @@ public:
                 pump (main, 30);
                 save (tp, "xenon-theme-panel.png");
             }
+
+            // Xenon with Studio White's faders (Themes > Faders)
+            xenon.faderStyle = 1;
+            main.applyTheme (xenon);
+            main.showMixer();
+            pump (main, 150);
+            save (main, "xenon-white-faders.png");
+            main.closeMixer();
+            main.applyTheme ({});
+            pump (main, 50);
+        }
+
+        // REAPER themes (RIFF_REAPER_THEMES: a folder of .ReaperThemeZip files), each loaded as the user would.
+        if (const auto dir = juce::File (juce::SystemStats::getEnvironmentVariable ("RIFF_REAPER_THEMES", {})); dir.isDirectory())
+        {
+            for (const auto& zip : dir.findChildFiles (juce::File::findFiles, false, "*.ReaperThemeZip"))
+            {
+                juce::String error;
+                const auto folder = themepack::install (zip, error);
+                if (folder == juce::File())
+                {
+                    std::cout << "REAPER theme " << zip.getFileName() << ": " << error << std::endl;
+                    continue;
+                }
+                theme::Settings t;
+                t.skin = theme::Skin::reaper;
+                t.themePack = folder.getFullPathName();
+                main.applyTheme (t);
+                const auto name = juce::File::createLegalFileName (folder.getFileName()).replaceCharacter (' ', '-');
+                main.project.setProperty ("mixerBusComp", true, nullptr);
+                main.showMixer();
+                main.mixer.relayoutStrips();
+                for (int i = 0; i < 20; ++i)
+                {
+                    main.mixer.setMasterLevels (0.7f, 0.6f);
+                    pump (main, 15);
+                }
+                save (main, "reaper-" + name + "-mixer.png");
+                if (auto* firstStrip = findById (main.mixer, "strip0"))
+                    save (*firstStrip, "reaper-" + name + "-strip.png", 2.0f);
+                main.project.setProperty ("mixerBusComp", false, nullptr);
+                main.closeMixer();
+                pump (main, 100);
+                save (main, "reaper-" + name + "-arrange.png");
+                {
+                    ThemePanel tp (t, [] (const theme::Settings&) {});
+                    pump (main, 30);
+                    save (tp, "reaper-theme-panel.png");
+                }
+            }
             main.applyTheme ({});
             pump (main, 50);
         }
@@ -744,9 +798,61 @@ public:
                         ++meters;
                     }
                 const auto perSecond = (juce::Time::getMillisecondCounterHiRes() - t0) / 30.0;
+                if (std::getenv ("RIFF_BENCH_PARTS") != nullptr)
+                {
+                    std::function<void (juce::Component&, int)> parts = [&] (juce::Component& comp, int depth)
+                    {
+                        for (auto* child : comp.getChildren())
+                        {
+                            if (! child->isVisible() || child->getWidth() <= 0) continue;
+                            juce::Image im (juce::Image::ARGB, child->getWidth(), child->getHeight(), true);
+                            const auto t = juce::Time::getMillisecondCounterHiRes();
+                            for (int i = 0; i < 5; ++i) { juce::Graphics g (im); child->paintEntireComponent (g, false); }
+                            const auto ms = (juce::Time::getMillisecondCounterHiRes() - t) / 5.0;
+                            if (ms > 0.8)
+                            {
+                                std::cout << "  PART " << juce::String::repeatedString ("  ", depth) << typeid (*child).name() << " " << child->getComponentID()
+                                          << " " << juce::String (ms, 2) << " ms buffered=" << (child->getCachedComponentImage() != nullptr) << std::endl;
+                                if (depth < 2) parts (*child, depth + 1);
+                            }
+                        }
+                    };
+                    const auto t = juce::Time::getMillisecondCounterHiRes();
+                    for (int i = 0; i < 5; ++i) { juce::Graphics g (image); main.mixer.paint (g); }
+                    std::cout << "  PART mixer own paint " << juce::String ((juce::Time::getMillisecondCounterHiRes() - t) / 5.0, 2) << std::endl;
+                    parts (main.mixer, 0);
+                }
                 std::cout << "BENCH " << c.name << (console ? " console" : " compact") << ": full mixer " << juce::String (full, 1)
                           << " ms, meters for one frame " << juce::String (perSecond, 2) << " ms (" << main.mixer.strips.size() << " strips)" << std::endl;
             }
+        }
+
+        // The edit window: the whole window, the control bar alone (it repaints as the clock runs), and the tracks.
+        main.closeMixer();
+        pump (main, 100);
+        for (const auto& c : cases)
+        {
+            main.applyTheme (c.s);
+            pump (main, 100);
+            auto time = [&main] (juce::Component& comp, juce::Rectangle<int> clip, int runs)
+            {
+                juce::Image image (juce::Image::ARGB, juce::jmax (1, comp.getWidth()), juce::jmax (1, comp.getHeight()), true);
+                const auto t0 = juce::Time::getMillisecondCounterHiRes();
+                for (int i = 0; i < runs; ++i)
+                {
+                    juce::Graphics g (image);
+                    g.reduceClipRegion (clip);
+                    comp.paintEntireComponent (g, false);
+                }
+                return (juce::Time::getMillisecondCounterHiRes() - t0) / runs;
+            };
+            const auto window = time (main, main.getLocalBounds(), 5);
+            const auto clockArea = main.clockLabel.getBounds().getUnion (main.positionLabel.getBounds());
+            const auto clock = time (main, clockArea, 20);
+            const auto canvas = time (main.canvas, main.canvas.getLocalBounds(), 5);
+            const auto playhead = time (main.canvas, main.canvas.getLocalBounds().withWidth (4).withX (main.canvas.getWidth() / 2), 20);
+            std::cout << "BENCH " << c.name << " edit: window " << juce::String (window, 1) << " ms, clock repaint " << juce::String (clock, 2)
+                      << " ms, tracks " << juce::String (canvas, 1) << " ms, playhead strip " << juce::String (playhead, 2) << " ms" << std::endl;
         }
         return 0;
     }

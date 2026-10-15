@@ -89,7 +89,7 @@ namespace riff::theme
     // settings: the colours above are worked out from a skin's own palette and
     // these adjustments, and change while the app runs.
     //==========================================================================
-    enum class Skin { studio, flat, white, xenon, protools, ableton };   // the picture's grey console, a flat dark look, or Studio White (your photos' faders, knobs and meters)
+    enum class Skin { studio, flat, white, xenon, protools, ableton, reaper };   // the picture's grey console, a flat dark look, or Studio White (your photos' faders, knobs and meters)
 
     struct Settings
     {
@@ -112,6 +112,12 @@ namespace riff::theme
 
         // The cycle (locators) and markers: your own colours (ARGB), 0: the skin's.
         juce::uint32 locatorColour = 0, markerColour = 0;
+
+        // Skin "REAPER theme": the theme's folder (copied in by Themes > Load REAPER Theme...).
+        juce::String themePack;
+
+        // The faders' caps, whatever the skin: -1 the skin's own, 0 classic, 1 Studio White, 2 Xenon, 3 the REAPER theme's.
+        int faderStyle = -1;
 
         juce::String toString() const;
         static Settings fromString (const juce::String&);
@@ -136,6 +142,12 @@ namespace riff::theme
     juce::Colour waveformA();
     juce::Colour waveformB();
     bool glassRegions();
+
+    /** Skin "REAPER theme": a loaded theme's pictures and colours are in use (see ThemePack.h). */
+    bool reaperSkin();
+
+    /** Which fader caps to draw now: 0 classic, 1 Studio White, 2 Xenon, 3 the REAPER theme's. */
+    int faderStyle();
 
     /** Every theme colour (to repaint controls that copied one when the theme changes). */
     std::vector<juce::Colour*> allColours();

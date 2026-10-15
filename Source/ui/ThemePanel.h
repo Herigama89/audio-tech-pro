@@ -60,6 +60,15 @@ private:
     // The cycle (locators) and marker colours
     juce::TextButton markButtons[2], markDefaultButton { "Skin's" };
 
+    // REAPER themes: load one (copied into the app's folder), or choose one loaded before
+    juce::TextButton loadReaperButton { "Load REAPER Theme..." };
+    juce::ComboBox reaperBox;
+    std::unique_ptr<juce::FileChooser> chooser;
+    void refreshReaperThemes();
+
+    // The fader caps, whatever the skin
+    juce::ComboBox faderBox;
+
     // Your presets, kept in the settings file
     juce::PropertiesFile* store = nullptr;
     juce::ComboBox myPresets;

@@ -531,12 +531,7 @@ void MainComponent::showKeyCommands()
     auto* panel = new KeyCommandsPanel (*commandManager.getKeyMappings(), keyPreset,
                                         [this] (const juce::String& preset) { applyKeyPreset (preset); },
                                         stopReturnsToStart,
-                                        [this] (bool on)
-                                        {
-                                            stopReturnsToStart = on;
-                                            appProperties.getUserSettings()->setValue ("stopReturnsToStart", on);
-                                            appProperties.saveIfNeeded();
-                                        });
+                                        [this] (bool on) { setStopReturnsToStart (on); });
 
     keyCommandsWindow = std::make_unique<EditorWindow> ("Key Commands", panel, true, [this]
     {
@@ -637,11 +632,7 @@ void MainComponent::applyKeyPreset (const juce::String& preset)
     appProperties.getUserSettings()->setValue ("keyPreset", preset);
 
     // The preset's workflow comes with its keys.
-    stopReturnsToStart = commands::stopReturnsToStart (preset);
-    appProperties.getUserSettings()->setValue ("stopReturnsToStart", stopReturnsToStart);
-    if (keyCommandsWindow != nullptr)
-        if (auto* panel = dynamic_cast<KeyCommandsPanel*> (keyCommandsWindow->getContentComponent()))
-            panel->setStopReturnsToStart (stopReturnsToStart);
+    setStopReturnsToStart (commands::stopReturnsToStart (preset));
 
     // Registering again picks up the preset's keys as the defaults.
     commandManager.clearCommands();

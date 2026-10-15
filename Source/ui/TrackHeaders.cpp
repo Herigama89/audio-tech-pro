@@ -62,6 +62,11 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
     soloButton.setColour (juce::TextButton::buttonOnColourId, theme::solo);
     armButton.setColour (juce::TextButton::buttonOnColourId, theme::danger);
     monitorButton.setColour (juce::TextButton::buttonOnColourId, theme::meterAmber);
+    // A REAPER theme draws these with its own pictures.
+    muteButton.getProperties().set ("packKind", "mute");
+    soloButton.getProperties().set ("packKind", "solo");
+    armButton.getProperties().set ("packKind", "recarm");
+    monitorButton.getProperties().set ("packKind", "monitor");
     muteButton.setTooltip ("Mute");
     soloButton.setTooltip ("Solo");
     monitorButton.setTooltip ("Input monitoring: hear the input through this track while it's armed.\n"

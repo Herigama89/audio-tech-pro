@@ -141,7 +141,8 @@ void BusCompConsolePanel::setCandidates (const juce::Array<juce::PluginDescripti
 
 bool BusCompConsolePanel::isAvailable() const
 {
-    return ! candidates.isEmpty() || model::busCompPlugin (project).isValid();
+    // Only while a compressor plugin is chosen: with Built-in, the mixer shows the built-in compressor's own knobs.
+    return showFaceForTesting || model::busCompPlugin (project).isValid();
 }
 
 int BusCompConsolePanel::widthForHeight (int height) const
@@ -385,9 +386,13 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
             rounded.addRoundedRectangle (plate, 18.0f);
             g.reduceClipRegion (rounded);
             const auto tex = skin::xenonPanel();
-            for (float y = plate.getY(); y < plate.getBottom(); y += (float) tex.getHeight() * 2.0f)
-                for (float x = plate.getX(); x < plate.getRight(); x += (float) tex.getWidth() * 2.0f)
-                    g.drawImage (tex, juce::Rectangle<float> (x, y, (float) tex.getWidth() * 2.0f, (float) tex.getHeight() * 2.0f));
+            const auto area = plate.getSmallestIntegerContainer();
+            skin::drawCached (g, "consolePlate" + juce::String ((juce::int64) tex.getPixelData().get()), area, [tex, area] (juce::Graphics& ig)
+            {
+                for (float y = 0.0f; y < (float) area.getHeight(); y += (float) tex.getHeight() * 2.0f)
+                    for (float x = 0.0f; x < (float) area.getWidth(); x += (float) tex.getWidth() * 2.0f)
+                        ig.drawImage (tex, juce::Rectangle<float> (x, y, (float) tex.getWidth() * 2.0f, (float) tex.getHeight() * 2.0f));
+            });
         }
         g.setColour (juce::Colours::white.withAlpha (0.07f));
         g.drawRoundedRectangle (plate.reduced (2.0f), 16.0f, 2.0f);

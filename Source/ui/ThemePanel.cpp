@@ -1,4 +1,5 @@
 #include "ThemePanel.h"
+#include "ThemePack.h"
 
 namespace riff
 {
@@ -7,13 +8,68 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
     : settings (initial), onChange (std::move (callback)), store (presetStore)
 {
     skinBox.addItemList ({ "Studio Grey (from your picture)", "Flat Dark (FL Studio style)", "Studio White (your fader, knob and meter photos)",
-                           "Xenon (your dark glass console picture)", "Pro Tools style", "Ableton style" }, 1);
+                           "Xenon (your dark glass console picture)", "Pro Tools style", "Ableton style",
+                           "REAPER theme (choose or load one below)" }, 1);
     skinBox.onChange = [this]
     {
-        settings.skin = (theme::Skin) juce::jlimit (0, (int) theme::Skin::ableton, skinBox.getSelectedItemIndex());
+        settings.skin = (theme::Skin) juce::jlimit (0, (int) theme::Skin::reaper, skinBox.getSelectedItemIndex());
+        if (settings.skin == theme::Skin::reaper && settings.themePack.isEmpty())
+            if (const auto themes = themepack::installed(); ! themes.isEmpty())
+                settings.themePack = themes.getFirst().getFullPathName();
         changed();
+        refreshReaperThemes();
     };
     addAndMakeVisible (skinBox);
+
+    loadReaperButton.setTooltip ("Use a REAPER theme (.ReaperThemeZip): its pictures (buttons, faders, knobs, slots) and colours skin the app. It's copied into the app's own folder.");
+    loadReaperButton.onClick = [this]
+    {
+        chooser = std::make_unique<juce::FileChooser> ("Load a REAPER theme", juce::File::getSpecialLocation (juce::File::userHomeDirectory),
+                                                       "*.ReaperThemeZip;*.ReaperTheme;*.zip");
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::canSelectDirectories,
+                              [safe = juce::Component::SafePointer<ThemePanel> (this)] (const juce::FileChooser& c)
+        {
+            if (safe == nullptr || c.getResult() == juce::File())
+                return;
+            juce::String error;
+            const auto folder = themepack::install (c.getResult(), error);
+            if (folder == juce::File())
+            {
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Couldn't load the theme", error);
+                return;
+            }
+            safe->settings.skin = theme::Skin::reaper;
+            safe->settings.themePack = folder.getFullPathName();
+            safe->refreshControls();
+            safe->changed();
+            safe->refreshReaperThemes();
+        });
+    };
+    addAndMakeVisible (loadReaperButton);
+    reaperBox.setTextWhenNothingSelected ("REAPER themes loaded");
+    reaperBox.setTooltip ("The REAPER themes you've loaded: choose one to use it");
+    reaperBox.onChange = [this]
+    {
+        const auto themes = themepack::installed();
+        const auto index = reaperBox.getSelectedItemIndex();
+        if (! juce::isPositiveAndBelow (index, themes.size()))
+            return;
+        settings.skin = theme::Skin::reaper;
+        settings.themePack = themes[index].getFullPathName();
+        refreshControls();
+        changed();
+    };
+    addAndMakeVisible (reaperBox);
+    refreshReaperThemes();
+
+    faderBox.addItemList ({ "Skin's own", "Classic", "Studio White (photo cap)", "Xenon (glass cap)", "REAPER theme's" }, 1);
+    faderBox.setTooltip ("The fader caps, whatever the skin: mix the Xenon look with Studio White faders, say");
+    faderBox.onChange = [this]
+    {
+        settings.faderStyle = faderBox.getSelectedItemIndex() - 1;
+        changed();
+    };
+    addAndMakeVisible (faderBox);
 
     const auto percent = [] (double v) { return (v > 0.005 ? "+" : "") + juce::String (juce::roundToInt (v * 100.0)) + "%"; };
     addRow ("Hue", -180.0, 180.0, 1.0, [] (const theme::Settings& s) { return (double) s.hue; },
@@ -182,7 +238,7 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
     }
 
     refreshControls();
-    setSize (460, 120 + (int) rows.size() * 34 + 110 + 40 + 68 + 34 + 30 + (store != nullptr ? 36 : 0));
+    setSize (460, 120 + (int) rows.size() * 34 + 110 + 40 + 68 + 34 + 30 + 34 + 34 + (store != nullptr ? 36 : 0));
 }
 
 void ThemePanel::chooseMeterColour (int which)
@@ -315,6 +371,8 @@ void ThemePanel::addRow (const juce::String& name, double min, double max, doubl
 void ThemePanel::refreshControls()
 {
     skinBox.setSelectedItemIndex ((int) settings.skin, juce::dontSendNotification);
+    faderBox.setSelectedItemIndex (settings.faderStyle + 1, juce::dontSendNotification);
+    refreshReaperThemes();
     waveModeBox.setSelectedItemIndex (settings.waveMode + 1, juce::dontSendNotification);
     regionBox.setSelectedItemIndex (settings.glassRegions + 1, juce::dontSendNotification);
     for (auto& r : rows)
@@ -347,6 +405,7 @@ void ThemePanel::paint (juce::Graphics& g)
     g.drawText ("Waveforms", 16, waveModeBox.getY(), 94, waveModeBox.getHeight(), juce::Justification::centredLeft);
     g.drawText ("Regions", 16, regionBox.getY(), 94, regionBox.getHeight(), juce::Justification::centredLeft);
     g.drawText ("Ruler colours", 16, markButtons[0].getY(), 94, markButtons[0].getHeight(), juce::Justification::centredLeft);
+    g.drawText ("Faders", 16, faderBox.getY(), 94, faderBox.getHeight(), juce::Justification::centredLeft);
 
     // A sample of the colours
     auto sample = juce::Rectangle<int> (16, getHeight() - 92, getWidth() - 32, 28);
@@ -379,10 +438,28 @@ void ThemePanel::paintOverChildren (juce::Graphics& g)
     }
 }
 
+void ThemePanel::refreshReaperThemes()
+{
+    reaperBox.clear (juce::dontSendNotification);
+    const auto themes = themepack::installed();
+    for (int i = 0; i < themes.size(); ++i)
+    {
+        reaperBox.addItem (themes[i].getFileName(), i + 1);
+        if (settings.skin == theme::Skin::reaper && themes[i].getFullPathName() == settings.themePack)
+            reaperBox.setSelectedId (i + 1, juce::dontSendNotification);
+    }
+}
+
 void ThemePanel::resized()
 {
     skinBox.setBounds (110, 14, getWidth() - 126, 24);
-    auto y = 54;
+    {
+        auto row = juce::Rectangle<int> (110, 46, getWidth() - 126, 24);
+        loadReaperButton.setBounds (row.removeFromLeft (150));
+        row.removeFromLeft (6);
+        reaperBox.setBounds (row);
+    }
+    auto y = 88;
     for (auto& r : rows)
     {
         r.slider->setBounds (110, y, getWidth() - 126, 26);
@@ -421,6 +498,9 @@ void ThemePanel::resized()
     for (auto& b : markButtons)
         b.setBounds (markRow.removeFromLeft (kw).reduced (2, 0));
     markDefaultButton.setBounds (markRow.reduced (2, 0));
+
+    y += 34;
+    faderBox.setBounds (112, y, (getWidth() - 126) / 2 - 4, 26);
 
     if (store != nullptr)
     {

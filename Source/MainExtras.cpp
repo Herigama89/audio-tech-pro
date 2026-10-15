@@ -208,7 +208,7 @@ void MainComponent::showPreferences()
     {
         autosaveMinutes = props->getIntValue ("autosaveMinutes", 2);
         engine.setRecordBitDepth (props->getIntValue ("recordBitDepth", 24));
-        stopReturnsToStart = props->getBoolValue ("stopReturnsToStart", false);
+        setStopReturnsToStart (props->getBoolValue ("stopReturnsToStart", false));
         props->saveIfNeeded();
     }), "Settings", this);
 }

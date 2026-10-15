@@ -185,6 +185,7 @@ set(RIFF_UI_SOURCES
     Source/ui/StartupSplash.cpp
     Source/MainAudioDevices.cpp
     Source/ui/Theme.cpp
+    Source/ui/ThemePack.cpp
     Source/ui/ConsoleLook.cpp
     Source/ui/Commands.cpp
     Source/ui/KeyCommands.cpp
@@ -274,6 +275,9 @@ if(RIFF_BUILD_TESTS)
         Tests/AudioEditTests.cpp
         Tests/ClapTests.cpp
         Tests/ImportTests.cpp
+        Tests/ThemeTests.cpp
+        Source/ui/Theme.cpp
+        Source/ui/ThemePack.cpp
         Source/ui/ScreenRecordPanel.cpp
         Source/ui/ScreenRecorder.cpp
         Source/ui/SpectrumAnalyzer.cpp

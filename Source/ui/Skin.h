@@ -1,6 +1,8 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <functional>
+#include <map>
 #include <BinaryData.h>
 
 /**
@@ -11,7 +13,9 @@
 namespace riff::skin
 {
     #define RIFF_SKIN_IMAGE(fn, name) \
-        inline juce::Image fn() { return juce::ImageCache::getFromMemory (BinaryData::name, BinaryData::name##Size); }
+        inline juce::Image fn() { static const juce::Image image = juce::ImageCache::getFromMemory (BinaryData::name, BinaryData::name##Size); return image; }
+        // (held for good: JUCE's image cache lets go of a picture after a few seconds, and decoding it again --
+        //  and redoing everything cached from it -- was a big part of what made the picture skins heavy)
 
     RIFF_SKIN_IMAGE (stripTop,  strip_top_png)    // the channel strip's top: knob scales, keys, Dynamics (196 x 861)
     RIFF_SKIN_IMAGE (stripFace, strip_face_png)   // a plain stretch of the strip (tiled downwards)
@@ -144,14 +148,56 @@ namespace riff::skin
         return cache[key] = out;
     }
 
-    /** Lays a texture over an area: the picture's piece tiled, every other tile mirrored so no seams show (one fill). */
+    /**
+        Draws something expensive (a texture laid over a whole panel, a picture repeated along a bar) from a
+        picture of it made once, at the screen's own resolution: after the first time it's one plain copy,
+        which matters on a Retina screen, where a tiled or scaled image fill is slow. A few sizes are kept
+        (the least recently used go). `key` says what's drawn; the size and the screen's scale are added.
+    */
+    inline void drawCached (juce::Graphics& g, const juce::String& key, juce::Rectangle<int> area,
+                            const std::function<void (juce::Graphics&)>& paint, bool opaque = false)
+    {
+        if (area.isEmpty())
+            return;
+        struct Entry { juce::Image image; juce::uint64 lastUse = 0; };
+        static std::map<juce::String, Entry> cache;
+        static juce::uint64 uses = 0;
+
+        const auto scale = juce::jlimit (1.0f, 4.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+        const auto fullKey = key + (opaque ? "|o|" : "|") + juce::String (area.getWidth()) + "x" + juce::String (area.getHeight()) + "@" + juce::String (scale, 3);
+        auto it = cache.find (fullKey);
+        if (it == cache.end())
+        {
+            while (cache.size() >= 16)
+                cache.erase (std::min_element (cache.begin(), cache.end(),
+                                               [] (const auto& a, const auto& b) { return a.second.lastUse < b.second.lastUse; }));
+            Entry e;
+            e.image = juce::Image (opaque ? juce::Image::RGB : juce::Image::ARGB, juce::roundToInt ((float) area.getWidth() * scale),
+                                   juce::roundToInt ((float) area.getHeight() * scale), true);
+            {
+                juce::Graphics ig (e.image);
+                ig.addTransform (juce::AffineTransform::scale (scale));
+                paint (ig);
+            }
+            it = cache.emplace (fullKey, std::move (e)).first;
+        }
+        it->second.lastUse = ++uses;
+        juce::Graphics::ScopedSaveState state (g);
+        g.setImageResamplingQuality (juce::Graphics::lowResamplingQuality);
+        g.drawImageTransformed (it->second.image, juce::AffineTransform::scale (1.0f / scale).translated ((float) area.getX(), (float) area.getY()));
+    }
+
+    /** Lays a texture over an area: the picture's piece tiled, every other tile mirrored so no seams show (cached: see drawCached). */
     inline void tileTexture (juce::Graphics& g, const juce::Image& image, juce::Rectangle<int> area, float opacity = 1.0f)
     {
         if (! image.isValid() || area.isEmpty())
             return;
-        juce::Graphics::ScopedSaveState state (g);
-        g.setTiledImageFill (mirroredTile (image), area.getX(), area.getY(), opacity);
-        g.fillRect (area);
+        const auto key = "tile" + juce::String ((juce::int64) image.getPixelData().get()) + "/" + juce::String (opacity, 3);
+        drawCached (g, key, area, [&image, area, opacity] (juce::Graphics& ig)
+        {
+            ig.setTiledImageFill (mirroredTile (image), 0, 0, opacity);
+            ig.fillRect (area.withZeroOrigin());
+        });
     }
 
     /** An image turned a quarter turn (the photo's meter runs sideways; ours run upwards). Cached. */

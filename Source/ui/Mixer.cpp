@@ -1162,10 +1162,24 @@ void ChannelStrip::paint (juce::Graphics& g)
     else
     {
         // The flat skin: a plain panel, lit a touch at the top, with a dark gap between strips
-        g.setGradientFill (juce::ColourGradient (theme::stripFace.brighter (0.06f), 0.0f, 0.0f, theme::stripFaceLow, 0.0f, (float) getHeight(), false));
-        g.fillRect (bounds);
+        auto face = [height = getHeight()] (juce::Graphics& fg, juce::Rectangle<int> area)
+        {
+            fg.setGradientFill (juce::ColourGradient (theme::stripFace.brighter (0.06f), 0.0f, 0.0f, theme::stripFaceLow, 0.0f, (float) height, false));
+            fg.fillRect (area);
+        };
         if (theme::xenonSkin())
-            skin::tileTexture (g, skin::xenonPanel(), bounds, 0.35f);   // the picture's dark grain
+        {
+            // the face with the picture's dark grain, made once for this size (every strip shares it)
+            const auto tex = skin::xenonPanel();
+            skin::drawCached (g, "stripFace" + theme::stripFace.toString() + theme::stripFaceLow.toString(), bounds,
+                              [face, tex, bounds] (juce::Graphics& ig)
+            {
+                face (ig, bounds.withZeroOrigin());
+                skin::tileTexture (ig, tex, bounds.withZeroOrigin(), 0.35f);
+            }, true);
+        }
+        else
+            face (g, bounds);
         g.setColour (theme::stripEdge);
         g.fillRect (getWidth() - 1, 0, 1, getHeight());
     }
@@ -2109,6 +2123,7 @@ void MixerPanel::handleAsyncUpdate()
         {
             busComp.refresh();
             consolePanel.refresh();
+            resized();   // built-in knobs, or the plugin's console face
         }
         return;
     }
@@ -2303,9 +2318,19 @@ void MixerPanel::setMasterLevels (float left, float right)
 
 void MixerPanel::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::whiteSkin() ? theme::consoleDark : juce::Colour (0xff2b2a2d));   // the console's frame, behind the strips
+    const auto frame = theme::whiteSkin() ? theme::consoleDark : juce::Colour (0xff2b2a2d);   // the console's frame, behind the strips
     if (theme::xenonSkin())
-        skin::tileTexture (g, skin::xenonPanel(), getLocalBounds(), 0.55f);
+    {
+        // The texture with the frame colour under it, as one opaque picture (a copy to draw, not a blend).
+        const auto tex = skin::xenonPanel();
+        skin::drawCached (g, "mixerBack" + frame.toString(), getLocalBounds(), [frame, tex, size = getLocalBounds()] (juce::Graphics& ig)
+        {
+            ig.fillAll (frame);
+            skin::tileTexture (ig, tex, size, 0.55f);
+        }, true);
+    }
+    else
+        g.fillAll (frame);
 
     const auto header = getLocalBounds().removeFromTop (headerHeight).toFloat();
     g.setGradientFill (juce::ColourGradient (theme::toolbar.brighter (0.1f), 0.0f, 0.0f, theme::toolbarDark, 0.0f, header.getBottom(), false));

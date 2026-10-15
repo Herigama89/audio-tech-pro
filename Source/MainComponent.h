@@ -320,6 +320,7 @@ private:
     IconButton backBarButton   { "Rewind",  IconButton::Icon::rewind };
     IconButton forwardButton   { "Forward", IconButton::Icon::forward };
     IconButton stopButton      { "Stop",    IconButton::Icon::stop };
+    IconButton returnButton    { "Return",  IconButton::Icon::returnToStart, juce::Colour (0xff5a9cff) };   // the small square key by Stop
     IconButton playButton      { "Play",    IconButton::Icon::play,   juce::Colour (0xff3d9f4f) };
     IconButton recordButton    { "Rec",     IconButton::Icon::record, juce::Colour (0xffd8352d) };
     IconButton cycleButton     { "Cycle",   IconButton::Icon::cycle,  juce::Colour (0xffe9b949) };
@@ -428,7 +429,8 @@ private:
     // Menus and key commands
     juce::ApplicationCommandManager commandManager;
     juce::String keyPreset;
-    bool stopReturnsToStart = false;   // workflow: jump back to where playback started when stopping
+    bool stopReturnsToStart = false;
+    void setStopReturnsToStart (bool on);   // saves it, and lights the Return key   // workflow: jump back to where playback started when stopping
     double playStartedAt = 0.0;
     std::unique_ptr<EditorWindow> keyCommandsWindow;
 

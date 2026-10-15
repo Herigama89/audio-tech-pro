@@ -92,7 +92,7 @@ namespace look
 class IconButton final : public juce::Button
 {
 public:
-    enum class Icon { toStart, rewind, forward, stop, play, record, cycle, metronome, countIn, mixer, pianoRoll, keys, plus, generate, chat, screen, punch, replace, inspector, library, smartControls, quickHelp, toolbar, listEditors, notepad, loopBrowser, browser, clipStop };
+    enum class Icon { toStart, rewind, forward, stop, play, record, cycle, metronome, countIn, mixer, pianoRoll, keys, plus, generate, chat, screen, punch, replace, inspector, library, smartControls, quickHelp, toolbar, listEditors, notepad, loopBrowser, browser, clipStop, returnToStart };
 
     IconButton (const juce::String& name, Icon icon, juce::Colour onColour = juce::Colour (0xff3fa34d));
 
