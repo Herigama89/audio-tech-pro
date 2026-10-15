@@ -87,15 +87,26 @@ void PluginEffect::process (float* left, float* right, int numSamples) noexcept
     juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), used, numSamples);
     view.clear();
 
+    // As an Extension it hears silence and its regions are added to the track (which plays the rest itself).
+    const bool extension = extensionMode.load (std::memory_order_relaxed) && rendersRegions.load (std::memory_order_relaxed);
     const auto ins = plugin->getTotalNumInputChannels();
-    if (ins >= 1) juce::FloatVectorOperations::copy (view.getWritePointer (0), left, numSamples);
-    if (ins >= 2) juce::FloatVectorOperations::copy (view.getWritePointer (1), right, numSamples);
-    if (ins == 1) juce::FloatVectorOperations::addWithMultiply (view.getWritePointer (0), right, 1.0f, numSamples);
+    if (! extension)
+    {
+        if (ins >= 1) juce::FloatVectorOperations::copy (view.getWritePointer (0), left, numSamples);
+        if (ins >= 2) juce::FloatVectorOperations::copy (view.getWritePointer (1), right, numSamples);
+        if (ins == 1) juce::FloatVectorOperations::addWithMultiply (view.getWritePointer (0), right, 1.0f, numSamples);
+    }
 
     noMidi.clear();
     plugin->processBlock (view, noMidi);
 
     const auto outs = juce::jmax (1, plugin->getTotalNumOutputChannels());
+    if (extension)
+    {
+        juce::FloatVectorOperations::add (left, view.getReadPointer (0), numSamples);
+        juce::FloatVectorOperations::add (right, view.getReadPointer (outs > 1 ? 1 : 0), numSamples);
+        return;
+    }
     juce::FloatVectorOperations::copy (left, view.getReadPointer (0), numSamples);
     juce::FloatVectorOperations::copy (right, view.getReadPointer (outs > 1 ? 1 : 0), numSamples);
 }
@@ -331,7 +342,12 @@ void EffectRack::syncAra (const juce::ValueTree& project)
         for (const auto& insert : chain)
             if (auto doc = araDocs.find (insert[ids::id].toString()); doc != araDocs.end())
                 if (auto track = model::findById (project, chain[ids::owner].toString()); track.isValid())
+                {
+                    if (auto entry = entries.find (insert[ids::id].toString()); entry != entries.end())
+                        if (auto* plugin = dynamic_cast<PluginEffect*> (entry->second.effect.get()))
+                            plugin->setExtensionMode (model::hasAraRegions (track));
                     doc->second->sync (project, track);
+                }
 }
 
 juce::AudioPluginInstance* EffectRack::getPlugin (const juce::String& insertId)

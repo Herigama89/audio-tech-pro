@@ -114,7 +114,7 @@ void ArrangeCanvas::paint (juce::Graphics& g)
     if ((bool) project[ids::cycleEnabled])
     {
         const auto c = cycleBounds();
-        g.setColour (juce::Colour (0xffe8892a).withAlpha (0.06f));
+        g.setColour (theme::locators.withAlpha (0.06f));
         g.fillRect (c.getX(), (float) TimelineState::rulerHeight, c.getWidth(), (float) getHeight());
     }
 
@@ -140,6 +140,17 @@ void ArrangeCanvas::paint (juce::Graphics& g)
     }
 
     paintLiveTakes (g);
+
+    // Clip gain being dragged: its level beside the pointer
+    if (gainReadout.isNotEmpty())
+    {
+        const auto box = juce::Rectangle<float> (gainReadoutAt.x + 14.0f, gainReadoutAt.y - 22.0f, 74.0f, 20.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.8f));
+        g.fillRoundedRectangle (box, 4.0f);
+        g.setColour (juce::Colours::white);
+        g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+        g.drawText (gainReadout, box, juce::Justification::centred, false);
+    }
 
     // File-drop target highlight
     if (dropHighlightTrack != -2)
@@ -508,9 +519,10 @@ void ArrangeCanvas::paintMarkers (juce::Graphics& g)
 
         const bool selected = timeline.selectedMarkerId == m[ids::id].toString();
         const auto body = juce::Rectangle<float> (x0, top + 2.0f, juce::jmax (4.0f, x1 - x0 - 1.0f), lane.getHeight() - 4.0f);
-        g.setColour (selected ? theme::neon : juce::Colour (0xff4b4e54));
+        g.setColour (selected ? theme::neon : theme::markers);
         g.fillRoundedRectangle (body, 2.0f);
-        g.setColour (juce::Colours::white);
+        const auto fill = selected ? theme::neon : theme::markers;
+        g.setColour (fill.getPerceivedBrightness() > 0.6f ? juce::Colours::black : juce::Colours::white);
         g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
         g.drawText (m[ids::name].toString(), body.reduced (4.0f, 0.0f), juce::Justification::centredLeft, true);
     }
@@ -624,7 +636,7 @@ void ArrangeCanvas::paintCycle (juce::Graphics& g)
     const auto r = cycleBounds();
     const bool on = project[ids::cycleEnabled];
 
-    g.setColour (on ? juce::Colour (0xffe8892a) : theme::goldDark.withAlpha (0.55f));
+    g.setColour (on ? theme::locators : theme::locators.withMultipliedSaturation (0.4f).withAlpha (0.45f));
     g.fillRoundedRectangle (r, 3.0f);
     g.setColour (theme::ink.withAlpha (on ? 0.6f : 0.25f));
     g.drawRoundedRectangle (r.reduced (0.5f), 3.0f, 1.0f);
@@ -1107,6 +1119,21 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
         }
     }
 
+    // The clip gain handle (as in FL Studio): on the region under the pointer, or selected
+    if (! isMidi && ! missing && (selected || region[ids::id].toString() == hoverRegionId || gainReadout.isNotEmpty()))
+        if (const auto handle = gainHandleOf (region, trackIndex); ! handle.isEmpty())
+        {
+            const auto body = bounds.withTrimmedTop ((float) regionHeader);
+            g.setColour (juce::Colours::white.withAlpha (0.35f));
+            g.drawHorizontalLine (juce::roundToInt (handle.getCentreY()), body.getX() + 2.0f, body.getRight() - 2.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.6f));
+            g.fillRoundedRectangle (handle.expanded (1.0f), 2.5f);
+            g.setColour (juce::Colours::white);
+            g.fillRoundedRectangle (handle, 2.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.7f));
+            g.drawHorizontalLine (juce::roundToInt (handle.getCentreY()), handle.getX() + 4.0f, handle.getRight() - 4.0f);
+        }
+
     if (glass)
     {
         g.setColour (selected ? juce::Colours::white : base.brighter (0.4f).withAlpha (0.85f));
@@ -1334,6 +1361,20 @@ void ArrangeCanvas::mouseDown (const juce::MouseEvent& e)
 
     dragMode = edgeActionAt (region, trackIndex, e.position);
 
+    if (dragMode == DragMode::gain)
+    {
+        if (e.mods.isAltDown())   // Option-click: back to 0 dB
+        {
+            resetGain (region);
+            dragMode = DragMode::none;
+            return;
+        }
+        undoManager.beginNewTransaction ("Clip gain");
+        startGainDrag (region);
+        dragRegion = region;
+        return;
+    }
+
     undoManager.beginNewTransaction (dragMode == DragMode::move ? (e.mods.isAltDown() ? "Copy region" : "Move region")
                                      : dragMode == DragMode::fadeIn || dragMode == DragMode::fadeOut ? "Fade"
                                      : dragMode == DragMode::loopEnd ? "Loop region" : "Trim region");
@@ -1353,6 +1394,11 @@ ArrangeCanvas::DragMode ArrangeCanvas::edgeActionAt (const juce::ValueTree& regi
     const bool wideEnough = bounds.getWidth() > edgeGrab * 3.0f;
     const bool audio = ! model::isMidiRegion (region);
     const auto body = bounds.withTrimmedTop ((float) regionHeader);
+
+    // Clip gain: the handle on an audio region (as in FL Studio)
+    if (audio)
+        if (const auto handle = gainHandleOf (region, trackIndex); ! handle.isEmpty() && handle.expanded (3.0f).contains (pos))
+            return DragMode::gain;
 
     // Fade handles: the top corners of the body, where the fade currently ends (audio).
     if (audio && std::abs (pos.y - body.getY()) <= 5.0f)
@@ -1439,6 +1485,25 @@ void ArrangeCanvas::mouseDrag (const juce::MouseEvent& e)
         case DragMode::scrub:
             setPlayheadFromX ((float) e.x);
             break;
+
+        case DragMode::gain:
+        {
+            // Up: louder. Shift for fine steps.
+            const auto db = -(double) e.getDistanceFromDragStartY() * (e.mods.isShiftDown() ? 0.05 : 0.25);
+            for (auto& [r, before] : gainBefore)
+            {
+                const auto from = before > 0.0 ? before : juce::Decibels::decibelsToGain (-60.0);
+                r.setProperty (ids::gain, juce::jlimit (0.0, (double) juce::Decibels::decibelsToGain (24.0f), from * std::pow (10.0, db / 20.0)), &undoManager);
+            }
+            if (! gainBefore.empty())
+            {
+                const auto now = juce::Decibels::gainToDecibels ((double) gainBefore.front().first.getProperty (ids::gain, 1.0), -96.0);
+                gainReadout = (now > 0.05 ? "+" : "") + juce::String (now, 1) + " dB";
+            }
+            gainReadoutAt = e.position;
+            repaint();
+            break;
+        }
 
         case DragMode::move:
             dragMove (e, useSnap);
@@ -1618,6 +1683,13 @@ void ArrangeCanvas::mouseDrag (const juce::MouseEvent& e)
 void ArrangeCanvas::mouseUp (const juce::MouseEvent& e)
 {
     const bool wasClick = e.getDistanceFromDragStart() < 4;
+
+    if (dragMode == DragMode::gain)
+    {
+        gainReadout = {};
+        gainBefore.clear();
+        repaint();
+    }
 
     if (dragMode == DragMode::zoomRect)
     {
@@ -1882,11 +1954,62 @@ void ArrangeCanvas::useTool (const juce::MouseEvent& e, juce::ValueTree region, 
             break;
         }
 
+        case TimelineState::Tool::gain:
+            if (model::isMidiRegion (region))
+                break;
+            if (e.mods.isAltDown())
+            {
+                resetGain (region);
+                break;
+            }
+            undoManager.beginNewTransaction ("Gain");
+            startGainDrag (region);
+            dragRegion = region;
+            dragMode = DragMode::gain;
+            break;
+
         case TimelineState::Tool::pointer:
         case TimelineState::Tool::pencil:
             break;
     }
     timeline.changed();
+}
+
+juce::Rectangle<float> ArrangeCanvas::gainHandleOf (const juce::ValueTree& region, int trackIndex) const
+{
+    if (model::isMidiRegion (region))
+        return {};
+    const auto bounds = regionBounds (region, trackIndex);
+    const auto body = bounds.withTrimmedTop ((float) regionHeader + 2.0f).withTrimmedBottom (4.0f);
+    if (bounds.getWidth() < 40.0f || body.getHeight() < 14.0f)
+        return {};
+    // Its height shows the level: +12 dB at the top, -30 dB at the bottom.
+    const auto db = juce::Decibels::gainToDecibels ((float) (double) region.getProperty (ids::gain, 1.0), -30.0f);
+    const auto y = body.getY() + (1.0f - juce::jmap (juce::jlimit (-30.0f, 12.0f, db), -30.0f, 12.0f, 0.0f, 1.0f)) * body.getHeight();
+    return juce::Rectangle<float> (18.0f, 9.0f).withCentre ({ bounds.getCentreX(), y });
+}
+
+void ArrangeCanvas::startGainDrag (juce::ValueTree region)
+{
+    auto selection = timeline.selectedRegionTrees();
+    if (! selection.contains (region))
+        selection = { region };
+    gainBefore.clear();
+    for (const auto& r : selection)
+        if (! model::isMidiRegion (r))
+            gainBefore.emplace_back (r, (double) r.getProperty (ids::gain, 1.0));
+}
+
+void ArrangeCanvas::resetGain (juce::ValueTree region)
+{
+    auto selection = timeline.selectedRegionTrees();
+    if (! selection.contains (region))
+        selection = { region };
+    undoManager.beginNewTransaction ("Clip gain 0 dB");
+    for (auto& r : selection)
+        if (! model::isMidiRegion (r))
+            r.setProperty (ids::gain, 1.0, &undoManager);
+    repaint();
 }
 
 void ArrangeCanvas::showRegionMenu (juce::ValueTree region)
@@ -1962,6 +2085,18 @@ void ArrangeCanvas::showRegionMenu (juce::ValueTree region)
             for (auto ms : { 10, 50, 250, 1000 })
                 fades.addItem ("Fade out " + juce::String (ms) + " ms", [setFades, ms] { setFades (-1.0, ms / 1000.0); });
             menu.addSubMenu ("Fades", fades);
+
+            // Extensions (Cubase): an ARA plugin on just these regions
+            if (addExtensionItems)
+            {
+                auto regions = timeline.selectedRegionTrees();
+                if (! regions.contains (region))
+                    regions = { region };
+                juce::PopupMenu extensions;
+                addExtensionItems (extensions, regions);
+                if (extensions.getNumItems() > 0)
+                    menu.addSubMenu ("Extensions", extensions);
+            }
         }
         if (model::numTakes (region) > 0)
         {
@@ -2092,6 +2227,16 @@ void ArrangeCanvas::showTakeMenu (juce::ValueTree region)
 
 void ArrangeCanvas::mouseDoubleClick (const juce::MouseEvent& e)
 {
+    // On a clip gain handle: back to 0 dB.
+    {
+        int index = -1;
+        if (const auto r = regionAt (e.position, index); r.isValid() && edgeActionAt (r, index, e.position) == DragMode::gain)
+        {
+            resetGain (r);
+            return;
+        }
+    }
+
     // In the tempo track: a new tempo change on the nearest bar, or change one.
     if (e.y >= TimelineState::tempoTop && e.y < TimelineState::rulerHeight)
     {
@@ -2181,10 +2326,18 @@ void ArrangeCanvas::mouseMove (const juce::MouseEvent& e)
     auto newCursor = toolicons::cursor (timeline.tool);
     juce::ignoreUnused (trackIndex);
 
+    // The region under the pointer shows its clip gain handle.
+    if (const auto hovered = region.isValid() ? region[ids::id].toString() : juce::String(); hovered != hoverRegionId)
+    {
+        hoverRegionId = hovered;
+        repaint();
+    }
+
     if (region.isValid() && (timeline.tool == TimelineState::Tool::pointer || timeline.tool == TimelineState::Tool::pencil))
     {
         switch (edgeActionAt (region, trackIndex, e.position))
         {
+            case DragMode::gain: newCursor = juce::MouseCursor (juce::MouseCursor::UpDownResizeCursor); break;
             case DragMode::trimStart:
             case DragMode::trimEnd:  newCursor = juce::MouseCursor (juce::MouseCursor::LeftRightResizeCursor); break;
             case DragMode::fadeIn:

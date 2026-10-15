@@ -49,6 +49,7 @@ public:
     /** Load a plugin into the master's bus compressor place. */
     std::function<void (const juce::PluginDescription&)> onLoadPlugin;
     /** Take the plugin out (back to the built-in compressor). */
+    std::function<void (juce::Component&)> onChooseAny;   // the full chooser (built-in, or any plugin)
     std::function<void()> onRemovePlugin;
     /** Show the plugin's own window. */
     std::function<void (juce::ValueTree insert)> onOpenPluginWindow;

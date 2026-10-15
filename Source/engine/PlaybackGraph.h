@@ -139,6 +139,10 @@ struct PlaybackGraph
     static constexpr int maxTracks = 256;
     static constexpr int maxBuses = 32;
 
+    /** The buses in the order they must play (indices into `tracks`): a bus that plays into
+        another bus (a summing stack into a bus, say) comes before it. Empty: in track order. */
+    std::vector<int> busOrder;
+
     double sampleRate = 44100.0;
     float masterGain = 0.8f;
 

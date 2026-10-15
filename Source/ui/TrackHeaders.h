@@ -8,6 +8,41 @@ namespace riff
 {
 
 /** One track header: name, mute, solo, volume and pan. Edits go through the UndoManager. */
+/**
+    A track's insert slots beside its header, as in Pro Tools' Edit window
+    (View > Show Inserts in Edit Window). Click an empty slot to choose an effect,
+    a used one to open it; Option-click copies it to the selected tracks;
+    right-click for Bypass, Replace, Remove.
+*/
+class HeaderInserts final : public juce::Component,
+                            public juce::SettableTooltipClient,
+                            private juce::ValueTree::Listener
+{
+public:
+    HeaderInserts (juce::ValueTree track, juce::UndoManager& um);
+    ~HeaderInserts() override;
+
+    void paint (juce::Graphics& g) override;
+    void mouseUp (const juce::MouseEvent& e) override;
+
+    static constexpr int slotHeight = 15, maxSlots = 10;
+
+    // Set once by the main window.
+    static inline std::function<void (const juce::String& owner, int slot, juce::ValueTree existing, juce::Component& target)> chooseEffect;
+    static inline std::function<void (juce::ValueTree insert)> openInsert, copyToSelected;
+
+private:
+    juce::ValueTree track, mixer;
+    juce::UndoManager& undoManager;
+    int slotAt (int y) const;
+    juce::Rectangle<int> slotBounds (int index) const;
+    juce::ValueTree chain() const;
+    bool concernsUs (const juce::ValueTree& tree) const;
+    void valueTreePropertyChanged (juce::ValueTree& t, const juce::Identifier&) override { if (concernsUs (t)) repaint(); }
+    void valueTreeChildAdded (juce::ValueTree& p, juce::ValueTree&) override             { if (concernsUs (p)) repaint(); }
+    void valueTreeChildRemoved (juce::ValueTree& p, juce::ValueTree&, int) override      { if (concernsUs (p)) repaint(); }
+};
+
 class TrackHeader final : public juce::Component,
                           private juce::ValueTree::Listener
 {
@@ -22,6 +57,10 @@ public:
     juce::ValueTree getTrack() const { return track; }
 
     static constexpr int numberWidth = 30;
+
+    /** View > Show Inserts in Edit Window: the insert column's width when shown. */
+    static inline bool showInserts = false;
+    static constexpr int insertsWidth = 100;
 
     void paint (juce::Graphics& g) override;
     void resized() override;
@@ -69,6 +108,7 @@ private:
     juce::TextButton muteButton { "M" }, soloButton { "S" }, armButton { "R" }, monitorButton { "I" }, automationButton { "A" };
     juce::TextButton instrumentButton;
     strip::DragSlider volumeSlider, panKnob;   // dragged as in Logic (the pointer hides while you drag)
+    std::unique_ptr<HeaderInserts> inserts;
 };
 
 /** The column of track headers, kept in sync with the project's tracks and the vertical scroll. */

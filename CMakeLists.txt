@@ -181,6 +181,7 @@ set(RIFF_UI_SOURCES
     Source/MainScreenRecording.cpp
     Source/ui/PluginHostPanel.cpp
     Source/ui/AudioSuitePanel.cpp
+    Source/ui/MultiMeter.cpp
     Source/ui/StartupSplash.cpp
     Source/MainAudioDevices.cpp
     Source/ui/Theme.cpp
@@ -313,6 +314,13 @@ endif()
 if(APPLE)
     # Screen recording (ScreenCaptureKit is weak-linked: the rest of the app runs on older macOS)
     target_sources(AudioTechPro PRIVATE Source/ui/ScreenRecorder_mac.mm)
+
+    # Sign the app so macOS's privacy permissions (screen recording, microphone) stay with it when it's
+    # rebuilt: the requirement names the app's identifier, not this build's fingerprint.
+    add_custom_command(TARGET AudioTechPro POST_BUILD
+        COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/Tools/sign_app.sh" "$<TARGET_BUNDLE_DIR:AudioTechPro>"
+        COMMENT "Signing Audio Tech Pro (keeps its permissions across updates)"
+        VERBATIM)
     set_source_files_properties(Source/ui/ScreenRecorder_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(AudioTechPro PRIVATE "-framework AVFoundation" "-framework CoreMedia" "-framework CoreVideo"
                                                "-weak_framework ScreenCaptureKit")

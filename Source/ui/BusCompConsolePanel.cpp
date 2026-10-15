@@ -655,6 +655,9 @@ void BusCompConsolePanel::showMenu()
         if (auto xml = juce::parseXML (insert[ids::pluginDescription].toString()))
             current.loadFromXml (*xml);
 
+    menu.addItem ("Built-in compressor", true, ! insert.isValid(), [this] { if (onRemovePlugin) onRemovePlugin(); });
+    menu.addItem ("Choose any plugin...", [this] { if (onChooseAny) onChooseAny (*this); });
+    menu.addSeparator();
     if (insert.isValid())
         menu.addItem ("Open plugin window", [this, insert] { if (onOpenPluginWindow) onOpenPluginWindow (insert); });
 

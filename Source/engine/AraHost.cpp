@@ -366,8 +366,10 @@ void AraDocument::sync (const juce::ValueTree& project, const juce::ValueTree& t
     // What the track has now: its audio regions (muted ones are left out, as the engine would).
     struct Wanted { juce::String id, file; double start, offset, length; };
     std::vector<Wanted> wanted;
+    const bool onlyMarked = model::hasAraRegions (track);   // Extensions (Cubase style): just the regions given to it
     for (const auto& r : track)
-        if (r.hasType (ids::REGION) && ! model::isMidiRegion (r) && ! model::isRegionMuted (r) && r[ids::file].toString().isNotEmpty())
+        if (r.hasType (ids::REGION) && ! model::isMidiRegion (r) && ! model::isRegionMuted (r) && r[ids::file].toString().isNotEmpty()
+            && (! onlyMarked || (bool) r[ids::araEdit]))
             wanted.push_back ({ r[ids::id].toString(), r[ids::file].toString(), (double) r[ids::start], (double) r[ids::offset], (double) r[ids::length] });
 
     std::set<juce::String> keep;

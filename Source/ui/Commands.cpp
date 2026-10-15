@@ -19,6 +19,10 @@ const std::vector<Info>& all()
         { exportSong,             "Bounce Song to WAV...",      "File",      "Export the song, or the cycle range, to a WAV file" },
         { exportStems,            "Export All Tracks as Audio Files...", "File", "Each track (and bus) to its own WAV in a folder, with its plugins, fader and pan, ignoring solo" },
         { importTracks,           "Import Tracks from Project...", "File",   "Bring tracks (regions, plugins, sends, automation) in from another project" },
+        { toggleHeaderInserts,    "Show Inserts in Edit Window", "View",     "Each track's insert slots beside its header (as in Pro Tools' Edit window)" },
+        { toggleExclusiveSolo,    "Exclusive Solo",             "Mix",       "Soloing a track unsolos the others (as in LUNA)" },
+        { showMultiMeter,         "MultiMeter",                 "Mix",       "The master's meters: levels, loudness (LUFS), spectrum, goniometer and phase correlation" },
+        { toggleMixerComments,    "Show Comments in Mixer",     "View",      "A notes field under each mixer channel (as in Pro Tools)" },
         { importProject,          "Open Project from Another Program...", "File", "Open an Ableton Live, FL Studio, Studio One, Pro Tools, Logic, Cubase, DAWproject or MIDI file project" },
         { bounceInPlace,          "Bounce in Place",            "Track",     "Render the selected track to a new audio track and mute the original" },
 
@@ -147,13 +151,13 @@ const Info* find (juce::CommandID id)
 
 juce::StringArray presetNames()
 {
-    return { "Logic Pro", "Pro Tools", "Ableton Live", "FL Studio", "Cubase" };
+    return { "Logic Pro", "Pro Tools", "Ableton Live", "FL Studio", "Cubase", "LUNA" };
 }
 
 bool stopReturnsToStart (const juce::String& preset)
 {
     // Pro Tools, Live and FL Studio jump back to where playback started; Logic and Cubase stay put.
-    return preset == "Pro Tools" || preset == "Ableton Live" || preset == "FL Studio";
+    return preset == "Pro Tools" || preset == "Ableton Live" || preset == "FL Studio" || preset == "LUNA";
 }
 
 namespace
@@ -340,6 +344,57 @@ namespace
         }
     }
 
+    /** LUNA's default shortcuts (Mac), from Universal Audio's "Default LUNA Keyboard Shortcuts" list. */
+    juce::Array<KeyPress> lunaKeys (juce::CommandID id)
+    {
+        switch (id)
+        {
+            case newProject:             return { key ('n', cmd) };
+            case openProject:            return { key ('o', cmd) };
+            case saveProject:            return { key ('s', cmd) };
+            case saveProjectAs:          return { key ('s', shift | cmd) };              // Save New Version
+            case importAudio:            return { key ('i', cmd) };
+            case exportSong:             return { key ('b', opt) };                      // Bounce Range
+            case bounceInPlace:          return { key ('b', cmd) };                      // Bounce Track
+
+            case undo:                   return { key ('z', cmd) };
+            case redo:                   return { key ('z', shift | cmd) };
+            case deleteSelection:        return { key (KeyPress::backspaceKey), key (KeyPress::deleteKey) };
+            case splitAtPlayhead:        return { key ('e', cmd), key ('b') };           // Separate Selection
+            case joinRegions:            return { key ('h', cmd) };                      // Heal Separation
+            case repeatRegions:          return { key ('d', cmd) };                      // Duplicate
+            case muteRegions:            return { key ('m', cmd) };                      // Mute Clip
+            case quantize:               return { key ('u', cmd) };
+            case nudgeLeft:              return { key (',') };
+            case nudgeRight:             return { key ('.') };
+
+            case newAudioTrack:          return { key ('n', shift | cmd) };
+            case muteTrack:              return { key ('m', shift) };
+            case soloTrack:              return { key ('s', shift) };
+            case armTrack:               return { key ('r', shift) };
+
+            case play:                   return { key (KeyPress::spaceKey) };
+            case record:                 return { key (KeyPress::spaceKey, cmd), key (KeyPress::numberPad3) };
+            case goToStart:              return { key (KeyPress::returnKey) };
+            case toggleCycle:            return { key ('l', macCtrl), key (KeyPress::numberPad4) };
+            case toggleMetronome:        return { key ('k'), key (KeyPress::numberPad7) };
+            case toggleCountIn:          return { key ('k', shift), key (KeyPress::numberPad8) };
+           #if JUCE_MAC
+            case nextMarker:             return { key ('\'', macCtrl | opt) };
+            case previousMarker:         return { key ('l', macCtrl | opt) };
+           #else
+            case nextMarker:             return { key ('\'', cmd | opt) };
+            case previousMarker:         return { key ('l', cmd | opt) };
+           #endif
+
+            case showMixer:              return { key ('=', cmd) };                      // Timeline / Mixer
+            case zoomIn:                 return { key (']', cmd) };
+            case zoomOut:                return { key ('[', cmd) };
+            case zoomToFitAll:           return { key ('e') };                           // Frame Selection
+            default:                     return appKeys (id);
+        }
+    }
+
     /** Ableton Live's default shortcuts (Mac). */
     juce::Array<KeyPress> abletonKeys (juce::CommandID id)
     {
@@ -456,6 +511,7 @@ juce::Array<juce::KeyPress> keysFor (const juce::String& preset, juce::CommandID
     if (preset == "Ableton Live") return abletonKeys (id);
     if (preset == "FL Studio")    return flStudioKeys (id);
     if (preset == "Cubase")       return cubaseKeys (id);
+    if (preset == "LUNA")         return lunaKeys (id);
     return logicKeys (id);
 }
 

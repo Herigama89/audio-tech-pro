@@ -2,6 +2,7 @@
 #include "ui/PluginHostPanel.h"
 #include "ui/Skin.h"
 #include "import/ProjectImport.h"
+#include "engine/AraHost.h"
 #include "ui/ToolIcons.h"
 #include "ui/PluginPicker.h"
 #include "model/Project.h"
@@ -24,7 +25,8 @@ namespace
 {
     constexpr int fullToolbarHeight = 100;    // two rows: display row, transport row
     constexpr int toolbarTopRow = 50;
-    constexpr int headerWidth = 232;
+    constexpr int baseHeaderWidth = 232;
+    int headerWidth() { return baseHeaderWidth + (TrackHeader::showInserts ? TrackHeader::insertsWidth : 0); }
     constexpr int scrollBarSize = 12;
     constexpr int meterWidth = 84;
     constexpr int statusHeight = 24;
@@ -344,6 +346,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     canvas.commandManager = &commandManager;
     canvas.onEmptyAreaMenu = [this] { showToolMenu (true); };
     canvas.onOpenProject = [this] (const juce::File& f) { confirmDiscardChanges ([this, f] { openImportedProject (f); }); };
+    canvas.addExtensionItems = [this] (juce::PopupMenu& menu, juce::Array<juce::ValueTree> regions) { addExtensionItems (menu, regions); };
     canvas.onDelete = [this] { deleteSelection(); };
     canvas.onRepeat = [this] { repeatSelectedRegions(); };
     canvas.onJoin = [this] { joinSelectedRegions(); };
@@ -401,6 +404,16 @@ MainComponent::MainComponent (bool openAudioDevice)
         };
         console.onOpenPluginWindow = [this] (juce::ValueTree insert) { openInsertWindow (insert); };
 
+        // The plain Master Bus Compressor: built-in or a plugin, like the channel strips.
+        auto& busCompPanel = mixer.getBusCompPanel();
+        busCompPanel.onChoose = [this] (juce::Component& target) { showBusCompChooser (target); };
+        console.onChooseAny = [this] (juce::Component& target) { showBusCompChooser (target); };
+        busCompPanel.onOpenPlugin = [this]
+        {
+            if (const auto insert = model::busCompPlugin (project); insert.isValid())
+                openInsertWindow (insert);
+        };
+
         // ...and on every track: the console chosen in the mixer's header.
         mixer.onChooseConsole = [this] (const juce::PluginDescription* d)
         {
@@ -416,6 +429,14 @@ MainComponent::MainComponent (bool openAudioDevice)
     effectRack.onLoadError = [this] (const juce::String& error) { showError ("Plugin problem", error); };
     effectRack.onEffectReplaced = [this] (const juce::String& insertId) { editorWindows.erase (insertId); };
     mixer.onOpenInsert = [this] (juce::ValueTree insert) { openInsertWindow (insert); };
+    mixer.onCopyInsertToSelected = [this] (juce::ValueTree insert) { copyInsertToSelected (insert); };
+    mixer.onOpenMultiMeter = [this] { showMultiMeter(); };
+    HeaderInserts::chooseEffect = [this] (const juce::String& owner, int slot, juce::ValueTree existing, juce::Component& target)
+    {
+        showEffectMenu (owner, slot, existing, target);
+    };
+    HeaderInserts::openInsert = [this] (juce::ValueTree insert) { openInsertWindow (insert); };
+    HeaderInserts::copyToSelected = [this] (juce::ValueTree insert) { copyInsertToSelected (insert); };
     mixer.onChooseEffect = [this] (const juce::String& owner, int slot, juce::ValueTree existing, juce::Component& target)
     {
         showEffectMenu (owner, slot, existing, target);
@@ -485,8 +506,8 @@ MainComponent::MainComponent (bool openAudioDevice)
     if (auto xml = appProperties.getUserSettings()->getXmlValue ("knownPlugins"))
         rack.getKnownPlugins().recreateFromXml (*xml);
 
-    mixer.getConsolePanel().setCandidates (console::findBusCompressors (rack.getKnownPlugins().getTypes()));
-    mixer.setStripCandidates (console::findChannelStrips (rack.getKnownPlugins().getTypes()));
+    mixer.getConsolePanel().setCandidates (console::findBusCompressors (visiblePluginTypes()));
+    mixer.setStripCandidates (console::findChannelStrips (visiblePluginTypes()));
     rack.getKnownPlugins().addChangeListener (this);   // a new scan may find one
 
     // --- Menus and key commands -------------------------------------------------
@@ -545,6 +566,8 @@ MainComponent::MainComponent (bool openAudioDevice)
         showStatusBar = settings->getBoolValue ("viewStatusBar", true);
         showMeters = settings->getBoolValue ("viewMeters", true);
         showTrackHeaders = settings->getBoolValue ("viewTrackHeaders", true);
+        TrackHeader::showInserts = settings->getBoolValue ("viewHeaderInserts", false);
+        mixer.setShowComments (settings->getBoolValue ("mixerComments", false));
         applyPanelVisibility();
     }
     screenRecorder = ScreenRecorder::create();
@@ -1016,7 +1039,7 @@ void MainComponent::resized()
     outputMeter.setBounds (meters);
 
     // Headers | tracks area + scroll bars
-    headers.setBounds (showTrackHeaders ? area.removeFromLeft (headerWidth).withTrimmedBottom (scrollBarSize) : juce::Rectangle<int>());
+    headers.setBounds (showTrackHeaders ? area.removeFromLeft (headerWidth()).withTrimmedBottom (scrollBarSize) : juce::Rectangle<int>());
     vScroll.setBounds (area.removeFromRight (scrollBarSize).withTrimmedTop (TimelineState::rulerHeight).withTrimmedBottom (scrollBarSize));
     hScroll.setBounds (area.removeFromBottom (scrollBarSize));
     canvas.setBounds (area);
@@ -1202,6 +1225,93 @@ void MainComponent::openProjectFile (const juce::File& file)
     }
 
     setProject (loaded, file);
+}
+
+juce::StringArray MainComponent::shownPluginFormats()
+{
+    auto formats = juce::StringArray::fromTokens (appProperties.getUserSettings()->getValue ("pluginFormatsShown", "VST3;AudioUnit;CLAP"), ";", {});
+    formats.removeEmptyStrings();
+    return formats;
+}
+
+void MainComponent::setShownPluginFormats (const juce::StringArray& formats)
+{
+    appProperties.getUserSettings()->setValue ("pluginFormatsShown", formats.joinIntoString (";"));
+    appProperties.saveIfNeeded();
+    mixer.getConsolePanel().setCandidates (console::findBusCompressors (visiblePluginTypes()));
+    mixer.setStripCandidates (console::findChannelStrips (visiblePluginTypes()));
+}
+
+juce::Array<juce::PluginDescription> MainComponent::visiblePluginTypes()
+{
+    const auto formats = shownPluginFormats();
+    juce::Array<juce::PluginDescription> out;
+    for (const auto& type : rack.getKnownPlugins().getTypes())
+        if (formats.isEmpty() || formats.contains (type.pluginFormatName))
+            out.add (type);
+    return out;
+}
+
+void MainComponent::showBusCompChooser (juce::Component& target)
+{
+    juce::PopupMenu menu;
+    const auto insert = model::busCompPlugin (project);
+    juce::String current;
+    if (insert.isValid())
+        current = insert[ids::pluginDescription].toString();
+
+    menu.addSectionHeader ("Master Bus Compressor");
+    menu.addItem ("Built-in", true, ! insert.isValid(), [this]
+    {
+        undoManager.beginNewTransaction ("Built-in Master Bus Compressor");
+        for (const auto& i : model::insertsOf (model::findChain (project, model::busCompOwner)))
+            model::removeInsert (i, &undoManager);
+    });
+    menu.addSeparator();
+
+    // Compressors first (found by name), then every effect by maker.
+    const auto pick = [this] (const juce::PluginDescription& d)
+    {
+        return [this, d]
+        {
+            if (auto xml = d.createXml())
+            {
+                undoManager.beginNewTransaction ("Master Bus Compressor: " + d.name);
+                model::setBusCompPlugin (project, xml->toString (juce::XmlElement::TextFormat().singleLine()), &undoManager);
+            }
+        };
+    };
+    const auto isCurrent = [&current] (const juce::PluginDescription& d)
+    {
+        auto xml = d.createXml();
+        return xml != nullptr && xml->toString (juce::XmlElement::TextFormat().singleLine()) == current;
+    };
+    const auto types = visiblePluginTypes();
+    juce::PopupMenu compressors;
+    std::map<juce::String, juce::PopupMenu> byMaker;
+    for (const auto& d : types)
+    {
+        if (d.isInstrument)
+            continue;
+        const auto label = d.name + "  (" + (d.pluginFormatName == "AudioUnit" ? juce::String ("AU") : d.pluginFormatName) + ")";
+        if (d.name.containsIgnoreCase ("comp") || d.name.containsIgnoreCase ("bus") || d.name.containsIgnoreCase ("glue")
+            || d.category.containsIgnoreCase ("dynamics"))
+            compressors.addItem (label, true, isCurrent (d), pick (d));
+        byMaker[d.manufacturerName.isNotEmpty() ? d.manufacturerName : juce::String ("Other")].addItem (label, true, isCurrent (d), pick (d));
+    }
+    if (compressors.getNumItems() > 0)
+        menu.addSubMenu ("Compressors", compressors);
+    juce::PopupMenu all;
+    for (auto& [maker, sub] : byMaker)
+        all.addSubMenu (maker, sub);
+    menu.addSubMenu ("All Plugins", all, ! byMaker.empty());
+
+    if (insert.isValid())
+    {
+        menu.addSeparator();
+        menu.addItem ("Open Plugin Window", [this, insert] { openInsertWindow (insert); });
+    }
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
 }
 
 void MainComponent::openOtherProject()
@@ -2024,6 +2134,19 @@ void MainComponent::valueTreePropertyChanged (juce::ValueTree& tree, const juce:
                             || property == ids::keyRoot || property == ids::keyMinor))
         refreshProjectControls();
 
+    // Exclusive Solo (as in LUNA): soloing a track unsolos the others (except other selected tracks soloed with it).
+    if (property == ids::solo && tree.hasType (ids::TRACK) && (bool) tree[ids::solo] && ! applyingExclusiveSolo
+        && appProperties.getUserSettings()->getBoolValue ("exclusiveSolo", false))
+    {
+        const juce::ScopedValueSetter<bool> busy (applyingExclusiveSolo, true);
+        const auto selected = timeline.selectedTrackIds();
+        const bool inSelection = selected.contains (tree[ids::id].toString());
+        for (auto other : project)
+            if (other.hasType (ids::TRACK) && other != tree && (bool) other[ids::solo]
+                && ! (inSelection && selected.contains (other[ids::id].toString())))
+                other.setProperty (ids::solo, false, &undoManager);
+    }
+
     // Menu ticks follow these.
     if (property == ids::cycleEnabled || property == ids::metronome || property == ids::countIn
         || property == ids::mute || property == ids::solo || property == ids::armed || property == ids::showAutomation)
@@ -2074,8 +2197,8 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
     }
     else if (source == &rack.getKnownPlugins())
     {
-        mixer.getConsolePanel().setCandidates (console::findBusCompressors (rack.getKnownPlugins().getTypes()));
-        mixer.setStripCandidates (console::findChannelStrips (rack.getKnownPlugins().getTypes()));
+        mixer.getConsolePanel().setCandidates (console::findBusCompressors (visiblePluginTypes()));
+        mixer.setStripCandidates (console::findChannelStrips (visiblePluginTypes()));
     }
     else if (source == commandManager.getKeyMappings())
     {
@@ -2420,7 +2543,7 @@ void MainComponent::showInstrumentMenu (juce::ValueTree track, juce::Component& 
     std::map<juce::String, juce::PopupMenu> byMaker;
     int numInstruments = 0;
 
-    for (const auto& type : rack.getKnownPlugins().getTypes())
+    for (const auto& type : visiblePluginTypes())
     {
         if (! type.isInstrument)
             continue;
@@ -2595,8 +2718,15 @@ void MainComponent::showEffectMenu (const juce::String& owner, int slot, juce::V
         for (const auto& t : routing::actingTracks (project, track, timeline.selectedTrackIds()))
             owners.addIfNotAlreadyThere (t[ids::id].toString());
 
-    auto place = [this, owner, owners, slot, existing] (std::function<juce::ValueTree (juce::ValueTree chain, int index)> make)
+    auto place = [this, owner, chosenOwners = owners, slot, existing] (std::function<juce::ValueTree (juce::ValueTree chain, int index)> make)
     {
+        // Option held as you choose (as in Pro Tools and Cubase): every selected track gets it too.
+        auto owners = chosenOwners;
+        if (juce::ModifierKeys::getCurrentModifiersRealtime().isAltDown())
+            for (const auto& id : timeline.selectedTrackIds())
+                if (auto t = model::findById (project, id); t.isValid() && ! model::isVcaTrack (t))
+                    owners.addIfNotAlreadyThere (id);
+
         undoManager.beginNewTransaction (existing.isValid() ? "Replace effect" : "Add effect");
         const auto targetSlot = existing.isValid() ? model::insertSlot (existing) : slot;
         for (const auto& other : owners)
@@ -2629,7 +2759,7 @@ void MainComponent::showEffectMenu (const juce::String& owner, int slot, juce::V
         entries.push_back (std::move (e));
     }
 
-    for (const auto& type : rack.getKnownPlugins().getTypes())
+    for (const auto& type : visiblePluginTypes())
     {
         if (type.isInstrument)
             continue;
@@ -2657,13 +2787,143 @@ void MainComponent::showEffectMenu (const juce::String& owner, int slot, juce::V
     settings.favorites = juce::StringArray::fromLines (appProperties.getUserSettings()->getValue ("pluginFavorites"));
     settings.favorites.removeEmptyStrings();
     settings.view = (PluginPicker::View) juce::jlimit (0, 3, appProperties.getUserSettings()->getIntValue ("pluginView", 1));
+    settings.collapsed = juce::StringArray::fromLines (appProperties.getUserSettings()->getValue ("pluginFoldersClosed"));
+    settings.collapsed.removeEmptyStrings();
     auto picker = std::make_unique<PluginPicker> (std::move (entries), [this] { showPluginScanner(); }, remove, settings,
                                                   [this] (const PluginPicker::Settings& changed)
     {
         appProperties.getUserSettings()->setValue ("pluginFavorites", changed.favorites.joinIntoString ("\n"));
         appProperties.getUserSettings()->setValue ("pluginView", (int) changed.view);
+        appProperties.getUserSettings()->setValue ("pluginFoldersClosed", changed.collapsed.joinIntoString ("\n"));
     });
     juce::CallOutBox::launchAsynchronously (std::move (picker), target.getScreenBounds(), nullptr);
+}
+
+void MainComponent::addExtensionItems (juce::PopupMenu& menu, juce::Array<juce::ValueTree> regions)
+{
+    if (! araAvailable())
+        return;
+    bool anyMarked = false;
+    for (const auto& r : regions)
+        anyMarked = anyMarked || (bool) r[ids::araEdit];
+
+    int found = 0;
+    for (const auto& d : visiblePluginTypes())
+        if (d.hasARAExtension && ! d.isInstrument)
+        {
+            ++found;
+            menu.addItem (d.name + "  (" + (d.pluginFormatName == "AudioUnit" ? juce::String ("AU") : d.pluginFormatName) + ")",
+                          [this, regions, d] { applyExtension (regions, d); });
+        }
+    if (found == 0)
+        menu.addItem ("No ARA plugins found (Melodyne, VocAlign, RX...)", false, false, [] {});
+    if (anyMarked)
+    {
+        menu.addSeparator();
+        menu.addItem ("Remove Extension", [this, regions] { removeExtension (regions); });
+    }
+}
+
+void MainComponent::applyExtension (juce::Array<juce::ValueTree> regions, const juce::PluginDescription& plugin)
+{
+    auto xml = plugin.createXml();
+    if (xml == nullptr)
+        return;
+    const auto description = xml->toString (juce::XmlElement::TextFormat().singleLine());
+    undoManager.beginNewTransaction ("Extension: " + plugin.name);
+
+    juce::ValueTree toOpen;
+    std::set<juce::String> done;
+    for (auto region : regions)
+    {
+        if (model::isMidiRegion (region))
+            continue;
+        region.setProperty (ids::araEdit, true, &undoManager);
+        auto track = region.getParent();
+        const auto trackId = track[ids::id].toString();
+        if (! done.insert (trackId).second)
+            continue;
+
+        // The plugin on the track (once): in the first free insert slot, marked as an Extension.
+        auto chain = model::chainFor (project, trackId);
+        juce::ValueTree insert;
+        for (const auto& i : model::insertsOf (chain))
+            if (i[ids::pluginDescription].toString() == description)
+                insert = i;
+        if (! insert.isValid())
+        {
+            int slot = 0;
+            while (model::insertAtSlot (chain, slot).isValid() && slot < 15)
+                ++slot;
+            insert = model::placeInsert (chain, slot, [this, description] (juce::ValueTree c, int index)
+            {
+                return model::addPluginInsert (c, description, index, &undoManager);
+            }, &undoManager);
+            insert.setProperty ("araExtension", true, &undoManager);
+        }
+        if (! toOpen.isValid())
+            toOpen = insert;
+    }
+
+    // Its editor opens once it has the regions (as Cubase opens it in the lower zone).
+    if (toOpen.isValid())
+        juce::Timer::callAfterDelay (1200, [safe = juce::Component::SafePointer<MainComponent> (this), toOpen]
+        {
+            if (safe != nullptr && toOpen.getParent().isValid())
+                safe->openInsertWindow (toOpen);
+        });
+    statusLabel.setText (plugin.name + " is working on " + juce::String (regions.size()) + (regions.size() == 1 ? " region" : " regions")
+                         + "; the rest of the track plays as before.", juce::dontSendNotification);
+}
+
+void MainComponent::removeExtension (juce::Array<juce::ValueTree> regions)
+{
+    undoManager.beginNewTransaction ("Remove Extension");
+    std::set<juce::String> tracks;
+    for (auto region : regions)
+    {
+        region.setProperty (ids::araEdit, false, &undoManager);
+        tracks.insert (region.getParent()[ids::id].toString());
+    }
+    // A track with no Extension regions left loses the plugin it was given as one.
+    for (const auto& id : tracks)
+    {
+        auto track = model::findById (project, id);
+        if (! track.isValid() || model::hasAraRegions (track))
+            continue;
+        for (const auto& insert : model::insertsOf (model::findChain (project, id)))
+            if ((bool) insert.getProperty ("araExtension", false))
+                model::removeInsert (insert, &undoManager);
+    }
+}
+
+void MainComponent::copyInsertToSelected (juce::ValueTree insert)
+{
+    if (! insert.isValid())
+        return;
+    effectRack.storePluginStates (model::mixerOf (project));   // (its settings as they are now)
+    const auto from = insert.getParent()[ids::owner].toString();
+    const auto slot = model::insertSlot (insert);
+    int copies = 0;
+    undoManager.beginNewTransaction ("Copy plugin to selected channels");
+    for (const auto& id : timeline.selectedTrackIds())
+    {
+        auto track = model::findById (project, id);
+        if (id == from || ! track.isValid() || model::isVcaTrack (track))
+            continue;
+        model::placeInsert (model::chainFor (project, id), slot, [this, &insert] (juce::ValueTree chain, int index)
+        {
+            auto copy = insert.createCopy();
+            copy.setProperty (ids::id, juce::Uuid().toString(), nullptr);
+            copy.removeProperty (ids::araArchive, nullptr);
+            chain.addChild (copy, index, &undoManager);
+            return copy;
+        }, &undoManager);
+        ++copies;
+    }
+    statusLabel.setText (copies > 0 ? "Copied to " + juce::String (copies) + (copies == 1 ? " channel" : " channels")
+                                    : juce::String ("Select the channels to copy it to first (Shift- or Cmd-click their names), then Option-click the plugin"),
+                         juce::dontSendNotification);
 }
 
 void MainComponent::openInsertWindow (const juce::ValueTree& insert)

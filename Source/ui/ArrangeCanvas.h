@@ -75,9 +75,21 @@ public:
     /** Called to open an audio region in the Audio File Editor. */
     std::function<void (juce::ValueTree region)> onOpenAudioEditor;
 
+    /** Audio regions' Extensions menu (ARA plugins such as Melodyne, as in Cubase): filled by the main window. */
+    std::function<void (juce::PopupMenu& menu, juce::Array<juce::ValueTree> regions)> addExtensionItems;
+
 private:
     enum class DragMode { none, scrub, move, trimStart, trimEnd, cycleNew, cycleMove, automationPoint, rubberBand, pencilRegion, marker,
-                          fadeIn, fadeOut, loopEnd, punch, marquee, zoomRect, solo, tempo, compSwipe };
+                          fadeIn, fadeOut, loopEnd, punch, marquee, zoomRect, solo, tempo, compSwipe, gain };
+
+    // Clip gain (the handle on an audio region, as in FL Studio; the Gain tool): each region's level when the drag began.
+    std::vector<std::pair<juce::ValueTree, double>> gainBefore;
+    juce::String gainReadout;
+    juce::Point<float> gainReadoutAt;
+    juce::String hoverRegionId;
+    juce::Rectangle<float> gainHandleOf (const juce::ValueTree& region, int trackIndex) const;
+    void startGainDrag (juce::ValueTree region);
+    void resetGain (juce::ValueTree region);
     int takeLaneAt (const juce::ValueTree& region, int trackIndex, juce::Point<float> pos) const;   // -1: not on a take lane
     void paintTakeLanes (juce::Graphics& g, const juce::ValueTree& region, juce::Rectangle<float> body);
     void restoreComp (juce::ValueTree region, const std::vector<model::CompPiece>& segments, juce::UndoManager* um);

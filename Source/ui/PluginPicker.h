@@ -32,6 +32,7 @@ public:
     {
         juce::StringArray favorites;        // entries' keys
         View view = View::maker;
+        juce::StringArray collapsed;        // folders (makers, categories...) closed, as in Cubase's plugin selector
     };
 
     PluginPicker (std::vector<Entry> entries, std::function<void()> onScan, std::function<void()> onRemove,
@@ -64,6 +65,22 @@ private:
     void setView (View v);
     juce::String groupOf (const Entry& e) const;
     bool isFavorite (const Entry& e) const { return settings.favorites.contains (e.key); }
+
+    // Cubase-style: a column of folders (each maker, or category...) on the left to narrow the list to one;
+    // folder rows in the list open and close with a click.
+    struct FolderList final : juce::ListBoxModel
+    {
+        PluginPicker& owner;
+        explicit FolderList (PluginPicker& o) : owner (o) {}
+        int getNumRows() override { return (int) owner.folders.size() + 1; }
+        void paintListBoxItem (int row, juce::Graphics&, int width, int height, bool selected) override;
+        void listBoxItemClicked (int row, const juce::MouseEvent&) override;
+    };
+    FolderList folderModel { *this };
+    juce::ListBox folderList { "Folders", &folderModel };
+    std::vector<std::pair<juce::String, int>> folders;   // name, how many plugins
+    juce::String folderFilter;                           // empty: all folders
+    void toggleFolder (const juce::String& folder);
 
     std::vector<Entry> entries;
     std::vector<int> shown;

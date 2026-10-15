@@ -293,6 +293,13 @@ namespace riff::model
     // --- Buses and sends --------------------------------------------------------
     bool isBusTrack (const juce::ValueTree& track);
 
+    /** Whether playing `track` into the track `targetId` would come back round to it (a bus into itself, through others). */
+    /** Cubase-style ARA Extensions: whether some of the track's regions are marked for its ARA plugin
+        (then only those are the plugin's, the rest play as usual; otherwise the plugin takes every region). */
+    bool hasAraRegions (const juce::ValueTree& track);
+
+    bool outputWouldLoop (const juce::ValueTree& project, const juce::ValueTree& track, const juce::String& targetId);
+
     /** Logic's channel format: a mono channel plays (and records) one channel, panned; stereo plays both.
         Unset means stereo. Switching also sets the input to a mono input or a stereo pair. */
     bool isStereoChannel (const juce::ValueTree& track);

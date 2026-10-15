@@ -57,6 +57,9 @@ private:
     juce::ComboBox waveModeBox, regionBox;
     juce::TextButton waveButtons[2];
 
+    // The cycle (locators) and marker colours
+    juce::TextButton markButtons[2], markDefaultButton { "Skin's" };
+
     // Your presets, kept in the settings file
     juce::PropertiesFile* store = nullptr;
     juce::ComboBox myPresets;

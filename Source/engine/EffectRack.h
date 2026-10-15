@@ -31,6 +31,9 @@ public:
 
     /** Set for an ARA plugin playing its track's regions: it makes the sound itself (silence when it can't). */
     void setRendersRegions (bool shouldRender) noexcept { rendersRegions.store (shouldRender); }
+
+    /** Extensions (Cubase style): the plugin plays only its regions, added to the track's other audio (it hears silence). */
+    void setExtensionMode (bool on) noexcept { extensionMode.store (on); }
     juce::String getName() const override { return plugin->getName(); }
     int getLatencySamples() const override { return plugin->getLatencySamples(); }
     void setAutomatedParameter (int index, float value) noexcept override
@@ -74,7 +77,7 @@ private:
         }
     } playHead;
     juce::SpinLock processLock;
-    std::atomic<bool> rendersRegions { false };
+    std::atomic<bool> rendersRegions { false }, extensionMode { false };
     int preparedBlock = 0;
 
     std::unique_ptr<juce::AudioPluginInstance> plugin;

@@ -94,43 +94,64 @@ namespace riff::skin
         const auto size = juce::jmin (area.getWidth(), area.getHeight());
         const auto r = area.withSizeKeepingCentre (size, size);
         const auto image = xenonKnob();
-        if (! image.isValid())
+        if (! image.isValid() || size < 2.0f)
             return;
-        juce::Graphics::ScopedSaveState state (g);
-        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-        g.setOpacity (enabled ? 1.0f : 0.55f);
         const auto angle = start + proportion * (end - start);
-        const auto turn = angle + juce::MathConstants<float>::halfPi;   // its lit edge sits at the left (-90 degrees)
-        const auto scale = size / (float) image.getWidth();
-        g.drawImageTransformed (image, juce::AffineTransform::translation (-image.getWidth() * 0.5f, -image.getHeight() * 0.5f)
-                                           .rotated (turn)
-                                           .scaled (scale)
-                                           .translated (r.getCentreX(), r.getCentreY()));
+
+        // Drawn once per size and angle (in 1/256 turns) and kept: knobs redraw often.
+        static std::map<juce::int64, juce::Image> cache;
+        const auto pixels = juce::roundToInt (size * 2.0f);   // (2x for sharp screens)
+        const auto step = (juce::roundToInt (angle / juce::MathConstants<float>::twoPi * 256.0f) % 256 + 256) % 256;
+        const auto key = (juce::int64) pixels * 1024 + step;
+        auto it = cache.find (key);
+        if (it == cache.end())
+        {
+            if (cache.size() > 4096)
+                cache.clear();
+            juce::Image frame (juce::Image::ARGB, pixels, pixels, true);
+            {
+                juce::Graphics fg (frame);
+                fg.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+                const auto turn = (float) step / 256.0f * juce::MathConstants<float>::twoPi + juce::MathConstants<float>::halfPi;   // its lit edge sits at the left
+                fg.drawImageTransformed (image, juce::AffineTransform::translation (-image.getWidth() * 0.5f, -image.getHeight() * 0.5f)
+                                                    .rotated (turn)
+                                                    .scaled ((float) pixels / (float) image.getWidth())
+                                                    .translated ((float) pixels * 0.5f, (float) pixels * 0.5f));
+            }
+            it = cache.emplace (key, frame).first;
+        }
+        juce::Graphics::ScopedSaveState state (g);
+        g.setOpacity (enabled ? 1.0f : 0.55f);
+        g.drawImage (it->second, r);
     }
 
-    /** Lays a texture over an area: the picture's piece tiled with every other tile mirrored, so no seams show. */
+    /** An image with its mirror images beside and below it (2 x 2): it tiles without seams. Cached. */
+    inline juce::Image mirroredTile (const juce::Image& source)
+    {
+        static std::map<juce::String, juce::Image> cache;
+        const auto key = juce::String ((juce::int64) source.getPixelData().get());
+        if (auto it = cache.find (key); it != cache.end())
+            return it->second;
+        const auto w = source.getWidth(), h = source.getHeight();
+        juce::Image out (juce::Image::ARGB, w * 2, h * 2, true);
+        {
+            juce::Graphics g (out);
+            g.drawImageAt (source, 0, 0);
+            g.drawImageTransformed (source, juce::AffineTransform::scale (-1.0f, 1.0f).translated ((float) w * 2.0f, 0.0f));
+            g.drawImageTransformed (source, juce::AffineTransform::scale (1.0f, -1.0f).translated (0.0f, (float) h * 2.0f));
+            g.drawImageTransformed (source, juce::AffineTransform::scale (-1.0f, -1.0f).translated ((float) w * 2.0f, (float) h * 2.0f));
+        }
+        return cache[key] = out;
+    }
+
+    /** Lays a texture over an area: the picture's piece tiled, every other tile mirrored so no seams show (one fill). */
     inline void tileTexture (juce::Graphics& g, const juce::Image& image, juce::Rectangle<int> area, float opacity = 1.0f)
     {
         if (! image.isValid() || area.isEmpty())
             return;
         juce::Graphics::ScopedSaveState state (g);
-        g.reduceClipRegion (area);
-        g.setOpacity (opacity);
-        const auto w = (float) image.getWidth(), h = (float) image.getHeight();
-        const auto clip = g.getClipBounds();
-        int row = 0;
-        for (float y = (float) area.getY(); y < (float) area.getBottom(); y += h, ++row)
-        {
-            if (y + h < (float) clip.getY() || y > (float) clip.getBottom())
-                continue;
-            int column = 0;
-            for (float x = (float) area.getX(); x < (float) area.getRight(); x += w, ++column)
-            {
-                const bool flipX = (column & 1) != 0, flipY = (row & 1) != 0;
-                g.drawImageTransformed (image, juce::AffineTransform::scale (flipX ? -1.0f : 1.0f, flipY ? -1.0f : 1.0f)
-                                                   .translated (flipX ? x + w : x, flipY ? y + h : y));
-            }
-        }
+        g.setTiledImageFill (mirroredTile (image), area.getX(), area.getY(), opacity);
+        g.fillRect (area);
     }
 
     /** An image turned a quarter turn (the photo's meter runs sideways; ours run upwards). Cached. */

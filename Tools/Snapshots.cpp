@@ -5,6 +5,8 @@
 #include "../Source/ui/LiveLoopsGrid.h"
 #include "../Source/ui/ToolIcons.h"
 #include "../Source/ui/PluginPicker.h"
+#include "../Source/ui/MultiMeter.h"
+#include "../Source/ui/TrackHeaders.h"
 #include "../Source/ui/ThemePanel.h"
 #include <JuceHeader.h>
 #include "MainComponent.h"
@@ -90,6 +92,9 @@ public:
         pump (main, 2500);
         pump (main, 200);
         save (main, "arrange.png");
+
+        if (juce::SystemStats::getEnvironmentVariable ("RIFF_BENCH", {}).isNotEmpty())
+            return bench (main);
 
         main.showMixer();
         pump (main, 200);
@@ -622,6 +627,59 @@ public:
         }
 
         {
+            // This batch: Pro Tools and Ableton style skins; inserts in the Edit window; R / I / MM and comments in the mixer;
+            // the bus compressor's chooser; clip gain on a selected audio region.
+            TrackHeader::showInserts = true;
+            main.resized();
+            for (auto* c : main.headers.getChildren())
+                c->resized();
+            main.headers.resized();
+            for (const auto& region : main.project.getChild (0))
+                if (region.hasType (ids::REGION))
+                {
+                    main.timeline.selectOnlyRegion (region[ids::id].toString());
+                    break;
+                }
+            main.timeline.changed();
+            for (auto [skin, name] : { std::pair { theme::Skin::protools, "protools" }, std::pair { theme::Skin::ableton, "ableton" } })
+            {
+                theme::Settings t;
+                t.skin = skin;
+                main.applyTheme (t);
+                pump (main, 150);
+                save (main, juce::String (name) + "-arrange.png");
+                main.mixer.setShowComments (true);
+                main.showMixer();
+                main.mixer.relayoutStrips();
+                pump (main, 200);
+                save (main, juce::String (name) + "-mixer.png");
+                main.mixer.setShowComments (false);
+                main.closeMixer();
+            }
+            TrackHeader::showInserts = false;
+            main.resized();
+            main.headers.resized();
+            main.applyTheme ({});
+            pump (main, 50);
+
+            // The MultiMeter, fed a second of a stereo mix
+            MultiMeterPanel meter (main.engine);
+            juce::AudioBuffer<float> mix (2, 48000);
+            for (int i = 0; i < mix.getNumSamples(); ++i)
+            {
+                const auto t = (float) i / 48000.0f;
+                mix.setSample (0, i, 0.3f * std::sin (juce::MathConstants<float>::twoPi * 220.0f * t) + 0.08f * std::sin (juce::MathConstants<float>::twoPi * 3100.0f * t));
+                mix.setSample (1, i, 0.26f * std::sin (juce::MathConstants<float>::twoPi * 220.0f * t + 0.4f) + 0.05f * std::sin (juce::MathConstants<float>::twoPi * 5200.0f * t));
+            }
+            for (int block = 0; block < 60; ++block)
+            {
+                meter.take (mix.getReadPointer (0, (block * 800) % 47000), mix.getReadPointer (1, (block * 800) % 47000), 800);
+                pump (main, 20);
+            }
+            save (meter, "multimeter.png");
+        }
+
+        {
             // A Pro Tools session opened (its MIDI tracks; its audio files aren't here)
             main.showImportReport = false;
             main.openImportedProject (juce::File (RIFF_SOURCE_DIR).getChildFile ("Tests/data/protools/TestPTX.ptx"));
@@ -636,6 +694,60 @@ public:
         }
 
         main.engine.stop();
+        return 0;
+    }
+
+    /** How long the skins take to draw: the whole mixer, and a meter's update on each strip (what plays at 30 a second). */
+    int bench (MainComponent& main)
+    {
+        main.project.setProperty ("mixerBusComp", true, nullptr);
+        main.showMixer();
+        pump (main, 200);
+        struct Case { const char* name; theme::Settings s; };
+        std::vector<Case> cases;
+        for (auto [name, skin] : { std::pair { "studio", theme::Skin::studio }, std::pair { "flat", theme::Skin::flat },
+                                   std::pair { "white", theme::Skin::white }, std::pair { "xenon", theme::Skin::xenon } })
+        {
+            theme::Settings s;
+            s.skin = skin;
+            cases.push_back ({ name, s });
+        }
+        for (const auto& c : cases)
+        {
+            for (bool console : { false, true })
+            {
+                main.applyTheme (c.s);
+                main.project.setProperty ("mixerConsole", console, nullptr);
+                main.mixer.relayoutStrips();
+                pump (main, 100);
+                juce::Image image (juce::Image::ARGB, main.mixer.getWidth(), main.mixer.getHeight(), true);
+                auto t0 = juce::Time::getMillisecondCounterHiRes();
+                for (int i = 0; i < 10; ++i)
+                {
+                    juce::Graphics g (image);
+                    main.mixer.paintEntireComponent (g, false);
+                }
+                const auto full = (juce::Time::getMillisecondCounterHiRes() - t0) / 10.0;
+
+                // A meter's repaint on every strip: the strip drawn behind it, then the meter.
+                t0 = juce::Time::getMillisecondCounterHiRes();
+                int meters = 0;
+                for (int i = 0; i < 30; ++i)
+                    for (auto* strip : main.mixer.strips)
+                    {
+                        juce::Graphics g (image);
+                        g.reduceClipRegion (strip->meter.getBoundsInParent());
+                        if (strip->meter.isOpaque())
+                            strip->meter.paintEntireComponent (g, false);   // (what an opaque meter's repaint costs)
+                        else
+                            strip->paintEntireComponent (g, false);
+                        ++meters;
+                    }
+                const auto perSecond = (juce::Time::getMillisecondCounterHiRes() - t0) / 30.0;
+                std::cout << "BENCH " << c.name << (console ? " console" : " compact") << ": full mixer " << juce::String (full, 1)
+                          << " ms, meters for one frame " << juce::String (perSecond, 2) << " ms (" << main.mixer.strips.size() << " strips)" << std::endl;
+            }
+        }
         return 0;
     }
 

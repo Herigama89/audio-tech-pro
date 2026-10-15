@@ -82,7 +82,7 @@ struct TimelineState : public juce::ChangeBroadcaster
     }
 
     // --- Tools, snap and drag modes (Logic's tool menu and the Snap / Drag menus) ---------
-    enum class Tool { pointer, pencil, eraser, scissors, glue, mute, fade, marquee, zoom, solo, text };
+    enum class Tool { pointer, pencil, eraser, scissors, glue, mute, fade, marquee, zoom, solo, text, gain };
 
     /** The Marquee tool's selection: a stretch of time on some tracks (empty when there's none). */
     double marqueeStart = 0.0, marqueeEnd = 0.0;

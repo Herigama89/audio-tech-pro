@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "model/Project.h"
 #include "engine/AudioEngine.h"
+#include "engine/Loudness.h"
 #include "engine/AudioFileCache.h"
 #include "engine/ProjectPlayer.h"
 #include "engine/InstrumentRack.h"
@@ -2256,4 +2257,59 @@ TEST_CASE ("AudioSuite: a region through an effect, with handles, tail and laten
 TEST_CASE ("This build can host ARA plugins", "[engine]")
 {
     CHECK (araAvailable());
+}
+
+TEST_CASE ("A summing stack plays into a bus, and loops are refused", "[engine][mixer]")
+{
+    Fixture f;
+    const auto wav = writeConstantWav (f.temp.dir.getChildFile ("a.wav"), 48000.0, 48000, 0.5f);
+    auto a = model::addTrack (f.project, "A", nullptr);
+    model::addRegion (a, wav, 0.0, 1.0, nullptr);
+    auto stack = model::createTrackStack (f.project, { a }, true, nullptr);
+    auto bus = model::addTrack (f.project, "Bus", nullptr, -1, model::busKind);
+    bus.setProperty (ids::volume, 0.5, nullptr);
+
+    // The stack into the bus: the bus's fader applies to the stack's sound.
+    stack.setProperty (ids::output, bus[ids::id].toString(), nullptr);
+    f.player.setProject (f.project);
+    f.engine.play();
+    auto out = renderLeft (f.engine, 9600);
+    CHECK_THAT (out[9000], WithinAbs (0.5f * 0.8f * 0.5f, 1e-3));
+
+    // The bus back into the stack would loop: refused (and ignored by the player).
+    CHECK (model::outputWouldLoop (f.project, bus, stack[ids::id].toString()));
+    CHECK_FALSE (model::outputWouldLoop (f.project, stack, bus[ids::id].toString()));
+    CHECK (model::outputWouldLoop (f.project, bus, bus[ids::id].toString()));
+}
+
+TEST_CASE ("Extensions: an ARA plugin takes only the regions given to it", "[model][ara]")
+{
+    auto project = model::createProject();
+    auto track = model::addTrack (project, "Vox", nullptr);
+    auto r1 = model::addRegion (track, juce::File::getCurrentWorkingDirectory().getChildFile ("a.wav"), 0.0, 1.0, nullptr);
+    auto r2 = model::addRegion (track, juce::File::getCurrentWorkingDirectory().getChildFile ("b.wav"), 2.0, 1.0, nullptr);
+    CHECK_FALSE (model::hasAraRegions (track));
+    r2.setProperty (ids::araEdit, true, nullptr);
+    CHECK (model::hasAraRegions (track));
+    juce::ignoreUnused (r1);
+}
+
+TEST_CASE ("Loudness: a stereo 1 kHz tone at -23 dBFS reads -23 LUFS", "[engine][loudness]")
+{
+    LoudnessMeter meter;
+    meter.prepare (48000.0);
+    const auto amplitude = std::pow (10.0f, -23.0f / 20.0f);
+    std::vector<float> tone (48000 * 5);
+    for (size_t i = 0; i < tone.size(); ++i)
+        tone[i] = amplitude * std::sin (juce::MathConstants<float>::twoPi * 1000.0f * (float) i / 48000.0f);
+    meter.process (tone.data(), tone.data(), (int) tone.size());
+    CHECK_THAT (meter.integrated(), WithinAbs (-23.0, 0.2));
+    CHECK_THAT (meter.momentary(), WithinAbs (-23.0, 0.2));
+    CHECK_THAT (meter.shortTerm(), WithinAbs (-23.0, 0.2));
+    CHECK (meter.range() < 0.5);
+
+    // Silence doesn't pull the integrated loudness down (it's gated out).
+    std::vector<float> silence (48000 * 5, 0.0f);
+    meter.process (silence.data(), silence.data(), (int) silence.size());
+    CHECK_THAT (meter.integrated(), WithinAbs (-23.0, 0.2));
 }

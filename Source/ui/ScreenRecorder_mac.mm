@@ -363,7 +363,11 @@ namespace
     juce::String toJuce (NSString* s) { return s != nil ? juce::String (juce::CharPointer_UTF8 ([s UTF8String])) : juce::String(); }
 
     const char* permissionText = "Audio Tech Pro needs permission to record the screen. Allow it in System Settings > "
-                                 "Privacy & Security > Screen & System Audio Recording, then quit and reopen Audio Tech Pro.";
+                                 "Privacy & Security > Screen & System Audio Recording, then quit and reopen Audio Tech Pro.\n\n"
+                                 "If it's already switched on: select Audio Tech Pro in that list, remove it with the minus button, "
+                                 "add it again with the plus button (or just switch it on when asked), then reopen the app. "
+                                 "(macOS ties the permission to the copy of the app it was given to; from this version on, "
+                                 "updates keep it.)";
 
     class MacScreenRecorder final : public ScreenRecorder
     {
@@ -409,11 +413,16 @@ namespace
                     return;
                 }
 
+                // macOS's quick check can say "no" when the switch is on (for a rebuilt app, until it's reopened),
+                // so it doesn't stop us: ask once, then try; the capture itself says if it's really refused.
                 if (! CGPreflightScreenCaptureAccess())
                 {
-                    CGRequestScreenCaptureAccess();   // the system asks, or lists the app in Settings
-                    started (permissionText);
-                    return;
+                    static bool asked = false;
+                    if (! asked)
+                    {
+                        asked = true;
+                        CGRequestScreenCaptureAccess();   // the system asks, or lists the app in Settings
+                    }
                 }
 
                 // Which display: the one showing our window.

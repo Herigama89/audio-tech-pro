@@ -121,12 +121,75 @@ namespace
         { &knobRed, juce::Colour (0xffff5a4au), juce::Colour (0xffff5a4au), Role::fixed },
         { &knobBlack, juce::Colour (0xff2f8cffu), juce::Colour (0xffff9a30u), Role::accent },
         { &neon, juce::Colour (0xff2f8cffu), juce::Colour (0xffff9a30u), Role::accent },
-        { &waveform, juce::Colour (0xffeef3f8u), juce::Colour (0xffeef3f8u), Role::fixed }
+        { &waveform, juce::Colour (0xffeef3f8u), juce::Colour (0xffeef3f8u), Role::fixed },
+        { &locators, juce::Colour (0xffe8892au), juce::Colour (0xffe8892au), Role::fixed },
+        { &markers, juce::Colour (0xff4b4e54u), juce::Colour (0xff4b4e54u), Role::fixed }
         };
         return entries;
     }
 
     Settings& settingsNow() { static Settings s; return s; }
+
+    /** A skin's own colours: (colour, value) pairs; anything not listed takes the flat skin's. */
+    using SkinTable = std::vector<std::pair<const juce::Colour*, juce::Colour>>;
+
+    juce::Colour fromTable (const SkinTable& values, const juce::Colour* c, juce::Colour fallback)
+    {
+        for (const auto& [colour, value] : values)
+            if (colour == c)
+                return value;
+        return fallback;
+    }
+
+    /** Pro Tools style: mid-dark greys, blue selection, green-to-red meters, dark waveforms in coloured clips. */
+    juce::Colour protoolsValue (const juce::Colour* c, juce::Colour fallback)
+    {
+        using namespace juce;
+        static const SkinTable values {
+            { &background, Colour (0xff2d2e30) }, { &toolbar, Colour (0xff3c3d40) }, { &toolbarDark, Colour (0xff333437) },
+            { &panel, Colour (0xff3a3b3e) }, { &laneA, Colour (0xff2a2b2d) }, { &laneB, Colour (0xff2e2f31) },
+            { &outline, Colour (0xff505154) }, { &gridBar, Colour (0xff57585b) }, { &gridBeat, Colour (0xff38393c) },
+            { &text, Colour (0xffe4e4e4) }, { &dimText, Colour (0xff9d9ea2) }, { &accent, Colour (0xff4a9fe8) },
+            { &selection, Colour (0xff2f4a66) }, { &meterGreen, Colour (0xff3fcf4a) }, { &meterAmber, Colour (0xffe6d23a) },
+            { &meterRed, Colour (0xffe8382f) },
+            { &cream, Colour (0xff47484c) }, { &creamShade, Colour (0xff3e3f42) }, { &creamDeep, Colour (0xff2a2b2e) },
+            { &ink, Colour (0xffe4e4e4) }, { &inkDim, Colour (0xff9d9ea2) }, { &gold, Colour (0xff4a9fe8) }, { &goldDark, Colour (0xff2f6fae) },
+            { &ruler, Colour (0xff404144) }, { &rulerDark, Colour (0xff36373a) },
+            { &console, Colour (0xff434448) }, { &consoleShade, Colour (0xff3a3b3f) }, { &consoleDark, Colour (0xff1f2022) },
+            { &slotDark, Colour (0xff26272a) }, { &stripFace, Colour (0xff4a4b4f) }, { &stripFaceLow, Colour (0xff404145) },
+            { &stripEdge, Colour (0xff222325) }, { &stripInk, Colour (0xffe4e4e4) }, { &stripInkDim, Colour (0xffa3a4a8) },
+            { &stripSlot, Colour (0xff2f3033) }, { &stripSlotOn, Colour (0xff3a4a5c) }, { &knobArc, Colour (0xff4a9fe8) },
+            { &lcd, Colour (0xff151618) }, { &lcdText, Colour (0xff7fd27b) }, { &lcdDim, Colour (0xff5d7a5b) },
+            { &knobBlue, Colour (0xff4a9fe8) }, { &knobBlack, Colour (0xff4a9fe8) }, { &neon, Colour (0xff4a9fe8) },
+            { &waveform, Colour (0xff141414) }, { &locators, Colour (0xff4a9fe8) }, { &markers, Colour (0xffd6c23c) },
+        };
+        return fromTable (values, c, fallback);
+    }
+
+    /** Ableton style: flat charcoal surfaces, orange accent and locators, bright clips with dark waveforms. */
+    juce::Colour abletonValue (const juce::Colour* c, juce::Colour fallback)
+    {
+        using namespace juce;
+        static const SkinTable values {
+            { &background, Colour (0xff242424) }, { &toolbar, Colour (0xff363636) }, { &toolbarDark, Colour (0xff2c2c2c) },
+            { &panel, Colour (0xff303030) }, { &laneA, Colour (0xff282828) }, { &laneB, Colour (0xff2b2b2b) },
+            { &outline, Colour (0xff181818) }, { &gridBar, Colour (0xff4a4a4a) }, { &gridBeat, Colour (0xff353535) },
+            { &text, Colour (0xffd8d8d8) }, { &dimText, Colour (0xff8e8e8e) }, { &accent, Colour (0xffffa236) },
+            { &selection, Colour (0xff5c4a2a) }, { &meterGreen, Colour (0xff2fd17a) }, { &meterAmber, Colour (0xffffc23b) },
+            { &meterRed, Colour (0xffff4a3a) },
+            { &cream, Colour (0xff3a3a3a) }, { &creamShade, Colour (0xff323232) }, { &creamDeep, Colour (0xff222222) },
+            { &ink, Colour (0xffd8d8d8) }, { &inkDim, Colour (0xff8e8e8e) }, { &gold, Colour (0xffffa236) }, { &goldDark, Colour (0xffb06c1c) },
+            { &ruler, Colour (0xff2f2f2f) }, { &rulerDark, Colour (0xff272727) },
+            { &console, Colour (0xff333333) }, { &consoleShade, Colour (0xff2c2c2c) }, { &consoleDark, Colour (0xff1b1b1b) },
+            { &slotDark, Colour (0xff1e1e1e) }, { &stripFace, Colour (0xff363636) }, { &stripFaceLow, Colour (0xff303030) },
+            { &stripEdge, Colour (0xff1a1a1a) }, { &stripInk, Colour (0xffd8d8d8) }, { &stripInkDim, Colour (0xff8e8e8e) },
+            { &stripSlot, Colour (0xff262626) }, { &stripSlotOn, Colour (0xff4a3e2a) }, { &knobArc, Colour (0xffffa236) },
+            { &lcd, Colour (0xff1c1c1c) }, { &lcdText, Colour (0xffffa236) }, { &lcdDim, Colour (0xff8a6a40) },
+            { &knobBlue, Colour (0xffffa236) }, { &knobBlack, Colour (0xffffa236) }, { &neon, Colour (0xffffa236) },
+            { &waveform, Colour (0xff1c1c1c) }, { &locators, Colour (0xffffa236) }, { &markers, Colour (0xff5a5a5a) },
+        };
+        return fromTable (values, c, fallback);
+    }
 
     /** Xenon's own colours (sampled from your picture). */
     juce::Colour xenonValue (const juce::Colour* c, juce::Colour fallback)
@@ -220,10 +283,19 @@ namespace
 void set (const Settings& s)
 {
     settingsNow() = s;
-    const bool flat = s.skin == Skin::flat, white = s.skin == Skin::white, xenon = s.skin == Skin::xenon;
-    const auto pick = [flat, white, xenon] (const Entry& e)
+    const auto skin = s.skin;
+    const auto pick = [skin] (const Entry& e)
     {
-        return white ? whiteValue (e.colour, e.flat) : xenon ? xenonValue (e.colour, e.flat) : flat ? e.flat : e.studio;
+        switch (skin)
+        {
+            case Skin::white:    return whiteValue (e.colour, e.flat);
+            case Skin::xenon:    return xenonValue (e.colour, e.flat);
+            case Skin::protools: return protoolsValue (e.colour, e.flat);
+            case Skin::ableton:  return abletonValue (e.colour, e.flat);
+            case Skin::flat:     return e.flat;
+            case Skin::studio:   break;
+        }
+        return e.studio;
     };
     const auto base = pick (table()[0]);   // the background
     for (auto& e : table())
@@ -233,6 +305,8 @@ void set (const Settings& s)
     for (auto [chosen, target] : { std::pair { s.meterLow, &meterGreen }, std::pair { s.meterMid, &meterAmber }, std::pair { s.meterPeak, &meterRed } })
         if (chosen != 0)
             *target = adjust (juce::Colour (chosen), Role::meter, s, base.getBrightness());
+    if (s.locatorColour != 0) locators = juce::Colour (s.locatorColour);
+    if (s.markerColour != 0)  markers = juce::Colour (s.markerColour);
 }
 
 const Settings& current() { return settingsNow(); }
@@ -243,12 +317,12 @@ bool xenonSkin() { return settingsNow().skin == Skin::xenon; }
 int waveformMode()
 {
     const auto& s = settingsNow();
-    return s.waveMode >= 0 ? s.waveMode : (s.skin == Skin::xenon ? 2 : 0);
+    return s.waveMode >= 0 ? s.waveMode : (s.skin == Skin::xenon ? 2 : (s.skin == Skin::protools || s.skin == Skin::ableton) ? 1 : 0);
 }
 juce::Colour waveformA()
 {
     const auto& s = settingsNow();
-    return s.waveA != 0 ? juce::Colour (s.waveA) : (s.skin == Skin::xenon ? juce::Colour (0xff7ae0de) : waveform);
+    return s.waveA != 0 ? juce::Colour (s.waveA) : (s.skin == Skin::xenon ? juce::Colour (0xff7ae0de) : waveform);   // (Pro Tools / Ableton: dark)
 }
 juce::Colour waveformB()
 {
@@ -277,7 +351,8 @@ juce::String Settings::toString() const
                                juce::String::toHexString ((int) meterLow), juce::String::toHexString ((int) meterMid),
                                juce::String::toHexString ((int) meterPeak),
                                juce::String (waveMode), juce::String::toHexString ((int) waveA), juce::String::toHexString ((int) waveB),
-                               juce::String (glassRegions) }.joinIntoString (";");
+                               juce::String (glassRegions),
+                               juce::String::toHexString ((int) locatorColour), juce::String::toHexString ((int) markerColour) }.joinIntoString (";");
 }
 
 Settings Settings::fromString (const juce::String& text)
@@ -286,7 +361,7 @@ Settings Settings::fromString (const juce::String& text)
     const auto v = juce::StringArray::fromTokens (text, ";", "");
     if (v.size() < 9)
         return s;
-    s.skin = v[0].getIntValue() == 3 ? Skin::xenon : v[0].getIntValue() == 2 ? Skin::white : v[0].getIntValue() == 1 ? Skin::flat : Skin::studio;
+    s.skin = (Skin) juce::jlimit (0, (int) Skin::ableton, v[0].getIntValue());
     s.hue = juce::jlimit (-180.0f, 180.0f, v[1].getFloatValue());
     s.saturation = juce::jlimit (0.0f, 2.0f, v[2].getFloatValue());
     s.lightness = juce::jlimit (-1.0f, 1.0f, v[3].getFloatValue());
@@ -307,6 +382,11 @@ Settings Settings::fromString (const juce::String& text)
         s.waveA = (juce::uint32) v[13].getHexValue32();
         s.waveB = (juce::uint32) v[14].getHexValue32();
         s.glassRegions = juce::jlimit (-1, 1, v[15].getIntValue());
+    }
+    if (v.size() >= 18)
+    {
+        s.locatorColour = (juce::uint32) v[16].getHexValue32();
+        s.markerColour = (juce::uint32) v[17].getHexValue32();
     }
     return s;
 }

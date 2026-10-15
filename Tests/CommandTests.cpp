@@ -24,7 +24,7 @@ TEST_CASE ("Every command has a name, a menu and a unique id", "[commands]")
 
 TEST_CASE ("No preset gives one key to two commands", "[commands]")
 {
-    REQUIRE (commands::presetNames() == juce::StringArray { "Logic Pro", "Pro Tools", "Ableton Live", "FL Studio", "Cubase" });
+    REQUIRE (commands::presetNames() == juce::StringArray { "Logic Pro", "Pro Tools", "Ableton Live", "FL Studio", "Cubase", "LUNA" });
 
     for (const auto& preset : commands::presetNames())
     {

@@ -95,6 +95,10 @@ namespace riff::toolicons
                 p.applyTransform (p.getTransformToScaleToFit (4.0f, 3.0f, 16.0f, 18.0f, true));
                 break;
             }
+            case Tool::gain:
+                // A fader cap on its slot
+                p.addRoundedRectangle (7.0f, 10.0f, 10.0f, 5.0f, 1.0f);
+                break;
             case Tool::zoom:
             case Tool::marquee:
                 break;
@@ -147,6 +151,12 @@ namespace riff::toolicons
                 p.startNewSubPath (3.0f, 21.0f);
                 p.lineTo (21.0f, 21.0f);
                 break;
+            case Tool::gain:
+                p.startNewSubPath (12.0f, 3.0f);
+                p.lineTo (12.0f, 21.0f);
+                p.startNewSubPath (8.5f, 6.0f);  p.lineTo (12.0f, 2.5f);  p.lineTo (15.5f, 6.0f);
+                p.startNewSubPath (8.5f, 18.0f); p.lineTo (12.0f, 21.5f); p.lineTo (15.5f, 18.0f);
+                break;
             case Tool::pointer: case Tool::pencil: case Tool::eraser: case Tool::glue: case Tool::text:
                 break;
         }
@@ -194,8 +204,30 @@ namespace riff::toolicons
             case Tool::zoom:     return "Zoom";
             case Tool::solo:     return "Solo";
             case Tool::text:     return "Text";
+            case Tool::gain:     return "Gain";
         }
         return "";
+    }
+
+    /** Logic's keys for the tools, pressed while the Tool menu (T) is open. */
+    inline juce::juce_wchar key (Tool tool)
+    {
+        switch (tool)
+        {
+            case Tool::pointer:  return 't';
+            case Tool::pencil:   return 'p';
+            case Tool::eraser:   return 'e';
+            case Tool::text:     return 'x';
+            case Tool::scissors: return 'i';
+            case Tool::glue:     return 'g';
+            case Tool::solo:     return 's';
+            case Tool::mute:     return 'm';
+            case Tool::zoom:     return 'z';
+            case Tool::fade:     return 'a';
+            case Tool::marquee:  return 'r';
+            case Tool::gain:     return 'n';
+        }
+        return 0;
     }
 
     /** What each tool does, for the menu. */
@@ -214,6 +246,7 @@ namespace riff::toolicons
             case Tool::zoom:     return "drag to zoom in";
             case Tool::solo:     return "hear one region";
             case Tool::text:     return "rename";
+            case Tool::gain:     return "drag a region up or down to change its level";
         }
         return "";
     }
@@ -263,5 +296,5 @@ namespace riff::toolicons
     }
 
     constexpr Tool all[] { Tool::pointer, Tool::pencil, Tool::eraser, Tool::text, Tool::scissors, Tool::glue,
-                           Tool::solo, Tool::mute, Tool::zoom, Tool::fade, Tool::marquee };
+                           Tool::solo, Tool::mute, Tool::zoom, Tool::fade, Tool::marquee, Tool::gain };
 }

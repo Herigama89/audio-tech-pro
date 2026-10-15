@@ -184,6 +184,23 @@ public:
         return scope.blockSize1 + scope.blockSize2;
     }
 
+    /** The MultiMeter listens to the master output (after the master fader) while this is on. */
+    void setMasterTap (bool on) noexcept { masterTapOn.store (on); }
+
+    /** Takes up to `maxSamples` of the master output (left and right) that arrived since the last call. Message thread. */
+    int readMaster (float* left, float* right, int maxSamples) noexcept
+    {
+        const auto scope = masterFifo.read (juce::jmin (maxSamples, masterFifo.getNumReady()));
+        int written = 0;
+        for (auto [start, size] : { std::pair { scope.startIndex1, scope.blockSize1 }, std::pair { scope.startIndex2, scope.blockSize2 } })
+        {
+            std::copy_n (masterTapL.data() + start, size, left + written);
+            std::copy_n (masterTapR.data() + start, size, right + written);
+            written += size;
+        }
+        return written;
+    }
+
     /** The channel strip's Dynamics gain reduction on a track's slot (dB, positive). */
     float getConsoleGainReduction (int slot) const noexcept
     {
@@ -421,6 +438,9 @@ private:
     MasterBusCompressor busComp;
     std::array<ConsoleChannel, PlaybackGraph::maxTracks> consoles;
     std::atomic<int> analyzerSlot { -1 };
+    std::atomic<bool> masterTapOn { false };
+    juce::AbstractFifo masterFifo { 65536 };
+    std::vector<float> masterTapL = std::vector<float> (65536, 0.0f), masterTapR = std::vector<float> (65536, 0.0f);
     juce::AbstractFifo analyzerFifo { 32768 };
     std::vector<float> analyzerBuffer = std::vector<float> (32768, 0.0f);
 

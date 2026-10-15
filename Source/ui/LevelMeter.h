@@ -10,7 +10,11 @@ namespace riff
 class LevelMeter final : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    explicit LevelMeter (juce::String labelText) : label (std::move (labelText)) {}
+    explicit LevelMeter (juce::String labelText) : label (std::move (labelText))
+    {
+        // Without a caption it fills itself: its updates (30 a second) don't redraw what's behind it.
+        setOpaque (label.isEmpty());
+    }
 
     void push (float left, float right)
     {
@@ -49,7 +53,10 @@ public:
         // Black housing with two LED columns
         auto housing = area.toFloat();
         g.setColour (juce::Colour (0xff0d0e10));
-        g.fillRoundedRectangle (housing, 2.5f);
+        if (isOpaque())
+            g.fillRect (housing);
+        else
+            g.fillRoundedRectangle (housing, 2.5f);
         g.setColour (juce::Colours::black);
         g.drawRoundedRectangle (housing.reduced (0.5f), 2.5f, 1.0f);
 

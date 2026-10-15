@@ -185,6 +185,8 @@ TrackHeader::~TrackHeader()
 void TrackHeader::refresh()
 {
     nameLabel.setText (track[ids::name].toString(), juce::dontSendNotification);
+    nameLabel.setTooltip (track[ids::comment].toString().isNotEmpty() ? track[ids::name].toString() + ": " + track[ids::comment].toString()
+                                                                    : juce::String ("Double-click to rename"));
     muteButton.setToggleState ((bool) track[ids::mute], juce::dontSendNotification);
     soloButton.setToggleState ((bool) track[ids::solo], juce::dontSendNotification);
     armButton.setToggleState ((bool) track[ids::armed], juce::dontSendNotification);
@@ -334,6 +336,23 @@ void TrackHeader::paint (juce::Graphics& g)
 void TrackHeader::resized()
 {
     auto area = getLocalBounds().withTrimmedLeft (numberWidth + 6).withTrimmedRight (8).withTrimmedBottom (resizeEdge);
+
+    // The insert column (Pro Tools' Edit window), for tracks that have inserts
+    const bool withInserts = showInserts && ! model::isVcaTrack (track) && track.getParent().isValid();
+    if (withInserts && inserts == nullptr)
+    {
+        inserts = std::make_unique<HeaderInserts> (track, undoManager);
+        addAndMakeVisible (*inserts);
+    }
+    if (inserts != nullptr)
+    {
+        inserts->setVisible (withInserts);
+        if (withInserts)
+        {
+            inserts->setBounds (getLocalBounds().removeFromRight (insertsWidth).withTrimmedBottom (resizeEdge).reduced (3, 3));
+            area.removeFromRight (insertsWidth - 4);
+        }
+    }
 
     // Short tracks show just the name and keys, as in Logic.
     const bool roomy = getHeight() >= 64;
@@ -631,6 +650,27 @@ void TrackHeader::showMenu()
         menu.addItem ("Choose input...", [this] { showInputMenu(); });
     menu.addItem ("Rename", [this] { nameLabel.showEditor(); });
     menu.addItem ("Colour...", [this] { showColours(); });
+    menu.addItem ("Comments...", [this]
+    {
+        // Pro Tools' Comments: your notes on the track (also under its channel in the mixer).
+        auto* window = new juce::AlertWindow ("Comments: " + track[ids::name].toString(), {}, juce::MessageBoxIconType::NoIcon);
+        window->addTextEditor ("text", track[ids::comment].toString());
+        if (auto* editor = window->getTextEditor ("text"))
+        {
+            editor->setMultiLine (true, true);
+            editor->setReturnKeyStartsNewLine (true);
+            editor->setSize (360, 110);
+        }
+        window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey, juce::ModifierKeys::commandModifier, 0));
+        window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        window->enterModalState (true, juce::ModalCallbackFunction::create ([this, window] (int result)
+        {
+            if (result != 1)
+                return;
+            undoManager.beginNewTransaction ("Comments");
+            track.setProperty (ids::comment, window->getTextEditorContents ("text"), &undoManager);
+        }), true);
+    });
     {
         juce::PopupMenu iconMenu;
         const int current = track.getProperty (ids::icon, 0);
@@ -863,4 +903,124 @@ void TrackHeaderList::mouseWheelMove (const juce::MouseEvent& e, const juce::Mou
         onWheel (e, wheel);
 }
 
+} // namespace riff
+
+namespace riff
+{
+//==============================================================================
+HeaderInserts::HeaderInserts (juce::ValueTree t, juce::UndoManager& um)
+    : track (t), mixer (model::mixerOf (t.getParent())), undoManager (um)
+{
+    mixer.addListener (this);
+    setTooltip ("Inserts: click an empty slot to add an effect, a plugin to open it. Option-click copies it to the selected tracks; right-click for more.");
+}
+
+HeaderInserts::~HeaderInserts()
+{
+    mixer.removeListener (this);
+}
+
+juce::ValueTree HeaderInserts::chain() const
+{
+    return model::findChain (track.getParent(), track[ids::id].toString());
+}
+
+bool HeaderInserts::concernsUs (const juce::ValueTree& tree) const
+{
+    for (auto t = tree; t.isValid(); t = t.getParent())
+        if (t.hasType (ids::CHAIN))
+            return t[ids::owner].toString() == track[ids::id].toString();
+    return tree == mixer;
+}
+
+juce::Rectangle<int> HeaderInserts::slotBounds (int index) const
+{
+    return { 0, index * slotHeight, getWidth(), slotHeight - 1 };
+}
+
+int HeaderInserts::slotAt (int y) const
+{
+    const auto count = juce::jlimit (1, maxSlots, getHeight() / slotHeight);
+    const auto index = y / slotHeight;
+    return index >= 0 && index < count ? index : -1;
+}
+
+void HeaderInserts::paint (juce::Graphics& g)
+{
+    const auto c = chain();
+    const auto count = juce::jlimit (1, maxSlots, getHeight() / slotHeight);
+    for (int i = 0; i < count; ++i)
+    {
+        const auto r = slotBounds (i).toFloat();
+        const auto insert = model::insertAtSlot (c, i);
+        g.setColour (insert.isValid() ? theme::stripSlotOn.brighter (0.15f) : theme::toolbarDark.darker (0.25f));
+        g.fillRoundedRectangle (r, 2.5f);
+        g.setColour (juce::Colours::black.withAlpha (0.45f));
+        g.drawRoundedRectangle (r.reduced (0.5f), 2.5f, 1.0f);
+
+        // a..j, as Pro Tools labels them
+        g.setColour (theme::dimText.withAlpha (0.8f));
+        g.setFont (juce::FontOptions (9.5f));
+        g.drawText (juce::String::charToString ((juce::juce_wchar) ('a' + i)), r.withWidth (11.0f), juce::Justification::centred, false);
+
+        if (! insert.isValid())
+            continue;
+        juce::String name = insert[ids::effect].toString();
+        for (const auto& info : builtInEffects())
+            if (info.type == name)
+                name = info.name;
+        if (insert[ids::kind].toString() == model::pluginKind)
+        {
+            juce::PluginDescription d;
+            if (auto xml = juce::parseXML (insert[ids::pluginDescription].toString()); xml != nullptr && d.loadFromXml (*xml))
+                name = d.name;
+        }
+        const bool bypassed = insert[ids::bypass];
+        g.setColour (bypassed ? theme::dimText : theme::text);
+        g.setFont (juce::FontOptions (10.5f, bypassed ? juce::Font::italic : juce::Font::plain));
+        g.drawText (name, r.withTrimmedLeft (12.0f).reduced (2.0f, 0.0f), juce::Justification::centredLeft, true);
+    }
+}
+
+void HeaderInserts::mouseUp (const juce::MouseEvent& e)
+{
+    const auto index = slotAt (e.y);
+    if (index < 0 || ! e.mouseWasClicked())
+        return;
+    const auto owner = track[ids::id].toString();
+    const auto insert = model::insertAtSlot (chain(), index);
+
+    if (! insert.isValid())
+    {
+        if (chooseEffect)
+            chooseEffect (owner, index, {}, *this);
+        return;
+    }
+    if (! e.mods.isPopupMenu())
+    {
+        if (e.mods.isAltDown() && copyToSelected)
+            copyToSelected (insert);
+        else if (openInsert)
+            openInsert (insert);
+        return;
+    }
+
+    juce::PopupMenu menu;
+    menu.addItem ("Open", [insert] { if (openInsert) openInsert (insert); });
+    menu.addItem ("Bypass", true, (bool) insert[ids::bypass], [this, target = insert]() mutable
+    {
+        auto insert = target;
+        undoManager.beginNewTransaction ("Bypass");
+        insert.setProperty (ids::bypass, ! (bool) insert[ids::bypass], &undoManager);
+    });
+    menu.addItem ("Replace...", [this, owner, index, insert] { if (chooseEffect) chooseEffect (owner, index, insert, *this); });
+    menu.addItem ("Copy to Selected Tracks (Option-click)", [insert] { if (copyToSelected) copyToSelected (insert); });
+    menu.addSeparator();
+    menu.addItem ("Remove", [this, target = insert]
+    {
+        undoManager.beginNewTransaction ("Remove effect");
+        model::removeInsert (target, &undoManager);
+    });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+}
 } // namespace riff

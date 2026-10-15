@@ -7,11 +7,10 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
     : settings (initial), onChange (std::move (callback)), store (presetStore)
 {
     skinBox.addItemList ({ "Studio Grey (from your picture)", "Flat Dark (FL Studio style)", "Studio White (your fader, knob and meter photos)",
-                           "Xenon (your dark glass console picture)" }, 1);
+                           "Xenon (your dark glass console picture)", "Pro Tools style", "Ableton style" }, 1);
     skinBox.onChange = [this]
     {
-        const auto index = skinBox.getSelectedItemIndex();
-        settings.skin = index == 3 ? theme::Skin::xenon : index == 2 ? theme::Skin::white : index == 1 ? theme::Skin::flat : theme::Skin::studio;
+        settings.skin = (theme::Skin) juce::jlimit (0, (int) theme::Skin::ableton, skinBox.getSelectedItemIndex());
         changed();
     };
     addAndMakeVisible (skinBox);
@@ -51,6 +50,8 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
         { "Soft Light",    { theme::Skin::flat, 0.0f, 0.8f, 0.5f, -0.3f, 0.2f, 160.0f, 0.9f, 0.8f } },
         { "Studio White",  { theme::Skin::white, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f } },
         { "Xenon",         { theme::Skin::xenon, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f } },
+        { "Pro Tools",     { theme::Skin::protools, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f } },
+        { "Ableton",       { theme::Skin::ableton, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f } },
     };
     for (const auto& p : list)
     {
@@ -110,6 +111,21 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
         addAndMakeVisible (waveButtons[i]);
     }
     regionBox.addItemList ({ "Skin's own", "Filled", "Glass" }, 1);
+    const char* markNames[] { "Locators", "Markers" };
+    for (int i = 0; i < 2; ++i)
+    {
+        markButtons[i].setButtonText (markNames[i]);
+        markButtons[i].setTooltip (i == 0 ? "The cycle's colour in the ruler (Logic's locators)" : "The markers' colour in the marker track");
+        markButtons[i].onClick = [this, i] { chooseMeterColour (5 + i); };
+        addAndMakeVisible (markButtons[i]);
+    }
+    markDefaultButton.setTooltip ("Back to the skin's own locator and marker colours");
+    markDefaultButton.onClick = [this]
+    {
+        settings.locatorColour = settings.markerColour = 0;
+        changed();
+    };
+    addAndMakeVisible (markDefaultButton);
     regionBox.setTooltip ("Filled: regions in the track's colour. Glass: dark see-through regions with a lit outline.");
     regionBox.onChange = [this]
     {
@@ -166,7 +182,7 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
     }
 
     refreshControls();
-    setSize (460, 120 + (int) rows.size() * 34 + 110 + 40 + 68 + (store != nullptr ? 36 : 0));
+    setSize (460, 120 + (int) rows.size() * 34 + 110 + 40 + 68 + 34 + 30 + (store != nullptr ? 36 : 0));
 }
 
 void ThemePanel::chooseMeterColour (int which)
@@ -194,7 +210,7 @@ void ThemePanel::chooseMeterColour (int which)
         safe->changed();
     });
     picker->setCurrentColour (current, juce::dontSendNotification);
-    juce::CallOutBox::launchAsynchronously (std::move (picker), (which < 3 ? meterButtons[which] : waveButtons[which - 3]).getScreenBounds(), nullptr);
+    juce::CallOutBox::launchAsynchronously (std::move (picker), (which < 3 ? meterButtons[which] : which < 5 ? waveButtons[which - 3] : markButtons[which - 5]).getScreenBounds(), nullptr);
 }
 
 juce::uint32& ThemePanel::colourSlot (int which)
@@ -205,7 +221,9 @@ juce::uint32& ThemePanel::colourSlot (int which)
         case 1:  return settings.meterMid;
         case 2:  return settings.meterPeak;
         case 3:  return settings.waveA;
-        default: return settings.waveB;
+        case 4:  return settings.waveB;
+        case 5:  return settings.locatorColour;
+        default: return settings.markerColour;
     }
 }
 
@@ -217,7 +235,9 @@ juce::Colour ThemePanel::colourNow (int which) const
         case 1:  return theme::meterAmber;
         case 2:  return theme::meterRed;
         case 3:  return theme::waveformA();
-        default: return theme::waveformB();
+        case 4:  return theme::waveformB();
+        case 5:  return theme::locators;
+        default: return theme::markers;
     }
 }
 
@@ -229,11 +249,12 @@ void ThemePanel::updateMeterButtons()
         meterButtons[i].setColour (juce::TextButton::buttonColourId, colours[i]);
         meterButtons[i].setColour (juce::TextButton::textColourOffId, colours[i].getPerceivedBrightness() > 0.55f ? juce::Colours::black : juce::Colours::white);
     }
-    for (int i = 0; i < 2; ++i)
+    for (int i = 0; i < 4; ++i)
     {
+        auto& b = i < 2 ? waveButtons[i] : markButtons[i - 2];
         const auto c = colourNow (3 + i);
-        waveButtons[i].setColour (juce::TextButton::buttonColourId, c);
-        waveButtons[i].setColour (juce::TextButton::textColourOffId, c.getPerceivedBrightness() > 0.55f ? juce::Colours::black : juce::Colours::white);
+        b.setColour (juce::TextButton::buttonColourId, c);
+        b.setColour (juce::TextButton::textColourOffId, c.getPerceivedBrightness() > 0.55f ? juce::Colours::black : juce::Colours::white);
     }
 }
 
@@ -293,8 +314,7 @@ void ThemePanel::addRow (const juce::String& name, double min, double max, doubl
 
 void ThemePanel::refreshControls()
 {
-    skinBox.setSelectedItemIndex (settings.skin == theme::Skin::xenon ? 3 : settings.skin == theme::Skin::white ? 2 : settings.skin == theme::Skin::flat ? 1 : 0,
-                                  juce::dontSendNotification);
+    skinBox.setSelectedItemIndex ((int) settings.skin, juce::dontSendNotification);
     waveModeBox.setSelectedItemIndex (settings.waveMode + 1, juce::dontSendNotification);
     regionBox.setSelectedItemIndex (settings.glassRegions + 1, juce::dontSendNotification);
     for (auto& r : rows)
@@ -326,6 +346,7 @@ void ThemePanel::paint (juce::Graphics& g)
     g.drawText ("Meter colours", 16, meterButtons[0].getY(), 94, meterButtons[0].getHeight(), juce::Justification::centredLeft);
     g.drawText ("Waveforms", 16, waveModeBox.getY(), 94, waveModeBox.getHeight(), juce::Justification::centredLeft);
     g.drawText ("Regions", 16, regionBox.getY(), 94, regionBox.getHeight(), juce::Justification::centredLeft);
+    g.drawText ("Ruler colours", 16, markButtons[0].getY(), 94, markButtons[0].getHeight(), juce::Justification::centredLeft);
 
     // A sample of the colours
     auto sample = juce::Rectangle<int> (16, getHeight() - 92, getWidth() - 32, 28);
@@ -346,12 +367,12 @@ void ThemePanel::paint (juce::Graphics& g)
 
 void ThemePanel::paintOverChildren (juce::Graphics& g)
 {
-    // Each meter colour as a chip on its button.
-    const juce::Colour colours[] { theme::meterGreen, theme::meterAmber, theme::meterRed };
-    for (int i = 0; i < 3; ++i)
+    // Each colour as a chip on its button (meters, waveform, locators and markers).
+    for (int i = 0; i < 7; ++i)
     {
-        const auto chip = meterButtons[i].getBounds().toFloat().reduced (6.0f, 6.0f).removeFromLeft (14.0f);
-        g.setColour (colours[i]);
+        const auto& button = i < 3 ? meterButtons[i] : i < 5 ? waveButtons[i - 3] : markButtons[i - 5];
+        const auto chip = button.getBounds().toFloat().reduced (6.0f, 6.0f).removeFromLeft (14.0f);
+        g.setColour (colourNow (i));
         g.fillRoundedRectangle (chip, 2.0f);
         g.setColour (juce::Colours::black.withAlpha (0.5f));
         g.drawRoundedRectangle (chip, 2.0f, 1.0f);
@@ -369,11 +390,15 @@ void ThemePanel::resized()
     }
     ownAccent.setBounds (110, y - 4, 220, 22);
     y += 24;
-    auto presetRow = juce::Rectangle<int> (16, y, getWidth() - 32, 26);
-    const auto pw = presetRow.getWidth() / (presets.size() + 1);
-    for (auto* b : presets)
-        b->setBounds (presetRow.removeFromLeft (pw).reduced (2, 0));
-    resetButton.setBounds (presetRow.reduced (2, 0));
+    // The presets in two rows (Reset at the end)
+    const auto perRow = (presets.size() + 2) / 2;
+    const auto pw = (getWidth() - 32) / perRow;
+    for (int i = 0; i <= presets.size(); ++i)
+    {
+        auto* b = i < presets.size() ? static_cast<juce::Button*> (presets[i]) : &resetButton;
+        b->setBounds (16 + (i % perRow) * pw + 2, y + (i / perRow) * 30, pw - 4, 26);
+    }
+    y += 30;
 
     y += 34;
     auto meterRow = juce::Rectangle<int> (110, y, getWidth() - 126, 26);
@@ -389,6 +414,13 @@ void ThemePanel::resized()
         b.setBounds (waveRow.removeFromLeft (waveRow.getWidth() / (&b == &waveButtons[0] ? 2 : 1)).reduced (2, 0));
     y += 34;
     regionBox.setBounds (112, y, (getWidth() - 126) / 2 - 4, 26);
+
+    y += 34;
+    auto markRow = juce::Rectangle<int> (110, y, getWidth() - 126, 26);
+    const auto kw = markRow.getWidth() / 3;
+    for (auto& b : markButtons)
+        b.setBounds (markRow.removeFromLeft (kw).reduced (2, 0));
+    markDefaultButton.setBounds (markRow.reduced (2, 0));
 
     if (store != nullptr)
     {

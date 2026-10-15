@@ -76,6 +76,7 @@ public:
     bool showsConsole() const;
 
 private:
+    friend class SnapshotTool;
     bool isMaster() const { return ! track.isValid(); }
     bool isVca() const { return track.isValid() && track[ids::kind].toString() == "vca"; }
 
@@ -118,6 +119,10 @@ private:
     strip::PointerKnob hfKnob { theme::neon }, hmfKnob { theme::neon }, lmfKnob { theme::neon }, lfKnob { theme::neon }, dynKnob { theme::knobCream };
     strip::LampKey consoleInButton { "EQ in", theme::knobArc }, dynInButton { "Dynamics in", theme::knobArc };
     strip::CreamKey muteButton { "M", theme::mute }, soloButton { "S", theme::solo }, stripInButton { "IN", theme::knobArc };
+    // Record enable and input monitoring: the same switches as the track header's R and I (either one turns them on or off).
+    strip::CreamKey armKey { "R", juce::Colour (0xffe2463f) }, monitorKey { "I", juce::Colour (0xffe8a33c) };
+    juce::TextButton multiMeterKey { "MM" };   // the master: opens the MultiMeter
+    bool canRecord() const;
     strip::DisplaySlider panKnob;
     juce::TextButton inputSlot, outputSlot;   // Logic's Input and Output slots
     juce::TextButton settingSlot { "Setting" };   // Logic's Setting button: copy, paste, reset, patches
@@ -180,7 +185,12 @@ public:
 
     static constexpr int panelWidth = 252;
 
+    /** The compressor: built-in or a plugin (as the channel strips choose). */
+    std::function<void (juce::Component& target)> onChoose;
+    std::function<void()> onOpenPlugin;
+
 private:
+    juce::TextButton chooseButton, openButton { "Open" };
     void setup (juce::Slider& knob, const juce::Identifier& property, look::Knob cap, double min, double max, double step,
                 std::function<juce::String (double)> text, const juce::String& name);
 
@@ -220,6 +230,12 @@ public:
 
     /** Show the "choose an effect" menu for a slot (owner is a track id or "master"). */
     std::function<void (const juce::String& owner, int slot, juce::ValueTree existing, juce::Component& target)> onChooseEffect;
+
+    /** Option-click on a plugin (as in Pro Tools and Cubase): a copy, with its settings, in the same slot of every selected channel. */
+    std::function<void (juce::ValueTree insert)> onCopyInsertToSelected;
+
+    /** The master strip's MM key: the MultiMeter. */
+    std::function<void()> onOpenMultiMeter;
 
     std::function<void()> onClose;
 
@@ -262,6 +278,7 @@ public:
 
     /** Console mode's bus compressor face (shown instead of the built-in one when a UA plugin is available). */
     BusCompConsolePanel& getConsolePanel() noexcept { return consolePanel; }
+    MasterBusCompressorPanel& getBusCompPanel() noexcept { return busComp; }
 
     /** Console mode for the strips: the channel strip plugins found on this computer, best first. */
     void setStripCandidates (const juce::Array<juce::PluginDescription>& found);
@@ -321,6 +338,16 @@ private:
     juce::Component body;
     juce::Viewport viewport;       // scrolls the strips sideways
     juce::Component stripHolder;
+
+public:
+    /** View > Show Comments in Mixer: a notes box under each channel (as in Pro Tools). */
+    void setShowComments (bool show) { showComments = show; resized(); }
+    bool getShowComments() const noexcept { return showComments; }
+private:
+    bool showComments = false;
+    static constexpr int commentsHeight = 46;
+    juce::OwnedArray<juce::TextEditor> commentBoxes;
+    void layOutComments (int stripW, int top);
     juce::OwnedArray<ChannelStrip> strips;
     std::unique_ptr<ChannelStrip> masterStrip;
     MasterBusCompressorPanel busComp;

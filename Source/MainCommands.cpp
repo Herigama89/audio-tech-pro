@@ -2,6 +2,7 @@
 // the menu bar. (Split from MainComponent.cpp to keep that file readable.)
 
 #include "MainComponent.h"
+#include "ui/ToolChooser.h"
 #include "ui/ToolIcons.h"
 #include "model/Project.h"
 #include "ui/Commands.h"
@@ -104,6 +105,9 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::toggleStatusBar: info.setTicked (showStatusBar); break;
         case commands::toggleMeters:    info.setTicked (showMeters); break;
         case commands::toggleTrackHeaders: info.setTicked (showTrackHeaders); break;
+        case commands::toggleHeaderInserts: info.setTicked (TrackHeader::showInserts); break;
+        case commands::toggleMixerComments: info.setTicked (mixer.getShowComments()); break;
+        case commands::toggleExclusiveSolo: info.setTicked (appProperties.getUserSettings()->getBoolValue ("exclusiveSolo", false)); break;
         case commands::showLibrary:     info.setTicked (libraryPanel != nullptr && libraryPanel->isVisible()); break;
         case commands::showSmartControls: info.setTicked (smartControls != nullptr && smartControls->isVisible()); break;
         case commands::recordScreen:    info.setTicked (screenRecorder != nullptr && screenRecorder->isRecording());
@@ -258,6 +262,30 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::toggleStatusBar:        setPanelShown ("viewStatusBar", showStatusBar, ! showStatusBar); break;
         case commands::toggleMeters:           setPanelShown ("viewMeters", showMeters, ! showMeters); break;
         case commands::toggleTrackHeaders:     setPanelShown ("viewTrackHeaders", showTrackHeaders, ! showTrackHeaders); break;
+        case commands::showMultiMeter:         showMultiMeter(); break;
+        case commands::toggleMixerComments:
+            mixer.setShowComments (! mixer.getShowComments());
+            appProperties.getUserSettings()->setValue ("mixerComments", mixer.getShowComments());
+            if (! mixer.isVisible() && mixer.getShowComments())
+                showMixer();
+            commandManager.commandStatusChanged();
+            break;
+        case commands::toggleExclusiveSolo:
+        {
+            auto* settings = appProperties.getUserSettings();
+            settings->setValue ("exclusiveSolo", ! settings->getBoolValue ("exclusiveSolo", false));
+            appProperties.saveIfNeeded();
+            commandManager.commandStatusChanged();
+            break;
+        }
+        case commands::toggleHeaderInserts:
+            TrackHeader::showInserts = ! TrackHeader::showInserts;
+            appProperties.getUserSettings()->setValue ("viewHeaderInserts", TrackHeader::showInserts);
+            for (auto* c : headers.getChildren())
+                c->resized();
+            headers.resized();
+            resized();
+            break;
         case commands::showAllPanels:
         case commands::hideAllPanels:
         {
@@ -423,14 +451,35 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             menu.addSeparator();
             add ({ commands::groupSettings, commands::ioLabels, commands::controllerAssignments });
             menu.addSeparator();
+            add ({ commands::toggleExclusiveSolo, commands::showMultiMeter, commands::toggleMixerComments });
+            menu.addSeparator();
             add ({ commands::scanPlugins });
+            {
+                // Which formats the plugin menus offer (VST3 only, say, so each plugin shows once).
+                juce::PopupMenu formats;
+                const auto shown = shownPluginFormats();
+                const auto set = [this] (juce::StringArray f) { setShownPluginFormats (f); };
+                formats.addItem ("All Formats (VST3, AU, CLAP)", true, shown.size() >= 3, [set] { set ({ "VST3", "AudioUnit", "CLAP" }); });
+                formats.addItem ("VST3 Only", true, shown == juce::StringArray { "VST3" }, [set] { set ({ "VST3" }); });
+                formats.addItem ("Audio Units Only", true, shown == juce::StringArray { "AudioUnit" }, [set] { set ({ "AudioUnit" }); });
+                formats.addSeparator();
+                for (const auto* f : { "VST3", "AudioUnit", "CLAP" })
+                    formats.addItem (juce::String (f) == "AudioUnit" ? juce::String ("AU") : juce::String (f), true, shown.contains (f), [this, f, shown]
+                    {
+                        auto next = shown;
+                        if (next.contains (f)) next.removeString (f); else next.add (f);
+                        if (! next.isEmpty())
+                            setShownPluginFormats (next);
+                    });
+                menu.addSubMenu ("Plugin Formats in Menus", formats);
+            }
             break;
 
         case 6:
             // As in Logic: show or hide each panel of the main window.
             add ({ commands::toggleControlBar, commands::toggleToolbar, commands::toggleInspector, commands::showSmartControls,
                    commands::showLibrary, commands::showMixer, commands::showPianoRoll, commands::showLoopBrowser,
-                   commands::toggleTrackHeaders, commands::toggleMeters, commands::toggleStatusBar });
+                   commands::toggleTrackHeaders, commands::toggleHeaderInserts, commands::toggleMeters, commands::toggleStatusBar });
             menu.addSeparator();
             add ({ commands::showAllPanels, commands::hideAllPanels });
             menu.addSeparator();
@@ -955,11 +1004,27 @@ void MainComponent::showToolMenu (bool withShortcuts)
 {
     // Logic's Tool menu: every tool with its icon. Right-clicking an empty part of the
     // tracks area adds the everyday edits under it.
+    // T: the tool chooser, which takes Logic's tool keys (T, P, E, X, I, G, S, M, Z, A, R, N).
+    if (! withShortcuts)
+    {
+        auto chooser = std::make_unique<ToolChooser> (timeline.tool, [safe = juce::Component::SafePointer<MainComponent> (this)] (TimelineState::Tool t)
+        {
+            if (safe != nullptr)
+                safe->setTool (t);
+        });
+        const auto at = canvas.isShowing() && canvas.getScreenBounds().contains (juce::Desktop::getMousePosition())
+                            ? juce::Rectangle<int> (juce::Desktop::getMousePosition(), juce::Desktop::getMousePosition()).expanded (2)
+                            : toolBox.getScreenBounds();
+        juce::CallOutBox::launchAsynchronously (std::move (chooser), at, nullptr);
+        return;
+    }
+
     juce::PopupMenu menu;
     menu.addSectionHeader ("Tools");
     for (const auto tool : toolicons::all)
     {
         juce::PopupMenu::Item item (juce::String (toolicons::name (tool)) + "    (" + toolicons::hint (tool) + ")");
+        item.shortcutKeyDescription = "T " + juce::String::charToString (toolicons::key (tool)).toUpperCase();
         item.image = toolicons::drawable (tool, theme::text);
         item.isTicked = timeline.tool == tool;
         item.action = [this, t = tool] { setTool (t); };

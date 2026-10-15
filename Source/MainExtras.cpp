@@ -1,5 +1,6 @@
 // Undo History, Settings, templates, project alternatives, Autopunch and the Event List.
 #include "MainComponent.h"
+#include "ui/MultiMeter.h"
 #include "ui/RoutingMenu.h"
 #include "ui/Commands.h"
 #include "ui/LiveLoopsGrid.h"
@@ -1215,6 +1216,25 @@ void MainComponent::updatePerformance()
     performanceMeter.setReading (lastReading.cpu, lastReading.disk);
 }
 
+void MainComponent::showMultiMeter()
+{
+    const juce::String id ("multimeter");
+    if (auto it = editorWindows.find (id); it != editorWindows.end())
+    {
+        it->second->toFront (true);
+        return;
+    }
+    auto closer = [this, id]
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this), id]
+        {
+            if (safe != nullptr)
+                safe->editorWindows.erase (id);
+        });
+    };
+    editorWindows[id] = std::make_unique<EditorWindow> ("MultiMeter (Master)", new MultiMeterPanel (engine), true, closer);
+}
+
 void MainComponent::showPerformanceWindow()
 {
     const juce::String id ("performance");
@@ -1241,6 +1261,7 @@ void MainComponent::showPerformanceWindow()
 #include "engine/BuiltInEffects.h"
 #include "ui/PluginHostPanel.h"
 #include "ui/PluginPicker.h"
+#include "ui/MultiMeter.h"
 
 namespace riff
 {
@@ -1299,7 +1320,7 @@ void MainComponent::chooseAudioSuiteEffect (juce::Component& target)
         e.key = "builtin:" + info.type;
         entries.push_back (std::move (e));
     }
-    for (const auto& type : rack.getKnownPlugins().getTypes())
+    for (const auto& type : visiblePluginTypes())
     {
         if (type.isInstrument)
             continue;
@@ -1314,11 +1335,14 @@ void MainComponent::chooseAudioSuiteEffect (juce::Component& target)
     settings.favorites = juce::StringArray::fromLines (appProperties.getUserSettings()->getValue ("pluginFavorites"));
     settings.favorites.removeEmptyStrings();
     settings.view = (PluginPicker::View) juce::jlimit (0, 3, appProperties.getUserSettings()->getIntValue ("pluginView", 1));
+    settings.collapsed = juce::StringArray::fromLines (appProperties.getUserSettings()->getValue ("pluginFoldersClosed"));
+    settings.collapsed.removeEmptyStrings();
     auto picker = std::make_unique<PluginPicker> (std::move (entries), [this] { showPluginScanner(); }, nullptr, settings,
                                                   [this] (const PluginPicker::Settings& changed)
     {
         appProperties.getUserSettings()->setValue ("pluginFavorites", changed.favorites.joinIntoString ("\n"));
         appProperties.getUserSettings()->setValue ("pluginView", (int) changed.view);
+        appProperties.getUserSettings()->setValue ("pluginFoldersClosed", changed.collapsed.joinIntoString ("\n"));
     });
     juce::CallOutBox::launchAsynchronously (std::move (picker), target.getScreenBounds(), nullptr);
 }
@@ -1369,7 +1393,7 @@ void MainComponent::addAudioSuiteItems (juce::PopupMenu& menu)
     std::map<juce::String, juce::PopupMenu> groups;
     for (const auto& info : builtInEffects())
         groups[PluginPicker::categoryOf ({}, info.name)].addItem (info.name, [this, type = info.type] { setAudioSuiteBuiltIn (type); });
-    for (const auto& type : rack.getKnownPlugins().getTypes())
+    for (const auto& type : visiblePluginTypes())
         if (! type.isInstrument)
             groups[PluginPicker::categoryOf (type.category, type.name)].addItem (type.name + "  (" + type.manufacturerName + ")",
                                                                                  [this, type] { setAudioSuitePlugin (type); });

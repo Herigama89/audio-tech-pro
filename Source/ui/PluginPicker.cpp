@@ -42,6 +42,11 @@ PluginPicker::PluginPicker (std::vector<Entry> e, std::function<void()> scan, st
         ++index;
     }
 
+    folderList.setRowHeight (22);
+    folderList.setColour (juce::ListBox::backgroundColourId, theme::toolbarDark);
+    folderList.setOutlineThickness (0);
+    addAndMakeVisible (folderList);
+
     list.setRowHeight (24);
     list.setColour (juce::ListBox::backgroundColourId, theme::panel);
     list.setOutlineThickness (0);
@@ -58,7 +63,7 @@ PluginPicker::PluginPicker (std::vector<Entry> e, std::function<void()> scan, st
     removeButton.setVisible (onRemove != nullptr);
 
     setView (settings.view == View::favorites && settings.favorites.isEmpty() ? View::maker : settings.view);
-    setSize (360, 460);
+    setSize (540, 500);
 }
 
 juce::String PluginPicker::categoryOf (const juce::String& pluginCategory, const juce::String& name)
@@ -117,6 +122,7 @@ juce::String PluginPicker::groupOf (const Entry& e) const
 void PluginPicker::setView (View v)
 {
     settings.view = v;
+    folderFilter = {};
     for (int i = 0; i < viewButtons.size(); ++i)
         viewButtons[i]->setToggleState (i == (int) v, juce::dontSendNotification);
     if (onSettingsChanged)
@@ -149,16 +155,36 @@ void PluginPicker::refilter()
         return ea.name.compareIgnoreCase (eb.name) < 0;
     });
 
-    rows.clear();
-    juce::String group;
+    // The folder column: every folder with what matches, then the list narrowed to the one chosen.
+    folders.clear();
     for (auto i : shown)
     {
         const auto g = groupOf (entries[(size_t) i]);
+        if (folders.empty() || folders.back().first != g)
+            folders.push_back ({ g, 0 });
+        ++folders.back().second;
+    }
+    if (folderFilter.isNotEmpty() && std::none_of (folders.begin(), folders.end(), [this] (auto& f) { return f.first == folderFilter; }))
+        folderFilter = {};
+    folderList.updateContent();
+    folderList.repaint();
+
+    rows.clear();
+    juce::String group;
+    const bool searching = search.getText().trim().isNotEmpty();
+    for (auto i : shown)
+    {
+        const auto g = groupOf (entries[(size_t) i]);
+        if (folderFilter.isNotEmpty() && g != folderFilter)
+            continue;
         if (g != group || rows.empty())
         {
             rows.push_back ({ -1, g });
             group = g;
         }
+        // A closed folder shows just its name (searching opens them all).
+        if (! searching && folderFilter.isEmpty() && settings.collapsed.contains (g))
+            continue;
         rows.push_back ({ i, {} });
     }
     list.updateContent();
@@ -184,9 +210,21 @@ void PluginPicker::paintListBoxItem (int row, juce::Graphics& g, int width, int 
         return;
     if (rows[(size_t) row].entry < 0)
     {
+        // A folder: open or closed (click to switch), with how many plugins it holds.
+        const auto& name = rows[(size_t) row].header;
+        const bool closed = settings.collapsed.contains (name) && search.getText().trim().isEmpty() && folderFilter.isEmpty();
         g.setColour (theme::dimText);
+        juce::Path arrow;
+        arrow.addTriangle (0.0f, 0.0f, 7.0f, 4.0f, 0.0f, 8.0f);
+        arrow.applyTransform (juce::AffineTransform::rotation (closed ? 0.0f : juce::MathConstants<float>::halfPi, 3.5f, 4.0f)
+                                  .translated (9.0f, (float) height - 13.0f));
+        g.fillPath (arrow);
+        int count = 0;
+        for (const auto& f : folders)
+            if (f.first == name)
+                count = f.second;
         g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
-        g.drawText (rows[(size_t) row].header.toUpperCase(), 8, 0, width - 16, height, juce::Justification::bottomLeft, true);
+        g.drawText (name.toUpperCase() + "   " + juce::String (count), 22, 0, width - 30, height, juce::Justification::bottomLeft, true);
         g.setColour (theme::outline);
         g.fillRect (8, height - 1, width - 16, 1);
         return;
@@ -225,8 +263,54 @@ void PluginPicker::paintListBoxItem (int row, juce::Graphics& g, int width, int 
     g.drawText (detail, width - 112, 0, 106, height, juce::Justification::centredRight, true);
 }
 
+void PluginPicker::toggleFolder (const juce::String& folder)
+{
+    if (settings.collapsed.contains (folder))
+        settings.collapsed.removeString (folder);
+    else
+        settings.collapsed.add (folder);
+    if (onSettingsChanged)
+        onSettingsChanged (settings);
+    refilter();
+}
+
+void PluginPicker::FolderList::paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool)
+{
+    const bool all = row == 0;
+    if (! all && ! juce::isPositiveAndBelow (row - 1, (int) owner.folders.size()))
+        return;
+    const auto name = all ? juce::String ("All") : owner.folders[(size_t) row - 1].first;
+    const bool chosen = all ? owner.folderFilter.isEmpty() : owner.folderFilter == name;
+    if (chosen)
+    {
+        g.setColour (theme::accent.withAlpha (0.8f));
+        g.fillRoundedRectangle (juce::Rectangle<float> (3.0f, 1.0f, (float) width - 6.0f, (float) height - 2.0f), 3.0f);
+    }
+    g.setColour (chosen ? juce::Colours::white : theme::text);
+    g.setFont (juce::FontOptions (12.5f, all ? juce::Font::bold : juce::Font::plain));
+    g.drawText (name, 10, 0, width - 40, height, juce::Justification::centredLeft, true);
+    if (! all)
+    {
+        g.setColour (chosen ? juce::Colours::white.withAlpha (0.8f) : theme::dimText);
+        g.setFont (juce::FontOptions (10.5f));
+        g.drawText (juce::String (owner.folders[(size_t) row - 1].second), width - 34, 0, 28, height, juce::Justification::centredRight, false);
+    }
+}
+
+void PluginPicker::FolderList::listBoxItemClicked (int row, const juce::MouseEvent&)
+{
+    owner.folderFilter = row <= 0 || row - 1 >= (int) owner.folders.size() ? juce::String() : owner.folders[(size_t) row - 1].first;
+    owner.refilter();
+}
+
 void PluginPicker::listBoxItemClicked (int row, const juce::MouseEvent& e)
 {
+    if (juce::isPositiveAndBelow (row, (int) rows.size()) && rows[(size_t) row].entry < 0)
+    {
+        if (folderFilter.isEmpty() && search.getText().trim().isEmpty())
+            toggleFolder (rows[(size_t) row].header);
+        return;
+    }
     if (! juce::isPositiveAndBelow (row, (int) rows.size()) || rows[(size_t) row].entry < 0)
         return;
 
@@ -329,6 +413,8 @@ void PluginPicker::resized()
     if (removeButton.isVisible())
         removeButton.setBounds (bottom.removeFromRight (90));
     r.removeFromBottom (6);
+    folderList.setBounds (r.removeFromLeft (150));
+    r.removeFromLeft (6);
     list.setBounds (r);
 }
 

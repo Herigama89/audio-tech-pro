@@ -178,6 +178,17 @@ private:
     void closeMixer();
     void toggleMixer();
     void showEffectMenu (const juce::String& owner, int slot, juce::ValueTree existing, juce::Component& target);
+
+    /** A copy of an insert (with its settings) in the same slot of every selected track. */
+    void copyInsertToSelected (juce::ValueTree insert);
+
+    /** The master's MultiMeter (levels, LUFS loudness, goniometer, spectrum), in its own window. */
+    void showMultiMeter();
+
+    /** Cubase's Extensions: an ARA plugin (Melodyne...) on just the chosen audio regions; the rest of the track plays as usual. */
+    void addExtensionItems (juce::PopupMenu& menu, juce::Array<juce::ValueTree> regions);
+    void applyExtension (juce::Array<juce::ValueTree> regions, const juce::PluginDescription& plugin);
+    void removeExtension (juce::Array<juce::ValueTree> regions);
     void openInsertWindow (const juce::ValueTree& insert);
     void createMidiRegionFromTake (juce::ValueTree track, const AudioEngine::FinishedTake& take, juce::ValueTree& last);
     juce::File recordingFolder() const;
@@ -234,8 +245,17 @@ private:
 
     /** Another program's project (Ableton, FL Studio, Studio One, Pro Tools, Logic, Cubase, DAWproject, MIDI). */
     void openOtherProject();
+
+    /** The plugins the menus offer: every one found, or only the formats chosen (Settings > Plugins, e.g. VST3 only). */
+    juce::Array<juce::PluginDescription> visiblePluginTypes();
+    juce::StringArray shownPluginFormats();
+    void setShownPluginFormats (const juce::StringArray& formats);
+
+    /** The Master Bus Compressor's chooser: built-in, or any effect plugin. */
+    void showBusCompChooser (juce::Component& target);
     void openImportedProject (const juce::File& file);
     bool showImportReport = true;   // (off for the snapshot tool)
+    bool applyingExclusiveSolo = false;
     void openRecent (const juce::File& file);
     void saveRecentProjects();
     void addRecentItems (juce::PopupMenu& menu);

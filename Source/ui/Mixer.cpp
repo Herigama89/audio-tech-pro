@@ -43,6 +43,17 @@ namespace
 ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     : owner (o), project (p), track (t)
 {
+    // The strip's face (art, texture, printing) is drawn once and kept: its knobs, keys and meter redraw on their own.
+    setBufferedToImage (true);
+
+    if (isMaster())
+    {
+        look::key (multiMeterKey, look::Key::console);
+        multiMeterKey.setTooltip ("MultiMeter: the master's levels, loudness (LUFS), stereo image and spectrum");
+        multiMeterKey.setWantsKeyboardFocus (false);
+        multiMeterKey.onClick = [this] { if (owner.onOpenMultiMeter) owner.onOpenMultiMeter(); };
+        addAndMakeVisible (multiMeterKey);
+    }
     if (track.isValid())
         addMouseListener (&selectOnClick, true);
 
@@ -96,6 +107,33 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         soloButton.onClick = [toggle] { toggle (ids::solo, "Solo"); };
         addAndMakeVisible (muteButton);
         addAndMakeVisible (soloButton);
+
+        armKey.setTooltip ("Record enable (the same as the track's R in the tracks area)");
+        monitorKey.setTooltip ("Input monitoring: hear the input through this channel (the same as the track's I)");
+        armKey.onClick = [this]
+        {
+            auto& um = owner.getUndoManager();
+            um.beginNewTransaction ("Record enable");
+            const auto value = ! (bool) track[ids::armed];
+            for (auto other : routing::linkedTracks (project, track, selected ? owner.getSelectedTrackIds() : juce::StringArray(), "Record"))
+                if (! model::isBusTrack (other) && ! model::isVcaTrack (other))
+                    other.setProperty (ids::armed, value, &um);
+        };
+        monitorKey.onClick = [this]
+        {
+            auto& um = owner.getUndoManager();
+            um.beginNewTransaction ("Input monitoring");
+            const auto value = ! (bool) track[ids::monitor];
+            for (auto other : routing::actingTracks (project, track, selected ? owner.getSelectedTrackIds() : juce::StringArray()))
+                if (! model::isBusTrack (other) && ! model::isVcaTrack (other))
+                    other.setProperty (ids::monitor, value, &um);
+        };
+        for (auto* k : { &armKey, &monitorKey })
+        {
+            k->setWantsKeyboardFocus (false);
+            addChildComponent (k);
+            k->setVisible (canRecord());
+        }
 
         // The two displays under Dynamics: its amount, and pan (drag sideways)
         dynLabel.setJustificationType (juce::Justification::centred);
@@ -977,6 +1015,8 @@ void ChannelStrip::refresh()
         muteButton.setToggleState ((bool) track[ids::mute], juce::dontSendNotification);
         stripInButton.setToggleState ((bool) track.getProperty (ids::stripIn, true), juce::dontSendNotification);
         soloButton.setToggleState ((bool) track[ids::solo], juce::dontSendNotification);
+        armKey.setToggleState ((bool) track[ids::armed], juce::dontSendNotification);
+        monitorKey.setToggleState ((bool) track[ids::monitor], juce::dontSendNotification);
     }
 
     // Sends and insert slots: as many as the mixer shows now (more appear as they fill up).
@@ -1050,7 +1090,9 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
 
     if (! e.mods.isPopupMenu())
     {
-        if (insert.isValid() && owner.onOpenInsert)
+        if (insert.isValid() && e.mods.isAltDown() && owner.onCopyInsertToSelected)
+            owner.onCopyInsertToSelected (insert);
+        else if (insert.isValid() && owner.onOpenInsert)
             owner.onOpenInsert (insert);
         else if (owner.onChooseEffect)
             owner.onChooseEffect (ownerId, index, {}, *button);
@@ -1084,6 +1126,7 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
         if (owner.onChooseEffect)
             owner.onChooseEffect (ownerId, index, insert, *button);
     });
+    menu.addItem ("Copy to Selected Channels (Option-click)", [this, insert] { if (owner.onCopyInsertToSelected) owner.onCopyInsertToSelected (insert); });
     menu.addSeparator();
     menu.addItem (same.size() > 1 ? "Remove (" + juce::String (same.size()) + " channels)" : juce::String ("Remove"), [same, &um]
     {
@@ -1358,15 +1401,14 @@ void ChannelStrip::showInputMenu()
 
 void ChannelStrip::showOutputMenu()
 {
-    if (isMaster() || isVca() || model::isBusTrack (track))
-        return;   // buses and the master go to the Stereo Out
+    if (isMaster() || isVca())
+        return;   // the master is the Stereo Out
 
     auto& um = owner.getUndoManager();
     const auto current = track[ids::output].toString();
     juce::Array<juce::ValueTree> targets;
     for (const auto& t : acting())
-        if (! model::isBusTrack (t))
-            targets.add (t);   // every selected channel goes to the same place (as in Logic)
+        targets.add (t);   // every selected channel goes to the same place (as in Logic)
     auto setOutput = [targets, &um] (const juce::String& id) mutable
     {
         um.beginNewTransaction ("Output");
@@ -1374,7 +1416,7 @@ void ChannelStrip::showOutputMenu()
         {
             if (id.isEmpty())
                 t.removeProperty (ids::output, &um);
-            else
+            else if (t[ids::id].toString() != id && ! model::outputWouldLoop (t.getParent(), t, id))
                 t.setProperty (ids::output, id, &um);
         }
     };
@@ -1382,7 +1424,7 @@ void ChannelStrip::showOutputMenu()
     menu.addSectionHeader ("Output");
     menu.addItem ("Stereo Out", true, current.isEmpty(), [setOutput]() mutable { setOutput ({}); });
     for (const auto& bus : project)
-        if (bus.hasType (ids::TRACK) && model::isBusTrack (bus))
+        if (bus.hasType (ids::TRACK) && model::isBusTrack (bus) && bus != track && ! model::outputWouldLoop (project, track, bus[ids::id].toString()))
             menu.addItem (bus[ids::name].toString(), true, current == bus[ids::id].toString(),
                           [setOutput, id = bus[ids::id].toString()]() mutable { setOutput (id); });
     menu.addSeparator();
@@ -1434,6 +1476,9 @@ void ChannelStrip::resized()
         stripInButton.onArt = consoleInButton.onArt = dynInButton.onArt = theme::imageSkin();
         panKnob.asKnob = ! console;
     }
+
+    if (isMaster())
+        multiMeterKey.setBounds (getWidth() - 36, 3, 32, 16);
 
     if (! isMaster() && ! console)
     {
@@ -1508,7 +1553,23 @@ void ChannelStrip::resized()
     meter.setBounds (juce::Rectangle<int> (getWidth() - 16, fa.getY() + 6, 12, fa.getHeight() - 12));
     dbLabel.setBounds (juce::Rectangle<int> (getWidth() - 46, fa.getBottom() + 2, 42, 19));
     if (! isMaster())
-        automationButton.setBounds (juce::Rectangle<int> (6, fa.getY() - automationRow + 1, getWidth() - 12, automationRow - 3));
+    {
+        auto row = juce::Rectangle<int> (6, fa.getY() - automationRow + 1, getWidth() - 12, automationRow - 3);
+        if (canRecord())
+        {
+            armKey.setBounds (row.removeFromLeft (row.getHeight() + 2));
+            row.removeFromLeft (2);
+            monitorKey.setBounds (row.removeFromLeft (row.getHeight() + 2));
+            row.removeFromLeft (3);
+        }
+        automationButton.setBounds (row);
+        updateAutomationButton();
+    }
+}
+
+bool ChannelStrip::canRecord() const
+{
+    return ! isMaster() && ! isVca() && track.isValid() && ! model::isBusTrack (track);
 }
 
 void ChannelStrip::updateAutomationButton()
@@ -1516,7 +1577,10 @@ void ChannelStrip::updateAutomationButton()
     if (isMaster())
         return;
     const auto mode = AutomationWriter::modeOf (track);
-    automationButton.setButtonText (mode.substring (0, 1).toUpperCase() + mode.substring (1));
+    // Beside the R and I keys there's less room: short names (as on a console).
+    const bool narrow = automationButton.getWidth() > 0 && automationButton.getWidth() < 48;
+    const auto shortName = mode == "read" ? "Rd" : mode == "touch" ? "Tch" : mode == "latch" ? "Ltch" : mode == "write" ? "Wr" : "Off";
+    automationButton.setButtonText (narrow ? juce::String (shortName) : mode.substring (0, 1).toUpperCase() + mode.substring (1));
     const auto colour = mode == "read"  ? juce::Colour (0xff2e9b4f)
                       : mode == "touch" ? juce::Colour (0xffd08a1c)
                       : mode == "latch" ? juce::Colour (0xff8a4fd0)
@@ -1608,6 +1672,17 @@ MasterBusCompressorPanel::MasterBusCompressorPanel (juce::UndoManager& um, Audio
     inButton.setColour (juce::TextButton::buttonOnColourId, theme::knobArc);
     inButton.setWantsKeyboardFocus (false);
     inButton.setTooltip ("Switch the Master Bus Compressor in or out");
+
+    chooseButton.setTooltip ("The compressor: the built-in one, or any compressor plugin you have");
+    chooseButton.onClick = [this] { if (onChoose) onChoose (chooseButton); };
+    openButton.setTooltip ("Open the compressor plugin's window");
+    openButton.onClick = [this] { if (onOpenPlugin) onOpenPlugin(); };
+    for (auto* b : { &chooseButton, &openButton })
+    {
+        look::key (*b, look::Key::dark);
+        b->setWantsKeyboardFocus (false);
+        addAndMakeVisible (b);
+    }
     inButton.onClick = [this]
     {
         undoManager.beginNewTransaction ("Master Bus Compressor in");
@@ -1656,6 +1731,23 @@ void MasterBusCompressorPanel::refresh()
     ratio.setValue (s.ratio, juce::dontSendNotification);
     mix.setValue (s.mix, juce::dontSendNotification);
     inButton.setToggleState (s.enabled, juce::dontSendNotification);
+
+    // A plugin in use: its name on the chooser; the built-in knobs rest.
+    juce::String name;
+    if (const auto insert = model::busCompPlugin (project); insert.isValid())
+    {
+        juce::PluginDescription d;
+        if (auto xml = juce::parseXML (insert[ids::pluginDescription].toString()); xml != nullptr && d.loadFromXml (*xml))
+            name = d.name;
+        else
+            name = "Plugin";
+    }
+    chooseButton.setButtonText ((name.isNotEmpty() ? name : juce::String ("Built-in")) + juce::String::fromUTF8 (" \xe2\x96\xbe"));
+    openButton.setVisible (name.isNotEmpty());
+    for (auto* k : { &threshold, &makeup, &attack, &release, &ratio, &mix })
+        k->setEnabled (name.isEmpty());
+    inButton.setEnabled (name.isEmpty());
+    resized();
     repaint();
 }
 
@@ -1731,7 +1823,15 @@ void MasterBusCompressorPanel::resized()
     auto area = getLocalBounds().reduced (12, 8);
 
     vu.setBounds (area.removeFromTop (118).withSizeKeepingCentre (juce::jmin (area.getWidth(), 220), 118));
-    area.removeFromTop (48);
+    area.removeFromTop (34);
+    {
+        auto row = area.removeFromTop (22).reduced (14, 0);
+        openButton.setBounds (row.removeFromRight (openButton.isVisible() ? 52 : 0));
+        if (openButton.isVisible())
+            row.removeFromRight (4);
+        chooseButton.setBounds (row);
+    }
+    area.removeFromTop (8);
 
     constexpr int knob = 46, rowHeight = 74;
     auto column = [&] (juce::Rectangle<int> row, bool left)
@@ -1756,6 +1856,8 @@ void MasterBusCompressorPanel::resized()
 MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p, EffectRack& fx)
     : undoManager (um), engine (e), player (p), effects (fx), busComp (um, e), consolePanel (um, e, fx)
 {
+    setBufferedToImage (true);
+    busComp.setBufferedToImage (true);
     // Console mode for the strips: the built-in strip, or a channel strip plugin you own
     consoleCaption.setFont (juce::FontOptions (12.0f));
     consoleCaption.setColour (juce::Label::textColourId, theme::dimText);
@@ -2003,6 +2105,11 @@ void MixerPanel::handleAsyncUpdate()
         refreshIfDirty (masterStrip.get());
         for (auto* s : extraStrips)
             refreshIfDirty (s);
+        if (owners.count (model::busCompOwner) > 0)
+        {
+            busComp.refresh();
+            consolePanel.refresh();
+        }
         return;
     }
 
@@ -2264,8 +2371,49 @@ void MixerPanel::resized()
     const auto height = content.getHeight() - (wide ? viewport.getScrollBarThickness() : 0);
     stripHolder.setSize (juce::jmax (content.getWidth(), strips.size() * stripW), height);
 
+    const auto stripHeight = stripHolder.getHeight() - (showComments ? commentsHeight : 0);
     for (int i = 0; i < strips.size(); ++i)
-        place (*strips[i], { i * stripW, 0, stripW, stripHolder.getHeight() });
+        place (*strips[i], { i * stripW, 0, stripW, stripHeight });
+    layOutComments (stripW, stripHeight);
+}
+
+void MixerPanel::layOutComments (int stripW, int top)
+{
+    while (commentBoxes.size() < (showComments ? strips.size() : 0))
+    {
+        auto* box = commentBoxes.add (new juce::TextEditor());
+        box->setMultiLine (true, true);
+        box->setReturnKeyStartsNewLine (false);
+        box->setFont (juce::FontOptions (11.0f));
+        box->setTextToShowWhenEmpty ("Comments", theme::dimText.withAlpha (0.6f));
+        box->setColour (juce::TextEditor::backgroundColourId, theme::slotDark);
+        box->setColour (juce::TextEditor::textColourId, theme::text);
+        box->setColour (juce::TextEditor::outlineColourId, theme::outline);
+        box->setIndents (4, 3);
+        stripHolder.addAndMakeVisible (box);
+    }
+    while (commentBoxes.size() > (showComments ? strips.size() : 0))
+        commentBoxes.removeLast();
+
+    for (int i = 0; i < commentBoxes.size(); ++i)
+    {
+        auto* box = commentBoxes[i];
+        auto track = strips[i]->getTrack();
+        box->setBounds (i * stripW + 1, top + 2, stripW - 2, commentsHeight - 4);
+        if (! box->hasKeyboardFocus (true))
+            box->setText (track[ids::comment].toString(), juce::dontSendNotification);
+        box->setTooltip (track[ids::name].toString() + ": your notes on this track");
+        auto save = [this, box, track]() mutable
+        {
+            if (box->getText() == track[ids::comment].toString())
+                return;
+            undoManager.beginNewTransaction ("Comments");
+            track.setProperty (ids::comment, box->getText(), &undoManager);
+        };
+        box->onFocusLost = save;
+        box->onReturnKey = [box, save]() mutable { save(); box->giveAwayKeyboardFocus(); };
+        box->onEscapeKey = [box, track] { box->setText (track[ids::comment].toString(), juce::dontSendNotification); box->giveAwayKeyboardFocus(); };
+    }
 }
 
 } // namespace riff

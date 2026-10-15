@@ -1792,6 +1792,27 @@ bool isBusTrack (const juce::ValueTree& track)
     return track[ids::kind].toString() == busKind;
 }
 
+bool hasAraRegions (const juce::ValueTree& track)
+{
+    for (const auto& r : track)
+        if (r.hasType (ids::REGION) && (bool) r[ids::araEdit])
+            return true;
+    return false;
+}
+
+bool outputWouldLoop (const juce::ValueTree& project, const juce::ValueTree& track, const juce::String& targetId)
+{
+    const auto self = track[ids::id].toString();
+    auto id = targetId;
+    for (int hops = 0; id.isNotEmpty() && hops < 64; ++hops)
+    {
+        if (id == self)
+            return true;
+        id = findById (project, id)[ids::output].toString();
+    }
+    return id.isNotEmpty();
+}
+
 bool isStereoChannel (const juce::ValueTree& track)
 {
     return track.getProperty (ids::channelFormat, "stereo").toString() != "mono";

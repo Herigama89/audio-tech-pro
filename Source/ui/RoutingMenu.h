@@ -66,8 +66,9 @@ inline void addRoutingItems (juce::PopupMenu& menu, juce::ValueTree project, juc
     const bool isBus = model::isBusTrack (track), isVcaFlag = model::isVcaTrack (track);
     const auto isVca = [isVcaFlag] { return isVcaFlag; };
 
-    // Output: the main output or a bus.
-    if (! isBus && ! isVca())
+    // Output: the main output or a bus (buses and summing stacks too: into another bus).
+    juce::ignoreUnused (isBus);
+    if (! isVca())
     {
         juce::PopupMenu output;
         const auto current = track[ids::output].toString();
@@ -77,7 +78,8 @@ inline void addRoutingItems (juce::PopupMenu& menu, juce::ValueTree project, juc
             t.removeProperty (ids::output, &um);
         });
         for (const auto& bus : project)
-            if (bus.hasType (ids::TRACK) && model::isBusTrack (bus))
+            if (bus.hasType (ids::TRACK) && model::isBusTrack (bus) && bus != track
+                && ! model::outputWouldLoop (project, track, bus[ids::id].toString()))
                 output.addItem (bus[ids::name].toString(), true, current == bus[ids::id].toString(), [t = track, id = bus[ids::id].toString(), &um]() mutable
                 {
                     um.beginNewTransaction ("Output");

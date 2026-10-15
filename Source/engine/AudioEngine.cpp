@@ -1021,6 +1021,19 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
         if (auto* tap = screenTap.load (std::memory_order_acquire); tap != nullptr && ! bouncing.load())
             tap->push (mixL, mixR, n, inputs, numInputs, offset);
 
+        // The MultiMeter's copy of what's heard
+        if (masterTapOn.load (std::memory_order_relaxed) && ! bouncing.load())
+        {
+            const auto scope = masterFifo.write (juce::jmin (n, masterFifo.getFreeSpace()));
+            int read = 0;
+            for (auto [start, size] : { std::pair { scope.startIndex1, scope.blockSize1 }, std::pair { scope.startIndex2, scope.blockSize2 } })
+            {
+                std::copy_n (mixL + read, size, masterTapL.data() + start);
+                std::copy_n (mixR + read, size, masterTapR.data() + start);
+                read += size;
+            }
+        }
+
         storeMax (peakOutL, mixBuffer.getMagnitude (0, 0, n));
         storeMax (peakOutR, mixBuffer.getMagnitude (1, 0, n));
 
@@ -1185,9 +1198,16 @@ void AudioEngine::renderChunk (const PlaybackGraph& graph, const float* const* i
     juce::FloatVectorOperations::add (mixL, dL, n);
     juce::FloatVectorOperations::add (mixR, dR, n);
 
-    for (const auto& track : graph.tracks)
-        if (track.isBus)
-            timed (track, mixL, mixR);
+    if (! graph.busOrder.empty())
+    {
+        for (const auto index : graph.busOrder)
+            if (juce::isPositiveAndBelow (index, (int) graph.tracks.size()))
+                timed (graph.tracks[(size_t) index], mixL, mixR);
+    }
+    else
+        for (const auto& track : graph.tracks)
+            if (track.isBus)
+                timed (track, mixL, mixR);
 }
 
 void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* const* inputs, int numInputs, int inputOffset,
@@ -1487,7 +1507,7 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
     }
 
     // Into a bus (a summing stack, or an output chosen on the strip), or the main output.
-    if (juce::isPositiveAndBelow (track.outputBus, PlaybackGraph::maxBuses) && ! track.isBus)
+    if (juce::isPositiveAndBelow (track.outputBus, PlaybackGraph::maxBuses) && track.outputBus != track.busIndex)
     {
         juce::FloatVectorOperations::add (busBuffer.getWritePointer (track.outputBus * 2), tL, n);
         juce::FloatVectorOperations::add (busBuffer.getWritePointer (track.outputBus * 2 + 1), tR, n);

@@ -250,7 +250,9 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         t.width = (float) juce::jlimit (0.0, 2.0, (double) track.getProperty (ids::panWidth, 1.0));
         if (! model::isStereoChannel (track))
             t.width = 0.0f;   // a mono channel: both sides summed, then panned
-        if (const auto out = busIndex.find (track[ids::output].toString()); out != busIndex.end() && ! model::isBusTrack (track))
+        // Into a bus: any track, and buses too (a summing stack into a bus), unless that would loop back.
+        if (const auto out = busIndex.find (track[ids::output].toString()); out != busIndex.end()
+            && ! model::outputWouldLoop (project, track, track[ids::output].toString()))
             t.outputBus = out->second;
 
         t.monitorInput = (bool) track[ids::armed] && (bool) track[ids::monitor];
@@ -455,9 +457,10 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
             for (const auto& insert : model::insertsOf (model::findChain (project, trackId)))
                 araPlays = araPlays || effects->isAraInsert (insert[ids::id].toString());
 
-        for (const auto& region : araPlays ? juce::Array<juce::ValueTree>() : regionsToPlay (track))
+        const bool araByRegion = araPlays && model::hasAraRegions (track);   // Extensions: only the marked regions are the plugin's
+        for (const auto& region : (araPlays && ! araByRegion) ? juce::Array<juce::ValueTree>() : regionsToPlay (track))
         {
-            if (model::isRegionMuted (region))
+            if (model::isRegionMuted (region) || (araByRegion && (bool) region[ids::araEdit]))
                 continue;
 
             // A comped take folder: each stretch plays from its own take (a few ms of fade where they meet).
@@ -586,6 +589,34 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
     }
 
     graph->directDelay = slowestBus;
+
+    // Buses that feed other buses play first (the deepest first).
+    {
+        const auto depthOf = [this] (const juce::String& id)
+        {
+            int depth = 0;
+            auto t = model::findById (project, id);
+            while (t.isValid() && t[ids::output].toString().isNotEmpty() && depth < 64)
+            {
+                t = model::findById (project, t[ids::output].toString());
+                ++depth;
+            }
+            return depth;
+        };
+        std::vector<std::pair<int, int>> buses;   // depth, index
+        for (int i = 0; i < (int) graph->tracks.size(); ++i)
+            if (graph->tracks[(size_t) i].isBus)
+            {
+                juce::String id;
+                for (const auto& [busId, index] : busIndex)
+                    if (index == graph->tracks[(size_t) i].busIndex)
+                        id = busId;
+                buses.emplace_back (depthOf (id), i);
+            }
+        std::stable_sort (buses.begin(), buses.end(), [] (auto& a, auto& b) { return a.first > b.first; });
+        for (const auto& b : buses)
+            graph->busOrder.push_back (b.second);
+    }
 
     int masterLatency = 0;
     for (const auto& e : graph->masterInserts)

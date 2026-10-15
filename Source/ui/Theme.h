@@ -34,7 +34,9 @@ namespace riff::theme
     inline juce::Colour meterGreen { 0xff45c25a };   // meters: green, then yellow near the top
     inline juce::Colour meterAmber { 0xffe8c53c };
     inline juce::Colour meterRed   { 0xffe2463f };   // the top of the meters (clipping)
-    inline juce::Colour waveform   { 0xffeef3f8 };   // waveforms in regions (0: drawn in the track's colour)
+    inline juce::Colour waveform   { 0xffeef3f8 };
+    inline juce::Colour locators   { 0xffe8892a };   // the cycle (Logic's locators) in the ruler
+    inline juce::Colour markers    { 0xff4b4e54 };   // markers in the marker track   // waveforms in regions (0: drawn in the track's colour)
 
     // --- Key and header surfaces (were cream; now dark rubber) ----------------
     inline juce::Colour cream      { 0xff3b3d41 };
@@ -87,7 +89,7 @@ namespace riff::theme
     // settings: the colours above are worked out from a skin's own palette and
     // these adjustments, and change while the app runs.
     //==========================================================================
-    enum class Skin { studio, flat, white, xenon };   // the picture's grey console, a flat dark look, or Studio White (your photos' faders, knobs and meters)
+    enum class Skin { studio, flat, white, xenon, protools, ableton };   // the picture's grey console, a flat dark look, or Studio White (your photos' faders, knobs and meters)
 
     struct Settings
     {
@@ -107,6 +109,9 @@ namespace riff::theme
         int waveMode = -1;
         juce::uint32 waveA = 0, waveB = 0;
         int glassRegions = -1;   // -1: the skin's own, 0 off, 1 on
+
+        // The cycle (locators) and markers: your own colours (ARGB), 0: the skin's.
+        juce::uint32 locatorColour = 0, markerColour = 0;
 
         juce::String toString() const;
         static Settings fromString (const juce::String&);

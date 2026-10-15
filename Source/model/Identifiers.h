@@ -204,6 +204,8 @@ namespace riff::ids
     RIFF_DECLARE_ID (group)           // TRACK: 0 (none) or 1..8 - linked volume, mute, solo and record
     RIFF_DECLARE_ID (vca)             // TRACK: the VCA (or folder stack) track whose fader scales this one
     RIFF_DECLARE_ID (output)          // TRACK: the bus track it plays into (empty: the main output)
+    RIFF_DECLARE_ID (araEdit)         // REGION (audio): edited by the track's ARA plugin as an Extension (Cubase style)
+    RIFF_DECLARE_ID (comment)         // TRACK: your notes on it (Pro Tools' Comments)
     RIFF_DECLARE_ID (stackParent)     // TRACK: the main track of the stack it's in
     RIFF_DECLARE_ID (stack)           // TRACK (a stack's main track): "folder" or "summing"
     RIFF_DECLARE_ID (collapsed)       // TRACK (a stack's main track): its tracks are folded away
