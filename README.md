@@ -219,6 +219,29 @@ reports, so they line up with what you heard while playing.
 Projects store audio paths relative to the project file. If you keep the audio
 next to the project, you can move the folder and it still opens.
 
+## Opening other programs' projects
+
+File > Open (or File > Open Project from Another Program..., or drag the file onto the tracks area)
+opens these as a new, untitled project; the original is never changed. A window afterwards lists
+what didn't come across.
+
+| Program | File | What comes across |
+|---|---|---|
+| Ableton Live | `.als` | tracks, groups, returns and sends, arrangement clips (warped clips follow the song's tempo with Flex), notes, loops, fades, clip gain, mix, tempo changes, time signature, locators, VST3/AU plugins with their settings, Simpler samples; Session View clips go into Live Loops |
+| DAWproject (Cubase 14+, Studio One 6.5+, Bitwig) | `.dawproject` | everything above, including plugin settings (`.vstpreset`, `.aupreset`); audio is unpacked next to the file |
+| FL Studio | `.flp` | channels (VST/AU plugins, sampler channels), patterns and their notes, the playlist, audio clips, tempo, markers, mixer insert plugins |
+| Studio One | `.song` | tracks, audio events, note parts, tempo, markers (for plugins and the mix too: export a DAWproject) |
+| Pro Tools | `.ptx` `.ptf` `.pts` | audio tracks and regions as edited (stereo tracks joined into stereo files), MIDI notes (read with libptformat) |
+| Logic Pro | `.logicx` | the project's audio files (at their recorded place when stamped), tempo, signature |
+| Cubase / Nuendo | `.cpr` `.npr` | the audio files it uses (for everything: export a DAWproject) |
+| MIDI files | `.mid` | tracks, notes, tempo, time signatures, markers |
+
+Each program's own built-in plugins can't come across; third-party plugins are matched by name to
+what's installed here (the same format first, then VST3, AU, CLAP).
+
+Pro Tools sessions are read with [libptformat](https://github.com/zamaudio/ptformat) (LGPL 2.1,
+from the Ardour project), in `ThirdParty/ptformat`.
+
 ## Code layout
 
 ```

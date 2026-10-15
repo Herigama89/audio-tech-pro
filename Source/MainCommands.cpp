@@ -68,6 +68,7 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::exportSong:
         case commands::exportStems:
         case commands::importTracks:    info.setActive (! recording); break;
+        case commands::importProject:   info.setActive (! recording); break;
         case commands::bounceInPlace:   info.setActive (track.isValid() && ! recording); break;
         case commands::generateMidi:    info.setActive (! recording); break;
 
@@ -163,6 +164,7 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::exportStems:            exportStems(); break;
         case commands::bounceInPlace:          bounceInPlace(); break;
         case commands::importTracks:           importTracksFromProject(); break;
+        case commands::importProject:          openOtherProject(); break;
 
         case commands::undo:                   undo(); break;
         case commands::redo:                   redo(); break;
@@ -352,7 +354,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
     switch (index)
     {
         case 0:
-            add ({ commands::newProject, commands::openProject });
+            add ({ commands::newProject, commands::openProject, commands::importProject });
             addRecentItems (menu);
             addTemplateAndAlternativeItems (menu);
             menu.addSeparator();

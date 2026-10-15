@@ -53,7 +53,20 @@ endif()
 # CLAP plugin hosting: the CLAP SDK headers (MIT), vendored.
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/clap/include)
 
+# Opening Pro Tools sessions: libptformat (LGPL 2.1, from the Ardour project), vendored.
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/ptformat)
+set_source_files_properties(ThirdParty/ptformat/ptformat.cc PROPERTIES COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/w;/UDEBUG,-w;-UDEBUG>")
+
 set(RIFF_CORE_SOURCES
+    Source/import/ProjectImport.cpp
+    Source/import/ReadAbleton.cpp
+    Source/import/ReadDawProject.cpp
+    Source/import/ReadFlStudio.cpp
+    Source/import/ReadStudioOne.cpp
+    Source/import/ReadProTools.cpp
+    Source/import/ReadLogicCubase.cpp
+    Source/import/ReadMidiFile.cpp
+    ThirdParty/ptformat/ptformat.cc
     Source/engine/ClapFormat.cpp
     Source/engine/RegionVariants.cpp
     Source/engine/AudioSuite.cpp
@@ -259,6 +272,7 @@ if(RIFF_BUILD_TESTS)
         Tests/AutomationWriterTests.cpp
         Tests/AudioEditTests.cpp
         Tests/ClapTests.cpp
+        Tests/ImportTests.cpp
         Source/ui/ScreenRecordPanel.cpp
         Source/ui/ScreenRecorder.cpp
         Source/ui/SpectrumAnalyzer.cpp
@@ -272,6 +286,7 @@ if(RIFF_BUILD_TESTS)
     set_target_properties(TestClapPlugins PROPERTIES PREFIX "" SUFFIX ".clap" CXX_VISIBILITY_PRESET hidden)
     add_dependencies(AudioTechProTests TestClapPlugins)
     target_compile_definitions(AudioTechProTests PRIVATE TEST_CLAP_PATH="$<TARGET_FILE:TestClapPlugins>")
+    target_compile_definitions(AudioTechProTests PRIVATE TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Tests/data")
 
     # Tests compare exact silence (0.0f) on purpose.
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
@@ -318,7 +333,7 @@ if(RIFF_BUILD_SNAPSHOTS)
     juce_generate_juce_header(Snapshots)
     target_sources(Snapshots PRIVATE Tools/Snapshots.cpp ${RIFF_CORE_SOURCES} ${RIFF_UI_SOURCES})
     target_include_directories(Snapshots PRIVATE Source)
-    target_compile_definitions(Snapshots PRIVATE ${RIFF_DEFINITIONS} JUCE_MODAL_LOOPS_PERMITTED=1)
+    target_compile_definitions(Snapshots PRIVATE ${RIFF_DEFINITIONS} JUCE_MODAL_LOOPS_PERMITTED=1 RIFF_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(Snapshots PRIVATE AudioTechProData juce::juce_gui_extra juce::juce_audio_utils juce::juce_dsp)
     if(APPLE)
         target_sources(Snapshots PRIVATE Source/ui/ScreenRecorder_mac.mm)

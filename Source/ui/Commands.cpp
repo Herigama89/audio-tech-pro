@@ -19,6 +19,7 @@ const std::vector<Info>& all()
         { exportSong,             "Bounce Song to WAV...",      "File",      "Export the song, or the cycle range, to a WAV file" },
         { exportStems,            "Export All Tracks as Audio Files...", "File", "Each track (and bus) to its own WAV in a folder, with its plugins, fader and pan, ignoring solo" },
         { importTracks,           "Import Tracks from Project...", "File",   "Bring tracks (regions, plugins, sends, automation) in from another project" },
+        { importProject,          "Open Project from Another Program...", "File", "Open an Ableton Live, FL Studio, Studio One, Pro Tools, Logic, Cubase, DAWproject or MIDI file project" },
         { bounceInPlace,          "Bounce in Place",            "Track",     "Render the selected track to a new audio track and mute the original" },
 
         { undo,                   "Undo",                       "Edit",      "Undo the last edit" },

@@ -622,6 +622,14 @@ public:
         }
 
         {
+            // A Pro Tools session opened (its MIDI tracks; its audio files aren't here)
+            main.showImportReport = false;
+            main.openImportedProject (juce::File (RIFF_SOURCE_DIR).getChildFile ("Tests/data/protools/TestPTX.ptx"));
+            pump (main, 300);
+            save (main, "import-protools.png");
+        }
+
+        {
             AssistantSettingsPanel settings ("sk-ant-example", "claude-sonnet-5-5", {});
             pump (main, 50);
             save (settings, "assistant-settings.png");

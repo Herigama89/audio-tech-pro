@@ -231,6 +231,11 @@ private:
     // File > Open Recent
     juce::RecentlyOpenedFilesList recentProjects;
     void openProjectFile (const juce::File& file);
+
+    /** Another program's project (Ableton, FL Studio, Studio One, Pro Tools, Logic, Cubase, DAWproject, MIDI). */
+    void openOtherProject();
+    void openImportedProject (const juce::File& file);
+    bool showImportReport = true;   // (off for the snapshot tool)
     void openRecent (const juce::File& file);
     void saveRecentProjects();
     void addRecentItems (juce::PopupMenu& menu);

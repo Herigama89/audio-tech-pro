@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include "ui/PluginHostPanel.h"
 #include "ui/Skin.h"
+#include "import/ProjectImport.h"
 #include "ui/ToolIcons.h"
 #include "ui/PluginPicker.h"
 #include "model/Project.h"
@@ -342,6 +343,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     }
     canvas.commandManager = &commandManager;
     canvas.onEmptyAreaMenu = [this] { showToolMenu (true); };
+    canvas.onOpenProject = [this] (const juce::File& f) { confirmDiscardChanges ([this, f] { openImportedProject (f); }); };
     canvas.onDelete = [this] { deleteSelection(); };
     canvas.onRepeat = [this] { repeatSelectedRegions(); };
     canvas.onJoin = [this] { joinSelectedRegions(); };
@@ -1141,7 +1143,7 @@ void MainComponent::openProject()
     {
         fileChooser = std::make_unique<juce::FileChooser> ("Open a project",
                                                            juce::File::getSpecialLocation (juce::File::userMusicDirectory),
-                                                           "*" + app::projectExtension + ";*" + app::oldProjectExtension);
+                                                           "*" + app::projectExtension + ";*" + app::oldProjectExtension + ";" + projectimport::wildcard());
 
         fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                                   [this] (const juce::FileChooser& chooser)
@@ -1154,6 +1156,12 @@ void MainComponent::openProject()
 
 void MainComponent::openProjectFile (const juce::File& file)
 {
+    if (projectimport::canImport (file))
+    {
+        openImportedProject (file);
+        return;
+    }
+
     juce::String error;
     auto loaded = model::load (file, error);
 
@@ -1196,9 +1204,78 @@ void MainComponent::openProjectFile (const juce::File& file)
     setProject (loaded, file);
 }
 
+void MainComponent::openOtherProject()
+{
+    confirmDiscardChanges ([this]
+    {
+        fileChooser = std::make_unique<juce::FileChooser> ("Open a project from Ableton Live, FL Studio, Studio One, Pro Tools, Logic, Cubase...",
+                                                           juce::File::getSpecialLocation (juce::File::userMusicDirectory),
+                                                           projectimport::wildcard());
+        // (a Logic project is a package: picked as a file on the Mac)
+        fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                  [this] (const juce::FileChooser& chooser)
+        {
+            if (const auto file = chooser.getResult(); file != juce::File())
+                openImportedProject (file);
+        });
+    });
+}
+
+void MainComponent::openImportedProject (const juce::File& file)
+{
+    if (! projectimport::canImport (file))
+    {
+        showError ("Can't open this", "\"" + file.getFileName() + "\" isn't a project this app can open.");
+        return;
+    }
+
+    juce::StringArray notes;
+    juce::String error;
+    juce::ValueTree imported;
+    {
+        juce::MouseCursor::showWaitCursor();
+        imported = projectimport::open (file, [this] (const interchange::Plugin& p) { return projectimport::matchPlugin (getKnownPlugins(), p); },
+                                        notes, error);
+        juce::MouseCursor::hideWaitCursor();
+    }
+    if (! imported.isValid())
+    {
+        showError ("Couldn't open the " + projectimport::formatName (file) + " project", error);
+        return;
+    }
+
+    // An untitled project of ours (Save puts it where you like); the original is left as it was.
+    setProject (imported, {});
+    markDirty();
+    recentProjects.addFile (file);
+    saveRecentProjects();
+
+    juce::String message;
+    message << "\"" << file.getFileNameWithoutExtension() << "\" (" << projectimport::formatName (file) << ") opened: "
+            << model::numTracks (imported) << (model::numTracks (imported) == 1 ? " track" : " tracks")
+            << ". It isn't saved yet: File > Save keeps it as a project of this app.";
+    if (! showImportReport)
+        return;
+    if (! notes.isEmpty())
+    {
+        message << "\n\nWhat to know:\n";
+        for (int i = 0; i < juce::jmin (12, notes.size()); ++i)
+            message << juce::String::fromUTF8 ("\xe2\x80\xa2 ") << notes[i] << "\n";
+        if (notes.size() > 12)
+            message << "...and " << (notes.size() - 12) << " more.\n";
+    }
+    messageBox = juce::AlertWindow::showScopedAsync (juce::MessageBoxOptions()
+                                                         .withIconType (juce::MessageBoxIconType::InfoIcon)
+                                                         .withTitle ("Opened from " + projectimport::formatName (file))
+                                                         .withMessage (message)
+                                                         .withButton ("OK")
+                                                         .withAssociatedComponent (this),
+                                                     nullptr);
+}
+
 void MainComponent::openRecent (const juce::File& file)
 {
-    if (! file.existsAsFile())
+    if (! file.existsAsFile() && ! (file.isDirectory() && projectimport::canImport (file)))
     {
         recentProjects.removeFile (file);
         saveRecentProjects();
@@ -2650,6 +2727,7 @@ void MainComponent::showFileMenu()
     menu.addSeparator();
     menu.addItem ("Import Audio...", [this] { importAudio(); });
     menu.addItem ("Import Tracks from Project...", [this] { importTracksFromProject(); });
+    menu.addItem ("Open Project from Another Program...", [this] { openOtherProject(); });
     menu.addSeparator();
     menu.addItem ("Export Song as WAV...", [this] { exportSong(); });
     menu.addItem ("Export All Tracks as Audio Files...", [this] { exportStems(); });

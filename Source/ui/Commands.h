@@ -30,7 +30,7 @@ namespace riff::commands
         cutRegions = 0x2501, copyRegions, pasteRegions, selectAllRegions, repeatRegions, joinRegions, muteRegions,
         nudgeLeft, nudgeRight, toolMenu,
         createMarker = 0x2601, nextMarker, previousMarker, deleteMarker,
-        consolidateProject = 0x2701, revertToBackup, recoverAutosave, exportStems, bounceInPlace, importTracks,
+        consolidateProject = 0x2701, revertToBackup, recoverAutosave, exportStems, bounceInPlace, importTracks, importProject,
         trimStartToPlayhead = 0x2801, trimEndToPlayhead, loopRegions, regionGain, removeFades,
         createFolderStack = 0x2901, createSummingStack, freezeTracks, newVca,
         toggleAutopunch = 0x2a01, toggleReplace, toggleMidiMerge, undoHistory, preferences, saveAsTemplate, newAlternative, eventList,

@@ -123,6 +123,9 @@ public:
     /** Right-click on an empty part of the tracks area: the tool menu and everyday edits. */
     std::function<void()> onEmptyAreaMenu;
 
+    /** A project from another program dropped on the tracks area (Ableton, FL Studio, Pro Tools...). */
+    std::function<void (const juce::File&)> onOpenProject;
+
     /** For the right-click menus: they list the app's commands with their keys. */
     juce::ApplicationCommandManager* commandManager = nullptr;
 

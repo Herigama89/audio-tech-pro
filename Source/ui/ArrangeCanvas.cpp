@@ -1,4 +1,5 @@
 #include "ArrangeCanvas.h"
+#include "../import/ProjectImport.h"
 #include "Commands.h"
 #include "ToolIcons.h"
 #include "Theme.h"
@@ -2237,7 +2238,8 @@ void ArrangeCanvas::zoomAround (float x, double factor)
 bool ArrangeCanvas::isInterestedInFileDrag (const juce::StringArray& files)
 {
     for (const auto& f : files)
-        if (engine.getFormatManager().findFormatForFileExtension (juce::File (f).getFileExtension()) != nullptr)
+        if (engine.getFormatManager().findFormatForFileExtension (juce::File (f).getFileExtension()) != nullptr
+            || (onOpenProject && projectimport::canImport (juce::File (f))))
             return true;
     return false;
 }
@@ -2263,6 +2265,15 @@ void ArrangeCanvas::fileDragExit (const juce::StringArray&)
 void ArrangeCanvas::filesDropped (const juce::StringArray& files, int x, int y)
 {
     dropHighlightTrack = -2;
+
+    // Another program's project (an .als, .flp, .ptx...): opened as a project.
+    for (const auto& f : files)
+        if (onOpenProject && projectimport::canImport (juce::File (f)))
+        {
+            repaint();
+            onOpenProject (juce::File (f));
+            return;
+        }
     importFiles (files, timeline.trackIndexAt (y), snap (timeline.xToTime ((float) x)));
 }
 
