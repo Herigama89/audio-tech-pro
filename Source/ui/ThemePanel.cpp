@@ -1,5 +1,6 @@
 #include "ThemePanel.h"
 #include "ThemePack.h"
+#include "Looks.h"
 
 namespace riff
 {
@@ -62,14 +63,41 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
     addAndMakeVisible (reaperBox);
     refreshReaperThemes();
 
-    faderBox.addItemList ({ "Skin's own", "Classic", "Studio White (photo cap)", "Xenon (glass cap)", "REAPER theme's" }, 1);
-    faderBox.setTooltip ("The fader caps, whatever the skin: mix the Xenon look with Studio White faders, say");
+    faderBox.addItemList (looks::faderNames(), 1);
+    faderBox.setTooltip ("The fader caps (mixer, track headers, editors), whatever the skin: Xenon with black long-throw caps, say");
     faderBox.onChange = [this]
     {
         settings.faderStyle = faderBox.getSelectedItemIndex() - 1;
         changed();
     };
     addAndMakeVisible (faderBox);
+
+    knobBox.addItemList (looks::knobNames(), 1);
+    knobBox.setTooltip ("The knobs on the channel strips, track headers, plugins' strips and the bus compressor");
+    knobBox.onChange = [this]
+    {
+        settings.knobStyle = knobBox.getSelectedItemIndex() - 1;
+        changed();
+    };
+    addAndMakeVisible (knobBox);
+
+    buttonBox.addItemList (looks::buttonNames(), 1);
+    buttonBox.setTooltip ("The channel keys (mute, solo, record, monitor, EQ and Dynamics in, the bus compressor's IN), lit in their colours");
+    buttonBox.onChange = [this]
+    {
+        settings.buttonStyle = buttonBox.getSelectedItemIndex() - 1;
+        changed();
+    };
+    addAndMakeVisible (buttonBox);
+
+    meterBox.addItemList (looks::meterNames(), 1);
+    meterBox.setTooltip ("The bus compressor's gain reduction meter");
+    meterBox.onChange = [this]
+    {
+        settings.meterStyle = meterBox.getSelectedItemIndex() - 1;
+        changed();
+    };
+    addAndMakeVisible (meterBox);
 
     const auto percent = [] (double v) { return (v > 0.005 ? "+" : "") + juce::String (juce::roundToInt (v * 100.0)) + "%"; };
     addRow ("Hue", -180.0, 180.0, 1.0, [] (const theme::Settings& s) { return (double) s.hue; },
@@ -183,7 +211,7 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
     };
     addAndMakeVisible (markDefaultButton);
 
-    const char* editNames[] { "    Tracks", "    Bars", "    Beats", "    Roll" };   // (room for the colour chip)
+    const char* editNames[] { "Tracks", "Bars", "Beats", "Roll" };   // (the buttons show their colour)
     const char* editTips[] { "The tracks area's background (its lanes)", "The bar lines in the tracks area and the editors",
                              "The beat lines", "The piano roll's rows (the black-key rows a shade darker)" };
     for (int i = 0; i < 4; ++i)
@@ -256,7 +284,7 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
     }
 
     refreshControls();
-    setSize (460, 120 + (int) rows.size() * 34 + 110 + 40 + 68 + 34 + 30 + 34 + 34 + 34 + (store != nullptr ? 36 : 0));
+    setSize (460, 120 + (int) rows.size() * 34 + 110 + 40 + 68 + 34 + 30 + 34 + 34 + 34 + 34 - 20 + (store != nullptr ? 36 : 0));
 }
 
 void ThemePanel::chooseMeterColour (int which)
@@ -403,6 +431,9 @@ void ThemePanel::refreshControls()
 {
     skinBox.setSelectedItemIndex ((int) settings.skin, juce::dontSendNotification);
     faderBox.setSelectedItemIndex (settings.faderStyle + 1, juce::dontSendNotification);
+    knobBox.setSelectedItemIndex (settings.knobStyle + 1, juce::dontSendNotification);
+    buttonBox.setSelectedItemIndex (settings.buttonStyle + 1, juce::dontSendNotification);
+    meterBox.setSelectedItemIndex (settings.meterStyle + 1, juce::dontSendNotification);
     refreshReaperThemes();
     waveModeBox.setSelectedItemIndex (settings.waveMode + 1, juce::dontSendNotification);
     regionBox.setSelectedItemIndex (settings.glassRegions + 1, juce::dontSendNotification);
@@ -436,7 +467,8 @@ void ThemePanel::paint (juce::Graphics& g)
     g.drawText ("Waveforms", 16, waveModeBox.getY(), 94, waveModeBox.getHeight(), juce::Justification::centredLeft);
     g.drawText ("Regions", 16, regionBox.getY(), 94, regionBox.getHeight(), juce::Justification::centredLeft);
     g.drawText ("Ruler colours", 16, markButtons[0].getY(), 94, markButtons[0].getHeight(), juce::Justification::centredLeft);
-    g.drawText ("Faders", 16, faderBox.getY(), 94, faderBox.getHeight(), juce::Justification::centredLeft);
+    g.drawText ("Faders / Knobs", 16, faderBox.getY(), 94, faderBox.getHeight(), juce::Justification::centredLeft);
+    g.drawText ("Keys / Meter", 16, buttonBox.getY(), 94, buttonBox.getHeight(), juce::Justification::centredLeft);
     g.drawText ("Edit windows", 16, editButtons[0].getY(), 94, editButtons[0].getHeight(), juce::Justification::centredLeft);
 
     // A sample of the colours
@@ -459,7 +491,7 @@ void ThemePanel::paint (juce::Graphics& g)
 void ThemePanel::paintOverChildren (juce::Graphics& g)
 {
     // Each colour as a chip on its button (meters, waveform, locators and markers).
-    for (int i = 0; i < 11; ++i)
+    for (int i = 0; i < 7; ++i)   // (the edit window buttons are filled with their colour instead: they're narrow)
     {
         const auto& button = colourButton (i);
         const auto chip = button.getBounds().toFloat().reduced (6.0f, 6.0f).removeFromLeft (14.0f);
@@ -539,7 +571,12 @@ void ThemePanel::resized()
     editDefaultButton.setBounds (editRow.reduced (2, 0));
 
     y += 34;
-    faderBox.setBounds (112, y, (getWidth() - 126) / 2 - 4, 26);
+    const auto half = (getWidth() - 126) / 2 - 2;
+    faderBox.setBounds (112, y, half, 26);
+    knobBox.setBounds (112 + half + 4, y, half, 26);
+    y += 32;
+    buttonBox.setBounds (112, y, half, 26);
+    meterBox.setBounds (112 + half + 4, y, half, 26);
 
     if (store != nullptr)
     {

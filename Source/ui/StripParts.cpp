@@ -2,6 +2,7 @@
 #include "ConsoleLook.h"
 #include "Skin.h"
 #include "ThemePack.h"
+#include "Looks.h"
 
 namespace riff::strip
 {
@@ -122,6 +123,17 @@ PointerKnob::PointerKnob (juce::Colour pointerColour) : pointer (pointerColour)
 
 void PointerKnob::paint (juce::Graphics& g)
 {
+    // Themes > Knobs: a photo knob, or the classic drawn one, whatever the skin.
+    if (theme::knobStyle() >= 0)
+    {
+        const auto params = getRotaryParameters();
+        const auto proportion = (float) valueToProportionOfLength (getValue());
+        const bool fromCentre = getMinimum() < 0.0 && getMaximum() > 0.0;
+        if (! looks::drawKnob (g, getLocalBounds().toFloat(), proportion, params.startAngleRadians, params.endAngleRadians, fromCentre, isEnabled()))
+            look::drawNeonKnob (g, getLocalBounds().toFloat(), proportion, params.startAngleRadians, params.endAngleRadians,
+                                theme::knobBlack, fromCentre, isEnabled(), true);
+        return;
+    }
     if (theme::reaperSkin())
     {
         const auto params = getRotaryParameters();
@@ -214,6 +226,8 @@ void LampKey::paintButton (juce::Graphics& g, bool over, bool down)
 
     // A small backlit key: dark when off, glowing in its colour when on.
     const auto r = getLocalBounds().toFloat().reduced (getWidth() * 0.12f);
+    if (looks::drawButton (g, r, getToggleState(), lamp, over, down))
+        return;
     look::drawKey (g, r, look::Key::console, getToggleState(), lamp, over, down);
 }
 
@@ -226,6 +240,17 @@ CreamKey::CreamKey (const juce::String& letter, juce::Colour litColour) : juce::
 
 void CreamKey::paintButton (juce::Graphics& g, bool over, bool down)
 {
+    // Themes > Buttons: the photo's key, lit in its colour, its letter on it.
+    {
+        const auto face = getLocalBounds().toFloat().reduced (getWidth() * 0.07f, getHeight() * 0.1f);
+        if (looks::drawButton (g, face, getToggleState(), lit, over, down))
+        {
+            g.setColour (looks::buttonTextColour (getToggleState(), lit));
+            g.setFont (juce::FontOptions (face.getHeight() * 0.58f, juce::Font::bold));
+            g.drawText (getName(), face, juce::Justification::centred, false);
+            return;
+        }
+    }
     // A REAPER theme's own mute / solo / record / monitor button
     if (theme::reaperSkin())
     {
@@ -280,6 +305,13 @@ void DisplaySlider::paint (juce::Graphics& g)
     if (asKnob)
     {
         const auto proportion = (float) valueToProportionOfLength (getValue());
+        if (theme::knobStyle() >= 0)
+        {
+            if (! looks::drawKnob (g, getLocalBounds().toFloat(), proportion, juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f), true, isEnabled()))
+                look::drawNeonKnob (g, getLocalBounds().toFloat(), proportion, juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f),
+                                    theme::knobBlack, true, isEnabled(), true);
+            return;
+        }
         if (theme::reaperSkin() && themepack::drawKnob (g, getLocalBounds().toFloat(), proportion, true, isEnabled()))
             return;
         if (theme::xenonSkin())
@@ -347,6 +379,23 @@ void Fader::paint (juce::Graphics& g)
             themepack::draw (g, cap, 0, juce::Rectangle<float> (w, h).withCentre ({ cx, yForValue (getValue()) }), false, isEnabled() ? 1.0f : 0.6f);
             return;
         }
+    }
+
+    // A photo cap (Themes > Faders) on a dark slot
+    if (style >= 4)
+    {
+        const auto slotArea = juce::Rectangle<float> (cx - 2.5f, capHeight() * 0.5f - 6.0f, 5.0f, bounds.getHeight() - capHeight() + 12.0f);
+        g.setColour (juce::Colour (0xff060708));
+        g.fillRoundedRectangle (slotArea, 2.5f);
+        g.setColour (juce::Colours::white.withAlpha (0.1f));
+        g.drawLine (slotArea.getRight() + 0.5f, slotArea.getY() + 2.0f, slotArea.getRight() + 0.5f, slotArea.getBottom() - 2.0f, 1.0f);
+        // As long as the classic cap, no wider than it by much (a wide cap would hide the scale).
+        auto h = capHeight() * 1.3f;
+        if (const auto maxWidth = capHeight() * 0.72f; looks::capWidthForHeight (h) > maxWidth)
+            h *= maxWidth / looks::capWidthForHeight (h);
+        if (looks::drawFaderCap (g, juce::Rectangle<float> (looks::capWidthForHeight (h), h).withCentre ({ cx, yForValue (getValue()) }), true,
+                                 isEnabled() ? 1.0f : 0.6f))
+            return;
     }
 
     // Studio White: the photo's rail and its cap (in a white shade), as photographed.

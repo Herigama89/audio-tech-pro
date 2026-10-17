@@ -164,3 +164,30 @@ TEST_CASE ("Edit window colours are kept with the theme and used", "[theme]")
     CHECK (theme::rollWhite == juce::Colour (0xff303030));
     theme::set ({});
 }
+
+TEST_CASE ("Faders, knobs, keys and the meter are chosen apart from the skin and kept", "[theme]")
+{
+    theme::Settings s;
+    s.skin = theme::Skin::xenon;
+    s.faderStyle = 5;
+    s.knobStyle = 2;
+    s.buttonStyle = 3;
+    s.meterStyle = 1;
+    const auto back = theme::Settings::fromString (s.toString());
+    CHECK (back.faderStyle == 5);
+    CHECK (back.knobStyle == 2);
+    CHECK (back.buttonStyle == 3);
+    CHECK (back.meterStyle == 1);
+
+    theme::set (back);
+    CHECK (theme::faderStyle() == 5);
+    CHECK (theme::knobStyle() == 2);
+    CHECK (theme::meterStyle() == 1);
+
+    // Older settings: the skin's own
+    const auto plain = theme::Settings::fromString (theme::Settings().toString());
+    CHECK (plain.knobStyle == -1);
+    CHECK (plain.buttonStyle == -1);
+    CHECK (plain.meterStyle == -1);
+    theme::set ({});
+}

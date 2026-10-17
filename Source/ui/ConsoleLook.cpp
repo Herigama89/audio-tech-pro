@@ -3,6 +3,7 @@
 #include "ToolIcons.h"
 #include "Skin.h"
 #include "ThemePack.h"
+#include "Looks.h"
 #include "PluginNames.h"
 
 namespace riff
@@ -122,6 +123,11 @@ void ConsoleLook::drawButtonBackground (juce::Graphics& g, juce::Button& button,
 
     auto area = button.getLocalBounds().toFloat().reduced (0.5f);
 
+    // Themes > Buttons: the channel keys (mute, solo, record, monitor, IN) as the photo's keys.
+    if (button.getProperties().contains ("packKind") || button.getProperties().contains ("channelKey"))
+        if (looks::drawButton (g, area.reduced (1.0f), on, onColour, over, down))
+            return;
+
     // A REAPER theme: its mute / solo / record / monitor buttons, and its insert slots.
     if (theme::reaperSkin())
     {
@@ -214,6 +220,15 @@ void ConsoleLook::drawButtonBackground (juce::Graphics& g, juce::Button& button,
 
 void ConsoleLook::drawButtonText (juce::Graphics& g, juce::TextButton& button, bool over, bool down)
 {
+    // On a photo key (Themes > Buttons): its letter, dark on a lit key.
+    if (theme::buttonStyle() >= 1 && (button.getProperties().contains ("packKind") || button.getProperties().contains ("channelKey")))
+    {
+        g.setColour (looks::buttonTextColour (button.getToggleState(), button.findColour (juce::TextButton::buttonOnColourId)));
+        g.setFont (getTextButtonFont (button, button.getHeight()));
+        g.drawText (button.getButtonText(), button.getLocalBounds(), juce::Justification::centred, false);
+        return;
+    }
+
     // A REAPER theme's picture already shows the button's letter (mute, solo...).
     if (theme::reaperSkin())
         if (const auto kind = button.getProperties().getWithDefault ("packKind", {}).toString(); kind.isNotEmpty())
@@ -342,18 +357,23 @@ namespace look
     void drawNeonKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
                        juce::Colour ringColour, bool fromCentre, bool enabled, bool light)
     {
+        // Themes > Knobs: a photo knob (or a skin's knob) on any skin.
+        if (looks::drawKnob (g, area, proportion, startAngle, endAngle, fromCentre, enabled))
+            return;
+        const bool skinKnobs = theme::knobStyle() < 0;   // (Classic: the drawn knob, whatever the skin)
+
         // Xenon: the picture's glass knob, turned to the value.
-        if (theme::xenonSkin())
+        if (skinKnobs && theme::xenonSkin())
         {
             juce::ignoreUnused (ringColour, light, fromCentre);
             skin::drawXenonKnob (g, area, proportion, startAngle, endAngle, enabled);
             return;
         }
         // A REAPER theme's knob
-        if (theme::reaperSkin() && themepack::drawKnob (g, area, proportion, fromCentre, enabled))
+        if (skinKnobs && theme::reaperSkin() && themepack::drawKnob (g, area, proportion, fromCentre, enabled))
             return;
         // Studio White: every knob is the photo's knob with its LED ring.
-        if (theme::whiteSkin())
+        if (skinKnobs && theme::whiteSkin())
         {
             juce::ignoreUnused (ringColour, light);
             skin::drawPhotoKnob (g, area, proportion, startAngle, endAngle, fromCentre, enabled);
@@ -386,7 +406,7 @@ namespace look
         juce::ignoreUnused (fromCentre);
         // On the grey face: black knobs (silver for the white ones); on a black panel: the panel's white knobs.
         const bool white = silver || ! light;
-        if (const auto body = silver ? skin::knobWhite() : (light ? skin::knobBlack() : skin::knobBus()); body.isValid() && theme::imageSkin())
+        if (const auto body = silver ? skin::knobWhite() : (light ? skin::knobBlack() : skin::knobBus()); skinKnobs && body.isValid() && theme::imageSkin())
         {
             const auto knobArea = area.withSizeKeepingCentre (outer * 1.5f, outer * 1.5f);
             g.setColour (juce::Colours::black.withAlpha (0.35f * alpha));
@@ -454,6 +474,10 @@ namespace look
 
     void drawFaderCap (juce::Graphics& g, juce::Rectangle<float> cap, bool vertical)
     {
+        // Themes > Faders: a photo cap
+        if (looks::drawFaderCap (g, vertical ? cap.withSizeKeepingCentre (cap.getWidth(), cap.getHeight() * 1.2f) : cap, vertical))
+            return;
+
         // The picture's fader cap.
         if (! theme::imageSkin())
         {
@@ -945,6 +969,10 @@ void GainReductionMeter::push (float reductionDb)
 void GainReductionMeter::paint (juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
+
+    // Themes > Bus Comp meter: a photo meter, our needle on it.
+    if (looks::drawMeter (g, bounds, needle))
+        return;
 
     // Bezel
     g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2c2c2f), bounds.getX(), bounds.getY(),

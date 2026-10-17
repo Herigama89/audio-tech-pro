@@ -385,6 +385,10 @@ bool whiteSkin() { return settingsNow().skin == Skin::white; }
 bool xenonSkin() { return settingsNow().skin == Skin::xenon; }
 bool reaperSkin() { return settingsNow().skin == Skin::reaper && themepack::active(); }
 
+int knobStyle()   { return settingsNow().knobStyle; }
+int buttonStyle() { return settingsNow().buttonStyle; }
+int meterStyle()  { return settingsNow().meterStyle; }
+
 int faderStyle()
 {
     const auto& s = settingsNow();
@@ -444,7 +448,8 @@ juce::String Settings::toString() const
                                juce::String::toHexString ((int) locatorColour), juce::String::toHexString ((int) markerColour),
                                juce::URL::addEscapeChars (themePack, false), juce::String (faderStyle),
                                juce::String::toHexString ((int) editBack), juce::String::toHexString ((int) gridBarColour),
-                               juce::String::toHexString ((int) gridBeatColour), juce::String::toHexString ((int) rollBack) }.joinIntoString (";");
+                               juce::String::toHexString ((int) gridBeatColour), juce::String::toHexString ((int) rollBack),
+                               juce::String (knobStyle), juce::String (buttonStyle), juce::String (meterStyle) }.joinIntoString (";");
 }
 
 Settings Settings::fromString (const juce::String& text)
@@ -483,7 +488,7 @@ Settings Settings::fromString (const juce::String& text)
     if (v.size() >= 20)
     {
         s.themePack = juce::URL::removeEscapeChars (v[18]);
-        s.faderStyle = juce::jlimit (-1, 3, v[19].getIntValue());
+        s.faderStyle = juce::jlimit (-1, 7, v[19].getIntValue());
     }
     if (v.size() >= 24)
     {
@@ -491,6 +496,12 @@ Settings Settings::fromString (const juce::String& text)
         s.gridBarColour = (juce::uint32) v[21].getHexValue32();
         s.gridBeatColour = (juce::uint32) v[22].getHexValue32();
         s.rollBack = (juce::uint32) v[23].getHexValue32();
+    }
+    if (v.size() >= 27)
+    {
+        s.knobStyle = juce::jlimit (-1, 6, v[24].getIntValue());
+        s.buttonStyle = juce::jlimit (-1, 3, v[25].getIntValue());
+        s.meterStyle = juce::jlimit (-1, 2, v[26].getIntValue());
     }
     return s;
 }

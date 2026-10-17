@@ -158,6 +158,19 @@ juce_add_binary_data(AudioTechProData
                 Resources/skin/vu_face.png
                 Resources/skin/panel.png
                 # The Studio White skin, cut from your pictures by Tools/make_white_skin.py
+                # Themes > Faders / Knobs / Buttons / Bus Comp meter (Tools/make_look_pieces.py)
+                Resources/skin/looks/look_cap_black.png
+                Resources/skin/looks/look_cap_black_red.png
+                Resources/skin/looks/look_cap_silver.png
+                Resources/skin/looks/look_knob_black.png
+                Resources/skin/looks/look_knob_blackyellow.png
+                Resources/skin/looks/look_knob_yellow.png
+                Resources/skin/looks/look_knob_red.png
+                Resources/skin/looks/look_btn_square_white.png
+                Resources/skin/looks/look_btn_square_grey.png
+                Resources/skin/looks/look_btn_round.png
+                Resources/skin/looks/look_vu_black.png
+                Resources/skin/looks/look_vu_cream.png
                 Resources/skin/white/white_fader_cap.png
                 Resources/skin/white/white_fader_cap_black.png
                 Resources/skin/white/white_fader_rail.png
@@ -187,6 +200,7 @@ set(RIFF_UI_SOURCES
     Source/MainAudioDevices.cpp
     Source/ui/Theme.cpp
     Source/ui/ThemePack.cpp
+    Source/ui/Looks.cpp
     Source/ui/InsertBar.cpp
     Source/ui/AutomixPanel.cpp
     Source/ui/ConsoleLook.cpp

@@ -205,10 +205,14 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         look::key (consoleTag, look::Key::console);
         consoleTag.setColour (juce::TextButton::buttonOnColourId, theme::knobArc);
         consoleTag.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
-        consoleTag.setTooltip ("The channel strip's EQ and Dynamics: lit when they're working. Click to open them.");
+        consoleTag.setTooltip ("The channel strip's EQ and Dynamics: lit when they're working. Click to open them; "
+                               "right-click to bypass the strip or change it.");
         consoleTag.setWantsKeyboardFocus (false);
+        consoleTag.addMouseListener (this, false);   // (its right-click: the channel strip's menu, with Bypass)
         consoleTag.onClick = [this]
         {
+            if (juce::ModifierKeys::getCurrentModifiers().isPopupMenu())
+                return;
             if (auto insert = stripInsert(); insert.isValid())
             {
                 if (owner.onOpenInsert)
@@ -799,6 +803,13 @@ void ChannelStrip::mouseDown (const juce::MouseEvent& e)
         return;
     if (auto* drag = dynamic_cast<strip::DragSlider*> (e.eventComponent); drag != nullptr && drag->onRightClick)
         return;   // faders and knobs have their own menu
+
+    // The EQ tag (EQ/Dyn hidden): the channel strip's menu (Bypass, built-in or plugin...).
+    if (e.eventComponent == &consoleTag)
+    {
+        showConsoleMenu();
+        return;
+    }
 
     const auto inConsole = e.eventComponent == this ? e.y < topSection()
                                                     : e.eventComponent->getY() < topSection() && e.eventComponent->getParentComponent() == this;
@@ -1827,6 +1838,7 @@ MasterBusCompressorPanel::MasterBusCompressorPanel (juce::UndoManager& um, Audio
     mix.setDoubleClickReturnValue (true, 1.0);
 
     look::key (inButton, look::Key::cream);
+    inButton.getProperties().set ("channelKey", true);   // (Themes > Buttons)
     inButton.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
     inButton.setColour (juce::TextButton::buttonOnColourId, theme::knobArc);
     inButton.setWantsKeyboardFocus (false);

@@ -68,8 +68,8 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
     void refreshReaperThemes();
 
-    // The fader caps, whatever the skin
-    juce::ComboBox faderBox;
+    // The fader caps, knobs, channel keys and bus compressor meter, whatever the skin
+    juce::ComboBox faderBox, knobBox, buttonBox, meterBox;
 
     // Your presets, kept in the settings file
     juce::PropertiesFile* store = nullptr;

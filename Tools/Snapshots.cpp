@@ -12,6 +12,7 @@
 #include "../Source/ui/ThemePanel.h"
 #include "../Source/ui/AutomixPanel.h"
 #include "../Source/ui/InsertBar.h"
+#include "../Source/ui/Looks.h"
 #include <JuceHeader.h>
 #include "MainComponent.h"
 #include "model/Project.h"
@@ -643,6 +644,105 @@ public:
             pump (main, 150);
             save (main, "xenon-white-faders.png");
             main.closeMixer();
+            main.applyTheme ({});
+            pump (main, 50);
+        }
+
+        // Themes > Faders / Knobs / Keys / Meter: the photo pieces, mixed with skins.
+        {
+            // The keys and knobs up close, on and off.
+            struct Board final : juce::Component
+            {
+                void paint (juce::Graphics& g) override
+                {
+                    g.fillAll (theme::stripFace);
+                    const juce::Colour colours[] { theme::mute, theme::solo, juce::Colour (0xffe2463f), theme::accent };
+                    for (int style = 1; style <= 3; ++style)
+                    {
+                        theme::Settings t = theme::current();
+                        t.buttonStyle = style;
+                        theme::set (t);
+                        for (int i = 0; i < 4; ++i)
+                            for (int on = 0; on < 2; ++on)
+                            {
+                                const auto r = juce::Rectangle<float> (10.0f + (float) (i * 2 + on) * 52.0f, 10.0f + (float) (style - 1) * 40.0f, 44.0f, 30.0f);
+                                looks::drawButton (g, r, on == 1, colours[i], false, false);
+                                g.setColour (looks::buttonTextColour (on == 1, colours[i]));
+                                g.drawText ("MSRI"[i] == 'M' ? "M" : i == 1 ? "S" : i == 2 ? "R" : "I", r, juce::Justification::centred);
+                            }
+                    }
+                    for (int k = 1; k <= 6; ++k)
+                    {
+                        theme::Settings t = theme::current();
+                        t.knobStyle = k;
+                        theme::set (t);
+                        looks::drawKnob (g, juce::Rectangle<float> (10.0f + (float) (k - 1) * 70.0f, 140.0f, 60.0f, 60.0f), 0.3f,
+                                         juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f), false, true);
+                    }
+                    for (int m = 1; m <= 2; ++m)
+                    {
+                        theme::Settings t = theme::current();
+                        t.meterStyle = m;
+                        theme::set (t);
+                        looks::drawMeter (g, juce::Rectangle<float> (10.0f + (float) (m - 1) * 250.0f, 215.0f, 240.0f, 135.0f), 6.0f);
+                    }
+                    theme::set ({});
+                }
+            } board;
+            board.setSize (500, 360);
+            save (board, "looks-board.png", 2.0f);
+        }
+        {
+            struct Mix { const char* name; theme::Skin skin; int fader, knob, button, meter; };
+            for (const auto& m : { Mix { "looks-xenon-black", theme::Skin::xenon, 5, 1, 1, 1 },
+                                   Mix { "looks-flat-silver", theme::Skin::flat, 7, 3, 3, 2 },
+                                   Mix { "looks-studio-red", theme::Skin::studio, 6, 2, 2, 1 },
+                                   Mix { "looks-white-red", theme::Skin::white, 4, 4, 1, 2 } })
+            {
+                theme::Settings t;
+                t.skin = m.skin;
+                t.faderStyle = m.fader;
+                t.knobStyle = m.knob;
+                t.buttonStyle = m.button;
+                t.meterStyle = m.meter;
+                main.applyTheme (t);
+                main.project.setProperty ("mixerBusComp", true, nullptr);
+                // (some keys lit, to see them on)
+                if (auto t0 = main.project.getChild (0); t0.isValid())
+                {
+                    t0.setProperty (ids::solo, true, nullptr);
+                    t0.setProperty (ids::armed, true, nullptr);
+                }
+                if (auto t1 = main.project.getChild (1); t1.isValid())
+                    t1.setProperty (ids::mute, true, nullptr);
+                main.showMixer();
+                main.mixer.relayoutStrips();
+                for (int i = 0; i < 20; ++i)
+                {
+                    main.mixer.setMasterLevels (0.7f, 0.6f);
+                    pump (main, 15);
+                }
+                save (main, juce::String (m.name) + "-mixer.png");
+                if (auto* firstStrip = findById (main.mixer, "strip0"))
+                    save (*firstStrip, juce::String (m.name) + "-strip.png", 2.0f);
+                save (main.mixer.getBusCompPanel(), juce::String (m.name) + "-buscomp.png", 2.0f);
+                main.mixer.getConsolePanel().showFaceForTesting = true;
+                main.mixer.resized();
+                pump (main, 60);
+                save (main.mixer.getConsolePanel(), juce::String (m.name) + "-buscomp-face.png");
+                main.mixer.getConsolePanel().showFaceForTesting = false;
+                main.project.setProperty ("mixerBusComp", false, nullptr);
+                main.closeMixer();
+                pump (main, 80);
+                save (main, juce::String (m.name) + "-arrange.png");
+                if (auto t0 = main.project.getChild (0); t0.isValid())
+                {
+                    t0.setProperty (ids::solo, false, nullptr);
+                    t0.setProperty (ids::armed, false, nullptr);
+                }
+                if (auto t1 = main.project.getChild (1); t1.isValid())
+                    t1.setProperty (ids::mute, false, nullptr);
+            }
             main.applyTheme ({});
             pump (main, 50);
         }

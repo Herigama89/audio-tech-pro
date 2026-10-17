@@ -120,8 +120,10 @@ namespace riff::theme
         // Skin "REAPER theme": the theme's folder (copied in by Themes > Load REAPER Theme...).
         juce::String themePack;
 
-        // The faders' caps, whatever the skin: -1 the skin's own, 0 classic, 1 Studio White, 2 Xenon, 3 the REAPER theme's.
+        // The faders' caps, whatever the skin: -1 the skin's own, 0 classic, 1 Studio White, 2 Xenon, 3 the REAPER theme's,
+        // 4..7 photo caps (see Looks.h). Knobs, channel keys and the bus compressor's meter likewise (-1: the skin's own).
         int faderStyle = -1;
+        int knobStyle = -1, buttonStyle = -1, meterStyle = -1;
 
         // The edit windows (tracks area and editors): your own colours (ARGB), 0: the skin's.
         juce::uint32 editBack = 0, gridBarColour = 0, gridBeatColour = 0, rollBack = 0;
@@ -153,8 +155,13 @@ namespace riff::theme
     /** Skin "REAPER theme": a loaded theme's pictures and colours are in use (see ThemePack.h). */
     bool reaperSkin();
 
-    /** Which fader caps to draw now: 0 classic, 1 Studio White, 2 Xenon, 3 the REAPER theme's. */
+    /** Which fader caps to draw now: 0 classic, 1 Studio White, 2 Xenon, 3 the REAPER theme's, 4..7 photo caps (Looks.h). */
     int faderStyle();
+
+    /** Themes > Knobs, Buttons, Bus Comp meter: -1 the skin's own, else a choice from Looks.h. */
+    int knobStyle();
+    int buttonStyle();
+    int meterStyle();
 
     /** Every theme colour (to repaint controls that copied one when the theme changes). */
     std::vector<juce::Colour*> allColours();

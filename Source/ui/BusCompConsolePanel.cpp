@@ -1,4 +1,5 @@
 #include "BusCompConsolePanel.h"
+#include "Looks.h"
 #include "Skin.h"
 #include "Theme.h"
 #include "ConsoleLook.h"
@@ -519,6 +520,11 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
                 juce::Justification::centred, false);
 
     // --- The meter -------------------------------------------------------------
+    // Themes > Bus Comp meter: a photo meter in the window instead (its needle ours).
+    if (looks::drawMeter (g, meterFace.expanded (22.0f), needleDb))
+    {
+    }
+    else
     {
         const auto faceInk = theme::lcdText;   // the scale, lit on the meter's own face
         juce::Graphics::ScopedSaveState faceState (g);
@@ -609,8 +615,10 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
     }
 
     // --- IN key and its lamp ---------------------------------------------------
-    look::drawKey (g, inKey.reduced (10.0f), look::Key::console, in, theme::neon, false, false);
-    g.setColour (in ? juce::Colours::white : ink.withAlpha (0.85f));
+    const bool photoKey = looks::drawButton (g, inKey.reduced (10.0f), in, theme::neon, false, false);
+    if (! photoKey)
+        look::drawKey (g, inKey.reduced (10.0f), look::Key::console, in, theme::neon, false, false);
+    g.setColour (photoKey ? looks::buttonTextColour (in, theme::neon) : in ? juce::Colours::white : ink.withAlpha (0.85f));
     g.setFont (juce::FontOptions (38.0f, juce::Font::bold));
     g.drawText ("IN", inKey, juce::Justification::centred, false);
 
