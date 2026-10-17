@@ -137,6 +137,11 @@ struct PlaybackGraph
 
         int inputTrackSlot = -1;    // its input is another track's output (that track's slot), not the device's
 
+        /** Printed inserts (LUNA style): they process the input while the track is armed, so what's recorded has
+            them in it (and you hear them as you play); on playback they're left out (the recording has them). */
+        std::vector<std::shared_ptr<Effect>> printInserts;
+        bool armed = false;
+
         bool monitorInput = false;  // armed + monitor: pass the input through this track
         int inputChannel = 0;       // index among the device's active inputs
         bool inputStereo = false;

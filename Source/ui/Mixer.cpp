@@ -1128,10 +1128,13 @@ void ChannelStrip::refresh()
         if (insert.isValid())
         {
             const bool off = insert[ids::bypass];
-            b->setButtonText (insertName (insert));
-            b->setTooltip (insertName (insert) + (off ? " (bypassed)" : "") + ". Click to open; right-click for bypass, replace and remove.");
-            b->setColour (juce::TextButton::buttonColourId, off ? theme::stripSlot : theme::stripSlotOn);
-            b->setColour (juce::TextButton::textColourOffId, off ? juce::Colour (0xff8d9196) : slotInk (true));
+            const bool printed = insert[ids::print];
+            b->setButtonText ((printed ? juce::String ("REC ") : juce::String()) + insertName (insert));
+            b->setTooltip (insertName (insert) + (off ? " (bypassed)" : "")
+                           + (printed ? ". Printed: it's recorded into the audio (and left out on playback)" : "")
+                           + ". Click to open; right-click for bypass, print, replace and remove.");
+            b->setColour (juce::TextButton::buttonColourId, off ? theme::stripSlot : printed ? juce::Colour (0xff7a2422) : theme::stripSlotOn);
+            b->setColour (juce::TextButton::textColourOffId, off ? juce::Colour (0xff8d9196) : printed ? juce::Colour (0xffffd9d6) : slotInk (true));
         }
         else
         {
@@ -1267,6 +1270,14 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
         for (auto& i : same)
             i.setProperty (ids::bypass, value, &um);
     });
+    if (! isMaster() && ! model::isBusTrack (track) && ! model::isInstrumentTrack (track))
+        menu.addItem ("Print While Recording (record it into the audio)", true, (bool) insert[ids::print],
+                      [same, &um, value = ! (bool) insert[ids::print]]() mutable
+        {
+            um.beginNewTransaction (value ? "Print While Recording" : "Don't Print");
+            for (auto& i : same)
+                i.setProperty (ids::print, value, &um);
+        });
     menu.addItem ("Replace...", [this, ownerId, index, insert, button]
     {
         if (owner.onChooseEffect)

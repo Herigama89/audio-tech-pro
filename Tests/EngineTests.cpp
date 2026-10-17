@@ -2396,3 +2396,41 @@ TEST_CASE ("A track can hear and record another track's output", "[engine][recor
     CHECK_THAT (data.getSample (0, 500), WithinAbs (0.5f, 1e-3));
     CHECK_THAT (data.getSample (1, 500), WithinAbs (0.5f, 1e-3));
 }
+
+TEST_CASE ("Printed inserts: the input is recorded through them, and playback leaves them out", "[engine][record]")
+{
+    Fixture f;
+    EffectRack effects (f.rack.getFormatManager());
+    ProjectPlayer player (f.engine, f.cache, &f.rack, &effects);
+    f.project.setProperty (ids::masterGain, 1.0, nullptr);
+
+    auto track = model::addTrack (f.project, "Vox", nullptr);
+    track.setProperty (ids::armed, true, nullptr);
+    auto limiter = model::addBuiltinInsert (model::chainFor (f.project, track[ids::id]), "limiter", 0, nullptr);
+    limiter.setProperty ("ceiling", -12.0, nullptr);
+    limiter.setProperty (ids::print, true, nullptr);
+    // A region already on the track, louder than the ceiling: on playback, not limited.
+    const auto wav = writeConstantWav (f.temp.dir.getChildFile ("old.wav"), 48000.0, 96000, 0.9f);
+    model::addRegion (track, wav, 0.0, 2.0, nullptr);
+    player.setProject (f.project);
+
+    const auto file = f.temp.dir.getChildFile ("printed.wav");
+    AudioEngine::RecordRequest request { track[ids::id].toString(), file, 0, 1, false };
+    request.printSlot = player.slotOf (track[ids::id].toString());
+    juce::String error;
+    REQUIRE (f.engine.startRecording ({ request }, error));
+    f.engine.play();
+    std::vector<float> heard;
+    renderWithInput (f.engine, 48000, 0.8f, 2, &heard);   // (input 1 carries 0.8)
+    const auto takes = f.engine.stopRecording();
+    REQUIRE (takes.size() == 1);
+
+    // The recording has the limiter in it...
+    auto reader = openReader (f.engine, file);
+    REQUIRE (reader != nullptr);
+    juce::AudioBuffer<float> data (1, 1000);
+    reader->read (&data, 0, 1000, 30000, true, false);
+    CHECK_THAT (data.getSample (0, 500), WithinAbs (juce::Decibels::decibelsToGain (-12.0f), 2e-3));
+    // ...and playback doesn't (the region plays at 0.9, the limiter left out).
+    CHECK_THAT (heard[40000], WithinAbs (0.9f, 2e-3));
+}

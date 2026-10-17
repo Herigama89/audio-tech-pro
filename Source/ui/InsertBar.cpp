@@ -34,6 +34,23 @@ InsertBar::InsertBar (juce::ValueTree i, juce::ValueTree p, juce::UndoManager& u
         insert.setProperty (ids::bypass, bypassButton.getToggleState(), &undoManager);
     };
 
+    {
+        const auto owner = model::findById (project, insert.getParent()[ids::owner].toString());
+        printable = owner.isValid() && ! model::isBusTrack (owner) && ! model::isInstrumentTrack (owner) && ! model::isVcaTrack (owner);
+    }
+    printButton.setClickingTogglesState (true);
+    printButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffd8352d));
+    printButton.setTooltip ("Print While Recording (as in LUNA): the input is recorded through this plugin, so the recording has it; "
+                            "you hear it as you play, and on playback it's left out (it's in the audio already)");
+    printButton.onClick = [this]
+    {
+        undoManager.beginNewTransaction (printButton.getToggleState() ? "Print While Recording" : "Don't Print");
+        insert.setProperty (ids::print, printButton.getToggleState(), &undoManager);
+    };
+    printButton.setWantsKeyboardFocus (false);
+    addChildComponent (printButton);
+    printButton.setVisible (printable);
+
     sideButton.setTooltip (sidechainable ? "Side Chain: another track's output keys this plugin (its detector hears that track)"
                                          : "This plugin has no side-chain input");
     sideButton.onClick = [this]
@@ -80,6 +97,7 @@ void InsertBar::addSidechainItems (juce::PopupMenu& menu, juce::ValueTree insert
 void InsertBar::refresh()
 {
     bypassButton.setToggleState ((bool) insert[ids::bypass], juce::dontSendNotification);
+    printButton.setToggleState ((bool) insert[ids::print], juce::dontSendNotification);
     if (auto* window = findParentComponentOfClass<EditorWindow>())
         pinButton.setToggleState (window->isPinned(), juce::dontSendNotification);
     const auto source = model::findById (project, insert[ids::sidechain].toString());
@@ -94,6 +112,11 @@ void InsertBar::resized()
     area.removeFromLeft (6);
     bypassButton.setBounds (area.removeFromLeft (70));
     area.removeFromLeft (6);
+    if (printable)
+    {
+        printButton.setBounds (area.removeFromLeft (60));
+        area.removeFromLeft (6);
+    }
     sideButton.setBounds (area);
 }
 

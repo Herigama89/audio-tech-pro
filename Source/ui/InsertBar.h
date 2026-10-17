@@ -20,7 +20,7 @@ public:
 
     void resized() override;
 
-    static constexpr int preferredWidth = 330;
+    static constexpr int preferredWidth = 400;
 
     /** The side-chain menu: no side chain, then every other track and bus. */
     static void addSidechainItems (juce::PopupMenu& menu, juce::ValueTree insert, juce::ValueTree project, juce::UndoManager& um);
@@ -34,7 +34,8 @@ private:
     juce::UndoManager& undoManager;
     bool sidechainable;
 
-    juce::TextButton pinButton { "Pin" }, bypassButton { "Bypass" }, sideButton;
+    juce::TextButton pinButton { "Pin" }, bypassButton { "Bypass" }, printButton { "Print" }, sideButton;
+    bool printable = false;   // an audio track's insert: it can be printed while recording
 };
 
 } // namespace riff

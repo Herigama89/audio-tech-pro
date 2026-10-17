@@ -828,18 +828,48 @@ public:
             // The MultiMeter, fed a second of a stereo mix
             MultiMeterPanel meter (main.engine);
             juce::AudioBuffer<float> mix (2, 48000);
-            for (int i = 0; i < mix.getNumSamples(); ++i)
             {
-                const auto t = (float) i / 48000.0f;
-                mix.setSample (0, i, 0.3f * std::sin (juce::MathConstants<float>::twoPi * 220.0f * t) + 0.08f * std::sin (juce::MathConstants<float>::twoPi * 3100.0f * t));
-                mix.setSample (1, i, 0.26f * std::sin (juce::MathConstants<float>::twoPi * 220.0f * t + 0.4f) + 0.05f * std::sin (juce::MathConstants<float>::twoPi * 5200.0f * t));
+                // A mix-like sound: pinkish noise (more lows), a bass note, a vocal-ish tone, some air
+                juce::Random rnd (7);
+                float b0 = 0, b1 = 0, b2 = 0, b0r = 0, b1r = 0, b2r = 0;
+                for (int i = 0; i < mix.getNumSamples(); ++i)
+                {
+                    const auto t = (float) i / 48000.0f;
+                    auto pink = [&rnd] (float& x0, float& x1, float& x2)
+                    {
+                        const auto w = rnd.nextFloat() * 2.0f - 1.0f;
+                        x0 = 0.99765f * x0 + w * 0.0990460f; x1 = 0.96300f * x1 + w * 0.2965164f; x2 = 0.57000f * x2 + w * 1.0526913f;
+                        return (x0 + x1 + x2 + w * 0.1848f) * 0.05f;
+                    };
+                    const auto bass = 0.25f * std::sin (juce::MathConstants<float>::twoPi * 55.0f * t);
+                    const auto tone = 0.08f * std::sin (juce::MathConstants<float>::twoPi * 440.0f * t) + 0.05f * std::sin (juce::MathConstants<float>::twoPi * 3100.0f * t);
+                    mix.setSample (0, i, bass + tone + pink (b0, b1, b2));
+                    mix.setSample (1, i, bass + 0.8f * tone + pink (b0r, b1r, b2r));
+                }
             }
-            for (int block = 0; block < 60; ++block)
+            for (int block = 0; block < 90; ++block)
             {
-                meter.take (mix.getReadPointer (0, (block * 800) % 47000), mix.getReadPointer (1, (block * 800) % 47000), 800);
+                meter.take (mix.getReadPointer (0, (block * 1600) % 46000), mix.getReadPointer (1, (block * 1600) % 46000), 1600);
                 pump (main, 20);
             }
             save (meter, "multimeter.png");
+            meter.showGoniometer (true);
+            pump (main, 30);
+            save (meter, "multimeter-goniometer.png");
+            meter.showGoniometer (false);
+            {
+                theme::Settings x;
+                x.skin = theme::Skin::xenon;
+                main.applyTheme (x);
+                meter.resized();
+                for (int block = 0; block < 10; ++block)
+                {
+                    meter.take (mix.getReadPointer (0, (block * 1600) % 46000), mix.getReadPointer (1, (block * 1600) % 46000), 1600);
+                    pump (main, 20);
+                }
+                save (meter, "multimeter-xenon.png");
+                main.applyTheme ({});
+            }
         }
         {
             // Automix, after a run

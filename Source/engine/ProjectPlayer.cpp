@@ -266,6 +266,16 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
 
         const auto trackId = track[ids::id].toString();
         t.inserts = buildChain (trackId, sampleRate, insertIds, effectsById);
+        t.armed = (bool) track[ids::armed];
+        // Printed inserts (LUNA style): on the input while armed, not on playback (the recording has them).
+        if (! model::isInstrumentTrack (track) && ! model::isBusTrack (track))
+            for (const auto& insert : model::insertsOf (model::findChain (project, trackId)))
+                if ((bool) insert[ids::print])
+                    if (auto it = effectsById.find (insert[ids::id].toString()); it != effectsById.end() && it->second != nullptr)
+                    {
+                        t.printInserts.push_back (it->second);
+                        t.inserts.erase (std::remove (t.inserts.begin(), t.inserts.end(), it->second), t.inserts.end());
+                    }
         for (const auto& insert : model::insertsOf (model::findChain (project, trackId)))
             if (const auto key = model::findById (project, insert[ids::sidechain].toString()); key.isValid() && key != track)
                 if (auto it = effectsById.find (insert[ids::id].toString()); it != effectsById.end() && it->second != nullptr)

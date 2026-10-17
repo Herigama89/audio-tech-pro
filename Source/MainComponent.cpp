@@ -1988,7 +1988,16 @@ void MainComponent::beginRecording()
             return;
         }
 
-        requests.push_back ({ track[ids::id].toString(), nextTakeFile (track), first, channels, false });
+        AudioEngine::RecordRequest request { track[ids::id].toString(), nextTakeFile (track), first, channels, false };
+        // Printed inserts (LUNA style): the input recorded through them.
+        for (const auto& insert : model::insertsOf (model::findChain (project, track[ids::id].toString())))
+            if ((bool) insert[ids::print] && ! (bool) insert[ids::bypass])
+            {
+                request.printSlot = player.slotOf (track[ids::id].toString());
+                if (auto* plugin = effectRack.getPlugin (insert[ids::id].toString()))
+                    request.printLatency += plugin->getLatencySamples();
+            }
+        requests.push_back (request);
     }
 
     // Where recording begins: right here when punching in during playback;

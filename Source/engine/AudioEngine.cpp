@@ -610,6 +610,8 @@ bool AudioEngine::startRecording (const std::vector<RecordRequest>& requests, ju
         take->firstChannel = request.firstChannel;
         take->numChannels = request.numChannels;
         take->sourceSlot = request.sourceSlot;
+        take->printSlot = request.printSlot;
+        take->printLatency = juce::jmax (0, request.printLatency);
 
         // Four seconds of FIFO between the audio thread and the disk thread.
         take->writer = std::make_unique<juce::AudioFormatWriter::ThreadedWriter> (writer.release(), diskThread,
@@ -818,6 +820,9 @@ void AudioEngine::prepare (double newSampleRate, int)
     busBuffer.setSize (PlaybackGraph::maxBuses * 2, maxBlockSize);
     slotOutputs.setSize (PlaybackGraph::maxTracks * 2, maxBlockSize);
     slotOutputs.clear();
+    slotInputs.setSize (PlaybackGraph::maxTracks * 2, maxBlockSize);
+    slotInputs.clear();
+    slotInputReady.fill (false);
 
     if (directDelayLine == nullptr)
         directDelayLine = std::make_unique<DelayLine>();
@@ -948,6 +953,8 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
         juce::FloatVectorOperations::clear (mixR, n);
 
         const bool recordingChunk = isRecordingNow && isPlayingNow && position >= recordStart;
+        if (graph != nullptr)
+            printInputs (*graph, inputs, numInputs, offset, n);   // (armed tracks' printed inserts, before recording)
         if (recordingChunk)
             recordChunk (inputs, numInputs, offset, n);
 
@@ -1081,13 +1088,15 @@ void AudioEngine::recordChunk (const float* const* inputs, int numInputs, int in
             const auto source = take->firstChannel + c;
             if (take->sourceSlot >= 0)
                 channels[c] = take->numChannels == 1 ? slotOutput (take->sourceSlot, 0) : slotOutput (take->sourceSlot, c);
+            else if (juce::isPositiveAndBelow (take->printSlot, PlaybackGraph::maxTracks) && slotInputReady[(size_t) take->printSlot])
+                channels[c] = slotInputs.getReadPointer (take->printSlot * 2 + (take->numChannels == 1 ? 0 : c));   // through its printed inserts
             else
                 channels[c] = (source < numInputs && inputs[source] != nullptr) ? inputs[source] + inputOffset
                                                                                  : silence.getReadPointer (c);
         }
 
         juce::int64 expected = -1;
-        take->startSample.compare_exchange_strong (expected, blockStart);
+        take->startSample.compare_exchange_strong (expected, blockStart - take->printLatency);   // (printed plugins' latency taken back)
 
         // The live waveform and clip watch: the loudest sample in each block of 512.
         for (int i = 0; i < n; ++i)
@@ -1117,6 +1126,37 @@ void AudioEngine::recordChunk (const float* const* inputs, int numInputs, int in
             take->samplesWritten.fetch_add (n);
         else
             recordOverflow.store (true); // disk too slow: this block is lost
+    }
+}
+
+void AudioEngine::printInputs (const PlaybackGraph& graph, const float* const* inputs, int numInputs, int inputOffset, int n) noexcept
+{
+    slotInputReady.fill (false);
+    if (n > slotInputs.getNumSamples())
+        return;
+    for (const auto& track : graph.tracks)
+    {
+        if (! track.armed || track.printInserts.empty() || ! juce::isPositiveAndBelow (track.slot, PlaybackGraph::maxTracks)
+            || track.inputTrackSlot >= 0 || track.isInstrument || track.isBus)
+            continue;
+        auto* l = slotInputs.getWritePointer (track.slot * 2);
+        auto* r = slotInputs.getWritePointer (track.slot * 2 + 1);
+        const auto first = track.inputChannel;
+        const auto second = track.inputStereo ? first + 1 : first;
+        if (first < numInputs && inputs != nullptr && inputs[first] != nullptr)
+            juce::FloatVectorOperations::copy (l, inputs[first] + inputOffset, n);
+        else
+            juce::FloatVectorOperations::clear (l, n);
+        if (second < numInputs && inputs != nullptr && inputs[second] != nullptr)
+            juce::FloatVectorOperations::copy (r, inputs[second] + inputOffset, n);
+        else
+            juce::FloatVectorOperations::copy (r, l, n);
+        for (const auto& effect : track.printInserts)
+        {
+            effect->setPosition (chunkPosition, chunkPlaying, chunkBpm);
+            effect->process (l, r, n);
+        }
+        slotInputReady[(size_t) track.slot] = true;
     }
 }
 
@@ -1432,6 +1472,13 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
             // ...another track's output, as its input
             juce::FloatVectorOperations::add (tL, slotOutput (track.inputTrackSlot, 0), n);
             juce::FloatVectorOperations::add (tR, slotOutput (track.inputTrackSlot, track.inputStereo ? 1 : 0), n);
+            anyAudio = true;
+        }
+        else if (track.monitorInput && slotInputReady[(size_t) track.slot])
+        {
+            // ...through its printed inserts (heard as it will be recorded)
+            juce::FloatVectorOperations::add (tL, slotInputs.getReadPointer (track.slot * 2), n);
+            juce::FloatVectorOperations::add (tR, slotInputs.getReadPointer (track.slot * 2 + 1), n);
             anyAudio = true;
         }
         else if (track.monitorInput && track.inputChannel < numInputs && inputs[track.inputChannel] != nullptr)

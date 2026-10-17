@@ -94,6 +94,8 @@ public:
         int numChannels = 1;    // 1 or 2
         bool midi = false;      // record the live MIDI input instead of audio (no file)
         int sourceSlot = -1;    // record another track's output (its slot) instead of the device's input
+        int printSlot = -1;     // its track's slot when it has printed inserts: record the input through them
+        int printLatency = 0;   // how late they make it (the take is moved back by this)
     };
 
     struct MidiEventRecord
@@ -340,7 +342,7 @@ private:
         juce::String trackId;
         juce::File file;
         int firstChannel = 0, numChannels = 1;
-        int sourceSlot = -1;
+        int sourceSlot = -1, printSlot = -1, printLatency = 0;
         std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> writer;
         std::atomic<juce::int64> startSample { -1 };
         std::atomic<juce::int64> samplesWritten { 0 };
@@ -432,6 +434,9 @@ private:
     // --- Audio-thread state (sized in prepare) --------------------------------
     juce::AudioBuffer<float> trackBuffer, regionBuffer, mixBuffer, silence, directBuffer, busBuffer;
     juce::AudioBuffer<float> slotOutputs;   // every track's output (after its fader) this block, by slot: side chains and track inputs
+    juce::AudioBuffer<float> slotInputs;    // armed tracks' input through their printed inserts, this block, by slot
+    std::array<bool, PlaybackGraph::maxTracks> slotInputReady {};
+    void printInputs (const PlaybackGraph& graph, const float* const* inputs, int numInputs, int inputOffset, int n) noexcept;
     const float* slotOutput (int slot, int channel) const noexcept
     {
         return juce::isPositiveAndBelow (slot, PlaybackGraph::maxTracks) && slot * 2 + 1 < slotOutputs.getNumChannels()
