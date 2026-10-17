@@ -45,8 +45,9 @@ namespace
 }
 
 ConsoleStripWindow::ConsoleStripWindow (juce::ValueTree t, juce::UndoManager& um,
-                                        std::function<int (float*, int)> analyzerSource, std::function<double()> sampleRate)
-    : track (t), undoManager (um), analyzer (std::move (analyzerSource), std::move (sampleRate))
+                                        std::function<int (float*, int)> analyzerSource, std::function<double()> sampleRate,
+                                        Levels levelSource)
+    : track (t), undoManager (um), analyzer (std::move (analyzerSource), std::move (sampleRate)), levels (std::move (levelSource))
 {
     // Cap colours as on a classic console: red, green, blue and brown for the bands; grey filters; black dynamics; green gate.
     const auto white = capWhite, neon = capBlue, amber = capBlack, green = capGreen;
@@ -117,7 +118,84 @@ ConsoleStripWindow::ConsoleStripWindow (juce::ValueTree t, juce::UndoManager& um
     int height = curveHeight + optionsHeight + 2 * margin + margin;
     for (const auto& row : layout())
         height += (juce::String (row.section).isNotEmpty() ? headerHeight : 0) + cellHeight;
-    setSize (margin * 2 + cellWidth * 4, height + margin);
+    setSize (margin * 2 + cellWidth * 4 + (levels ? meterWidth : 0), height + margin);
+    if (levels)
+        startTimerHz (30);
+}
+
+juce::Rectangle<int> ConsoleStripWindow::meterArea() const
+{
+    if (! levels)
+        return {};
+    return { getWidth() - meterWidth, margin, meterWidth - margin, getHeight() - margin * 2 };
+}
+
+void ConsoleStripWindow::timerCallback()
+{
+    const auto now = levels();
+    const auto in = juce::Decibels::gainToDecibels (now[0], -100.0f), out = juce::Decibels::gainToDecibels (now[1], -100.0f);
+    inDb = juce::jmax (in, inDb - 1.5f);    // (they fall back gently)
+    outDb = juce::jmax (out, outDb - 1.5f);
+    const auto gr = std::abs (now[2]);
+    grDb += (gr - grDb) * (gr > grDb ? 0.6f : 0.2f);
+    repaint (meterArea());
+}
+
+void ConsoleStripWindow::paintLeds (juce::Graphics& g)
+{
+    const auto area = meterArea().toFloat();
+    if (area.isEmpty())
+        return;
+    g.setColour (theme::consoleDark.withAlpha (0.85f));
+    g.fillRoundedRectangle (area, 6.0f);
+
+    // Three ladders: IN and OUT (level, dBFS, green to red), GR between them (amber, down from 0)
+    constexpr int leds = 18;
+    const float levelSteps[leds] { -60, -48, -42, -36, -30, -27, -24, -21, -18, -15, -12, -9, -6, -4, -3, -2, -1, 0 };
+    const float grSteps[leds] { 0.5f, 1, 1.5f, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 24 };
+    auto columns = area.reduced (8.0f, 10.0f);
+    const auto captions = columns.removeFromTop (16.0f);
+    const auto values = columns.removeFromBottom (16.0f);
+    const auto w = columns.getWidth() / 3.0f;
+    const juce::String names[] { "IN", "GR", "OUT" };
+    for (int c = 0; c < 3; ++c)
+    {
+        const auto col = columns.withX (columns.getX() + w * (float) c).withWidth (w);
+        g.setColour (theme::text);
+        g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+        g.drawText (names[c], captions.withX (col.getX()).withWidth (w), juce::Justification::centred, false);
+        const auto step = col.getHeight() / (float) leds;
+        for (int i = 0; i < leds; ++i)
+        {
+            const auto led = juce::Rectangle<float> (col.getCentreX() - w * 0.28f, col.getBottom() - step * (float) (i + 1) + 1.5f, w * 0.56f, step - 3.0f);
+            juce::Colour colour;
+            bool on;
+            if (c == 1)
+            {
+                // Gain reduction lights from the top down, as on a console
+                const auto j = leds - 1 - i;
+                on = grDb >= grSteps[j];
+                colour = theme::meterAmber;
+            }
+            else
+            {
+                on = (c == 0 ? inDb : outDb) >= levelSteps[i];
+                colour = levelSteps[i] >= -1.0f ? theme::meterRed : levelSteps[i] >= -9.0f ? theme::meterAmber : theme::meterGreen;
+            }
+            g.setColour (on ? colour : colour.withAlpha (0.12f));
+            g.fillRoundedRectangle (led, 1.5f);
+            if (on)
+            {
+                g.setColour (colour.withAlpha (0.3f));
+                g.fillRoundedRectangle (led.expanded (1.5f), 2.5f);
+            }
+        }
+        g.setColour (theme::lcdText);
+        g.setFont (juce::FontOptions (11.0f));
+        const auto v = c == 1 ? (grDb > 0.05f ? "-" + juce::String (grDb, 1) : juce::String ("0.0"))
+                              : ((c == 0 ? inDb : outDb) > -99.0f ? juce::String (c == 0 ? inDb : outDb, 1) : juce::String::fromUTF8 ("-\xe2\x88\x9e"));
+        g.drawText (v, values.withX (col.getX()).withWidth (w), juce::Justification::centred, false);
+    }
 }
 
 ConsoleStripWindow::~ConsoleStripWindow()
@@ -191,12 +269,12 @@ void ConsoleStripWindow::refresh()
 
 juce::Rectangle<int> ConsoleStripWindow::curveArea() const
 {
-    return { margin, margin, getWidth() - margin * 2, curveHeight };
+    return { margin, margin, getWidth() - margin * 2 - (levels ? meterWidth - margin : 0), curveHeight };
 }
 
 juce::Rectangle<int> ConsoleStripWindow::optionsArea() const
 {
-    return { margin, curveArea().getBottom() + 4, getWidth() - margin * 2, optionsHeight - 4 };
+    return { margin, curveArea().getBottom() + 4, curveArea().getWidth(), optionsHeight - 4 };
 }
 
 void ConsoleStripWindow::applyAnalyzerOptions()
@@ -227,7 +305,7 @@ void ConsoleStripWindow::resized()
     {
         if (juce::String (row.section).isNotEmpty())
         {
-            sections.push_back ({ row.section, { margin, y, getWidth() - margin * 2, headerHeight } });
+            sections.push_back ({ row.section, { margin, y, cellWidth * 4, headerHeight } });
             y += headerHeight;
         }
 
@@ -331,6 +409,8 @@ void ConsoleStripWindow::paint (juce::Graphics& g)
 
 void ConsoleStripWindow::paintOverChildren (juce::Graphics& g)
 {
+    paintLeds (g);
+
     // The EQ curve over the analyzer
     const auto area = curveArea().toFloat();
     const auto xOf = [&area] (double f) { return area.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * area.getWidth(); };

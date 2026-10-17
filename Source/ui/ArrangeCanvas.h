@@ -135,6 +135,9 @@ public:
     /** Right-click on an empty part of the tracks area: the tool menu and everyday edits. */
     std::function<void()> onEmptyAreaMenu;
 
+    /** Detect Tempo (BPM) on an audio region (its shortcut menu). */
+    std::function<void (juce::ValueTree region)> onDetectTempo;
+
     /** A project from another program dropped on the tracks area (Ableton, FL Studio, Pro Tools...). */
     std::function<void (const juce::File&)> onOpenProject;
 

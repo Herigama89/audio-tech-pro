@@ -524,7 +524,12 @@ float AudioEngine::rmsOf (const float* left, const float* right, int n) noexcept
 
 std::pair<float, float> AudioEngine::takeBusPluginLevels() noexcept
 {
-    return { busPluginIn.exchange (0.0f), busPluginOut.exchange (0.0f) };
+    // The RMS level over everything since the last read, in and out (the same stretch of audio for both).
+    const auto samples = busPluginSamples.exchange (0);
+    const auto in = busPluginIn.exchange (0.0f), out = busPluginOut.exchange (0.0f);
+    if (samples <= 0)
+        return { 0.0f, 0.0f };
+    return { std::sqrt (in / (float) samples), std::sqrt (out / (float) samples) };
 }
 
 void AudioEngine::storeMax (std::atomic<float>& target, float value) noexcept
@@ -979,10 +984,18 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
             // own plugin in console mode, or the built-in one.
             if (! graph->busCompPlugins.empty())
             {
-                storeMax (busPluginIn, rmsOf (mixL, mixR, n));
+                const auto energy = [n] (const float* l, const float* r)
+                {
+                    float e = 0.0f;
+                    for (int i = 0; i < n; ++i)
+                        e += 0.5f * (l[i] * l[i] + r[i] * r[i]);
+                    return e;
+                };
+                busPluginIn.store (busPluginIn.load (std::memory_order_relaxed) + energy (mixL, mixR), std::memory_order_relaxed);
                 for (const auto& effect : graph->busCompPlugins)
                     effect->process (mixL, mixR, n);
-                storeMax (busPluginOut, rmsOf (mixL, mixR, n));
+                busPluginOut.store (busPluginOut.load (std::memory_order_relaxed) + energy (mixL, mixR), std::memory_order_relaxed);
+                busPluginSamples.fetch_add (n, std::memory_order_release);
             }
             else
             {
@@ -1495,6 +1508,12 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
 
     // The strip's console EQ and Dynamics, then the insert effects, all before
     // the fader. Inserts run even on silence so delays and reverbs ring out.
+    const auto peakOf = [n] (const float* l, const float* r)
+    {
+        const auto a = juce::FloatVectorOperations::findMinAndMax (l, n), b = juce::FloatVectorOperations::findMinAndMax (r, n);
+        return juce::jmax (std::abs (a.getStart()), std::abs (a.getEnd()), std::abs (b.getStart()), std::abs (b.getEnd()));
+    };
+    storeMax (stripInPeaks[(size_t) track.slot], peakOf (tL, tR));
     for (const auto& effect : track.stripPlugins)
     {
         effect->setPosition (chunkPosition, chunkPlaying, chunkBpm);
@@ -1507,6 +1526,8 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         console.setSettings (track.console);
         console.process (tL, tR, n);
     }
+
+    storeMax (stripOutPeaks[(size_t) track.slot], peakOf (tL, tR));
 
     // The spectrum analyzer's track: its sound after the EQ, in mono.
     if (track.slot == analyzerSlot.load (std::memory_order_relaxed))

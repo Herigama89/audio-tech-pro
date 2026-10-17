@@ -402,8 +402,8 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
 
                     for (const auto& note : region)
                     {
-                        if (! note.hasType (ids::NOTE))
-                            continue;
+                        if (! note.hasType (ids::NOTE) || (bool) note.getProperty (ids::mute, false))
+                            continue;   // (muted notes, from the piano roll's Mute tool, don't play)
 
                         // Notes play only if they start inside the region's window.
                         const double noteStart = note[ids::start];

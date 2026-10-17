@@ -16,12 +16,17 @@ namespace riff
     curve on top. The knobs on the mixer strip are the same controls.
 */
 class ConsoleStripWindow final : public juce::Component,
-                                 private juce::ValueTree::Listener
+                                 private juce::ValueTree::Listener,
+                                 private juce::Timer
 {
 public:
     /** `analyzerSource` hands over the track's audio for the analyzer behind the EQ curve (none: no analyzer). */
+    /** The LED meters at the right: (level in, level out as linear peaks, gain reduction in dB), read ~30 times a second. */
+    using Levels = std::function<std::array<float, 3>()>;
+
     ConsoleStripWindow (juce::ValueTree track, juce::UndoManager& um,
-                        std::function<int (float*, int)> analyzerSource = {}, std::function<double()> sampleRate = {});
+                        std::function<int (float*, int)> analyzerSource = {}, std::function<double()> sampleRate = {},
+                        Levels levels = {});
     ~ConsoleStripWindow() override;
 
     void paint (juce::Graphics& g) override;
@@ -70,6 +75,14 @@ private:
     juce::ComboBox modeBox, fftBox, rangeBox, releaseBox, holdBox;
     void applyAnalyzerOptions();
     juce::Rectangle<int> optionsArea() const;
+
+    // IN, GR and OUT: LED ladders down the right side
+    Levels levels;
+    float inDb = -100.0f, outDb = -100.0f, grDb = 0.0f;
+    static constexpr int meterWidth = 110;
+    juce::Rectangle<int> meterArea() const;
+    void timerCallback() override;
+    void paintLeds (juce::Graphics& g);
 };
 
 } // namespace riff

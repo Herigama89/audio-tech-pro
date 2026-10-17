@@ -73,6 +73,7 @@ set(RIFF_CORE_SOURCES
     Source/engine/AraHost.cpp
     Source/model/Project.cpp
     Source/model/Automix.cpp
+    Source/model/NoteTools.cpp
     Source/model/Generator.cpp
     Source/model/ProjectFiles.cpp
     Source/engine/AggregateDevice.cpp
@@ -294,6 +295,7 @@ if(RIFF_BUILD_TESTS)
         Tests/ImportTests.cpp
         Tests/ThemeTests.cpp
         Tests/AutomixTests.cpp
+        Tests/NoteToolsTests.cpp
         Source/ui/Theme.cpp
         Source/ui/ThemePack.cpp
         Source/ui/ScreenRecordPanel.cpp

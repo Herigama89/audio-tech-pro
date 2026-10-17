@@ -214,6 +214,14 @@ public:
     std::pair<float, float> takeBusPluginLevels() noexcept;
 
     /** The Master Bus Compressor's largest gain reduction (dB) since the last call. */
+    /** A track's channel strip: its level coming in (before the strip) and going out (after it), the loudest since the last call. */
+    std::pair<float, float> takeStripLevels (int slot) noexcept
+    {
+        if (! juce::isPositiveAndBelow (slot, PlaybackGraph::maxTracks))
+            return {};
+        return { stripInPeaks[(size_t) slot].exchange (0.0f), stripOutPeaks[(size_t) slot].exchange (0.0f) };
+    }
+
     float takeBusCompGainReduction() noexcept
     {
         const auto gr = busComp.getGainReductionDb();
@@ -463,9 +471,12 @@ private:
     float clickAmplitude = 0.0f;
 
     std::atomic<float> peakOutL { 0 }, peakOutR { 0 }, peakInL { 0 }, peakInR { 0 };
+    // The bus compressor plugin's level in and out, summed since the last read (its gain reduction is worked out from them)
     std::atomic<float> busPluginIn { 0 }, busPluginOut { 0 };
+    std::atomic<int> busPluginSamples { 0 };
     static float rmsOf (const float* left, const float* right, int n) noexcept;
     std::array<std::atomic<float>, PlaybackGraph::maxTracks * 2> trackPeaks {};
+    std::array<std::atomic<float>, PlaybackGraph::maxTracks> stripInPeaks {}, stripOutPeaks {};   // the channel strip's LED meters
     std::atomic<bool> bouncing { false };
     juce::String labelledDevice;
     juce::StringArray inputLabels;

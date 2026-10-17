@@ -185,6 +185,11 @@ private:
     /** The master's MultiMeter (levels, LUFS loudness, goniometer, spectrum), in its own window. */
     void showMultiMeter();
     void showAutomix();
+
+    // BPM: detect it from an audio region, or tap it
+    void detectTempo (juce::ValueTree region);
+    void showTapTempo();
+    void showTempoMenu();
     void runAutomix (const juce::String& genre, bool cycleOnly);
 
     /** Cubase's Extensions: an ARA plugin (Melodyne...) on just the chosen audio regions; the rest of the track plays as usual. */

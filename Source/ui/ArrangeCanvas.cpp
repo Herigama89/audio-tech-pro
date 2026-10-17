@@ -2044,6 +2044,8 @@ void ArrangeCanvas::showRegionMenu (juce::ValueTree region)
         }
         else
         {
+            if (onDetectTempo)
+                menu.addItem ("Detect Tempo (BPM)...", [this, region] { onDetectTempo (region); });
             menu.addCommandItem (commandManager, commands::regionGain);
             menu.addCommandItem (commandManager, commands::removeFades);
             menu.addCommandItem (commandManager, commands::audioSuite);

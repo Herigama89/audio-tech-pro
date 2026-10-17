@@ -26,6 +26,7 @@
 #include "ui/ScreenRecordPanel.h"
 #include "ui/CombineInterfacesPanel.h"
 #include "ui/ConsoleStripWindow.h"
+#include "model/NoteTools.h"
 #include "ui/AudioEditorPanel.h"
 #include <deque>
 #include "ui/ConsoleLook.h"
@@ -155,6 +156,27 @@ public:
                 }
         pump (main, 200);
         save (main, "pianoroll.png");
+        {
+            // FL Studio-style tools: the scale shaded, the other regions as ghosts, a muted note, the Paint tool
+            auto& roll = main.pianoRoll;
+            roll.scaleHighlightButton.setToggleState (true, juce::sendNotification);
+            roll.ghostButton.setToggleState (true, juce::sendNotification);
+            for (const auto& n : roll.region)
+                if (n.hasType (ids::NOTE))
+                {
+                    notetools::setMuted ({ n }, true, nullptr);
+                    break;
+                }
+            roll.setTool (PianoRoll::Tool::paint);
+            pump (main, 150);
+            save (roll, "pianoroll-tools.png");
+            for (const auto& n : roll.region)
+                if (n.hasType (ids::NOTE))
+                    notetools::setMuted ({ n }, false, nullptr);
+            roll.setTool (PianoRoll::Tool::draw);
+            roll.scaleHighlightButton.setToggleState (false, juce::sendNotification);
+            roll.ghostButton.setToggleState (false, juce::sendNotification);
+        }
         main.pianoRoll.viewBox.setSelectedId (2);
         pump (main, 150);
         save (main.pianoRoll, "score.png");
@@ -195,7 +217,7 @@ public:
                               + 0.08f * (float) std::sin (*phase * 2.0 * juce::MathConstants<double>::pi * 2500.0 / 48000.0);
                 }
                 return n;
-            }, [] { return 48000.0; });
+            }, [] { return 48000.0; }, [] { return std::array<float, 3> { 0.55f, 0.42f, 4.5f }; });
             for (int i = 0; i < 20; ++i)
                 pump (main, 40);
             save (panel, "strip-window.png");
@@ -555,7 +577,8 @@ public:
             {
                 // The channel EQ window in the flat skin.
                 auto t0 = main.project.getChild (0);
-                ConsoleStripWindow eq (t0, main.undoManager, [] (float*, int) { return 0; }, [] { return 48000.0; });
+                ConsoleStripWindow eq (t0, main.undoManager, [] (float*, int) { return 0; }, [] { return 48000.0; },
+                                        [] { return std::array<float, 3> { 0.5f, 0.32f, 4.5f }; });
                 pump (main, 30);
                 save (eq, "flat-strip-window.png");
             }

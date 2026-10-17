@@ -249,7 +249,8 @@ MainComponent::MainComponent (bool openAudioDevice)
     tempoLabel.setJustificationType (juce::Justification::centred);
     tempoLabel.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 24.0f, juce::Font::plain));
     tempoLabel.setColour (juce::Label::textColourId, theme::lcdText);
-    tempoLabel.setTooltip ("Double-click to change the tempo");
+    tempoLabel.setTooltip ("Double-click to change the tempo; right-click to detect it from a region, or tap it");
+    tempoLabel.addMouseListener (this, false);   // (its right-click: the tempo menu)
     tempoLabel.onTextChange = [this]
     {
         const auto bpm = tempoLabel.getText().getDoubleValue();
@@ -349,6 +350,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     canvas.commandManager = &commandManager;
     canvas.onEmptyAreaMenu = [this] { showToolMenu (true); };
     canvas.onOpenProject = [this] (const juce::File& f) { confirmDiscardChanges ([this, f] { openImportedProject (f); }); };
+    canvas.onDetectTempo = [this] (juce::ValueTree region) { detectTempo (region); };
     canvas.addExtensionItems = [this] (juce::PopupMenu& menu, juce::Array<juce::ValueTree> regions) { addExtensionItems (menu, regions); };
     canvas.onDelete = [this] { deleteSelection(); };
     canvas.onRepeat = [this] { repeatSelectedRegions(); };
@@ -672,7 +674,12 @@ MainComponent::MainComponent (bool openAudioDevice)
         editorWindows[id] = std::make_unique<EditorWindow> (track[ids::name].toString() + ": Channel Strip",
                                                             new ConsoleStripWindow (track, undoManager,
                                                                                     [this] (float* dest, int max) { return engine.readAnalyzer (dest, max); },
-                                                                                    [this] { return engine.getSampleRate(); }),
+                                                                                    [this] { return engine.getSampleRate(); },
+                                                                                    [this, slot = player.slotOf (track[ids::id].toString())]
+                                                                                    {
+                                                                                        const auto [in, out] = engine.takeStripLevels (slot);
+                                                                                        return std::array<float, 3> { in, out, engine.getConsoleGainReduction (slot) };
+                                                                                    }),
                                                             false, closer);
     };
     routing::createStack = [this] (bool summing) { createStackFromSelection (summing); };
@@ -1686,6 +1693,8 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
 {
     if (e.eventComponent == &signatureLabel)
         showSignatureMenu();
+    else if (e.eventComponent == &tempoLabel && e.mods.isPopupMenu())
+        showTempoMenu();
 }
 
 void MainComponent::showSignatureMenu()

@@ -2,6 +2,7 @@
 #include "Theme.h"
 #include "../model/Project.h"
 #include "../model/Generator.h"
+#include "../model/NoteTools.h"
 
 namespace riff
 {
@@ -77,6 +78,204 @@ PianoRoll::PianoRoll (juce::UndoManager& um, AudioEngine& e)
         box->setWantsKeyboardFocus (false);
         addAndMakeVisible (box);
     }
+
+    // FL Studio's toolbar: the tools, the stamp, the snap, scale highlighting, ghost notes and the Tools menu
+    const char* toolNames[] { "Draw", "Paint", "Delete", "Mute", "Slice", "Select", "Zoom" };
+    const char* toolTips[] {
+        "Draw (P): click to add a note (as long as the last one), drag to set its length; drag notes to move them, their right edge to resize",
+        "Paint (B): drag to paint notes along the grid", "Delete (D): click or drag over notes to delete them (right-click deletes with any tool)",
+        "Mute (T): click or drag over notes to mute or unmute them", "Slice (C): drag down across notes to cut them where you started",
+        "Select (E): drag to select notes in a rectangle; drag a selected note to move them all", "Zoom (Z): click to zoom in, Option-click out, drag across a stretch to fill the view with it" };
+    for (int i = 0; i < 7; ++i)
+    {
+        auto& b = toolButtons[i];
+        b.setButtonText (toolNames[i]);
+        b.setTooltip (toolTips[i]);
+        b.setClickingTogglesState (true);
+        b.setRadioGroupId (701);
+        b.setColour (juce::TextButton::buttonOnColourId, theme::accent);
+        b.setWantsKeyboardFocus (false);
+        b.onClick = [this, i] { setTool ((Tool) i); };
+        addAndMakeVisible (b);
+    }
+    toolButtons[0].setToggleState (true, juce::dontSendNotification);
+
+    stampBox.addItem ("No Stamp", 1);
+    for (size_t i = 0; i < notetools::stamps().size(); ++i)
+        stampBox.addItem (notetools::stamps()[i].name, (int) i + 2);
+    stampBox.setSelectedId (1, juce::dontSendNotification);
+    stampBox.setTooltip ("Stamp: Draw and Paint put in a whole chord (the clicked note its root)");
+    snapBox.addItemList ({ "Snap: Auto", "Snap: None", "Snap: 1/64", "Snap: 1/32", "Snap: 1/16", "Snap: 1/8", "Snap: 1/4", "Snap: Bar",
+                           "Snap: 1/16 T", "Snap: 1/8 T" }, 1);
+    snapBox.setSelectedId (1, juce::dontSendNotification);
+    snapBox.setTooltip ("Snap: where notes go when you draw, move and resize them (Auto follows the zoom). Cmd while dragging: no snap.");
+    for (auto* box : { &stampBox, &snapBox })
+    {
+        box->setWantsKeyboardFocus (false);
+        addAndMakeVisible (box);
+    }
+    scaleHighlightButton.setClickingTogglesState (true);
+    scaleHighlightButton.setTooltip ("Scale highlighting: the rows of the song's key lit, the others darker (the root marked)");
+    ghostButton.setClickingTogglesState (true);
+    ghostButton.setToggleState (true, juce::dontSendNotification);
+    ghostButton.setTooltip ("Ghost notes: the other regions' notes, faint, behind these (FL Studio's ghost channels)");
+    toolsButton.setTooltip ("FL Studio's tools: Chop, Glue, Strum, Arpeggiate, Flam, Randomize, Scale Levels, Limit, Claw Machine, Articulate...");
+    toolsButton.onClick = [this] { showToolsMenu(); };
+    for (auto* b : { &scaleHighlightButton, &ghostButton, &toolsButton })
+    {
+        b->setWantsKeyboardFocus (false);
+        b->setColour (juce::TextButton::buttonOnColourId, theme::accent.withAlpha (0.8f));
+        b->onStateChange = [this] { repaint(); };
+        addAndMakeVisible (b);
+    }
+    toolsButton.onStateChange = nullptr;
+}
+
+void PianoRoll::setTool (Tool t)
+{
+    tool = t;
+    for (int i = 0; i < 7; ++i)
+        toolButtons[i].setToggleState (i == (int) t, juce::dontSendNotification);
+    setMouseCursor (t == Tool::zoom ? juce::MouseCursor::CrosshairCursor : juce::MouseCursor::NormalCursor);
+}
+
+double PianoRoll::snapSeconds() const
+{
+    if (! region.isValid())
+        return 0.25;
+    const auto project = region.getParent().getParent();
+    const auto beat = model::secondsPerBeat (project);
+    switch (snapBox.getSelectedId())
+    {
+        case 2:  return 0.0;
+        case 3:  return beat / 16.0;
+        case 4:  return beat / 8.0;
+        case 5:  return beat / 4.0;
+        case 6:  return beat / 2.0;
+        case 7:  return beat;
+        case 8:  return beat * (int) project.getProperty (ids::timeSigNumerator, 4);
+        case 9:  return beat / 6.0;
+        case 10: return beat / 3.0;
+        default: return gridSeconds();
+    }
+}
+
+std::vector<int> PianoRoll::stampIntervals() const
+{
+    const auto index = stampBox.getSelectedId() - 2;
+    if (juce::isPositiveAndBelow (index, (int) notetools::stamps().size()))
+        return notetools::stamps()[(size_t) index].intervals;
+    return { 0 };
+}
+
+juce::Array<juce::ValueTree> PianoRoll::addNotesAt (int pitch, double start, double length)
+{
+    juce::Array<juce::ValueTree> added;
+    for (const auto interval : stampIntervals())
+        if (const auto p = pitch + interval; p >= 0 && p <= 127)
+            added.add (model::addNote (region, p, start, length, 100, &undoManager));
+    return added;
+}
+
+void PianoRoll::moveSelection (double shift, int semitones)
+{
+    if (selection.isEmpty())
+        return;
+    undoManager.beginNewTransaction (semitones != 0 ? "Transpose notes" : "Move notes");
+    for (auto n : selection)
+        model::moveNote (n, juce::jmax (0.0, (double) n[ids::start] + shift), juce::jlimit (0, 127, (int) n[ids::pitch] + semitones), &undoManager);
+    if (semitones != 0)
+        previewNote (selection.getFirst()[ids::pitch]);
+}
+
+void PianoRoll::duplicateSelection()
+{
+    if (selection.isEmpty())
+        return;
+    // Right after the selection, in whole grid steps (FL's Ctrl+B)
+    double from = std::numeric_limits<double>::max(), to = 0.0;
+    for (const auto& n : selection)
+    {
+        from = juce::jmin (from, (double) n[ids::start]);
+        to = juce::jmax (to, (double) n[ids::start] + (double) n[ids::length]);
+    }
+    const auto step = juce::jmax (1.0e-3, snapSeconds() > 0.0 ? snapSeconds() : gridSeconds());
+    const auto shift = std::ceil ((to - from) / step - 1.0e-6) * step;
+    undoManager.beginNewTransaction ("Duplicate notes");
+    selection = notetools::duplicate (region, selection, shift, &undoManager);
+    // The region grows to hold them.
+    const double offset = region[ids::offset];
+    for (const auto& n : selection)
+        if ((double) n[ids::start] + (double) n[ids::length] > offset + (double) region[ids::length])
+            region.setProperty (ids::length, (double) n[ids::start] + (double) n[ids::length] - offset, &undoManager);
+    repaint();
+}
+
+void PianoRoll::showToolsMenu()
+{
+    if (! region.isValid())
+        return;
+    juce::PopupMenu menu;
+    menu.addSectionHeader (selection.isEmpty() ? "Tools (all notes)" : "Tools (selected notes)");
+    auto run = [this] (const juce::String& name, std::function<void (juce::Array<juce::ValueTree>)> f)
+    {
+        return [this, name, f]
+        {
+            undoManager.beginNewTransaction (name);
+            f (selectedOrAllNotes());
+            selection.clear();
+            repaint();
+        };
+    };
+    const auto step = juce::jmax (1.0e-3, quantizeGrid());
+    menu.addItem ("Quick Quantize (Q)", [this] { quantizeSelection(); });
+    menu.addItem ("Quick Legato", run ("Legato", [this] (auto notes) { model::transformNotes (notes, model::Transform::legato, &undoManager); }));
+    menu.addItem ("Quick Chop (at the quantize grid)", run ("Chop", [this, step] (auto notes) { notetools::chop (region, notes, step, &undoManager); }));
+    menu.addItem ("Glue", run ("Glue", [this] (auto notes) { notetools::glue (region, notes, &undoManager); }));
+    menu.addSeparator();
+    juce::PopupMenu strum;
+    for (const auto ms : { 10, 20, 35, 60 })
+    {
+        strum.addItem ("Up, " + juce::String (ms) + " ms", run ("Strum", [this, ms] (auto notes) { notetools::strum (notes, ms / 1000.0, false, &undoManager); }));
+        strum.addItem ("Down, " + juce::String (ms) + " ms", run ("Strum", [this, ms] (auto notes) { notetools::strum (notes, ms / 1000.0, true, &undoManager); }));
+    }
+    menu.addSubMenu ("Strum", strum);
+    juce::PopupMenu arp;
+    const char* patterns[] { "Up", "Down", "Up and Down" };
+    for (int p = 0; p < 3; ++p)
+        arp.addItem (juce::String (patterns[p]) + " (at the quantize grid)", run ("Arpeggiate", [this, p, step] (auto notes) { notetools::arpeggiate (region, notes, step, p, &undoManager); }));
+    menu.addSubMenu ("Arpeggiate", arp);
+    menu.addItem ("Flam", run ("Flam", [this] (auto notes) { notetools::flam (region, notes, 0.03, &undoManager); }));
+    menu.addSeparator();
+    juce::PopupMenu random;
+    random.addItem ("Gently (5 ms, 8 velocity)", run ("Randomize", [this] (auto notes) { notetools::randomize (notes, 0.005, 8, juce::Random::getSystemRandom().nextInt(), &undoManager); }));
+    random.addItem ("More (15 ms, 20 velocity)", run ("Randomize", [this] (auto notes) { notetools::randomize (notes, 0.015, 20, juce::Random::getSystemRandom().nextInt(), &undoManager); }));
+    random.addItem ("Velocity only (25)", run ("Randomize", [this] (auto notes) { notetools::randomize (notes, 0.0, 25, juce::Random::getSystemRandom().nextInt(), &undoManager); }));
+    menu.addSubMenu ("Randomize", random);
+    juce::PopupMenu levels;
+    for (const auto [name, pc, off] : { std::tuple { "Compress (50%)", 50.0, 0 }, std::tuple { "Expand (150%)", 150.0, 0 },
+                                        std::tuple { "Louder (+10)", 100.0, 10 }, std::tuple { "Softer (-10)", 100.0, -10 }, std::tuple { "Flatten (0%)", 0.0, 0 } })
+        levels.addItem (name, run ("Scale Levels", [this, pc = pc, off = off] (auto notes) { notetools::scaleVelocity (notes, pc, off, &undoManager); }));
+    menu.addSubMenu ("Scale Levels (velocity)", levels);
+    juce::PopupMenu limitMenu;
+    for (const auto [name, lo, hi] : { std::tuple { "C2 to C4", 36, 60 }, std::tuple { "C3 to C5", 48, 72 }, std::tuple { "C4 to C6", 60, 84 } })
+        limitMenu.addItem (name, run ("Limit", [this, lo = lo, hi = hi] (auto notes) { notetools::limit (notes, lo, hi, &undoManager); }));
+    menu.addSubMenu ("Limit (fold into a range)", limitMenu);
+    juce::PopupMenu clawMenu;
+    for (const auto [name, group, keep] : { std::tuple { "Keep 1 of every 2", 2, 1 }, std::tuple { "Keep 2 of every 3", 3, 2 }, std::tuple { "Keep 3 of every 4", 4, 3 } })
+        clawMenu.addItem (name, run ("Claw Machine", [this, group = group, keep = keep] (auto notes) { notetools::claw (notes, group, keep, &undoManager); }));
+    menu.addSubMenu ("Claw Machine (thin out)", clawMenu);
+    juce::PopupMenu art;
+    for (const auto pc : { 25, 50, 75, 100 })
+        art.addItem (juce::String (pc) + "% of the gap", run ("Articulate", [this, pc] (auto notes) { notetools::articulate (notes, pc, &undoManager); }));
+    menu.addSubMenu ("Articulate (note lengths)", art);
+    menu.addSeparator();
+    menu.addItem ("Mute", run ("Mute notes", [this] (auto notes) { notetools::setMuted (notes, true, &undoManager); }));
+    menu.addItem ("Unmute", run ("Unmute notes", [this] (auto notes) { notetools::setMuted (notes, false, &undoManager); }));
+    menu.addItem ("Flip Horizontally (reverse)", run ("Flip", [this] (auto notes) { model::transformNotes (notes, model::Transform::reverse, &undoManager); }));
+    menu.addItem ("Flip Vertically (invert)", run ("Flip", [this] (auto notes) { model::transformNotes (notes, model::Transform::invertPitch, &undoManager); }));
+    menu.addItem ("Duplicate (Cmd+D)", [this] { duplicateSelection(); });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&toolsButton));
 }
 
 int PianoRoll::laneController() const
@@ -156,7 +355,7 @@ void PianoRoll::setRegion (juce::ValueTree newRegion)
         high = juce::jmax (high, (int) note[ids::pitch]);
     }
     const auto centre = low <= high ? (low + high) / 2 : 60;
-    const auto visible = juce::jmax (100, getHeight() - headerHeight);
+    const auto visible = juce::jmax (100, getHeight() - headerHeight - toolbarHeight - laneHeight - laneGap);
     scrollY = juce::jlimit (0, juce::jmax (0, 128 * rowHeight - visible), (127 - centre) * rowHeight - visible / 2);
 
     repaint();
@@ -184,7 +383,7 @@ void PianoRoll::valueTreeParentChanged (juce::ValueTree& tree)
 //==============================================================================
 juce::Rectangle<int> PianoRoll::gridArea() const
 {
-    return getLocalBounds().withTrimmedTop (headerHeight).withTrimmedLeft (keyboardWidth).withTrimmedBottom (laneHeight + laneGap);
+    return getLocalBounds().withTrimmedTop (headerHeight + toolbarHeight).withTrimmedLeft (keyboardWidth).withTrimmedBottom (laneHeight + laneGap);
 }
 
 juce::Rectangle<int> PianoRoll::laneArea() const
@@ -303,6 +502,24 @@ void PianoRoll::resized()
     viewBox.setBounds (header.removeFromLeft (110));
     header.removeFromLeft (8);
     titleLabel.setBounds (header);
+
+    // The toolbar row
+    auto bar = getLocalBounds().withTrimmedTop (headerHeight).removeFromTop (toolbarHeight).reduced (8, 3);
+    for (auto& b : toolButtons)
+    {
+        b.setBounds (bar.removeFromLeft (58));
+        bar.removeFromLeft (2);
+    }
+    bar.removeFromLeft (10);
+    stampBox.setBounds (bar.removeFromLeft (120));
+    bar.removeFromLeft (6);
+    snapBox.setBounds (bar.removeFromLeft (118));
+    bar.removeFromLeft (10);
+    scaleHighlightButton.setBounds (bar.removeFromLeft (58));
+    bar.removeFromLeft (4);
+    ghostButton.setBounds (bar.removeFromLeft (64));
+    bar.removeFromLeft (10);
+    toolsButton.setBounds (bar.removeFromLeft (60));
     score.setBounds (getLocalBounds().withTrimmedTop (headerHeight));
     stepEditor.setBounds (getLocalBounds().withTrimmedTop (headerHeight));
     playerEditor.setBounds (getLocalBounds().withTrimmedTop (headerHeight));
@@ -317,6 +534,13 @@ void PianoRoll::paint (juce::Graphics& g)
     g.setColour (theme::outline);
     g.fillRect (0, 0, getWidth(), 1);
     g.fillRect (0, headerHeight - 1, getWidth(), 1);
+    if (viewBox.getSelectedId() == 1)
+    {
+        g.setColour (theme::toolbarDark);
+        g.fillRect (0, headerHeight, getWidth(), toolbarHeight);
+        g.setColour (theme::outline);
+        g.fillRect (0, headerHeight + toolbarHeight - 1, getWidth(), 1);
+    }
 
     if (! region.isValid())
         return;
@@ -336,7 +560,17 @@ void PianoRoll::paint (juce::Graphics& g)
             if (y > area.getBottom() || y + rowHeight < area.getY())
                 continue;
 
-            g.setColour (isBlackKey (p) ? theme::rollBlack : theme::rollWhite);
+            auto rowColour = isBlackKey (p) ? theme::rollBlack : theme::rollWhite;
+            if (scaleHighlightButton.getToggleState())
+            {
+                // Scale highlighting: the key's notes lit, the rest darker, the root marked
+                const auto [root, minor] = model::keyAt (project, region[ids::start]);
+                const bool inKey = model::isInScale (p, root, minor);
+                rowColour = inKey ? theme::rollWhite.brighter (0.08f) : theme::rollBlack.darker (0.25f);
+                if (((p - root) % 12 + 12) % 12 == 0)
+                    rowColour = rowColour.interpolatedWith (theme::accent, 0.18f);
+            }
+            g.setColour (rowColour);
             g.fillRect (area.getX(), y, area.getWidth(), rowHeight);
 
             if (p % 12 == 0)
@@ -373,16 +607,35 @@ void PianoRoll::paint (juce::Graphics& g)
         g.fillRect (juce::Rectangle<float> ((float) area.getX(), (float) area.getY(), w0 - (float) area.getX(), (float) area.getHeight()));
         g.fillRect (juce::Rectangle<float> (w1, (float) area.getY(), (float) area.getRight() - w1, (float) area.getHeight()));
 
-        // Notes, brighter for higher velocity.
+        if (ghostButton.getToggleState())
+            paintGhosts (g, area);
+
+        // Notes, brighter for higher velocity, with their names (FL Studio style); muted ones greyed.
+        g.setFont (juce::FontOptions (juce::jlimit (8.0f, 12.0f, (float) rowHeight - 3.0f)));
         for (const auto& note : region)
         {
             if (! note.hasType (ids::NOTE))
                 continue;
 
             const auto r = noteBounds (note);
+            if (! r.intersects (area.toFloat()))
+                continue;
             const auto vel = (float) (int) note[ids::velocity] / 127.0f;
-            g.setColour (colour.withMultipliedBrightness (0.55f + 0.6f * vel));
+            const bool muted = notetools::isMuted (note);
+            const auto fill = muted ? theme::dimText.withAlpha (0.35f) : colour.withMultipliedBrightness (0.55f + 0.6f * vel);
+            g.setColour (fill);
             g.fillRoundedRectangle (r, 2.0f);
+            if (! muted && r.getWidth() > 10.0f)
+            {
+                // the velocity as a bar along the note's bottom
+                g.setColour (juce::Colours::black.withAlpha (0.25f));
+                g.fillRect (r.getX() + 1.0f, r.getBottom() - 2.5f, (r.getWidth() - 2.0f) * vel, 1.5f);
+            }
+            if (rowHeight >= 10 && r.getWidth() > 24.0f)
+            {
+                g.setColour ((fill.getPerceivedBrightness() > 0.6f ? juce::Colours::black : juce::Colours::white).withAlpha (muted ? 0.4f : 0.8f));
+                g.drawText (juce::MidiMessage::getMidiNoteName (note[ids::pitch], true, true, 3), r.reduced (3.0f, 0.0f), juce::Justification::centredLeft, false);
+            }
 
             if (isSelected (note))
             {
@@ -462,7 +715,7 @@ void PianoRoll::mouseDown (const juce::MouseEvent& e)
     drag = Drag::none;
     originals.clear();
 
-    if (! region.isValid() || e.y < headerHeight)
+    if (! region.isValid() || e.y < headerHeight + toolbarHeight)
         return;
 
     if (laneArea().contains (e.getPosition()))
@@ -500,7 +753,43 @@ void PianoRoll::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    // FL Studio: right-click deletes (and right-drag deletes what it passes), whatever the tool.
+    if (e.mods.isPopupMenu() || tool == Tool::erase)
+    {
+        undoManager.beginNewTransaction ("Delete notes");
+        drag = Drag::erase;
+        eraseAt (e.position);
+        return;
+    }
+    if (tool == Tool::mute)
+    {
+        undoManager.beginNewTransaction ("Mute notes");
+        drag = Drag::muting;
+        const auto under = noteAt (e.position);
+        muteTo = under.isValid() ? ! notetools::isMuted (under) : true;
+        if (under.isValid())
+            notetools::setMuted ({ under }, muteTo, &undoManager);
+        return;
+    }
+    if (tool == Tool::slice || tool == Tool::zoom)
+    {
+        drag = tool == Tool::slice ? Drag::slice : Drag::zoom;
+        rubberBand = {};
+        return;
+    }
+    if (tool == Tool::paint)
+    {
+        undoManager.beginNewTransaction ("Paint notes");
+        drag = Drag::paint;
+        lastPaintStart = -1.0;
+        lastPaintPitch = -1;
+        paintAt (e.position);
+        return;
+    }
+
     auto note = noteAt (e.position);
+    if (note.isValid())
+        lastLength = note[ids::length];   // (FL: touching a note sets the pencil's length)
 
     if (note.isValid())
     {
@@ -527,9 +816,9 @@ void PianoRoll::mouseDown (const juce::MouseEvent& e)
         lastPreviewPitch = dragStartPitch;
         previewNote (dragStartPitch);
     }
-    else if (e.mods.isShiftDown() || e.mods.isAltDown())
+    else if (e.mods.isShiftDown() || e.mods.isAltDown() || tool == Tool::select)
     {
-        // Shift or Option-drag over empty space: select the notes in a rectangle.
+        // Shift or Option-drag over empty space (or the Select tool): select the notes in a rectangle.
         if (! e.mods.isShiftDown())
             selection.clear();
         drag = Drag::rubberBand;
@@ -539,16 +828,18 @@ void PianoRoll::mouseDown (const juce::MouseEvent& e)
     }
     else
     {
-        // Pencil: a new note at the grid line before the mouse, one grid step long.
-        const auto grid = gridSeconds();
+        // Pencil: a new note (or the stamp's chord) at the grid line before the mouse, as long as the last one.
+        const auto grid = snapSeconds() > 0.0 ? snapSeconds() : gridSeconds();
         auto start = snapContent (xToContent ((float) e.x));
         if (start > xToContent ((float) e.x))
             start = juce::jmax (0.0, start - grid);
 
         const auto pitch = yToPitch (e.y);
         undoManager.beginNewTransaction ("Add note");
-        note = model::addNote (region, pitch, start, grid, 100, &undoManager);
-        selection = { note };
+        selection = addNotesAt (pitch, start, lastLength > 0.0 ? lastLength : grid);
+        if (selection.isEmpty())
+            return;
+        note = selection.getFirst();
         drag = Drag::resize;
         dragStartPitch = pitch;
         previewNote (pitch);
@@ -582,6 +873,39 @@ void PianoRoll::mouseDrag (const juce::MouseEvent& e)
     if (drag == Drag::velocity || drag == Drag::controller)
     {
         laneMouse (e, false);
+        return;
+    }
+
+    if (drag == Drag::erase)
+    {
+        eraseAt (e.position);
+        return;
+    }
+    if (drag == Drag::muting)
+    {
+        if (const auto under = noteAt (e.position); under.isValid() && notetools::isMuted (under) != muteTo)
+            notetools::setMuted ({ under }, muteTo, &undoManager);
+        repaint();
+        return;
+    }
+    if (drag == Drag::paint)
+    {
+        paintAt (e.position);
+        return;
+    }
+    if (drag == Drag::slice)
+    {
+        rubberBand = juce::Rectangle<float> (e.mouseDownPosition.x - 0.5f, juce::jmin (e.mouseDownPosition.y, e.position.y), 1.5f,
+                                             std::abs (e.position.y - e.mouseDownPosition.y) + 1.0f);
+        repaint();
+        return;
+    }
+    if (drag == Drag::zoom)
+    {
+        const auto area = gridArea().toFloat();
+        rubberBand = juce::Rectangle<float> (juce::jmin (e.mouseDownPosition.x, e.position.x), area.getY(),
+                                             std::abs (e.position.x - e.mouseDownPosition.x), area.getHeight());
+        repaint();
         return;
     }
 
@@ -643,8 +967,41 @@ void PianoRoll::mouseDrag (const juce::MouseEvent& e)
     }
 }
 
-void PianoRoll::mouseUp (const juce::MouseEvent&)
+void PianoRoll::mouseUp (const juce::MouseEvent& e)
 {
+    if (drag == Drag::slice)
+    {
+        // Cut the notes the line crossed, where it started
+        const auto at = snapContent (xToContent (e.mouseDownPosition.x));
+        const auto p0 = yToPitch ((int) e.mouseDownPosition.y), p1 = yToPitch (e.y);
+        juce::Array<juce::ValueTree> crossed;
+        for (const auto& n : region)
+            if (n.hasType (ids::NOTE) && (int) n[ids::pitch] >= juce::jmin (p0, p1) && (int) n[ids::pitch] <= juce::jmax (p0, p1))
+                crossed.add (n);
+        undoManager.beginNewTransaction ("Slice notes");
+        notetools::slice (region, crossed, at, &undoManager);
+    }
+    else if (drag == Drag::zoom)
+    {
+        const auto area = gridArea();
+        if (e.getDistanceFromDragStart() > 6)
+        {
+            // Fill the view with the stretch dragged across
+            const auto from = xToContent (juce::jmin (e.mouseDownPosition.x, e.position.x));
+            const auto to = xToContent (juce::jmax (e.mouseDownPosition.x, e.position.x));
+            pixelsPerSecond = juce::jlimit (10.0, 4000.0, (double) area.getWidth() / juce::jmax (1.0e-3, to - from));
+            scrollContent = juce::jmax (0.0, from);
+        }
+        else
+        {
+            const auto anchor = xToContent ((float) e.x);
+            pixelsPerSecond = juce::jlimit (10.0, 4000.0, pixelsPerSecond * (e.mods.isAltDown() ? 1.0 / 1.6 : 1.6));
+            scrollContent = juce::jmax (0.0, anchor - (e.x - area.getX()) / pixelsPerSecond);
+        }
+    }
+    else if (drag == Drag::resize && ! originals.empty())
+        lastLength = originals.front().note[ids::length];   // (the pencil draws the next note this long)
+
     if (drag == Drag::keyboard)
     {
         engine.sendLiveMidi (juce::MidiMessage::noteOff (1, keyboardNote));
@@ -668,7 +1025,15 @@ void PianoRoll::mouseMove (const juce::MouseEvent& e)
 
 void PianoRoll::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
 {
-    if (e.mods.isCommandDown() || e.mods.isCtrlDown())
+    if (e.mods.isAltDown())
+    {
+        // Option-wheel: the rows taller or shorter (vertical zoom), keeping the row under the mouse in place
+        const auto pitch = yToPitch (e.y);
+        rowHeight = juce::jlimit (6, 32, rowHeight + (wheel.deltaY > 0 ? 1 : -1) * juce::jmax (1, rowHeight / 6));
+        const auto maxScroll = juce::jmax (0, 128 * rowHeight - gridArea().getHeight());
+        scrollY = juce::jlimit (0, maxScroll, (127 - pitch) * rowHeight - (e.y - gridArea().getY()));
+    }
+    else if (e.mods.isCommandDown() || e.mods.isCtrlDown())
     {
         const auto anchor = xToContent ((float) e.x);
         pixelsPerSecond = juce::jlimit (10.0, 4000.0, pixelsPerSecond * std::exp (wheel.deltaY * 2.0));
@@ -690,6 +1055,58 @@ void PianoRoll::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWhee
 
 bool PianoRoll::keyPressed (const juce::KeyPress& key)
 {
+    // FL Studio's tool keys
+    if (! key.getModifiers().isAnyModifierKeyDown())
+    {
+        const auto c = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
+        const std::pair<juce::juce_wchar, Tool> keys[] { { 'p', Tool::draw }, { 'b', Tool::paint }, { 'd', Tool::erase }, { 't', Tool::mute },
+                                                         { 'c', Tool::slice }, { 'e', Tool::select }, { 'z', Tool::zoom } };
+        for (const auto& [ch, t] : keys)
+            if (c == ch)
+            {
+                setTool (t);
+                return true;
+            }
+    }
+
+    // Arrows: transpose (Shift: an octave), or move by the grid
+    const auto step = snapSeconds() > 0.0 ? snapSeconds() : gridSeconds();
+    const auto octave = key.getModifiers().isShiftDown() ? 12 : 1;
+    if (key.isKeyCode (juce::KeyPress::upKey) && ! selection.isEmpty())    { moveSelection (0.0, octave); return true; }
+    if (key.isKeyCode (juce::KeyPress::downKey) && ! selection.isEmpty())  { moveSelection (0.0, -octave); return true; }
+    if (key.isKeyCode (juce::KeyPress::rightKey) && ! selection.isEmpty()) { moveSelection (step, 0); return true; }
+    if (key.isKeyCode (juce::KeyPress::leftKey) && ! selection.isEmpty())  { moveSelection (-step, 0); return true; }
+
+    // Duplicate (Cmd+D, or FL's Ctrl+B), copy, cut and paste
+    if (key == juce::KeyPress ('d', juce::ModifierKeys::commandModifier, 0) || key == juce::KeyPress ('b', juce::ModifierKeys::ctrlModifier, 0))
+    {
+        duplicateSelection();
+        return true;
+    }
+    static juce::Array<juce::ValueTree> clipboard;
+    if ((key == juce::KeyPress ('c', juce::ModifierKeys::commandModifier, 0) || key == juce::KeyPress ('x', juce::ModifierKeys::commandModifier, 0))
+        && ! selection.isEmpty())
+    {
+        clipboard.clear();
+        for (const auto& n : selection)
+            clipboard.add (n.createCopy());
+        if (key.getKeyCode() == 'x' || key.getKeyCode() == 'X')
+            deleteSelection();
+        return true;
+    }
+    if (key == juce::KeyPress ('v', juce::ModifierKeys::commandModifier, 0) && ! clipboard.isEmpty() && region.isValid())
+    {
+        // At the playhead (inside the region), or right after the region's notes
+        double first = std::numeric_limits<double>::max();
+        for (const auto& n : clipboard)
+            first = juce::jmin (first, (double) n[ids::start]);
+        const auto at = snapContent (engine.getPlayheadSeconds() - (double) region[ids::start] + (double) region[ids::offset]);
+        undoManager.beginNewTransaction ("Paste notes");
+        selection = notetools::duplicate (region, clipboard, juce::jmax (0.0, at) - first, &undoManager);
+        repaint();
+        return true;
+    }
+
     if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey)
     {
         deleteSelection();
@@ -754,8 +1171,11 @@ void PianoRoll::showView (int id)
     score.setVisible (id == 2);
     stepEditor.setVisible (id == 3);
     playerEditor.setVisible (id == 4);
-    for (auto* c : std::initializer_list<juce::Component*> { &laneBox, &stepButton, &restButton })
+    for (auto* c : std::initializer_list<juce::Component*> { &laneBox, &stepButton, &restButton, &stampBox, &snapBox,
+                                                             &scaleHighlightButton, &ghostButton, &toolsButton })
         c->setVisible (id == 1);
+    for (auto& b : toolButtons)
+        b.setVisible (id == 1);
     resized();
     repaint();
 }
@@ -966,6 +1386,80 @@ void PianoRoll::laneMouse (const juce::MouseEvent& e, bool down)
         lastLaneX = (float) e.x;
     }
     repaint();
+}
+
+void PianoRoll::eraseAt (juce::Point<float> p)
+{
+    if (auto under = noteAt (p); under.isValid())
+    {
+        selection.removeAllInstancesOf (under);
+        model::deleteNote (under, &undoManager);
+        repaint();
+    }
+}
+
+void PianoRoll::paintAt (juce::Point<float> p)
+{
+    // Notes along the grid as the mouse passes (the stamp's chord each time), as long as the last note drawn
+    const auto grid = snapSeconds() > 0.0 ? snapSeconds() : gridSeconds();
+    const auto length = lastLength > 0.0 ? lastLength : grid;
+    auto start = snapContent (xToContent (p.x), grid);
+    if (start > xToContent (p.x))
+        start = juce::jmax (0.0, start - grid);
+    const auto pitch = yToPitch ((int) p.y);
+    if (std::abs (start - lastPaintStart) < 1.0e-6 && pitch == lastPaintPitch)
+        return;
+    // Not on top of a note that's already there
+    for (const auto& n : region)
+        if (n.hasType (ids::NOTE) && (int) n[ids::pitch] == pitch && std::abs ((double) n[ids::start] - start) < 1.0e-4)
+            return;
+    // Painting on: a note every `length` (not a note in each grid cell under a long one)
+    if (lastPaintStart >= 0.0 && pitch == lastPaintPitch && start > lastPaintStart && start < lastPaintStart + length - 1.0e-6)
+        return;
+    lastPaintStart = start;
+    lastPaintPitch = pitch;
+    selection = addNotesAt (pitch, start, length);
+    if (lastPaintStart == start)
+        previewNote (pitch);
+    repaint();
+}
+
+void PianoRoll::paintGhosts (juce::Graphics& g, juce::Rectangle<int> area)
+{
+    // The other MIDI regions playing at the same time (this track's others, and the other tracks'), faint
+    const auto project = region.getParent().getParent();
+    const double regionStart = region[ids::start], offset = region[ids::offset];
+    const auto viewFrom = regionStart + xToContent ((float) area.getX()) - offset;
+    const auto viewTo = regionStart + xToContent ((float) area.getRight()) - offset;
+    for (const auto& track : project)
+    {
+        if (! track.hasType (ids::TRACK))
+            continue;
+        const auto ghostColour = model::trackColour (track).withAlpha (0.28f);
+        for (const auto& other : track)
+        {
+            if (other == region || ! model::isMidiRegion (other))
+                continue;
+            const double otherStart = other[ids::start], otherOffset = other[ids::offset], otherLength = other[ids::length];
+            if (otherStart > viewTo || otherStart + otherLength < viewFrom)
+                continue;
+            g.setColour (ghostColour);
+            for (const auto& n : other)
+            {
+                if (! n.hasType (ids::NOTE))
+                    continue;
+                const double nStart = n[ids::start];
+                if (nStart < otherOffset || nStart >= otherOffset + otherLength)
+                    continue;
+                const auto songTime = otherStart + nStart - otherOffset;            // where it plays
+                const auto c = songTime - regionStart + offset;                      // in this region's content time
+                const auto x0 = contentToX (c), x1 = contentToX (c + (double) n[ids::length]);
+                if (x1 < (float) area.getX() || x0 > (float) area.getRight())
+                    continue;
+                g.fillRoundedRectangle (juce::Rectangle<float> (x0, (float) pitchToY (n[ids::pitch]) + 2.0f, juce::jmax (2.0f, x1 - x0), (float) rowHeight - 4.0f), 2.0f);
+            }
+        }
+    }
 }
 
 } // namespace riff

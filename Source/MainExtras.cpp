@@ -1,5 +1,6 @@
 // Undo History, Settings, templates, project alternatives, Autopunch and the Event List.
 #include "MainComponent.h"
+#include "engine/AudioEdit.h"
 #include "ui/MultiMeter.h"
 #include "ui/RoutingMenu.h"
 #include "ui/Commands.h"
@@ -1475,6 +1476,157 @@ void MainComponent::previewAudioSuite()
     }
     engine.previewFile (temp);
     audioSuitePanel->setStatus ("Previewing " + region[ids::name].toString() + "...");
+}
+
+//==============================================================================
+// BPM detector and tap tempo
+//==============================================================================
+void MainComponent::detectTempo (juce::ValueTree region)
+{
+    if (! region.isValid() || model::isMidiRegion (region))
+    {
+        statusLabel.setText ("Select an audio region to detect its tempo", juce::dontSendNotification);
+        return;
+    }
+    statusLabel.setText ("Detecting the tempo...", juce::dontSendNotification);
+    const juce::File file (region[ids::file].toString());
+    const double offset = region[ids::offset], length = region[ids::length];
+    auto& formats = engine.getFormatManager();
+
+    // Listening takes a moment on a long file: in the background.
+    juce::Thread::launch ([safe = juce::Component::SafePointer<MainComponent> (this), &formats, file, offset, length, region]
+    {
+        double rate = 48000.0;
+        const auto audio = audioedit::readRegion (formats, file, offset, length, rate);
+        const auto bpm = audio.getNumSamples() > 1 ? audioedit::detectTempo (audio, rate) : 0.0;
+        juce::MessageManager::callAsync ([safe, bpm, region]
+        {
+            if (safe == nullptr)
+                return;
+            auto* self = safe.getComponent();
+            if (bpm <= 0.0)
+            {
+                self->statusLabel.setText ("No clear beat in that region", juce::dontSendNotification);
+                self->showError ("Detect Tempo", "There's no clear beat in \"" + region[ids::name].toString() + "\".");
+                return;
+            }
+            self->statusLabel.setText ("\"" + region[ids::name].toString() + "\": about " + juce::String (bpm, 1) + " BPM", juce::dontSendNotification);
+            juce::PopupMenu menu;
+            menu.addSectionHeader (region[ids::name].toString() + ": about " + juce::String (bpm, 1) + " BPM");
+            for (const auto value : { bpm, bpm * 0.5, bpm * 2.0 })
+                if (value >= 40.0 && value <= 300.0)
+                    menu.addItem ("Set the Project Tempo to " + juce::String (value, 1) + " BPM" + (value == bpm ? juce::String() : value < bpm ? "  (half)" : "  (double)"),
+                                  [safe, value]
+                    {
+                        if (safe == nullptr)
+                            return;
+                        safe->undoManager.beginNewTransaction ("Tempo from region");
+                        model::setTempo (safe->project, value, &safe->undoManager);
+                        safe->refreshProjectControls();
+                    });
+            menu.addSeparator();
+            menu.addItem ("Close", [] {});
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&self->tempoLabel));
+        });
+    });
+}
+
+namespace
+{
+    /** Tap Tempo: tap the key (or the space bar while it has focus) on the beat; the tempo is the average of the last taps. */
+    class TapTempoPanel final : public juce::Component
+    {
+    public:
+        explicit TapTempoPanel (std::function<void (double)> use) : onUse (std::move (use))
+        {
+            tap.setButtonText ("TAP");
+            tap.onClick = [this] { tapped(); };
+            addAndMakeVisible (tap);
+            useButton.onClick = [this] { if (bpm > 0.0 && onUse) onUse (std::round (bpm * 10.0) / 10.0); };
+            addAndMakeVisible (useButton);
+            setWantsKeyboardFocus (true);
+            setSize (300, 190);
+        }
+        bool keyPressed (const juce::KeyPress&) override { tapped(); return true; }
+        void paint (juce::Graphics& g) override
+        {
+            g.fillAll (theme::panel);
+            g.setColour (theme::lcd);
+            g.fillRoundedRectangle (getLocalBounds().removeFromTop (60).reduced (12, 8).toFloat(), 5.0f);
+            g.setColour (theme::lcdText);
+            g.setFont (juce::FontOptions (30.0f));
+            g.drawText (bpm > 0.0 ? juce::String (bpm, 1) + " BPM" : juce::String ("Tap on the beat"), getLocalBounds().removeFromTop (60), juce::Justification::centred);
+        }
+        void resized() override
+        {
+            auto r = getLocalBounds().withTrimmedTop (64).reduced (12, 6);
+            useButton.setBounds (r.removeFromBottom (30));
+            r.removeFromBottom (8);
+            tap.setBounds (r);
+        }
+
+    private:
+        void tapped()
+        {
+            const auto now = juce::Time::getMillisecondCounterHiRes();
+            if (! taps.empty() && now - taps.back() > 2000.0)
+                taps.clear();   // a pause starts again
+            taps.push_back (now);
+            if (taps.size() > 8)
+                taps.erase (taps.begin());
+            if (taps.size() >= 2)
+                bpm = 60000.0 * (double) (taps.size() - 1) / (taps.back() - taps.front());
+            useButton.setButtonText (bpm > 0.0 ? "Use " + juce::String (bpm, 1) + " BPM" : juce::String ("Use"));
+            repaint();
+        }
+        std::vector<double> taps;
+        double bpm = 0.0;
+        juce::TextButton tap, useButton { "Use" };
+        std::function<void (double)> onUse;
+    };
+}
+
+void MainComponent::showTapTempo()
+{
+    const juce::String id ("taptempo");
+    if (auto it = editorWindows.find (id); it != editorWindows.end())
+    {
+        it->second->toFront (true);
+        return;
+    }
+    auto closer = [this, id]
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this), id]
+        {
+            if (safe != nullptr)
+                safe->editorWindows.erase (id);
+        });
+    };
+    auto* panel = new TapTempoPanel ([this] (double bpm)
+    {
+        undoManager.beginNewTransaction ("Tap Tempo");
+        model::setTempo (project, bpm, &undoManager);
+        refreshProjectControls();
+    });
+    editorWindows[id] = std::make_unique<EditorWindow> ("Tap Tempo", panel, false, closer);
+    panel->grabKeyboardFocus();
+}
+
+void MainComponent::showTempoMenu()
+{
+    juce::PopupMenu menu;
+    const auto selected = timeline.selectedRegionTrees();
+    juce::ValueTree audioRegion;
+    for (const auto& r : selected)
+        if (! model::isMidiRegion (r))
+            audioRegion = r;
+    menu.addItem ("Detect Tempo from the Selected Region", audioRegion.isValid(), false, [this, audioRegion] { detectTempo (audioRegion); });
+    menu.addItem ("Tap Tempo...", [this] { showTapTempo(); });
+    menu.addSeparator();
+    const auto bpm = model::secondsPerBeat (project) > 0.0 ? 60.0 / model::secondsPerBeat (project) : 120.0;
+    menu.addItem ("Halve (" + juce::String (bpm * 0.5, 1) + ")", [this, bpm] { undoManager.beginNewTransaction ("Tempo"); model::setTempo (project, bpm * 0.5, &undoManager); refreshProjectControls(); });
+    menu.addItem ("Double (" + juce::String (bpm * 2.0, 1) + ")", [this, bpm] { undoManager.beginNewTransaction ("Tempo"); model::setTempo (project, bpm * 2.0, &undoManager); refreshProjectControls(); });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&tempoLabel));
 }
 
 } // namespace riff

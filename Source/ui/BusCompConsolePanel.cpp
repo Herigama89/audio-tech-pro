@@ -290,9 +290,17 @@ float BusCompConsolePanel::gainReduction()
         if (in > 1.0e-4f && out > 1.0e-6f)
         {
             const auto diff = juce::Decibels::gainToDecibels (in) - juce::Decibels::gainToDecibels (out);
-            restingDiff = haveRestingDiff ? juce::jmin (diff, restingDiff + 0.03f) : diff;   // (creeps back up slowly)
-            haveRestingDiff = true;
-            measured = juce::jlimit (0.0f, 20.0f, diff - restingDiff);
+            if (auto* m = parameterFor (Control::makeup))
+            {
+                // Its make-up knob says how much it adds back: what's left is the reduction.
+                measured = juce::jlimit (0.0f, 20.0f, diff + console::numberIn (m->getCurrentValueAsText()));
+            }
+            else
+            {
+                restingDiff = haveRestingDiff ? juce::jmin (diff, restingDiff + 0.005f) : diff;   // (creeps back up slowly)
+                haveRestingDiff = true;
+                measured = juce::jlimit (0.0f, 20.0f, diff - restingDiff);
+            }
         }
     }
 
@@ -341,7 +349,7 @@ void BusCompConsolePanel::update()
     const auto target = previewing ? (previewIn ? reductionDb : 0.0f)
                                    : (insert.isValid() && ! (bool) insert[ids::bypass] ? gainReduction() : 0.0f);
     reductionDb = target;
-    needleDb += (target - needleDb) * (target > needleDb ? 0.45f : 0.15f);
+    needleDb += (target - needleDb) * (target > needleDb ? 0.3f : 0.12f);   // (a VU's ballistics, as the plugins' own meters)
 
     auto dirty = fromImage (meterFace).getUnion (fromImage ({ 260.0f, 600.0f, 110.0f, 370.0f }))
                                       .getUnion (fromImage (juce::Rectangle<float> (60.0f, 60.0f).withCentre (inLamp)))

@@ -9,7 +9,13 @@ namespace riff
 {
 
 /**
-    Note editor for one MIDI region, shown in the bottom pane.
+    Note editor for one MIDI region, shown in the bottom pane, with FL Studio's tools:
+    Draw (P), Paint (B), Delete (D), Mute (T), Slice (C), Select (E) and Zoom (Z); right-click
+    or right-drag deletes notes with any tool; chord Stamps; Snap; scale highlighting; ghost
+    notes from the other regions; and the Tools menu (Chop, Glue, Strum, Arpeggiate, Flam,
+    Randomize, Scale Levels, Limit, Claw Machine, Articulate, Legato, Quantize...).
+    Arrows move the selection (Up/Down a semitone, Shift an octave; Left/Right a grid step),
+    Cmd+D (or Ctrl+B) duplicates it, Cmd+C / Cmd+V copy and paste, Option-wheel zooms the rows.
 
     Click empty space to add a note (drag to set its length), drag a note to
     move it, drag its right edge to resize, Delete removes the selection,
@@ -48,7 +54,27 @@ public:
     void stepInput (const juce::MidiMessage& message);
 
 private:
-    enum class Drag { none, move, resize, keyboard, rubberBand, velocity, controller, timeHandle };
+    enum class Drag { none, move, resize, keyboard, rubberBand, velocity, controller, timeHandle, paint, erase, muting, slice, zoom };
+    enum class Tool { draw, paint, erase, mute, slice, select, zoom };
+    Tool tool = Tool::draw;
+    void setTool (Tool t);
+    juce::TextButton toolButtons[7];
+    juce::ComboBox stampBox, snapBox;
+    juce::TextButton scaleHighlightButton { "Scale" }, ghostButton { "Ghosts" }, toolsButton { "Tools" };
+    void showToolsMenu();
+    double lastLength = 0.0;            // FL's pencil: new notes as long as the last one you drew or touched
+    bool muteTo = true;                 // the Mute tool's drag: muting or unmuting
+    std::vector<int> stampIntervals() const;
+    double snapSeconds() const;         // the Snap setting (0: off)
+    juce::Array<juce::ValueTree> addNotesAt (int pitch, double start, double length);   // with the stamp, if any
+    void paintGhosts (juce::Graphics& g, juce::Rectangle<int> area);
+    void moveSelection (double shift, int semitones);
+    void duplicateSelection();
+    static constexpr int toolbarHeight = 30;
+    void eraseAt (juce::Point<float> p);
+    void paintAt (juce::Point<float> p);
+    double lastPaintStart = -1.0;
+    int lastPaintPitch = -1;
 
     /** Time Handles: with several notes selected, a bar over them whose right end stretches their timing. */
     juce::Rectangle<float> timeHandleBar() const;
@@ -58,7 +84,7 @@ private:
     static constexpr int laneHeight = 84;
     static constexpr int laneGap = 4;
     static constexpr int keyboardWidth = 56;
-    static constexpr int rowHeight = 12;
+    int rowHeight = 12;   // (Option-wheel zooms the rows)
 
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { repaint(); }
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override             { repaint(); }
@@ -87,7 +113,7 @@ private:
     int yToPitch (int y) const;
     int pitchToY (int pitch) const;
     double gridSeconds() const;
-    double snapContent (double c) const { return snapContent (c, gridSeconds()); }
+    double snapContent (double c) const { return snapContent (c, snapSeconds()); }
     double snapContent (double c, double grid) const;
     juce::Rectangle<float> noteBounds (const juce::ValueTree& note) const;
     juce::ValueTree noteAt (juce::Point<float> p) const;
