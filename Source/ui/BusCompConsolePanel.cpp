@@ -248,6 +248,12 @@ void BusCompConsolePanel::toggleIn()
 void BusCompConsolePanel::refresh()
 {
     auto* p = plugin();
+    if (p != lastPlugin)
+    {
+        // Another plugin: learn its meter and make-up again.
+        lastPlugin = p;
+        haveRestingDiff = meterSeen = meterMoves = false;
+    }
 
     for (size_t i = 0; i < numKnobs; ++i)
     {
@@ -275,29 +281,46 @@ float BusCompConsolePanel::gainReduction()
     if (p == nullptr)
         return 0.0f;
 
-    // The plugin's own meter, when it publishes one.
+    // From the levels in and out: the difference, less the make-up gain. The make-up is learnt
+    // from the quietest difference lately (when it isn't compressing, the difference is just the
+    // make-up), so it works whatever the plugin calls its output knob.
+    float measured = 0.0f;
+    {
+        const auto [in, out] = engine.takeBusPluginLevels();
+        if (in > 1.0e-4f && out > 1.0e-6f)
+        {
+            const auto diff = juce::Decibels::gainToDecibels (in) - juce::Decibels::gainToDecibels (out);
+            restingDiff = haveRestingDiff ? juce::jmin (diff, restingDiff + 0.03f) : diff;   // (creeps back up slowly)
+            haveRestingDiff = true;
+            measured = juce::jlimit (0.0f, 20.0f, diff - restingDiff);
+        }
+    }
+
+    // The plugin's own meter, when it publishes one and it moves (some publish one that never does).
+    juce::AudioProcessorParameter* meter = nullptr;
     const auto& params = p->getParameters();
     juce::StringArray names;
     for (auto* param : params)
     {
         if (param->getCategory() == juce::AudioProcessorParameter::compressorLimiterGainReductionMeter)
-            return std::abs (console::numberIn (param->getCurrentValueAsText()));
+            meter = param;
         names.add (param->getName (64));
     }
+    if (meter == nullptr)
+        if (const auto index = console::findGainReductionMeter (names); index >= 0)
+            meter = params[index];
 
-    if (const auto meter = console::findGainReductionMeter (names); meter >= 0)
-        return std::abs (console::numberIn (params[meter]->getCurrentValueAsText()));
-
-    // Otherwise, from the levels in and out, allowing for the make-up gain.
-    const auto [in, out] = engine.takeBusPluginLevels();
-    if (in < 1.0e-4f)
-        return 0.0f;
-
-    float makeup = 0.0f;
-    if (auto* m = parameterFor (Control::makeup))
-        makeup = console::numberIn (m->getCurrentValueAsText());
-
-    return juce::jlimit (0.0f, 20.0f, juce::Decibels::gainToDecibels (in) - juce::Decibels::gainToDecibels (out, -100.0f) + makeup);
+    if (meter != nullptr)
+    {
+        const auto value = std::abs (console::numberIn (meter->getCurrentValueAsText()));
+        if (meterSeen && std::abs (value - lastMeterValue) > 0.05f)
+            meterMoves = true;
+        meterSeen = true;
+        lastMeterValue = value;
+        if (meterMoves && value <= 40.0f)
+            return juce::jmin (20.0f, value);
+    }
+    return measured;
 }
 
 void BusCompConsolePanel::update()
@@ -312,7 +335,11 @@ void BusCompConsolePanel::update()
                 knobs[i]->setValue (param->getValue(), juce::dontSendNotification);
 
     // Meters: a moving-coil needle, and the LED ladders.
-    const auto target = isIn() ? gainReduction() : 0.0f;
+    // (Not gated by the IN key: some plugins' bypass switch reads the other way round; out of the
+    //  signal, in and out are the same anyway, so it shows nothing.)
+    const auto insert = model::busCompPlugin (project);
+    const auto target = previewing ? (previewIn ? reductionDb : 0.0f)
+                                   : (insert.isValid() && ! (bool) insert[ids::bypass] ? gainReduction() : 0.0f);
     reductionDb = target;
     needleDb += (target - needleDb) * (target > needleDb ? 0.45f : 0.15f);
 
@@ -367,17 +394,8 @@ void BusCompConsolePanel::resized()
     }
 }
 
-void BusCompConsolePanel::paint (juce::Graphics& g)
+void BusCompConsolePanel::paintFace (juce::Graphics& g, juce::Colour plateTop, juce::Colour plateBottom)
 {
-    g.fillAll (theme::consoleDark);
-    const auto plateTop = theme::stripFace.brighter (0.05f), plateBottom = theme::stripFaceLow.darker (0.12f);
-    const auto lightPlate = plateTop.interpolatedWith (plateBottom, 0.5f).getPerceivedBrightness() > 0.55f;
-    const auto ink = lightPlate ? darkInk : lightInk;
-    const auto engraved = ink.interpolatedWith (plateBottom, 0.35f);
-
-    juce::Graphics::ScopedSaveState state (g);
-    g.addTransform (juce::AffineTransform::scale (scale).translated (origin));
-    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
     // --- The faceplate, drawn: dark charcoal, a bezelled meter window, four screws
     {
         const juce::Rectangle<float> plate { 6.0f, 6.0f, 624.0f, 1472.0f };
@@ -435,6 +453,29 @@ void BusCompConsolePanel::paint (juce::Graphics& g)
         }
     }
 
+}
+
+void BusCompConsolePanel::paint (juce::Graphics& g)
+{
+    const auto plateTop = theme::stripFace.brighter (0.05f), plateBottom = theme::stripFaceLow.darker (0.12f);
+    const auto lightPlate = plateTop.interpolatedWith (plateBottom, 0.5f).getPerceivedBrightness() > 0.55f;
+    const auto ink = lightPlate ? darkInk : lightInk;
+    const auto engraved = ink.interpolatedWith (plateBottom, 0.35f);
+
+    // The faceplate (its texture, screws, the meter's window, the LED housings) doesn't move: drawn once
+    // into a picture for this size and theme, then copied (the meters redraw many times a second).
+    skin::drawCached (g, "consoleFace|" + theme::current().toString() + "|" + juce::String (scale, 5) + "|" + origin.toString(),
+                      getLocalBounds(), [this, plateTop, plateBottom] (juce::Graphics& fg)
+    {
+        fg.fillAll (theme::consoleDark);
+        fg.addTransform (juce::AffineTransform::scale (scale).translated (origin));
+        fg.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+        paintFace (fg, plateTop, plateBottom);
+    }, true);
+
+    juce::Graphics::ScopedSaveState state (g);
+    g.addTransform (juce::AffineTransform::scale (scale).translated (origin));
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
     const auto loaded = plugin() != nullptr || previewing;
     const auto in = isIn();
 

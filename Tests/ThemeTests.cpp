@@ -191,3 +191,30 @@ TEST_CASE ("Faders, knobs, keys and the meter are chosen apart from the skin and
     CHECK (plain.meterStyle == -1);
     theme::set ({});
 }
+
+TEST_CASE ("The editor can have a theme of its own", "[theme]")
+{
+    theme::Settings editor;
+    editor.skin = theme::Skin::white;
+    theme::Settings s;
+    s.skin = theme::Skin::xenon;
+    s.editorTheme = editor.toString();
+
+    const auto back = theme::Settings::fromString (s.toString());
+    REQUIRE (back.editorTheme.isNotEmpty());
+    CHECK (theme::Settings::fromString (back.editorTheme).skin == theme::Skin::white);
+
+    // The tracks area takes the editor's colours, the mixer the main skin's
+    theme::set (editor);
+    const auto whiteLanes = theme::laneA;
+    theme::set (theme::Settings { theme::Skin::xenon });
+    const auto xenonLanes = theme::laneA, xenonStrip = theme::stripFace;
+    REQUIRE (whiteLanes != xenonLanes);
+
+    theme::set (back);
+    CHECK (theme::laneA == whiteLanes);
+    CHECK (theme::stripFace == xenonStrip);
+    CHECK (theme::xenonSkin());
+    CHECK_FALSE (theme::glassRegions());   // (the editor's: Studio White's regions are filled)
+    theme::set ({});
+}

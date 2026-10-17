@@ -320,7 +320,46 @@ namespace
     }
 }
 
+namespace
+{
+    Settings& editorNow() { static Settings s; return s; }
+    bool& editorOwn() { static bool own = false; return own; }
+
+    /** The colours the editor takes from its own theme (the tracks area, ruler, grid, regions, editors). */
+    std::vector<juce::Colour*> editorColours()
+    {
+        return { &background, &laneA, &laneB, &gridBar, &gridBeat, &ruler, &rulerDark, &selection, &waveform,
+                 &locators, &markers, &rollWhite, &rollBlack, &keysWhite, &keysBlack };
+    }
+}
+
+void applyColours (const Settings& s);
+
 void set (const Settings& s)
+{
+    // The editor's own theme first (its colours kept), then the main one; the editor's go back on top.
+    editorOwn() = s.editorTheme.isNotEmpty();
+    std::vector<juce::Colour> editorValues;
+    if (editorOwn())
+    {
+        editorNow() = Settings::fromString (s.editorTheme);
+        editorNow().editorTheme = {};
+        applyColours (editorNow());
+        for (auto* c : editorColours())
+            editorValues.push_back (*c);
+    }
+    applyColours (s);
+    if (editorOwn())
+    {
+        const auto targets = editorColours();
+        for (size_t i = 0; i < targets.size(); ++i)
+            *targets[i] = editorValues[i];
+    }
+}
+
+const Settings& editorSettings() { return editorOwn() ? editorNow() : settingsNow(); }
+
+void applyColours (const Settings& s)
 {
     settingsNow() = s;
     themepack::use (s.skin == Skin::reaper && s.themePack.isNotEmpty() ? juce::File (s.themePack) : juce::File());
@@ -405,22 +444,22 @@ int faderStyle()
 
 int waveformMode()
 {
-    const auto& s = settingsNow();
+    const auto& s = editorSettings();
     return s.waveMode >= 0 ? s.waveMode : (s.skin == Skin::xenon ? 2 : (s.skin == Skin::protools || s.skin == Skin::ableton) ? 1 : 0);
 }
 juce::Colour waveformA()
 {
-    const auto& s = settingsNow();
+    const auto& s = editorSettings();
     return s.waveA != 0 ? juce::Colour (s.waveA) : (s.skin == Skin::xenon ? juce::Colour (0xff7ae0de) : waveform);   // (Pro Tools / Ableton: dark)
 }
 juce::Colour waveformB()
 {
-    const auto& s = settingsNow();
+    const auto& s = editorSettings();
     return s.waveB != 0 ? juce::Colour (s.waveB) : (s.skin == Skin::xenon ? juce::Colour (0xffa77fe0) : waveform);
 }
 bool glassRegions()
 {
-    const auto& s = settingsNow();
+    const auto& s = editorSettings();
     return s.glassRegions >= 0 ? s.glassRegions == 1 : s.skin == Skin::xenon;
 }
 
@@ -449,7 +488,8 @@ juce::String Settings::toString() const
                                juce::URL::addEscapeChars (themePack, false), juce::String (faderStyle),
                                juce::String::toHexString ((int) editBack), juce::String::toHexString ((int) gridBarColour),
                                juce::String::toHexString ((int) gridBeatColour), juce::String::toHexString ((int) rollBack),
-                               juce::String (knobStyle), juce::String (buttonStyle), juce::String (meterStyle) }.joinIntoString (";");
+                               juce::String (knobStyle), juce::String (buttonStyle), juce::String (meterStyle),
+                               juce::URL::addEscapeChars (editorTheme, false) }.joinIntoString (";");
 }
 
 Settings Settings::fromString (const juce::String& text)
@@ -503,6 +543,8 @@ Settings Settings::fromString (const juce::String& text)
         s.buttonStyle = juce::jlimit (-1, 3, v[25].getIntValue());
         s.meterStyle = juce::jlimit (-1, 2, v[26].getIntValue());
     }
+    if (v.size() >= 28)
+        s.editorTheme = juce::URL::removeEscapeChars (v[27]);
     return s;
 }
 

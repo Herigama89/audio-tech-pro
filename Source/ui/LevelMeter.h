@@ -120,15 +120,23 @@ private:
         g.fillRect (clipArea);
         r.removeFromTop (2.0f);
         const auto lit = juce::jlimit (0.0f, 1.0f, juce::jmap (juce::Decibels::gainToDecibels (linear, -60.0f), -60.0f, 0.0f, 0.0f, 1.0f));
+        // The column, faint and lit, made once for its size (a scaled photo 30 times a second was heavy on a Retina screen)
+        const auto column = r.toNearestInt();
+        auto paintColumn = [image, column] (float opacity)
+        {
+            return [image, column, opacity] (juce::Graphics& ig)
+            {
+                ig.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+                ig.setOpacity (opacity);
+                ig.drawImage (image, column.withZeroOrigin().toFloat(), juce::RectanglePlacement::stretchToFit);
+            };
+        };
         juce::Graphics::ScopedSaveState state (g);
-        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-        g.setOpacity (0.16f);
-        g.drawImage (image, r, juce::RectanglePlacement::stretchToFit);
+        skin::drawCached (g, "xenonMeterFaint", column, paintColumn (0.16f));
         if (lit > 0.0f)
         {
             g.reduceClipRegion (r.withTop (r.getBottom() - r.getHeight() * lit).getSmallestIntegerContainer());
-            g.setOpacity (1.0f);
-            g.drawImage (image, r, juce::RectanglePlacement::stretchToFit);
+            skin::drawCached (g, "xenonMeterLit", column, paintColumn (1.0f));
         }
     }
 

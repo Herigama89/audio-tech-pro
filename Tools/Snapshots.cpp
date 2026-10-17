@@ -747,6 +747,22 @@ public:
             pump (main, 50);
         }
 
+        // The editor with a theme of its own: Studio White tracks over a Xenon mixer.
+        {
+            theme::Settings editor;
+            editor.skin = theme::Skin::white;
+            theme::Settings t;
+            t.skin = theme::Skin::xenon;
+            t.editorTheme = editor.toString();
+            main.applyTheme (t);
+            main.showMixer();
+            pump (main, 150);
+            save (main, "editor-own-theme.png");
+            main.closeMixer();
+            main.applyTheme ({});
+            pump (main, 50);
+        }
+
         // REAPER themes (RIFF_REAPER_THEMES: a folder of .ReaperThemeZip files), each loaded as the user would.
         if (const auto dir = juce::File (juce::SystemStats::getEnvironmentVariable ("RIFF_REAPER_THEMES", {})); dir.isDirectory())
         {

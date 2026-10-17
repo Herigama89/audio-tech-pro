@@ -33,7 +33,12 @@ public:
 
     /** True if the panel has something to control: an installed plugin, or one already in the project. */
     bool isAvailable() const;
+    // Reading its gain reduction: its own meter (if it moves), else from the levels in and out
+    float restingDiff = 0.0f, lastMeterValue = 0.0f;
+    bool haveRestingDiff = false, meterSeen = false, meterMoves = false;
+    juce::AudioPluginInstance* lastPlugin = nullptr;
     bool showFaceForTesting = false;   // (the snapshot tool: the console face without a plugin chosen)
+    void paintFace (juce::Graphics& g, juce::Colour plateTop, juce::Colour plateBottom);   // (the still parts, drawn once)
 
     /** Re-reads the project (plugin chosen, knob assignments). */
     void refresh();

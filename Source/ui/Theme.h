@@ -125,6 +125,10 @@ namespace riff::theme
         int faderStyle = -1;
         int knobStyle = -1, buttonStyle = -1, meterStyle = -1;
 
+        // The editor (tracks area, ruler, editors) with a theme of its own: another Settings, as text;
+        // empty: the same as the mixer and the rest of the app.
+        juce::String editorTheme;
+
         // The edit windows (tracks area and editors): your own colours (ARGB), 0: the skin's.
         juce::uint32 editBack = 0, gridBarColour = 0, gridBeatColour = 0, rollBack = 0;
 
@@ -162,6 +166,9 @@ namespace riff::theme
     int knobStyle();
     int buttonStyle();
     int meterStyle();
+
+    /** The editor's own theme when it has one (else the main one): its waveforms, regions and colours. */
+    const Settings& editorSettings();
 
     /** Every theme colour (to repaint controls that copied one when the theme changes). */
     std::vector<juce::Colour*> allColours();

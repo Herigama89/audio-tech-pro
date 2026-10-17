@@ -168,9 +168,19 @@ namespace riff::skin
         auto it = cache.find (fullKey);
         if (it == cache.end())
         {
-            while (cache.size() >= 16)
-                cache.erase (std::min_element (cache.begin(), cache.end(),
-                                               [] (const auto& a, const auto& b) { return a.second.lastUse < b.second.lastUse; }));
+            // Room for many small pictures (meter columns, knobs' faces) and a few big ones (panels):
+            // the least recently used go when there are too many, or too many pixels.
+            const auto pixelsOf = [] (const Entry& e) { return (juce::int64) e.image.getWidth() * e.image.getHeight(); };
+            juce::int64 pixels = 0;
+            for (const auto& [k, e] : cache)
+                pixels += pixelsOf (e);
+            while (! cache.empty() && (cache.size() >= 96 || pixels > 24'000'000))
+            {
+                const auto oldest = std::min_element (cache.begin(), cache.end(),
+                                                      [] (const auto& a, const auto& b) { return a.second.lastUse < b.second.lastUse; });
+                pixels -= pixelsOf (oldest->second);
+                cache.erase (oldest);
+            }
             Entry e;
             e.image = juce::Image (opaque ? juce::Image::RGB : juce::Image::ARGB, juce::roundToInt ((float) area.getWidth() * scale),
                                    juce::roundToInt ((float) area.getHeight() * scale), true);
@@ -184,6 +194,7 @@ namespace riff::skin
         it->second.lastUse = ++uses;
         juce::Graphics::ScopedSaveState state (g);
         g.setImageResamplingQuality (juce::Graphics::lowResamplingQuality);
+        g.setOpacity (1.0f);   // (an image is drawn at the current colour's opacity: the caller's colour mustn't fade it)
         g.drawImageTransformed (it->second.image, juce::AffineTransform::scale (1.0f / scale).translated ((float) area.getX(), (float) area.getY()));
     }
 

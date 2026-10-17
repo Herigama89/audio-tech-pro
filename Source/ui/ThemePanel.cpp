@@ -6,8 +6,26 @@ namespace riff
 {
 
 ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme::Settings&)> callback, juce::PropertiesFile* presetStore)
-    : settings (initial), onChange (std::move (callback)), store (presetStore)
+    : settings (initial), whole (initial), onChange (std::move (callback)), store (presetStore)
 {
+    // Theme for: the mixer (and the rest of the app), or the editor on its own (the tracks area, ruler, editors)
+    scopeBox.addItemList ({ "Mixer & app", "Editor (tracks area, editors)" }, 1);
+    scopeBox.setSelectedItemIndex (0, juce::dontSendNotification);
+    scopeBox.setTooltip ("Edit the mixer's theme (and the rest of the app), or give the editor a theme of its own");
+    scopeBox.onChange = [this] { editScope (scopeBox.getSelectedItemIndex() == 1); };
+    addAndMakeVisible (scopeBox);
+    sameButton.setTooltip ("The editor follows the mixer's theme again");
+    sameButton.onClick = [this]
+    {
+        whole.editorTheme = {};
+        settings = whole;
+        refreshControls();
+        if (onChange)
+            onChange (whole);
+        repaint();
+    };
+    addChildComponent (sameButton);
+
     skinBox.addItemList ({ "Studio Grey (from your picture)", "Flat Dark (FL Studio style)", "Studio White (your fader, knob and meter photos)",
                            "Xenon (your dark glass console picture)", "Pro Tools style", "Ableton style",
                            "REAPER theme (choose or load one below)" }, 1);
@@ -284,7 +302,7 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
     }
 
     refreshControls();
-    setSize (460, 120 + (int) rows.size() * 34 + 110 + 40 + 68 + 34 + 30 + 34 + 34 + 34 + 34 - 20 + (store != nullptr ? 36 : 0));
+    setSize (460, 120 + (int) rows.size() * 34 + 110 + 40 + 68 + 34 + 30 + 34 + 34 + 34 + 34 - 20 + 34 + (store != nullptr ? 36 : 0));
 }
 
 void ThemePanel::chooseMeterColour (int which)
@@ -446,10 +464,40 @@ void ThemePanel::refreshControls()
     updateMeterButtons();
 }
 
+void ThemePanel::editScope (bool editor)
+{
+    editingEditor = editor;
+    if (editor)
+    {
+        settings = whole.editorTheme.isNotEmpty() ? theme::Settings::fromString (whole.editorTheme) : whole;
+        settings.editorTheme = {};
+    }
+    else
+        settings = whole;
+    sameButton.setVisible (editor);
+    for (auto* box : { &faderBox, &knobBox, &buttonBox, &meterBox })
+        box->setVisible (! editor);   // (faders, knobs, keys and the meter are the mixer's)
+    refreshControls();
+    resized();
+    repaint();
+}
+
 void ThemePanel::changed()
 {
+    if (editingEditor)
+    {
+        auto own = settings;
+        own.editorTheme = {};
+        whole.editorTheme = own.toString();
+    }
+    else
+    {
+        if (settings.editorTheme.isEmpty())
+            settings.editorTheme = whole.editorTheme;   // (the editor's own theme stays)
+        whole = settings;
+    }
     if (onChange)
-        onChange (settings);
+        onChange (whole);
     updateMeterButtons();
     repaint();
 }
@@ -459,7 +507,8 @@ void ThemePanel::paint (juce::Graphics& g)
     g.fillAll (theme::panel);
     g.setColour (theme::text);
     g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-    g.drawText ("Skin", 16, 14, 100, 24, juce::Justification::centredLeft);
+    g.drawText ("Theme for", 16, scopeBox.getY(), 100, 24, juce::Justification::centredLeft);
+    g.drawText ("Skin", 16, skinBox.getY(), 100, 24, juce::Justification::centredLeft);
     g.setFont (juce::FontOptions (12.5f));
     for (const auto& r : rows)
         g.drawText (r.name, 16, r.slider->getY(), 90, r.slider->getHeight(), juce::Justification::centredLeft);
@@ -467,8 +516,11 @@ void ThemePanel::paint (juce::Graphics& g)
     g.drawText ("Waveforms", 16, waveModeBox.getY(), 94, waveModeBox.getHeight(), juce::Justification::centredLeft);
     g.drawText ("Regions", 16, regionBox.getY(), 94, regionBox.getHeight(), juce::Justification::centredLeft);
     g.drawText ("Ruler colours", 16, markButtons[0].getY(), 94, markButtons[0].getHeight(), juce::Justification::centredLeft);
-    g.drawText ("Faders / Knobs", 16, faderBox.getY(), 94, faderBox.getHeight(), juce::Justification::centredLeft);
-    g.drawText ("Keys / Meter", 16, buttonBox.getY(), 94, buttonBox.getHeight(), juce::Justification::centredLeft);
+    if (! editingEditor)
+    {
+        g.drawText ("Faders / Knobs", 16, faderBox.getY(), 94, faderBox.getHeight(), juce::Justification::centredLeft);
+        g.drawText ("Keys / Meter", 16, buttonBox.getY(), 94, buttonBox.getHeight(), juce::Justification::centredLeft);
+    }
     g.drawText ("Edit windows", 16, editButtons[0].getY(), 94, editButtons[0].getHeight(), juce::Justification::centredLeft);
 
     // A sample of the colours
@@ -516,14 +568,23 @@ void ThemePanel::refreshReaperThemes()
 
 void ThemePanel::resized()
 {
-    skinBox.setBounds (110, 14, getWidth() - 126, 24);
     {
-        auto row = juce::Rectangle<int> (110, 46, getWidth() - 126, 24);
+        auto scope = juce::Rectangle<int> (110, 14, getWidth() - 126, 24);
+        if (sameButton.isVisible())
+        {
+            sameButton.setBounds (scope.removeFromRight (120));
+            scope.removeFromRight (6);
+        }
+        scopeBox.setBounds (scope);
+    }
+    skinBox.setBounds (110, 48, getWidth() - 126, 24);
+    {
+        auto row = juce::Rectangle<int> (110, 80, getWidth() - 126, 24);
         loadReaperButton.setBounds (row.removeFromLeft (150));
         row.removeFromLeft (6);
         reaperBox.setBounds (row);
     }
-    auto y = 88;
+    auto y = 122;
     for (auto& r : rows)
     {
         r.slider->setBounds (110, y, getWidth() - 126, 26);
