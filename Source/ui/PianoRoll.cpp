@@ -119,7 +119,7 @@ PianoRoll::PianoRoll (juce::UndoManager& um, AudioEngine& e)
     ghostButton.setClickingTogglesState (true);
     ghostButton.setToggleState (true, juce::dontSendNotification);
     ghostButton.setTooltip ("Ghost notes: the other regions' notes, faint, behind these (FL Studio's ghost channels)");
-    toolsButton.setTooltip ("FL Studio's tools: Chop, Glue, Strum, Arpeggiate, Flam, Randomize, Scale Levels, Limit, Claw Machine, Articulate...");
+    toolsButton.setTooltip ("FL Studio's tools: Chop, Glue, Strum, Arpeggiate, Flam, Randomize, Scale Levels, Limit, Claw Machine, Articulate... Each has a key (shown in the menu); press ? for every piano roll key.");
     toolsButton.onClick = [this] { showToolsMenu(); };
     for (auto* b : { &scaleHighlightButton, &ghostButton, &toolsButton })
     {
@@ -211,71 +211,228 @@ void PianoRoll::duplicateSelection()
     repaint();
 }
 
+std::function<void()> PianoRoll::runOnNotes (const juce::String& name, std::function<void (juce::Array<juce::ValueTree>)> f)
+{
+    return [this, name, f]
+    {
+        if (! region.isValid())
+            return;
+        undoManager.beginNewTransaction (name);
+        f (selectedOrAllNotes());
+        selection.clear();
+        repaint();
+    };
+}
+
+juce::PopupMenu PianoRoll::toolSubmenu (ToolMenu which)
+{
+    juce::PopupMenu menu;
+    const auto step = juce::jmax (1.0e-3, quantizeGrid());
+    switch (which)
+    {
+        case ToolMenu::strum:
+            for (const auto ms : { 10, 20, 35, 60 })
+            {
+                menu.addItem ("Up, " + juce::String (ms) + " ms", runOnNotes ("Strum", [this, ms] (auto notes) { notetools::strum (notes, ms / 1000.0, false, &undoManager); }));
+                menu.addItem ("Down, " + juce::String (ms) + " ms", runOnNotes ("Strum", [this, ms] (auto notes) { notetools::strum (notes, ms / 1000.0, true, &undoManager); }));
+            }
+            break;
+        case ToolMenu::arpeggiate:
+        {
+            const char* patterns[] { "Up", "Down", "Up and Down" };
+            for (int p = 0; p < 3; ++p)
+                menu.addItem (juce::String (patterns[p]) + " (at the quantize grid)",
+                              runOnNotes ("Arpeggiate", [this, p, step] (auto notes) { notetools::arpeggiate (region, notes, step, p, &undoManager); }));
+            break;
+        }
+        case ToolMenu::randomize:
+            menu.addItem ("Gently (5 ms, 8 velocity)", runOnNotes ("Randomize", [this] (auto notes) { notetools::randomize (notes, 0.005, 8, juce::Random::getSystemRandom().nextInt(), &undoManager); }));
+            menu.addItem ("More (15 ms, 20 velocity)", runOnNotes ("Randomize", [this] (auto notes) { notetools::randomize (notes, 0.015, 20, juce::Random::getSystemRandom().nextInt(), &undoManager); }));
+            menu.addItem ("Velocity only (25)", runOnNotes ("Randomize", [this] (auto notes) { notetools::randomize (notes, 0.0, 25, juce::Random::getSystemRandom().nextInt(), &undoManager); }));
+            break;
+        case ToolMenu::levels:
+        {
+            struct Level { const char* name; double percent; int offset; };
+            for (const auto& l : { Level { "Compress (50%)", 50.0, 0 }, Level { "Expand (150%)", 150.0, 0 }, Level { "Louder (+10)", 100.0, 10 },
+                                   Level { "Softer (-10)", 100.0, -10 }, Level { "Flatten (0%)", 0.0, 0 } })
+                menu.addItem (l.name, runOnNotes ("Scale Levels", [this, l] (auto notes) { notetools::scaleVelocity (notes, l.percent, l.offset, &undoManager); }));
+            break;
+        }
+        case ToolMenu::limit:
+        {
+            struct Range { const char* name; int low, high; };
+            for (const auto& r : { Range { "C2 to C4", 36, 60 }, Range { "C3 to C5", 48, 72 }, Range { "C4 to C6", 60, 84 } })
+                menu.addItem (r.name, runOnNotes ("Limit", [this, r] (auto notes) { notetools::limit (notes, r.low, r.high, &undoManager); }));
+            break;
+        }
+        case ToolMenu::claw:
+        {
+            struct Claw { const char* name; int group, keep; };
+            for (const auto& c : { Claw { "Keep 1 of every 2", 2, 1 }, Claw { "Keep 2 of every 3", 3, 2 }, Claw { "Keep 3 of every 4", 4, 3 } })
+                menu.addItem (c.name, runOnNotes ("Claw Machine", [this, c] (auto notes) { notetools::claw (notes, c.group, c.keep, &undoManager); }));
+            break;
+        }
+        case ToolMenu::articulate:
+            for (const auto pc : { 25, 50, 75, 100 })
+                menu.addItem (juce::String (pc) + "% of the gap", runOnNotes ("Articulate", [this, pc] (auto notes) { notetools::articulate (notes, pc, &undoManager); }));
+            break;
+    }
+    return menu;
+}
+
+std::vector<PianoRoll::NoteShortcut> PianoRoll::noteShortcuts()
+{
+    // FL Studio's keys for its piano roll tools (Ctrl is Cmd on the Mac; either works). The ones with
+    // choices open their menu at the mouse.
+    using K = juce::KeyPress;
+    constexpr auto cmd = juce::ModifierKeys::commandModifier, alt = juce::ModifierKeys::altModifier;
+    const auto step = juce::jmax (1.0e-3, quantizeGrid());
+    const auto popup = [this] (ToolMenu which) { return [this, which] { toolSubmenu (which).showMenuAsync (juce::PopupMenu::Options().withMousePosition()); }; };
+    return {
+        { K ('l', cmd, 0), "Quick Legato", runOnNotes ("Legato", [this] (auto notes) { model::transformNotes (notes, model::Transform::legato, &undoManager); }) },
+        { K ('u', alt, 0), "Chop (at the quantize grid)", runOnNotes ("Chop", [this, step] (auto notes) { notetools::chop (region, notes, step, &undoManager); }) },
+        { K ('g', cmd, 0), "Glue", runOnNotes ("Glue", [this] (auto notes) { notetools::glue (region, notes, &undoManager); }) },
+        { K ('s', alt, 0), "Strum...", popup (ToolMenu::strum) },
+        { K ('a', alt, 0), "Arpeggiate...", popup (ToolMenu::arpeggiate) },
+        { K ('f', alt, 0), "Flam", runOnNotes ("Flam", [this] (auto notes) { notetools::flam (region, notes, 0.03, &undoManager); }) },
+        { K ('r', alt, 0), "Randomize...", popup (ToolMenu::randomize) },
+        { K ('x', alt, 0), "Scale Levels (velocity)...", popup (ToolMenu::levels) },
+        { K ('k', alt, 0), "Limit (fold into a range)...", popup (ToolMenu::limit) },
+        { K ('c', alt, 0), "Claw Machine (thin out)...", popup (ToolMenu::claw) },
+        { K ('l', alt, 0), "Articulate (note lengths)...", popup (ToolMenu::articulate) },
+        { K ('m', alt, 0), "Mute / Unmute", runOnNotes ("Mute notes", [this] (auto notes)
+          {
+              bool anyOn = false;
+              for (const auto& n : notes)
+                  anyOn = anyOn || ! notetools::isMuted (n);
+              notetools::setMuted (notes, anyOn, &undoManager);
+          }) },
+        { K ('y', alt, 0), "Flip Horizontally (reverse)", runOnNotes ("Flip", [this] (auto notes) { model::transformNotes (notes, model::Transform::reverse, &undoManager); }) },
+        { K ('y', alt | juce::ModifierKeys::shiftModifier, 0), "Flip Vertically (invert)",
+          runOnNotes ("Flip", [this] (auto notes) { model::transformNotes (notes, model::Transform::invertPitch, &undoManager); }) },
+        { K ('b', cmd, 0), "Duplicate (also Cmd+D)", [this] { duplicateSelection(); } },
+    };
+}
+
+bool PianoRoll::runShortcut (const juce::KeyPress& key)
+{
+    // Ctrl and Cmd count the same, as FL Studio's Ctrl is the Mac's Cmd
+    const auto normal = [] (juce::ModifierKeys m)
+    {
+        auto flags = m.getRawFlags() & (juce::ModifierKeys::shiftModifier | juce::ModifierKeys::altModifier
+                                        | juce::ModifierKeys::commandModifier | juce::ModifierKeys::ctrlModifier);
+        if (flags & juce::ModifierKeys::ctrlModifier)
+            flags = (flags & ~juce::ModifierKeys::ctrlModifier) | juce::ModifierKeys::commandModifier;
+        return flags;
+    };
+    const auto code = juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) key.getKeyCode());
+    for (auto& s : noteShortcuts())
+        if (juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) s.key.getKeyCode()) == code
+            && normal (s.key.getModifiers()) == normal (key.getModifiers()))
+        {
+            s.action();
+            return true;
+        }
+    return false;
+}
+
+juce::String PianoRoll::shortcutsText()
+{
+    juce::String text;
+    text << "TOOLS\n"
+         << "P  Draw (pencil; it remembers the last note's length)\n"
+         << "B  Paint (drag to lay notes along the grid)\n"
+         << "D  Delete      T  Mute      C  Slice\n"
+         << "E  Select      Z  Zoom (Option-click zooms out)\n"
+         << "Right-click or right-drag: delete notes, with any tool\n\n"
+         << "EDITING\n"
+         << "Arrows: Up/Down a semitone (Shift: an octave), Left/Right a grid step\n"
+         << "Q  Quantize      Delete  delete the selected notes\n"
+         << juce::KeyPress ('a', juce::ModifierKeys::commandModifier, 0).getTextDescriptionWithIcons() << "  Select all      Esc  deselect\n"
+         << juce::KeyPress ('c', juce::ModifierKeys::commandModifier, 0).getTextDescriptionWithIcons() << " / "
+         << juce::KeyPress ('x', juce::ModifierKeys::commandModifier, 0).getTextDescriptionWithIcons() << " / "
+         << juce::KeyPress ('v', juce::ModifierKeys::commandModifier, 0).getTextDescriptionWithIcons() << "  Copy, cut, paste (at the playhead)\n"
+         << juce::KeyPress ('d', juce::ModifierKeys::commandModifier, 0).getTextDescriptionWithIcons() << "  Duplicate\n"
+         << "Option-scroll: taller or shorter rows      Cmd-scroll: zoom in time\n\n"
+         << "NOTE TOOLS (on the selected notes, or all)\n";
+    for (const auto& s : noteShortcuts())
+        text << s.key.getTextDescriptionWithIcons() << "  " << s.name << "\n";
+    return text;
+}
+
+void PianoRoll::showShortcuts()
+{
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                      .withIconType (juce::MessageBoxIconType::NoIcon)
+                                      .withTitle ("Piano Roll Keys")
+                                      .withMessage (shortcutsText())
+                                      .withButton ("OK")
+                                      .withAssociatedComponent (this),
+                                  nullptr);
+}
+
 void PianoRoll::showToolsMenu()
 {
     if (! region.isValid())
         return;
     juce::PopupMenu menu;
     menu.addSectionHeader (selection.isEmpty() ? "Tools (all notes)" : "Tools (selected notes)");
-    auto run = [this] (const juce::String& name, std::function<void (juce::Array<juce::ValueTree>)> f)
+    const auto shortcuts = noteShortcuts();
+    const auto item = [&menu, &shortcuts] (const juce::String& name)
     {
-        return [this, name, f]
-        {
-            undoManager.beginNewTransaction (name);
-            f (selectedOrAllNotes());
-            selection.clear();
-            repaint();
-        };
+        for (const auto& s : shortcuts)
+            if (s.name == name)
+            {
+                juce::PopupMenu::Item i (name.upToLastOccurrenceOf ("...", false, false));
+                i.setAction (s.action);
+                i.shortcutKeyDescription = s.key.getTextDescriptionWithIcons();
+                menu.addItem (std::move (i));
+                return;
+            }
     };
-    const auto step = juce::jmax (1.0e-3, quantizeGrid());
-    menu.addItem ("Quick Quantize (Q)", [this] { quantizeSelection(); });
-    menu.addItem ("Quick Legato", run ("Legato", [this] (auto notes) { model::transformNotes (notes, model::Transform::legato, &undoManager); }));
-    menu.addItem ("Quick Chop (at the quantize grid)", run ("Chop", [this, step] (auto notes) { notetools::chop (region, notes, step, &undoManager); }));
-    menu.addItem ("Glue", run ("Glue", [this] (auto notes) { notetools::glue (region, notes, &undoManager); }));
-    menu.addSeparator();
-    juce::PopupMenu strum;
-    for (const auto ms : { 10, 20, 35, 60 })
+    const auto sub = [this, &menu, &shortcuts] (const juce::String& name, ToolMenu which)
     {
-        strum.addItem ("Up, " + juce::String (ms) + " ms", run ("Strum", [this, ms] (auto notes) { notetools::strum (notes, ms / 1000.0, false, &undoManager); }));
-        strum.addItem ("Down, " + juce::String (ms) + " ms", run ("Strum", [this, ms] (auto notes) { notetools::strum (notes, ms / 1000.0, true, &undoManager); }));
+        juce::String keyText;
+        for (const auto& s : shortcuts)
+            if (s.name == name)
+                keyText = "   " + s.key.getTextDescriptionWithIcons();
+        menu.addSubMenu (name.upToLastOccurrenceOf ("...", false, false) + keyText, toolSubmenu (which));
+    };
+    {
+        juce::PopupMenu::Item q ("Quick Quantize");
+        q.setAction ([this] { quantizeSelection(); });
+        q.shortcutKeyDescription = "Q";
+        menu.addItem (std::move (q));
     }
-    menu.addSubMenu ("Strum", strum);
-    juce::PopupMenu arp;
-    const char* patterns[] { "Up", "Down", "Up and Down" };
-    for (int p = 0; p < 3; ++p)
-        arp.addItem (juce::String (patterns[p]) + " (at the quantize grid)", run ("Arpeggiate", [this, p, step] (auto notes) { notetools::arpeggiate (region, notes, step, p, &undoManager); }));
-    menu.addSubMenu ("Arpeggiate", arp);
-    menu.addItem ("Flam", run ("Flam", [this] (auto notes) { notetools::flam (region, notes, 0.03, &undoManager); }));
+    item ("Quick Legato");
+    item ("Chop (at the quantize grid)");
+    item ("Glue");
     menu.addSeparator();
-    juce::PopupMenu random;
-    random.addItem ("Gently (5 ms, 8 velocity)", run ("Randomize", [this] (auto notes) { notetools::randomize (notes, 0.005, 8, juce::Random::getSystemRandom().nextInt(), &undoManager); }));
-    random.addItem ("More (15 ms, 20 velocity)", run ("Randomize", [this] (auto notes) { notetools::randomize (notes, 0.015, 20, juce::Random::getSystemRandom().nextInt(), &undoManager); }));
-    random.addItem ("Velocity only (25)", run ("Randomize", [this] (auto notes) { notetools::randomize (notes, 0.0, 25, juce::Random::getSystemRandom().nextInt(), &undoManager); }));
-    menu.addSubMenu ("Randomize", random);
-    juce::PopupMenu levels;
-    for (const auto [name, pc, off] : { std::tuple { "Compress (50%)", 50.0, 0 }, std::tuple { "Expand (150%)", 150.0, 0 },
-                                        std::tuple { "Louder (+10)", 100.0, 10 }, std::tuple { "Softer (-10)", 100.0, -10 }, std::tuple { "Flatten (0%)", 0.0, 0 } })
-        levels.addItem (name, run ("Scale Levels", [this, pc = pc, off = off] (auto notes) { notetools::scaleVelocity (notes, pc, off, &undoManager); }));
-    menu.addSubMenu ("Scale Levels (velocity)", levels);
-    juce::PopupMenu limitMenu;
-    for (const auto [name, lo, hi] : { std::tuple { "C2 to C4", 36, 60 }, std::tuple { "C3 to C5", 48, 72 }, std::tuple { "C4 to C6", 60, 84 } })
-        limitMenu.addItem (name, run ("Limit", [this, lo = lo, hi = hi] (auto notes) { notetools::limit (notes, lo, hi, &undoManager); }));
-    menu.addSubMenu ("Limit (fold into a range)", limitMenu);
-    juce::PopupMenu clawMenu;
-    for (const auto [name, group, keep] : { std::tuple { "Keep 1 of every 2", 2, 1 }, std::tuple { "Keep 2 of every 3", 3, 2 }, std::tuple { "Keep 3 of every 4", 4, 3 } })
-        clawMenu.addItem (name, run ("Claw Machine", [this, group = group, keep = keep] (auto notes) { notetools::claw (notes, group, keep, &undoManager); }));
-    menu.addSubMenu ("Claw Machine (thin out)", clawMenu);
-    juce::PopupMenu art;
-    for (const auto pc : { 25, 50, 75, 100 })
-        art.addItem (juce::String (pc) + "% of the gap", run ("Articulate", [this, pc] (auto notes) { notetools::articulate (notes, pc, &undoManager); }));
-    menu.addSubMenu ("Articulate (note lengths)", art);
+    sub ("Strum...", ToolMenu::strum);
+    sub ("Arpeggiate...", ToolMenu::arpeggiate);
+    item ("Flam");
     menu.addSeparator();
-    menu.addItem ("Mute", run ("Mute notes", [this] (auto notes) { notetools::setMuted (notes, true, &undoManager); }));
-    menu.addItem ("Unmute", run ("Unmute notes", [this] (auto notes) { notetools::setMuted (notes, false, &undoManager); }));
-    menu.addItem ("Flip Horizontally (reverse)", run ("Flip", [this] (auto notes) { model::transformNotes (notes, model::Transform::reverse, &undoManager); }));
-    menu.addItem ("Flip Vertically (invert)", run ("Flip", [this] (auto notes) { model::transformNotes (notes, model::Transform::invertPitch, &undoManager); }));
-    menu.addItem ("Duplicate (Cmd+D)", [this] { duplicateSelection(); });
+    sub ("Randomize...", ToolMenu::randomize);
+    sub ("Scale Levels (velocity)...", ToolMenu::levels);
+    sub ("Limit (fold into a range)...", ToolMenu::limit);
+    sub ("Claw Machine (thin out)...", ToolMenu::claw);
+    sub ("Articulate (note lengths)...", ToolMenu::articulate);
+    menu.addSeparator();
+    item ("Mute / Unmute");
+    item ("Flip Horizontally (reverse)");
+    item ("Flip Vertically (invert)");
+    item ("Duplicate (also Cmd+D)");
+    menu.addSeparator();
+    menu.addItem ("Keyboard Shortcuts...", [this] { showShortcuts(); });
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&toolsButton));
+}
+
+void PianoRoll::mouseEnter (const juce::MouseEvent&)
+{
+    // The piano roll's keys work as soon as the mouse is over it (unless you're typing somewhere)
+    if (isShowing() && ! hasKeyboardFocus (true)
+        && dynamic_cast<juce::TextEditor*> (juce::Component::getCurrentlyFocusedComponent()) == nullptr)
+        grabKeyboardFocus();
 }
 
 int PianoRoll::laneController() const
@@ -1055,6 +1212,14 @@ void PianoRoll::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWhee
 
 bool PianoRoll::keyPressed (const juce::KeyPress& key)
 {
+    if (runShortcut (key))
+        return true;
+    if (key.getTextCharacter() == '?')
+    {
+        showShortcuts();
+        return true;
+    }
+
     // FL Studio's tool keys
     if (! key.getModifiers().isAnyModifierKeyDown())
     {

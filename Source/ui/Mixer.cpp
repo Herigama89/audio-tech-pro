@@ -236,7 +236,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         addAndMakeVisible (b);
     }
     inputSlot.setTooltip ("Input: what this channel records or plays (an interface input, or the instrument)");
-    outputSlot.setTooltip ("Output: where this channel goes (the Stereo Out, or a bus)");
+    outputSlot.setTooltip ("Output: where this channel goes (the Stereo Out, a bus, or the interface's other outputs: Output 3-4 and so on)");
     inputSlot.onClick = [this] { showInputMenu(); };
 
     formatButton.setTooltip ("Channel format: mono (one circle) or stereo (two). Click to switch.");
@@ -701,38 +701,95 @@ void ChannelStrip::showConsoleMenu()
     else
         menu.addItem ("Open channel strip window (all controls)...", [this] { if (owner.onOpenStripWindow) owner.onOpenStripWindow (track); });
 
-    // This strip: built-in or a plugin
+    // This strip (and the other selected ones): built-in, or any channel strip plugin (UA, bx_console, SSL, API, Waves...)
     const auto& candidates = owner.getStripCandidates();
+    const auto targets = acting();
     juce::PopupMenu use;
-    use.addItem ("Built-in console strip", true, ! insert.isValid(), [this, &um, t, proj, trackId, insert]() mutable
+    use.addItem ("Built-in console strip", true, ! insert.isValid(), [this, &um, proj, targets]() mutable
     {
         // The plugin's settings are kept with the track, and come back when you choose it again.
         if (owner.onStorePluginStates)
             owner.onStorePluginStates();
         um.beginNewTransaction ("Built-in console strip");
-        if (insert.isValid())
-            if (auto xml = insert.createXml())
-                t.setProperty (ids::parkedStrip, xml->toString (juce::XmlElement::TextFormat().singleLine()), &um);
-        t.setProperty (ids::builtInStrip, true, &um);
-        model::setStripPlugin (proj, trackId, {}, &um);
+        for (auto t2 : targets)
+        {
+            const auto id = t2[ids::id].toString();
+            if (const auto old = model::stripPlugin (proj, id); old.isValid())
+                if (auto xml = old.createXml())
+                    t2.setProperty (ids::parkedStrip, xml->toString (juce::XmlElement::TextFormat().singleLine()), &um);
+            t2.setProperty (ids::builtInStrip, true, &um);
+            model::setStripPlugin (proj, id, {}, &um);
+        }
     });
-    for (const auto& d : candidates)
+    const auto currentXml = insert[ids::pluginDescription].toString();
+    const auto choose = [&um, proj, targets] (const juce::String& xml)
     {
-        const auto xml = d.createXml()->toString (juce::XmlElement::TextFormat().singleLine());
-        use.addItem (d.name, true, insert[ids::pluginDescription].toString() == xml, [&um, t, proj, trackId, xml]() mutable
+        return [&um, proj, targets, xml]() mutable
         {
             um.beginNewTransaction ("Console strip plugin");
-            t.removeProperty (ids::builtInStrip, &um);
-            auto added = model::setStripPlugin (proj, trackId, xml, &um);
-            // Its settings from before you switched to Built-in.
-            if (const auto parked = juce::ValueTree::fromXml (t[ids::parkedStrip].toString()); parked.isValid() && added.isValid()
-                && parked[ids::pluginDescription].toString() == xml)
-                for (int i = 0; i < parked.getNumProperties(); ++i)
-                    if (const auto name = parked.getPropertyName (i); name != ids::id)
-                        added.setProperty (name, parked[name], &um);
-        });
+            for (auto t2 : targets)
+            {
+                t2.removeProperty (ids::builtInStrip, &um);
+                auto added = model::setStripPlugin (proj, t2[ids::id].toString(), xml, &um);
+                // Its settings from before you switched to Built-in.
+                if (const auto parked = juce::ValueTree::fromXml (t2[ids::parkedStrip].toString()); parked.isValid() && added.isValid()
+                    && parked[ids::pluginDescription].toString() == xml)
+                    for (int i = 0; i < parked.getNumProperties(); ++i)
+                        if (const auto name = parked.getPropertyName (i); name != ids::id)
+                            added.setProperty (name, parked[name], &um);
+            }
+        };
+    };
+    const auto xmlOf = [] (const juce::PluginDescription& d)
+    {
+        auto e = d.createXml();
+        return e != nullptr ? e->toString (juce::XmlElement::TextFormat().singleLine()) : juce::String();
+    };
+    const auto label = [] (const juce::PluginDescription& d)
+    {
+        return d.name + "  (" + (d.pluginFormatName == "AudioUnit" ? juce::String ("AU") : d.pluginFormatName) + ")";
+    };
+
+    // The channel strips found, by maker
+    if (! candidates.isEmpty())
+    {
+        use.addSectionHeader ("Channel strips");
+        std::map<juce::String, juce::PopupMenu> byMaker;
+        for (const auto& d : candidates)
+        {
+            const auto xml = xmlOf (d);
+            byMaker[d.manufacturerName.isNotEmpty() ? d.manufacturerName : juce::String ("Other")].addItem (label (d), true, currentXml == xml, choose (xml));
+        }
+        if (byMaker.size() == 1)
+            for (const auto& d : candidates)
+                use.addItem (label (d), true, currentXml == xmlOf (d), choose (xmlOf (d)));
+        else
+        {
+            juce::String currentMaker;
+            for (const auto& d : candidates)
+                if (xmlOf (d) == currentXml)
+                    currentMaker = d.manufacturerName.isNotEmpty() ? d.manufacturerName : juce::String ("Other");
+            for (auto& [maker, sub] : byMaker)
+                use.addSubMenu (maker, sub, true, nullptr, maker == currentMaker);
+        }
     }
-    menu.addSubMenu ("This strip uses", use);
+    // ...or any plugin at all
+    if (owner.allPluginTypes)
+    {
+        std::map<juce::String, juce::PopupMenu> byMaker;
+        for (const auto& d : owner.allPluginTypes())
+            if (! d.isInstrument)
+            {
+                const auto xml = xmlOf (d);
+                byMaker[d.manufacturerName.isNotEmpty() ? d.manufacturerName : juce::String ("Other")].addItem (label (d), true, currentXml == xml, choose (xml));
+            }
+        juce::PopupMenu all;
+        for (auto& [maker, sub] : byMaker)
+            all.addSubMenu (maker, sub);
+        use.addSeparator();
+        use.addSubMenu ("All Plugins", all, ! byMaker.empty());
+    }
+    menu.addSubMenu (targets.size() > 1 ? "These " + juce::String (targets.size()) + " strips use" : juce::String ("This strip uses"), use);
 
     // Bypass: the strip (plugin or built-in) out of the signal, on every selected channel
     {
@@ -1073,7 +1130,10 @@ void ChannelStrip::refresh()
         else
             inputSlot.setButtonText (model::inputName (track, owner.inputNames ? owner.inputNames() : juce::StringArray()));
         const auto out = model::findById (project, track[ids::output].toString());
-        outputSlot.setButtonText (out.isValid() ? out[ids::name].toString() : juce::String ("St Out"));
+        if (const auto [first, count] = model::hardwareOutput (track[ids::output].toString()); first >= 0)
+            outputSlot.setButtonText ("Out " + juce::String (first + 1) + (count == 2 ? "-" + juce::String (first + 2) : juce::String()));
+        else
+            outputSlot.setButtonText (out.isValid() ? out[ids::name].toString() : juce::String ("St Out"));
     }
 
     const auto gain = isMaster() ? (double) project.getProperty (ids::masterGain, 0.8)
@@ -1608,6 +1668,7 @@ void ChannelStrip::showOutputMenu()
         if (bus.hasType (ids::TRACK) && model::isBusTrack (bus) && bus != track && ! model::outputWouldLoop (project, track, bus[ids::id].toString()))
             menu.addItem (bus[ids::name].toString(), true, current == bus[ids::id].toString(),
                           [setOutput, id = bus[ids::id].toString()]() mutable { setOutput (id); });
+    routing::addHardwareOutputItems (menu, current, [setOutput] (const juce::String& id) mutable { setOutput (id); });
     menu.addSeparator();
     menu.addItem ("New Bus", [proj = project, setOutput, &um]() mutable
     {
@@ -2045,12 +2106,34 @@ MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p,
     consoleCaption.setColour (juce::Label::textColourId, theme::dimText);
     consoleCaption.setJustificationType (juce::Justification::centredRight);
     addChildComponent (consoleCaption);
-    consoleBox.setTooltip ("The channel strip every track uses: the built-in one, or your own UA channel strip plugin");
+    consoleBox.setTooltip ("The channel strip every track uses: the built-in one, or a channel strip plugin you own "
+                           "(UA, bx_console, SSL, API, Waves...). Right-click a strip's EQ tag to give one channel its own.");
     consoleBox.onChange = [this]
     {
-        const auto index = consoleBox.getSelectedItemIndex();
+        if (consoleBox.getSelectedId() == 98)
+        {
+            // Any plugin as every track's strip, by maker
+            refreshConsoleBox();
+            if (! allPluginTypes)
+                return;
+            std::map<juce::String, juce::PopupMenu> byMaker;
+            auto types = std::make_shared<juce::Array<juce::PluginDescription>> (allPluginTypes());
+            for (int i = 0; i < types->size(); ++i)
+                if (const auto& d = types->getReference (i); ! d.isInstrument)
+                    byMaker[d.manufacturerName.isNotEmpty() ? d.manufacturerName : juce::String ("Other")]
+                        .addItem (d.name, [this, types, i] { if (onChooseConsole) onChooseConsole (&types->getReference (i)); });
+            juce::PopupMenu menu;
+            menu.addSectionHeader ("Every track's channel strip");
+            for (auto& [maker, sub] : byMaker)
+                menu.addSubMenu (maker, sub);
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&consoleBox));
+            return;
+        }
+        const auto id = consoleBox.getSelectedId();
+        if (id >= 97)
+            return;   // (the plugin already in use)
         if (onChooseConsole)
-            onChooseConsole (index > 0 && index - 1 < stripCandidates.size() ? &stripCandidates.getReference (index - 1) : nullptr);
+            onChooseConsole (id >= 2 && id - 2 < stripCandidates.size() ? &stripCandidates.getReference (id - 2) : nullptr);
     };
     addChildComponent (consoleBox);
 
@@ -2261,15 +2344,25 @@ void MixerPanel::refreshConsoleBox()
 
     if (current.isNotEmpty() && selected == 1)
     {
-        // The project uses a plugin this computer doesn't have.
+        // A plugin chosen from the full list, or one this computer doesn't have
         juce::PluginDescription d;
+        bool installed = false;
+        if (allPluginTypes)
+            for (const auto& t : allPluginTypes())
+                if (auto xml = t.createXml(); xml != nullptr && xml->toString (juce::XmlElement::TextFormat().singleLine()) == current)
+                    installed = true;
         if (auto xml = juce::parseXML (current); xml != nullptr && d.loadFromXml (*xml))
-            consoleBox.addItem (d.name + " (not installed)", 99);
+            consoleBox.addItem (d.name + (installed ? juce::String() : juce::String (" (not installed)")), 99);
         selected = 99;
     }
 
+    if (allPluginTypes)
+    {
+        consoleBox.addSeparator();
+        consoleBox.addItem ("Other plugin...", 98);
+    }
     consoleBox.setSelectedId (selected, juce::dontSendNotification);
-    const bool show = ! stripCandidates.isEmpty() || current.isNotEmpty();
+    const bool show = ! stripCandidates.isEmpty() || current.isNotEmpty() || allPluginTypes != nullptr;
     consoleBox.setVisible (show);
     consoleCaption.setVisible (show);
 }

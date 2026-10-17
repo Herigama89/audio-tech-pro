@@ -281,6 +281,8 @@ void Inspector::buildTrackBox()
         juce::String text = "Stereo Out";
         if (const auto out = model::findById (p, t[ids::output].toString()); out.isValid())
             text = out[ids::name].toString();
+        else if (model::hardwareOutput (t[ids::output].toString()).first >= 0)
+            text = model::hardwareOutputName (t[ids::output].toString());
         if (const int g = t.getProperty (ids::group, 0); g > 0)
             text << ", G" << g;
         return text;

@@ -135,6 +135,7 @@ private:
     void openInstrumentWindow (const juce::ValueTree& track);
     void showPluginScanner();
     void openPianoRoll (juce::ValueTree region);
+    void enableHardwareOutputs (int upTo);   // the interface's outputs up to this one switched on
     void closePianoRoll();
     void updateLiveMidiTrack();
     void showFileMenu();

@@ -25,14 +25,19 @@ namespace
 
 bool isBusCompressor (const juce::PluginDescription& d)
 {
-    if (d.isInstrument || ! isUniversalAudio (d))
+    if (d.isInstrument)
         return false;
 
     const auto name = words (d.name);
     const bool gSeries = name.contains (" ssl g") || name.contains (" g bus") || name.contains (" gbus")
                       || name.contains (" g master") || name.contains (" g series");
-    const bool busComp = name.contains (" bus") || name.contains (" buss") || name.contains (" comp");
-    return gSeries && busComp;
+    const bool bus = name.contains (" bus") || name.contains (" buss") || name.contains ("bus ");
+    const bool comp = name.contains (" comp") || name.contains ("comp ");
+    if (isUniversalAudio (d) && gSeries && (bus || comp))
+        return true;
+    // Anyone's: SSL Native Bus Compressor, Comp 4K-Bus, bx_console bus comps, The Glue, G-Master, API 2500...
+    return (bus && comp) || name.contains (" glue ") || name.contains (" g master") || name.contains (" gmaster")
+        || name.contains (" g bus") || name.contains (" gbus") || name.contains (" 2500 ") || name.contains (" mix bus comp");
 }
 
 juce::Array<juce::PluginDescription> findBusCompressors (const juce::Array<juce::PluginDescription>& scanned)
@@ -126,16 +131,25 @@ bool isBypassParameter (const juce::String& name)
 //==============================================================================
 bool isChannelStrip (const juce::PluginDescription& d)
 {
-    if (d.isInstrument || ! isUniversalAudio (d))
+    if (d.isInstrument)
         return false;
 
     const auto name = words (d.name);
-    if (name.contains (" bus") || name.contains (" buss"))
+    if (name.contains (" bus") || name.contains (" buss") || name.contains (" silence"))
         return false;
 
     const bool eSeries = name.contains (" 4000 e") || name.contains (" 4000e") || name.contains (" 4k e")
                       || name.contains (" e channel") || name.contains (" e series") || name.contains (" ssl e ");
-    return eSeries || (name.contains (" ssl") && name.contains (" channel strip"));
+    if (eSeries)
+        return true;
+    // Anyone's console strips: bx_console (SSL, N, Focusrite, AMEK, API...), SSL Native Channel Strip, API Vision,
+    // Waves E/G-Channel, Scheps Omni Channel, Console 1, Harrison 32C, MixHub...
+    for (const auto* key : { " channel strip", " channelstrip", " bx console", " g channel", " echannel", " gchannel",
+                             " vision channel", " omni channel", " console 1 ", " 32c ", " mixhub", " 9000 j", " 4000 g", " 4k g",
+                             " channel module", " strip " })
+        if (name.contains (key))
+            return true;
+    return false;
 }
 
 juce::Array<juce::PluginDescription> findChannelStrips (const juce::Array<juce::PluginDescription>& scanned)

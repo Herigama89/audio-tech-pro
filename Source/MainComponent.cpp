@@ -420,6 +420,7 @@ MainComponent::MainComponent (bool openAudioDevice)
         };
 
         // ...and on every track: the console chosen in the mixer's header.
+        mixer.allPluginTypes = [this] { return visiblePluginTypes(); };
         mixer.onChooseConsole = [this] (const juce::PluginDescription* d)
         {
             juce::String xml;
@@ -591,6 +592,12 @@ MainComponent::MainComponent (bool openAudioDevice)
     automation.makeCurrent();
     routing::toggleFreeze = [this] (juce::ValueTree track) { toggleFreeze (track); };
     routing::openGroupSettings = [this] { showGroupSettings(); };
+    routing::hardwareOutputNames = [this]
+    {
+        auto* device = engine.getDeviceManager().getCurrentAudioDevice();
+        return device != nullptr ? device->getOutputChannelNames() : juce::StringArray();
+    };
+    routing::enableHardwareOutputs = [this] (int upTo) { enableHardwareOutputs (upTo); };
 
     // A knob turned in a plugin's own window: written as automation in Touch, Latch or Write.
     effectRack.onPluginParameter = [this] (const juce::String& insertId, int index, float value, int phase)
@@ -1148,6 +1155,16 @@ void MainComponent::setProject (juce::ValueTree newProject, const juce::File& fi
     project = newProject;
     timeline.project = project;
     projectFile = file;
+
+    // Channels playing to the interface's other outputs: those outputs switched on
+    {
+        int upTo = 0;
+        for (const auto& t : project)
+            if (const auto [first, count] = model::hardwareOutput (t[ids::output].toString()); first >= 0)
+                upTo = juce::jmax (upTo, first + count);
+        if (upTo > 2)
+            enableHardwareOutputs (upTo);
+    }
     project.addListener (this);
     if (file.existsAsFile())
     {

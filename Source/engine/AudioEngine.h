@@ -326,6 +326,9 @@ public:
 
     // --- Rendering, public so tests can drive the engine without a device --
     void prepare (double newSampleRate, int maxBlockSize);
+    /** Which of the interface's outputs the callback carries (set when the device starts; tests set it themselves). */
+    void setActiveOutputs (const juce::BigInteger& active);
+
     void render (const float* const* inputs, int numInputs,
                  float* const* outputs, int numOutputs, int numSamples) noexcept;
 
@@ -441,6 +444,11 @@ private:
 
     // --- Audio-thread state (sized in prepare) --------------------------------
     juce::AudioBuffer<float> trackBuffer, regionBuffer, mixBuffer, silence, directBuffer, busBuffer;
+public:
+    static constexpr int maxHardwareOutputs = 64;
+private:
+    juce::AudioBuffer<float> hardwareBuffer;                   // channels sent straight to the interface's other outputs
+    std::array<int, maxHardwareOutputs> outputSlots {};        // an output's number on the device -> its place in the callback (-1: off)
     juce::AudioBuffer<float> slotOutputs;   // every track's output (after its fader) this block, by slot: side chains and track inputs
     juce::AudioBuffer<float> slotInputs;    // armed tracks' input through their printed inserts, this block, by slot
     std::array<bool, PlaybackGraph::maxTracks> slotInputReady {};

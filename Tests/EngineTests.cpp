@@ -2434,3 +2434,32 @@ TEST_CASE ("Printed inserts: the input is recorded through them, and playback le
     // ...and playback doesn't (the region plays at 0.9, the limiter left out).
     CHECK_THAT (heard[40000], WithinAbs (0.9f, 2e-3));
 }
+
+TEST_CASE ("A channel can play straight to the interface's other outputs", "[engine]")
+{
+    Fixture f;
+    const auto wav = writeConstantWav (f.temp.dir.getChildFile ("a.wav"), 48000.0, 48000, 0.5f);
+    auto a = model::addTrack (f.project, "A", nullptr);
+    auto b = model::addTrack (f.project, "B", nullptr);
+    model::addRegion (a, wav, 0.0, 1.0, nullptr);
+    model::addRegion (b, wav, 0.0, 1.0, nullptr);
+    b.setProperty (ids::output, model::hardwareOutputId (2, false), nullptr);   // outputs 3-4
+    CHECK (model::hardwareOutput ("hw:2") == std::pair { 2, 2 });
+    CHECK (model::hardwareOutput ("hwm:5") == std::pair { 5, 1 });
+    CHECK (model::hardwareOutputName ("hw:2") == "Output 3-4");
+    f.player.setProject (f.project);
+
+    juce::BigInteger active;
+    active.setRange (0, 4, true);
+    f.engine.setActiveOutputs (active);
+    f.engine.play();
+
+    juce::AudioBuffer<float> out (4, 256);
+    for (int i = 0; i < 4; ++i)
+        f.engine.render (nullptr, 0, out.getArrayOfWritePointers(), 4, 256);
+    // A on the Stereo Out (through the master fader); B alone on 3-4, past the master
+    const auto pan = out.getSample (2, 100);
+    CHECK (pan > 0.2f);
+    CHECK_THAT (out.getSample (0, 100), WithinAbs (pan * 0.8f, 1e-4));
+    CHECK_THAT (out.getSample (3, 100), WithinAbs (pan, 1e-4));
+}

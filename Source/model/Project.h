@@ -307,6 +307,13 @@ namespace riff::model
 
     bool outputWouldLoop (const juce::ValueTree& project, const juce::ValueTree& track, const juce::String& targetId);
 
+    /** A channel's output set to the audio interface's own outputs, past the master: "hw:2" is outputs 3-4,
+        "hwm:4" output 5 alone. Returns { first output (0-based), 1 or 2 outputs }, or { -1, 0 } when it isn't one. */
+    std::pair<int, int> hardwareOutput (const juce::String& outputId);
+    juce::String hardwareOutputId (int firstOutput, bool mono);
+    /** "Output 3-4" (or the interface's names for them, when given) */
+    juce::String hardwareOutputName (const juce::String& outputId, const juce::StringArray& channelNames = {});
+
     /** Logic's channel format: a mono channel plays (and records) one channel, panned; stereo plays both.
         Unset means stereo. Switching also sets the input to a mono input or a stereo pair. */
     bool isStereoChannel (const juce::ValueTree& track);

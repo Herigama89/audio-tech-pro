@@ -1813,6 +1813,41 @@ bool outputWouldLoop (const juce::ValueTree& project, const juce::ValueTree& tra
     return id.isNotEmpty();
 }
 
+std::pair<int, int> hardwareOutput (const juce::String& outputId)
+{
+    const bool mono = outputId.startsWith ("hwm:");
+    if (! mono && ! outputId.startsWith ("hw:"))
+        return { -1, 0 };
+    const auto first = outputId.fromFirstOccurrenceOf (":", false, false).getIntValue();
+    return first >= 0 ? std::pair { first, mono ? 1 : 2 } : std::pair { -1, 0 };
+}
+
+juce::String hardwareOutputId (int firstOutput, bool mono)
+{
+    return (mono ? "hwm:" : "hw:") + juce::String (firstOutput);
+}
+
+juce::String hardwareOutputName (const juce::String& outputId, const juce::StringArray& channelNames)
+{
+    const auto [first, count] = hardwareOutput (outputId);
+    if (first < 0)
+        return {};
+    // The interface's own names when it has real ones (not just "Output 3")
+    const auto named = [&channelNames] (int ch) { return juce::isPositiveAndBelow (ch, channelNames.size()) ? channelNames[ch].trim() : juce::String(); };
+    if (count == 1)
+        return named (first).isNotEmpty() ? named (first) : "Output " + juce::String (first + 1);
+    const auto a = named (first), b = named (first + 1);
+    if (a.isNotEmpty() && b.isNotEmpty() && ! a.startsWithIgnoreCase ("output") && ! a.startsWithIgnoreCase ("out "))
+    {
+        // "Line 3 L" + "Line 3 R" -> "Line 3"; otherwise both
+        auto common = a.substring (0, a.length() - 1).trim();
+        if (a.length() == b.length() && b.startsWith (common) && common.isNotEmpty())
+            return common + " (" + juce::String (first + 1) + "-" + juce::String (first + 2) + ")";
+        return a + " / " + b;
+    }
+    return "Output " + juce::String (first + 1) + "-" + juce::String (first + 2);
+}
+
 bool isStereoChannel (const juce::ValueTree& track)
 {
     return track.getProperty (ids::channelFormat, "stereo").toString() != "mono";

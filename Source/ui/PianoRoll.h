@@ -62,6 +62,18 @@ private:
     juce::ComboBox stampBox, snapBox;
     juce::TextButton scaleHighlightButton { "Scale" }, ghostButton { "Ghosts" }, toolsButton { "Tools" };
     void showToolsMenu();
+    enum class ToolMenu { strum, arpeggiate, randomize, levels, limit, claw, articulate };
+    juce::PopupMenu toolSubmenu (ToolMenu which);
+    std::function<void()> runOnNotes (const juce::String& name, std::function<void (juce::Array<juce::ValueTree>)> f);
+    struct NoteShortcut { juce::KeyPress key; juce::String name; std::function<void()> action; };
+    std::vector<NoteShortcut> noteShortcuts();
+    bool runShortcut (const juce::KeyPress& key);
+public:
+    /** Every key the piano roll knows, as text (shown by Tools > Keyboard Shortcuts, and the ? key) */
+    juce::String shortcutsText();
+    void showShortcuts();
+    void mouseEnter (const juce::MouseEvent&) override;
+private:
     double lastLength = 0.0;            // FL's pencil: new notes as long as the last one you drew or touched
     bool muteTo = true;                 // the Mute tool's drag: muting or unmuting
     std::vector<int> stampIntervals() const;

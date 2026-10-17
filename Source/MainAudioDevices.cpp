@@ -55,6 +55,31 @@ juce::String MainComponent::useAudioDevice (const juce::String& name, int numInp
     return dm.setAudioDeviceSetup (setup, true);
 }
 
+void MainComponent::enableHardwareOutputs (int upTo)
+{
+    // Every output up to `upTo` switched on (the callback only carries the ones that are), keeping any already on
+    auto& dm = engine.getDeviceManager();
+    auto* device = dm.getCurrentAudioDevice();
+    if (device == nullptr)
+        return;
+    upTo = juce::jmin (upTo, device->getOutputChannelNames().size(), AudioEngine::maxHardwareOutputs);
+    const auto active = device->getActiveOutputChannels();
+    bool allOn = true;
+    for (int ch = 0; ch < upTo; ++ch)
+        allOn = allOn && active[ch];
+    if (allOn)
+        return;
+
+    auto setup = dm.getAudioDeviceSetup();
+    setup.useDefaultOutputChannels = false;
+    setup.outputChannels = active;
+    setup.outputChannels.setRange (0, upTo, true);
+    if (const auto error = dm.setAudioDeviceSetup (setup, true); error.isNotEmpty())
+        DBG ("Couldn't switch the outputs on: " << error);
+    else
+        saveDeviceState();
+}
+
 juce::String MainComponent::combineInterfaces (const aggregate::Setup& setup)
 {
     if (engine.isRecording())

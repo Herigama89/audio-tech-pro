@@ -23,10 +23,15 @@ TEST_CASE ("Console mode recognises UA's G-series bus compressor", "[console-mod
     CHECK (console::isBusCompressor (plugin ("UAD SSL G Bus Compressor", "Universal Audio (UAD)", "VST3")));
     CHECK (console::isBusCompressor (plugin ("SSL G-Master Buss Compressor", "Universal Audio", "VST3")));
 
-    // Other UA plugins, and other makers' G-style compressors, are not it.
+    // Other makers' bus compressors too
+    CHECK (console::isBusCompressor (plugin ("Comp 4K-Bus", "Antelope Audio", "AudioUnit")));
+    CHECK (console::isBusCompressor (plugin ("SSL Native Bus Compressor 2", "Solid State Logic", "VST3")));
+    CHECK (console::isBusCompressor (plugin ("The Glue", "Cytomic", "VST3")));
+
+    // Not compressors for the bus
     CHECK_FALSE (console::isBusCompressor (plugin ("UADx SSL 4000 E Channel Strip", "Universal Audio (UADx)", "AudioUnit")));
     CHECK_FALSE (console::isBusCompressor (plugin ("UADx 1176 Classic Limiter", "Universal Audio (UADx)", "AudioUnit")));
-    CHECK_FALSE (console::isBusCompressor (plugin ("Bus Glue G", "Someone Else", "VST3")));
+    CHECK_FALSE (console::isBusCompressor (plugin ("Reverb Bus", "Someone Else", "VST3")));
 
     auto instrument = plugin ("UADx SSL G Bus Compressor", "Universal Audio", "AudioUnit");
     instrument.isInstrument = true;
@@ -95,9 +100,16 @@ TEST_CASE ("Console mode recognises UA's E-series channel strip", "[console-mode
     CHECK (console::isChannelStrip (plugin ("UAD SSL E Channel Strip", "Universal Audio (UAD)", "VST3")));
     CHECK (console::isChannelStrip (plugin ("UAD SSL 4000 E", "Universal Audio", "VST3")));
 
+    // Anyone's channel strips
+    CHECK (console::isChannelStrip (plugin ("UADx API Vision Channel Strip", "Universal Audio (UADx)", "AudioUnit")));
+    CHECK (console::isChannelStrip (plugin ("bx_console SSL 4000 E", "Plugin Alliance", "VST3")));
+    CHECK (console::isChannelStrip (plugin ("bx_console N", "Plugin Alliance", "AudioUnit")));
+    CHECK (console::isChannelStrip (plugin ("SSL Native Channel Strip 2", "Solid State Logic", "VST3")));
+    CHECK (console::isChannelStrip (plugin ("SSL E-Channel", "Waves", "VST3")));
+
     CHECK_FALSE (console::isChannelStrip (plugin ("UADx SSL G Bus Compressor", "Universal Audio (UADx)", "AudioUnit")));
-    CHECK_FALSE (console::isChannelStrip (plugin ("UADx API Vision Channel Strip", "Universal Audio (UADx)", "AudioUnit")));
-    CHECK_FALSE (console::isChannelStrip (plugin ("SSL 4000 E", "Someone Else", "VST3")));
+    CHECK_FALSE (console::isChannelStrip (plugin ("Channel EQ", "Apple", "AudioUnit")));
+    CHECK_FALSE (console::isChannelStrip (plugin ("Pro-Q 3", "FabFilter", "VST3")));
 
     const auto found = console::findChannelStrips ({ plugin ("UAD SSL E Channel Strip", "Universal Audio (UAD)", "VST3"),
                                                      plugin ("UADx SSL 4000 E Channel Strip", "Universal Audio (UADx)", "AudioUnit"),

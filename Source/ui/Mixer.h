@@ -322,6 +322,7 @@ public:
 
     /** The mixer's console was chosen in the header: a plugin, or none for the built-in strip. */
     std::function<void (const juce::PluginDescription* plugin)> onChooseConsole;
+    std::function<juce::Array<juce::PluginDescription>()> allPluginTypes;   // every effect scanned (to use any of them as the strip)
 
     /** A plugin finished loading: strips switch to it. */
     void pluginsChanged() { triggerAsyncUpdate(); }

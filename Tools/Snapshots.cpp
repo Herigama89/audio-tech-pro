@@ -170,6 +170,14 @@ public:
             roll.setTool (PianoRoll::Tool::paint);
             pump (main, 150);
             save (roll, "pianoroll-tools.png");
+            out.getChildFile ("pianoroll-keys.txt").replaceWithText (roll.shortcutsText());
+            {
+                // The FL keys reach the tools: Option-F flams the notes (one undoable step)
+                const auto before = roll.region.getNumChildren();
+                roll.keyPressed (juce::KeyPress ('f', juce::ModifierKeys::altModifier, 0));
+                std::cout << "Alt+F flam: " << before << " -> " << roll.region.getNumChildren() << " children" << std::endl;
+                main.undoManager.undo();
+            }
             for (const auto& n : roll.region)
                 if (n.hasType (ids::NOTE))
                     notetools::setMuted ({ n }, false, nullptr);

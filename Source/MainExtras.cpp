@@ -917,7 +917,10 @@ namespace
 
             if (const auto out = model::findById (project, track[ids::output].toString()); out.isValid())
                 add ("Output", "into " + out[ids::name].toString(), amber);
-            add ("Main output", "master inserts, bus compressor, master fader", amber);
+            if (model::hardwareOutput (track[ids::output].toString()).first >= 0)
+                add ("Interface output", "straight to " + model::hardwareOutputName (track[ids::output].toString()) + " (past the master)", amber);
+            else
+                add ("Main output", "master inserts, bus compressor, master fader", amber);
 
             title = track[ids::name].toString();
             setSize (300, 50 + (int) stages.size() * 56);

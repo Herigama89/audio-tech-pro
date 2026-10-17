@@ -8,6 +8,7 @@ AudioEngine::AudioEngine()
 {
     formatManager.registerBasicFormats(); // WAV, AIFF, FLAC, Ogg (+ MP3/CoreAudio formats on macOS)
     currentGraph.store (new PlaybackGraph());
+    outputSlots.fill (-1);
 
     for (auto& slot : takeSlots)
         slot.store (nullptr);
@@ -773,6 +774,16 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
     // Some drivers deliver blocks larger than advertised, so allocate generously;
     // render() also processes in chunks if a block is bigger still.
     prepare (device->getCurrentSampleRate(), juce::jmax (device->getCurrentBufferSizeSamples(), 2048));
+
+    // The callback hands over only the outputs that are switched on, packed together: where each one lands
+    setActiveOutputs (device->getActiveOutputChannels());
+}
+
+void AudioEngine::setActiveOutputs (const juce::BigInteger& active)
+{
+    int packed = 0;
+    for (int ch = 0; ch < maxHardwareOutputs; ++ch)
+        outputSlots[(size_t) ch] = active[ch] ? packed++ : -1;
     deviceRunning.store (true);
 }
 
@@ -823,6 +834,8 @@ void AudioEngine::prepare (double newSampleRate, int)
     mixBuffer.setSize (2, maxBlockSize);
     directBuffer.setSize (2, maxBlockSize);
     busBuffer.setSize (PlaybackGraph::maxBuses * 2, maxBlockSize);
+    hardwareBuffer.setSize (maxHardwareOutputs, maxBlockSize);
+    hardwareBuffer.clear();
     slotOutputs.setSize (PlaybackGraph::maxTracks * 2, maxBlockSize);
     slotOutputs.clear();
     slotInputs.setSize (PlaybackGraph::maxTracks * 2, maxBlockSize);
@@ -958,6 +971,9 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
         juce::FloatVectorOperations::clear (mixR, n);
 
         const bool recordingChunk = isRecordingNow && isPlayingNow && position >= recordStart;
+        const bool toHardware = graph != nullptr && graph->anyHardwareOut && ! bouncing.load (std::memory_order_relaxed);
+        if (toHardware)
+            hardwareBuffer.clear (0, n);
         if (graph != nullptr)
             printInputs (*graph, inputs, numInputs, offset, n);   // (armed tracks' printed inserts, before recording)
         if (recordingChunk)
@@ -1045,6 +1061,12 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
             if (auto* outL = outputs[0]) juce::FloatVectorOperations::copy (outL + offset, mixL, n);
             if (auto* outR = outputs[1]) juce::FloatVectorOperations::copy (outR + offset, mixR, n);
         }
+
+        // Channels sent to the interface's other outputs (they don't go through the master)
+        if (toHardware)
+            for (int ch = 0; ch < maxHardwareOutputs; ++ch)
+                if (const auto slot = outputSlots[(size_t) ch]; slot >= 0 && slot < numOutputs && outputs[slot] != nullptr)
+                    juce::FloatVectorOperations::add (outputs[slot] + offset, hardwareBuffer.getReadPointer (ch), n);
 
         if (auto* tap = screenTap.load (std::memory_order_acquire); tap != nullptr && ! bouncing.load())
             tap->push (mixL, mixR, n, inputs, numInputs, offset);
@@ -1622,8 +1644,22 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         juce::FloatVectorOperations::addWithMultiply (busBuffer.getWritePointer (send.busIndex * 2 + 1), tR, send.level, n);
     }
 
-    // Into a bus (a summing stack, or an output chosen on the strip), or the main output.
-    if (juce::isPositiveAndBelow (track.outputBus, PlaybackGraph::maxBuses) && track.outputBus != track.busIndex)
+    // Into a bus (a summing stack, or an output chosen on the strip), the interface's other outputs, or the main output.
+    if (track.hardwareOut >= 0 && track.hardwareOut < maxHardwareOutputs && ! bouncing.load (std::memory_order_relaxed))
+    {
+        if (track.hardwareMono || track.hardwareOut + 1 >= maxHardwareOutputs)
+        {
+            auto* out = hardwareBuffer.getWritePointer (track.hardwareOut);
+            for (int i = 0; i < n; ++i)
+                out[i] += 0.5f * (tL[i] + tR[i]);
+        }
+        else
+        {
+            juce::FloatVectorOperations::add (hardwareBuffer.getWritePointer (track.hardwareOut), tL, n);
+            juce::FloatVectorOperations::add (hardwareBuffer.getWritePointer (track.hardwareOut + 1), tR, n);
+        }
+    }
+    else if (juce::isPositiveAndBelow (track.outputBus, PlaybackGraph::maxBuses) && track.outputBus != track.busIndex)
     {
         juce::FloatVectorOperations::add (busBuffer.getWritePointer (track.outputBus * 2), tL, n);
         juce::FloatVectorOperations::add (busBuffer.getWritePointer (track.outputBus * 2 + 1), tR, n);

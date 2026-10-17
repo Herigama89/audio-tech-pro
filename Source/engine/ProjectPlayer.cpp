@@ -254,6 +254,12 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         if (const auto out = busIndex.find (track[ids::output].toString()); out != busIndex.end()
             && ! model::outputWouldLoop (project, track, track[ids::output].toString()))
             t.outputBus = out->second;
+        else if (const auto hw = model::hardwareOutput (track[ids::output].toString()); hw.first >= 0)
+        {
+            t.hardwareOut = hw.first;
+            t.hardwareMono = hw.second == 1;
+            graph->anyHardwareOut = true;
+        }
 
         t.monitorInput = (bool) track[ids::armed] && (bool) track[ids::monitor];
         t.inputChannel = juce::jmax (0, (int) track.getProperty (ids::input, 0));

@@ -12,6 +12,44 @@ inline std::function<void (juce::ValueTree track)> toggleFreeze;
 /** Set by the main window: the next controller you move on a MIDI device controls this (MIDI Learn). */
 inline std::function<void (juce::ValueTree track, juce::String param)> learnController;
 
+/** Set by the main window: the audio interface's output names (all of them), and switching them on up to a number. */
+inline std::function<juce::StringArray()> hardwareOutputNames;
+inline std::function<void (int upTo)> enableHardwareOutputs;
+
+/** The interface's other outputs (as Logic's Output 3-4 and so on; 1-2 is the Stereo Out), and a Mono submenu. */
+inline void addHardwareOutputItems (juce::PopupMenu& menu, const juce::String& current, std::function<void (const juce::String&)> setOutput)
+{
+    const auto names = hardwareOutputNames ? hardwareOutputNames() : juce::StringArray();
+    const auto count = juce::jmin (names.size(), 64);
+    menu.addSectionHeader ("Interface Outputs");
+    if (count <= 2)
+    {
+        menu.addItem ("(this interface has no other outputs)", false, false, nullptr);
+        return;
+    }
+    const auto choose = [setOutput] (int first, int width)
+    {
+        return [setOutput, first, width]
+        {
+            if (enableHardwareOutputs)
+                enableHardwareOutputs (first + width);
+            setOutput (model::hardwareOutputId (first, width == 1));
+        };
+    };
+    for (int ch = 2; ch + 1 < count; ch += 2)
+    {
+        const auto id = model::hardwareOutputId (ch, false);
+        menu.addItem (model::hardwareOutputName (id, names), true, current == id, choose (ch, 2));
+    }
+    juce::PopupMenu mono;
+    for (int ch = 0; ch < count; ++ch)
+    {
+        const auto id = model::hardwareOutputId (ch, true);
+        mono.addItem (model::hardwareOutputName (id, names), true, current == id, choose (ch, 1));
+    }
+    menu.addSubMenu ("Mono", mono, true, nullptr, current.startsWith ("hwm:"));
+}
+
 /** Set by the main window: opens the Group Settings window. */
 inline std::function<void()> openGroupSettings;
 
@@ -110,6 +148,11 @@ inline void addRoutingItems (juce::PopupMenu& menu, juce::ValueTree project, juc
                     um.beginNewTransaction ("Output");
                     t.setProperty (ids::output, id, &um);
                 });
+        addHardwareOutputItems (output, current, [t = track, &um] (const juce::String& id) mutable
+        {
+            um.beginNewTransaction ("Output");
+            t.setProperty (ids::output, id, &um);
+        });
         menu.addSubMenu ("Output", output);
     }
 

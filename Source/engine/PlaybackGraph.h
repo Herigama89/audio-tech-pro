@@ -113,6 +113,8 @@ struct PlaybackGraph
         float vcaGain = 1.0f;       // VCA and folder stack faders on top of the track's own
         float width = 1.0f;         // stereo width: 0 mono, 1 as recorded, up to 2 wider
         int outputBus = -1;         // plays into this bus instead of the main output (-1)
+        int hardwareOut = -1;       // or straight to the interface's outputs from this one (0-based), past the master
+        bool hardwareMono = false;  //   (one output, else a pair)
         std::vector<Region> regions;
 
         bool isInstrument = false;
@@ -153,6 +155,7 @@ struct PlaybackGraph
     /** The buses in the order they must play (indices into `tracks`): a bus that plays into
         another bus (a summing stack into a bus, say) comes before it. Empty: in track order. */
     std::vector<int> busOrder;
+    bool anyHardwareOut = false;    // some channel plays straight to other interface outputs
 
     double sampleRate = 44100.0;
     float masterGain = 0.8f;
