@@ -39,10 +39,12 @@ private:
 
     theme::Settings settings;      // what the controls edit now: the main theme, or the editor's own
     theme::Settings whole;         // the main theme (with the editor's inside it)
-    bool editingEditor = false;
-    juce::ComboBox scopeBox;       // Theme for: the mixer and the app, or the editor
+    int editingScope = 0;          // 0 the mixer and the app, 1 the editor, 2 the toolbar, 3 the MultiMeter
+    bool editingEditor = false;    // (scope 1)
+    juce::ComboBox scopeBox;       // Theme for: the mixer and the app, the editor, the toolbar or the MultiMeter
     juce::TextButton sameButton { "Same as Mixer" };
-    void editScope (bool editor);
+    void editScope (int scope);
+    static juce::String* scopeText (theme::Settings& s, int scope);
     std::function<void (const theme::Settings&)> onChange;
     juce::ComboBox skinBox;
     juce::ToggleButton ownAccent { "Skin's own accent colour" };

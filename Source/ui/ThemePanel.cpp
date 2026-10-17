@@ -9,16 +9,18 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
     : settings (initial), whole (initial), onChange (std::move (callback)), store (presetStore)
 {
     // Theme for: the mixer (and the rest of the app), or the editor on its own (the tracks area, ruler, editors)
-    scopeBox.addItemList ({ "Mixer & app", "Editor (tracks area, editors)" }, 1);
+    scopeBox.addItemList ({ "Mixer & app", "Editor (tracks area, editors)", "Toolbar (control bar, transport)", "MultiMeter" }, 1);
     scopeBox.setSelectedItemIndex (0, juce::dontSendNotification);
-    scopeBox.setTooltip ("Edit the mixer's theme (and the rest of the app), or give the editor a theme of its own");
-    scopeBox.onChange = [this] { editScope (scopeBox.getSelectedItemIndex() == 1); };
+    scopeBox.setTooltip ("Edit the mixer's theme (and the rest of the app), or give the editor, the toolbar or the MultiMeter a theme of its own");
+    scopeBox.onChange = [this] { editScope (scopeBox.getSelectedItemIndex()); };
     addAndMakeVisible (scopeBox);
-    sameButton.setTooltip ("The editor follows the mixer's theme again");
+    sameButton.setTooltip ("This part follows the mixer's theme again");
     sameButton.onClick = [this]
     {
-        whole.editorTheme = {};
+        if (auto* text = scopeText (whole, editingScope))
+            *text = {};
         settings = whole;
+        settings.editorTheme = settings.toolbarTheme = settings.meterTheme = {};
         refreshControls();
         if (onChange)
             onChange (whole);
@@ -464,19 +466,31 @@ void ThemePanel::refreshControls()
     updateMeterButtons();
 }
 
-void ThemePanel::editScope (bool editor)
+juce::String* ThemePanel::scopeText (theme::Settings& s, int scope)
 {
-    editingEditor = editor;
-    if (editor)
+    switch (scope)
     {
-        settings = whole.editorTheme.isNotEmpty() ? theme::Settings::fromString (whole.editorTheme) : whole;
-        settings.editorTheme = {};
+        case 1: return &s.editorTheme;
+        case 2: return &s.toolbarTheme;
+        case 3: return &s.meterTheme;
+        default: return nullptr;
+    }
+}
+
+void ThemePanel::editScope (int scope)
+{
+    editingScope = scope;
+    editingEditor = scope == 1;
+    if (auto* text = scopeText (whole, scope))
+    {
+        settings = text->isNotEmpty() ? theme::Settings::fromString (*text) : whole;
+        settings.editorTheme = settings.toolbarTheme = settings.meterTheme = {};
     }
     else
         settings = whole;
-    sameButton.setVisible (editor);
+    sameButton.setVisible (scope != 0);
     for (auto* box : { &faderBox, &knobBox, &buttonBox, &meterBox })
-        box->setVisible (! editor);   // (faders, knobs, keys and the meter are the mixer's)
+        box->setVisible (scope == 0);   // (faders, knobs, keys and the meter are the mixer's)
     refreshControls();
     resized();
     repaint();
@@ -484,16 +498,18 @@ void ThemePanel::editScope (bool editor)
 
 void ThemePanel::changed()
 {
-    if (editingEditor)
+    if (auto* text = scopeText (whole, editingScope))
     {
         auto own = settings;
-        own.editorTheme = {};
-        whole.editorTheme = own.toString();
+        own.editorTheme = own.toolbarTheme = own.meterTheme = {};
+        *text = own.toString();
     }
     else
     {
-        if (settings.editorTheme.isEmpty())
-            settings.editorTheme = whole.editorTheme;   // (the editor's own theme stays)
+        // (the editor's, toolbar's and MultiMeter's own themes stay)
+        settings.editorTheme = whole.editorTheme;
+        settings.toolbarTheme = whole.toolbarTheme;
+        settings.meterTheme = whole.meterTheme;
         whole = settings;
     }
     if (onChange)
@@ -516,7 +532,7 @@ void ThemePanel::paint (juce::Graphics& g)
     g.drawText ("Waveforms", 16, waveModeBox.getY(), 94, waveModeBox.getHeight(), juce::Justification::centredLeft);
     g.drawText ("Regions", 16, regionBox.getY(), 94, regionBox.getHeight(), juce::Justification::centredLeft);
     g.drawText ("Ruler colours", 16, markButtons[0].getY(), 94, markButtons[0].getHeight(), juce::Justification::centredLeft);
-    if (! editingEditor)
+    if (editingScope == 0)
     {
         g.drawText ("Faders / Knobs", 16, faderBox.getY(), 94, faderBox.getHeight(), juce::Justification::centredLeft);
         g.drawText ("Keys / Meter", 16, buttonBox.getY(), 94, buttonBox.getHeight(), juce::Justification::centredLeft);

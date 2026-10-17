@@ -48,12 +48,16 @@ class MainComponent final : public juce::Component,
                             private juce::ValueTree::Listener,
                             private juce::ChangeListener,
                             private juce::ScrollBar::Listener,
+                            private juce::FocusChangeListener,
                             private juce::Timer
 {
 public:
     /** `openAudioDevice` false skips the audio device (for the snapshot tool). */
     explicit MainComponent (bool openAudioDevice = true);
     ~MainComponent() override;
+    /** When the focused control goes away (a strip rebuilt after selecting a channel, say), the keys come back
+        to the main window, so X, Space and the rest keep working. */
+    void globalFocusChanged (juce::Component* focused) override;
 
     /** For the start-up scan: the plugin formats, the list of plugins found, and where a crash is noted. */
     juce::AudioPluginFormatManager& getPluginFormats() noexcept { return rack.getFormatManager(); }
@@ -65,6 +69,8 @@ public:
     void confirmDiscardChanges (std::function<void()> then);
 
     void paint (juce::Graphics& g) override;
+    void paintToolbar (juce::Graphics& g);           // the control bar and the Toolbar row (in the toolbar's theme)
+    void paintToolbarCaptions (juce::Graphics& g);   //   and the captions under its keys
     void resized() override;
     void parentHierarchyChanged() override { updateTitle(); }
 
@@ -152,6 +158,12 @@ private:
     void showChannelSettingMenu (juce::ValueTree track, juce::Component& target);
     juce::ValueTree copiedChannelStrip;   // Copy Channel Strip
     void applyTheme (const theme::Settings& settings);
+    void recolourArea (juce::Component& c, theme::Area area);
+    ConsoleLook areaLooks[3];   // the toolbar's and the MultiMeter's own looks (their themes' colours), when they have themes of their own
+    void updateAreaLooks();
+    /** A window for a panel, under a bar with a Pin key (remembered under `pinKey`) */
+    std::unique_ptr<EditorWindow> makePinnedWindow (const juce::String& title, juce::Component* content, bool resizable,
+                                                    std::function<void()> closer, const juce::String& pinKey);
     void showControllerAssignments();
     void toggleLibrary (LibraryPanel::Page page);
     void toggleSmartControls();
@@ -478,6 +490,23 @@ private:
 
     // The Performance meter (CPU and disk) and its window
     PerformanceMeter performanceMeter;
+
+    /** The control bar and the Toolbar row hold their controls in this layer, so they paint in the toolbar's
+        own theme (Themes > Theme for: Toolbar). It only takes clicks on its controls. */
+    struct ToolbarLayer final : juce::Component
+    {
+        explicit ToolbarLayer (MainComponent& m) : owner (m)
+        {
+            setInterceptsMouseClicks (false, true);
+            theme::AreaScope::tag (*this, theme::Area::toolbar);
+        }
+        void paint (juce::Graphics& g) override              { theme::enterArea (theme::Area::toolbar); entered = true; owner.paintToolbar (g); }
+        void paintOverChildren (juce::Graphics& g) override  { owner.paintToolbarCaptions (g); if (std::exchange (entered, false)) theme::leaveArea(); }
+        MainComponent& owner;
+        bool entered = false;
+    };
+    ToolbarLayer toolbarLayer { *this };
+    void moveToolbarIntoLayer();
     PerformanceReading lastReading;
     std::map<juce::String, float> trackLoads;   // smoothed, by track id
     double lastPerformanceMs = 0.0;

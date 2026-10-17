@@ -335,7 +335,90 @@ namespace
 
 void applyColours (const Settings& s);
 
+namespace
+{
+    struct AreaData { bool own = false; Settings settings; std::vector<juce::Colour> colours; };
+    AreaData& areaData (Area a) { static AreaData data[3]; return data[(int) a]; }
+    int& areaDepth() { static int depth = 0; return depth; }
+
+    std::vector<juce::Colour> colourValues()
+    {
+        std::vector<juce::Colour> v;
+        for (auto* c : allColours())
+            v.push_back (*c);
+        return v;
+    }
+    void writeColours (const std::vector<juce::Colour>& v)
+    {
+        const auto targets = allColours();
+        for (size_t i = 0; i < targets.size() && i < v.size(); ++i)
+            *targets[i] = v[i];
+    }
+    void setMain (const Settings& s);
+}
+
 void set (const Settings& s)
+{
+    // The parts with themes of their own first (their colours kept aside), then the main theme.
+    while (areaDepth() > 0)
+        leaveArea();
+    for (const auto& [area, text] : { std::pair { Area::toolbar, s.toolbarTheme }, std::pair { Area::meter, s.meterTheme } })
+    {
+        auto& a = areaData (area);
+        a.own = text.isNotEmpty();
+        if (! a.own)
+            continue;
+        auto own = Settings::fromString (text);
+        own.editorTheme = own.toolbarTheme = own.meterTheme = {};
+        applyColours (own);
+        a.settings = own;
+        a.colours = colourValues();
+    }
+    setMain (s);
+    auto& main = areaData (Area::main);
+    main.own = true;
+    main.settings = settingsNow();
+    main.colours = colourValues();
+    for (auto area : { Area::toolbar, Area::meter })
+        if (auto& a = areaData (area); ! a.own)
+        {
+            a.settings = main.settings;
+            a.colours = main.colours;
+        }
+}
+
+void enterArea (Area area)
+{
+    ++areaDepth();
+    if (area != Area::main && areaData (area).own)
+    {
+        writeColours (areaData (area).colours);
+        settingsNow() = areaData (area).settings;
+    }
+}
+
+void leaveArea()
+{
+    if (areaDepth() <= 0)
+        return;
+    if (--areaDepth() == 0 && ! areaData (Area::main).colours.empty())
+    {
+        writeColours (areaData (Area::main).colours);
+        settingsNow() = areaData (Area::main).settings;
+    }
+}
+
+bool areaOwn (Area area) { return area != Area::main && areaData (area).own; }
+
+std::vector<juce::Colour> areaColours (Area area)
+{
+    const auto& a = areaData (area);
+    return a.colours.empty() ? colourValues() : a.colours;
+}
+
+namespace
+{
+void setMain (const Settings& s)
 {
     // The editor's own theme first (its colours kept), then the main one; the editor's go back on top.
     editorOwn() = s.editorTheme.isNotEmpty();
@@ -355,6 +438,7 @@ void set (const Settings& s)
         for (size_t i = 0; i < targets.size(); ++i)
             *targets[i] = editorValues[i];
     }
+}
 }
 
 const Settings& editorSettings() { return editorOwn() ? editorNow() : settingsNow(); }
@@ -489,7 +573,8 @@ juce::String Settings::toString() const
                                juce::String::toHexString ((int) editBack), juce::String::toHexString ((int) gridBarColour),
                                juce::String::toHexString ((int) gridBeatColour), juce::String::toHexString ((int) rollBack),
                                juce::String (knobStyle), juce::String (buttonStyle), juce::String (meterStyle),
-                               juce::URL::addEscapeChars (editorTheme, false) }.joinIntoString (";");
+                               juce::URL::addEscapeChars (editorTheme, false),
+                               juce::URL::addEscapeChars (toolbarTheme, false), juce::URL::addEscapeChars (meterTheme, false) }.joinIntoString (";");
 }
 
 Settings Settings::fromString (const juce::String& text)
@@ -545,6 +630,11 @@ Settings Settings::fromString (const juce::String& text)
     }
     if (v.size() >= 28)
         s.editorTheme = juce::URL::removeEscapeChars (v[27]);
+    if (v.size() >= 30)
+    {
+        s.toolbarTheme = juce::URL::removeEscapeChars (v[28]);
+        s.meterTheme = juce::URL::removeEscapeChars (v[29]);
+    }
     return s;
 }
 

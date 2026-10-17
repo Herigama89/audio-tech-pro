@@ -583,11 +583,17 @@ MainComponent::MainComponent (bool openAudioDevice)
         showTrackHeaders = settings->getBoolValue ("viewTrackHeaders", true);
         TrackHeader::showInserts = settings->getBoolValue ("viewHeaderInserts", false);
         mixer.setShowComments (settings->getBoolValue ("mixerComments", false));
+        mixer.onCommentsToggled = [this] (bool shown)
+        {
+            appProperties.getUserSettings()->setValue ("mixerComments", shown);
+            commandManager.commandStatusChanged();
+        };
         applyPanelVisibility();
     }
     screenRecorder = ScreenRecorder::create();
 
     setWantsKeyboardFocus (true);
+    juce::Desktop::getInstance().addFocusChangeListener (this);
     setSize (1440, 920);
     automation.makeCurrent();
     routing::toggleFreeze = [this] (juce::ValueTree track) { toggleFreeze (track); };
@@ -615,9 +621,12 @@ MainComponent::MainComponent (bool openAudioDevice)
             if (auto* plugin = effectRack.getPlugin (insertId); plugin != nullptr && juce::isPositiveAndBelow (index, plugin->getParameters().size()))
                 value = plugin->getParameters()[index]->getValue();
 
-        // As in Logic: the track shows the lane of the knob you just touched (named after it).
+        // As in Logic: the track shows the lane of the knob you just touched (named after it), only while it's
+        // writing automation (Touch, Latch or Write). In Read or Off, touching a plugin (or a plugin moving its own
+        // controls) leaves the arrange alone.
         if (phase == 0)
-            if (auto track = model::findById (project, owner); track.isValid() && track.hasType (ids::TRACK))
+            if (auto track = model::findById (project, owner); track.isValid() && track.hasType (ids::TRACK)
+                && juce::StringArray { "touch", "latch", "write" }.contains (track.getProperty (ids::automationMode, "read").toString()))
             {
                 if (auto* plugin = effectRack.getPlugin (insertId); plugin != nullptr && juce::isPositiveAndBelow (index, plugin->getParameters().size()))
                     model::laneFor (project, owner, param, true).setProperty (ids::name, plugin->getParameters()[index]->getName (40), nullptr);
@@ -678,7 +687,7 @@ MainComponent::MainComponent (bool openAudioDevice)
         engine.setAnalyzerSlot (player.slotOf (track[ids::id].toString()));
         float discard[4096];
         while (engine.readAnalyzer (discard, 4096) > 0) {}
-        editorWindows[id] = std::make_unique<EditorWindow> (track[ids::name].toString() + ": Channel Strip",
+        editorWindows[id] = makePinnedWindow (track[ids::name].toString() + ": Channel Strip",
                                                             new ConsoleStripWindow (track, undoManager,
                                                                                     [this] (float* dest, int max) { return engine.readAnalyzer (dest, max); },
                                                                                     [this] { return engine.getSampleRate(); },
@@ -687,7 +696,7 @@ MainComponent::MainComponent (bool openAudioDevice)
                                                                                         const auto [in, out] = engine.takeStripLevels (slot);
                                                                                         return std::array<float, 3> { in, out, engine.getConsoleGainReduction (slot) };
                                                                                     }),
-                                                            false, closer);
+                                                            false, closer, "pinStripWindow");
     };
     routing::createStack = [this] (bool summing) { createStackFromSelection (summing); };
     TrackHeader::pluginParameterNames = [this] (const juce::String& insertId)
@@ -705,6 +714,9 @@ MainComponent::MainComponent (bool openAudioDevice)
         if (safe != nullptr)
             safe->grabKeyboardFocus();
     });
+
+    updateAreaLooks();
+    moveToolbarIntoLayer();
 
     if (startupError.isNotEmpty())
         showError ("Audio device problem", startupError);
@@ -730,8 +742,48 @@ MainComponent::MainComponent (bool openAudioDevice)
         });
 }
 
+void MainComponent::moveToolbarIntoLayer()
+{
+    // Everything on the control bar and the Toolbar row moves into the toolbar layer (same coordinates)
+    resized();
+    juce::Array<juce::Component*> controls { &fileButton, &undoButton, &redoButton, &addTrackButton, &settingsButton,
+                                             &masterSlider, &masterCaption, &performanceMeter,
+                                             &positionLabel, &clockLabel, &tempoLabel, &tempoCaption, &signatureLabel };
+    for (auto* key : functionKeys)
+        controls.add (key);
+    const auto barBottom = barHeight();
+    for (auto* child : getChildren())
+        if (child != &toolbarLayer && child->isVisible() && ! child->getBounds().isEmpty() && child->getBottom() <= barBottom)
+            controls.addIfNotAlreadyThere (child);
+    for (auto* c : controls)
+    {
+        const auto visible = c->isVisible();
+        toolbarLayer.addChildComponent (c);
+        c->setVisible (visible);
+    }
+    addAndMakeVisible (toolbarLayer);
+    toolbarLayer.toFront (false);
+    recolourArea (toolbarLayer, theme::Area::toolbar);
+    resized();
+}
+
+void MainComponent::globalFocusChanged (juce::Component* focused)
+{
+    if (focused != nullptr)
+        return;
+    juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this)]
+    {
+        if (safe == nullptr || juce::Component::getCurrentlyFocusedComponent() != nullptr || ! safe->isShowing())
+            return;
+        if (auto* peer = safe->getPeer(); peer != nullptr && peer->isFocused())
+            safe->grabKeyboardFocus();
+    });
+}
+
 MainComponent::~MainComponent()
 {
+    juce::Desktop::getInstance().removeFocusChangeListener (this);
+    toolbarLayer.setLookAndFeel (nullptr);
    #if JUCE_MAC
     juce::MenuBarModel::setMacMainMenu (nullptr);
    #endif
@@ -825,17 +877,14 @@ void MainComponent::paint (juce::Graphics& g)
 {
     g.fillAll (theme::background);
 
-    // The Toolbar row and the bar over the tracks
-    for (auto area : { functionBarArea, tracksBarArea })
-        if (! area.isEmpty())
-        {
-            g.setColour (theme::toolbarDark);
-            g.fillRect (area);
-            g.setColour (juce::Colours::black);
-            g.fillRect (area.removeFromBottom (1));
-        }
+    // The bar over the tracks
     if (! tracksBarArea.isEmpty())
     {
+        auto area = tracksBarArea;
+        g.setColour (theme::toolbarDark);
+        g.fillRect (area);
+        g.setColour (juce::Colours::black);
+        g.fillRect (area.removeFromBottom (1));
         g.setColour (theme::text.withAlpha (0.75f));
         g.setFont (juce::FontOptions (12.0f));
         g.drawText ("Snap:", snapBox.getBounds().translated (-38, 0).withWidth (36), juce::Justification::centredRight, false);
@@ -843,6 +892,19 @@ void MainComponent::paint (juce::Graphics& g)
         g.setFont (juce::FontOptions (14.0f));
         g.drawText (juce::String::fromUTF8 ("\xe2\x86\x95"), verticalZoom.getBounds().translated (-16, 0).withWidth (14), juce::Justification::centred, false);
         g.drawText (juce::String::fromUTF8 ("\xe2\x86\x94"), horizontalZoom.getBounds().translated (-16, 0).withWidth (14), juce::Justification::centred, false);
+    }
+}
+
+void MainComponent::paintToolbar (juce::Graphics& g)
+{
+    // (in the toolbar layer, which sits at the window's top left: the same coordinates)
+    if (! functionBarArea.isEmpty())
+    {
+        auto area = functionBarArea;
+        g.setColour (theme::toolbarDark);
+        g.fillRect (area);
+        g.setColour (juce::Colours::black);
+        g.fillRect (area.removeFromBottom (1));
     }
 
     if (! showControlBar)
@@ -897,7 +959,12 @@ void MainComponent::paint (juce::Graphics& g)
                 juce::Justification::centred, false);
     g.drawText ("TIME", juce::Rectangle<float> ((float) clockLabel.getX(), captionY, (float) clockLabel.getWidth(), 11.0f),
                 juce::Justification::centred, false);
+}
 
+void MainComponent::paintToolbarCaptions (juce::Graphics& g)
+{
+    if (! showControlBar)
+        return;
     // Captions under the keys
     for (auto* b : std::initializer_list<juce::Button*> { &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
                                                           &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton, &replaceButton, &clipStopButton,
@@ -1009,6 +1076,8 @@ void MainComponent::resized()
             row.removeFromLeft (4);
         }
     }
+
+    toolbarLayer.setBounds (0, 0, getWidth(), barHeight() + functionBarArea.getHeight());
 
     // Status line
     statusLabel.setBounds (showStatusBar ? area.removeFromBottom (statusHeight).reduced (10, 0) : juce::Rectangle<int>());

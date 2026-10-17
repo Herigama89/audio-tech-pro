@@ -330,8 +330,17 @@ void MultiMeterPanel::analyse (double seconds)
 }
 
 //==============================================================================
+void MultiMeterPanel::paintOverChildren (juce::Graphics&)
+{
+    if (std::exchange (entered, false))
+        theme::leaveArea();
+}
+
 void MultiMeterPanel::paint (juce::Graphics& g)
 {
+    // In the MultiMeter's own theme, when it has one (Themes > Theme for: MultiMeter), until paintOverChildren
+    theme::enterArea (theme::Area::meter);
+    entered = true;
     g.fillAll (theme::panel);
 
     // The tabs (Logic's: the chosen one dark with its name lit)
@@ -632,6 +641,7 @@ void MultiMeterPanel::paintCorrelation (juce::Graphics& g, juce::Rectangle<int> 
 
 void MultiMeterPanel::resized()
 {
+    const theme::ScopedArea scope (theme::Area::meter);   // (its controls take the MultiMeter's own theme's colours)
     auto area = getLocalBounds();
     auto tabs = area.removeFromTop (54);
     analyzerTab.setBounds (tabs.removeFromLeft ((int) (tabs.getWidth() * 0.5f)));

@@ -25,6 +25,8 @@ public:
     ~MultiMeterPanel() override;
 
     void paint (juce::Graphics& g) override;
+    void paintOverChildren (juce::Graphics& g) override;
+    void lookAndFeelChanged() override { resized(); }   // (a new theme: the controls' colours again)
     void resized() override;
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseDrag (const juce::MouseEvent& e) override;
@@ -92,6 +94,7 @@ private:
     int dragging = 0;   // 1 Top, 2 Range
     float dragStartValue = 0.0f;
     double lastTime = 0.0;
+    bool entered = false;   // (painting in the MultiMeter's own theme)
 };
 
 } // namespace riff

@@ -284,9 +284,9 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         s->useSkin (skin::knobBlack(), juce::Colours::white);
         s->setRange (minDb, 6.0, 0.1);
         s->setSkewFactorFromMidPoint (-12.0);
-        s->setDoubleClickReturnValue (true, 0.0);
+        s->setDoubleClickReturnValue (true, -20.0);
         s->setPopupDisplayEnabled (true, true, nullptr);
-        s->setTooltip ("Send level: drag up or down; Option-click for 0 dB. Right-click for more.");
+        s->setTooltip ("Send level: drag up or down; Option-click (or double-click) for -20 dB, the default. Right-click for more.");
         s->textFromValueFunction = [] (double db) { return db <= minDb + 0.01 ? juce::String ("-inf dB") : juce::String (db, 1) + " dB"; };
         s->onDragStart = [this, i, s]
         {
@@ -325,7 +325,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
                 {
                     const auto sends = model::sendsOf (model::findChain (project, t[ids::id].toString()));
                     if (juce::isPositiveAndBelow (i, sends.size()))
-                        sends[i].setProperty (ids::level, 1.0, &owner.getUndoManager());
+                        sends[i].setProperty (ids::level, juce::Decibels::decibelsToGain (-20.0), &owner.getUndoManager());
                 }
             }, "send:" + juce::String (i));
         };
@@ -401,7 +401,9 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
 
         const auto delta = fader.getValue() - dragStartDb;
         for (const auto& [id, startDb] : groupStart)
-            if (auto other = model::findById (project, id); other.isValid() && startDb > minDb + 0.01)
+            // (a fader all the way down stays down while the others move, unless this one started down too:
+            //  then they all come up together)
+            if (auto other = model::findById (project, id); other.isValid() && (startDb > minDb + 0.01 || dragStartDb <= minDb + 0.01))
                 other.setProperty (ids::volume, dbToGain (juce::jlimit (minDb, 6.0, startDb + delta)), &owner.getUndoManager());
     };
     addAndMakeVisible (fader);
@@ -1020,7 +1022,7 @@ void ChannelStrip::showSendMenu (int index)
             if (juce::isPositiveAndBelow (index, sends.size()))
                 sends[index].setProperty (ids::target, busId, &um);
             else
-                model::addSend (model::chainFor (proj, id), busId, juce::Decibels::decibelsToGain (-6.0), &um);
+                model::addSend (model::chainFor (proj, id), busId, juce::Decibels::decibelsToGain (-20.0), &um);   // (a new send starts at -20 dB)
         }
     };
 
@@ -2181,6 +2183,17 @@ MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p,
     automixButton.onClick = [this] { if (onAutomix) onAutomix(); };
     addAndMakeVisible (automixButton);
 
+    commentsButton.setClickingTogglesState (true);
+    commentsButton.setTooltip ("Comments: a notes box under each channel. Click to show or hide them (also View > Show Comments in Mixer).");
+    commentsButton.setWantsKeyboardFocus (false);
+    commentsButton.onClick = [this]
+    {
+        setShowComments (commentsButton.getToggleState());
+        if (onCommentsToggled)
+            onCommentsToggled (showComments);
+    };
+    addAndMakeVisible (commentsButton);
+
     title.setText ("Mixer", juce::dontSendNotification);
     title.setFont (juce::FontOptions (13.0f, juce::Font::bold));
     title.setColour (juce::Label::textColourId, theme::text);
@@ -2624,6 +2637,8 @@ void MixerPanel::resized()
     busCompButton.setBounds (header.removeFromLeft (76));
     header.removeFromLeft (6);
     automixButton.setBounds (header.removeFromLeft (70));
+    header.removeFromLeft (6);
+    commentsButton.setBounds (header.removeFromLeft (80));
 
     // Narrow strips are the same strips, drawn smaller.
     const auto scale = stripScale();
@@ -2674,7 +2689,30 @@ void MixerPanel::layOutComments (int stripW, int top)
 {
     while (commentBoxes.size() < (showComments ? strips.size() : 0))
     {
-        auto* box = commentBoxes.add (new juce::TextEditor());
+        // Only a click on it starts typing: selecting a channel (or Tab moving the focus along) never does
+        struct CommentBox final : juce::TextEditor
+        {
+            void focusGained (FocusChangeType cause) override
+            {
+                juce::TextEditor::focusGained (cause);
+                if (cause != focusChangedByMouseClick)
+                    juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<CommentBox> (this)]
+                    {
+                        if (safe == nullptr || ! safe->hasKeyboardFocus (false))
+                            return;
+                        // Back to the window, so the app's keys (Space, X...) keep working
+                        for (auto* c = safe->getParentComponent(); c != nullptr; c = c->getParentComponent())
+                            if (c->getWantsKeyboardFocus())
+                            {
+                                c->grabKeyboardFocus();
+                                return;
+                            }
+                        safe->giveAwayKeyboardFocus();
+                    });
+            }
+        };
+        auto* box = commentBoxes.add (new CommentBox());
+        box->setExplicitFocusOrder (0);
         box->setMultiLine (true, true);
         box->setReturnKeyStartsNewLine (false);
         box->setFont (juce::FontOptions (11.0f));

@@ -1,9 +1,61 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "Theme.h"
 
 namespace riff
 {
+
+/** A window's content under a slim bar with a Pin key (pinned: the window stays in front of the main window),
+    for windows without a plugin header of their own (the MultiMeter, the channel strip). */
+class PinFrame final : public juce::Component
+{
+public:
+    static constexpr int barHeight = 24;
+
+    PinFrame (juce::Component* contentToOwn, bool pinnedAtStart) : content (contentToOwn)
+    {
+        addAndMakeVisible (*content);
+        pin.setClickingTogglesState (true);
+        pin.setToggleState (pinnedAtStart, juce::dontSendNotification);
+        pin.setTooltip ("Pin: keep this window in front of the main window (while the app is in front)");
+        pin.setColour (juce::TextButton::buttonOnColourId, theme::accent);
+        pin.setWantsKeyboardFocus (false);
+        pin.onClick = [this] { if (onPinChanged) onPinChanged (pin.getToggleState()); };
+        addAndMakeVisible (pin);
+        setSize (content->getWidth(), content->getHeight() + barHeight);
+    }
+
+    std::function<void (bool pinned)> onPinChanged;
+    juce::Component& getContent() noexcept { return *content; }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.setColour (theme::toolbarDark);
+        g.fillRect (getLocalBounds().removeFromTop (barHeight));
+        g.setColour (juce::Colours::black.withAlpha (0.5f));
+        g.fillRect (0, barHeight - 1, getWidth(), 1);
+    }
+
+    void resized() override
+    {
+        const juce::ScopedValueSetter<bool> busy (laying, true);
+        pin.setBounds (getWidth() - 58, 3, 52, barHeight - 6);
+        content->setBounds (getLocalBounds().withTrimmedTop (barHeight));
+    }
+
+    void childBoundsChanged (juce::Component* child) override
+    {
+        // The content sizing itself (a window that grows): the frame and its window follow
+        if (child == content.get() && ! laying)
+            setSize (content->getWidth(), content->getHeight() + barHeight);
+    }
+
+private:
+    std::unique_ptr<juce::Component> content;
+    juce::TextButton pin { "Pin" };
+    bool laying = false;
+};
 
 /** A slider with a right-click menu (Logic's: automation, MIDI Learn, default) instead of a drag. */
 class MenuSlider : public juce::Slider

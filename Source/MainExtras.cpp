@@ -363,41 +363,91 @@ void MainComponent::showEventList()
 }
 
 //==============================================================================
+namespace
+{
+    using ColourMap = std::map<juce::uint32, juce::Colour>;
+
+    ColourMap mapBetween (const std::vector<juce::Colour>& from, const std::vector<juce::Colour>& to)
+    {
+        ColourMap remap;
+        for (size_t i = 0; i < from.size() && i < to.size(); ++i)
+            if (from[i] != to[i])
+                remap.emplace (from[i].getARGB(), to[i]);
+        return remap;
+    }
+
+    /** Controls that took a theme colour when they were made get the new one (matched by value); a part with a
+        theme of its own (the toolbar, the MultiMeter) uses its own map. */
+    void recolourTree (juce::Component& c, const ColourMap (&maps)[3], theme::Area area)
+    {
+        if (c.getProperties().contains ("themeArea"))
+            area = theme::AreaScope::of (c);
+        const auto& remap = maps[(int) area];
+        if (! remap.empty())
+            for (const int id : { (int) juce::TextButton::buttonColourId, (int) juce::TextButton::buttonOnColourId,
+                                  (int) juce::TextButton::textColourOffId, (int) juce::TextButton::textColourOnId,
+                                  (int) juce::Label::textColourId, (int) juce::Label::backgroundColourId, (int) juce::Label::outlineColourId,
+                                  (int) juce::ComboBox::backgroundColourId, (int) juce::ComboBox::textColourId, (int) juce::ComboBox::outlineColourId,
+                                  (int) juce::TextEditor::backgroundColourId, (int) juce::TextEditor::textColourId, (int) juce::TextEditor::outlineColourId,
+                                  (int) juce::Slider::textBoxTextColourId, (int) juce::Slider::trackColourId, (int) juce::Slider::backgroundColourId,
+                                  (int) juce::ToggleButton::textColourId, (int) juce::ToggleButton::tickColourId,
+                                  (int) juce::ListBox::backgroundColourId })
+                if (c.isColourSpecified (id))
+                    if (auto it = remap.find (c.findColour (id).getARGB()); it != remap.end())
+                        c.setColour (id, it->second);
+        for (auto* child : c.getChildren())
+            recolourTree (*child, maps, area);
+    }
+}
+
+void MainComponent::updateAreaLooks()
+{
+    // Each part with a theme of its own draws its buttons, boxes and sliders with a look in that theme's colours
+    for (auto area : { theme::Area::toolbar, theme::Area::meter })
+        if (theme::areaOwn (area))
+        {
+            theme::enterArea (area);
+            theme::apply (areaLooks[(int) area]);
+            theme::leaveArea();
+        }
+    toolbarLayer.setLookAndFeel (theme::areaOwn (theme::Area::toolbar) ? &areaLooks[(int) theme::Area::toolbar] : nullptr);
+    if (auto it = editorWindows.find ("multimeter"); it != editorWindows.end())
+        if (auto* frame = dynamic_cast<PinFrame*> (it->second->getContentComponent()))
+            frame->getContent().setLookAndFeel (theme::areaOwn (theme::Area::meter) ? &areaLooks[(int) theme::Area::meter] : nullptr);
+}
+
+void MainComponent::recolourArea (juce::Component& c, theme::Area area)
+{
+    // A part made in the main colours that has a theme of its own: into its colours
+    c.setLookAndFeel (theme::areaOwn (area) ? &areaLooks[(int) area] : nullptr);
+    if (! theme::areaOwn (area))
+        return;
+    ColourMap maps[3];
+    maps[(int) area] = mapBetween (theme::areaColours (theme::Area::main), theme::areaColours (area));
+    theme::AreaScope::tag (c, area);
+    recolourTree (c, maps, area);
+    c.repaint();
+}
+
 void MainComponent::applyTheme (const theme::Settings& settings)
 {
-    // Controls that took a theme colour when they were made get the new one (matched by value).
-    std::vector<juce::Colour> before;
+    std::vector<juce::Colour> before[3];
+    for (int a = 0; a < 3; ++a)
+        before[a] = theme::areaColours ((theme::Area) a);
+    before[0].clear();
     for (auto* c : theme::allColours())
-        before.push_back (*c);
+        before[0].push_back (*c);
     theme::set (settings);
-    std::map<juce::uint32, juce::Colour> remap;
-    {
-        const auto now = theme::allColours();
-        for (size_t i = 0; i < now.size(); ++i)
-            if (before[i] != *now[i])
-                remap.emplace (before[i].getARGB(), *now[i]);
-    }
-    std::function<void (juce::Component&)> recolour = [&] (juce::Component& c)
-    {
-        for (const int id : { (int) juce::TextButton::buttonColourId, (int) juce::TextButton::buttonOnColourId,
-                              (int) juce::TextButton::textColourOffId, (int) juce::TextButton::textColourOnId,
-                              (int) juce::Label::textColourId, (int) juce::Label::backgroundColourId, (int) juce::Label::outlineColourId,
-                              (int) juce::ComboBox::backgroundColourId, (int) juce::ComboBox::textColourId, (int) juce::ComboBox::outlineColourId,
-                              (int) juce::TextEditor::backgroundColourId, (int) juce::TextEditor::textColourId, (int) juce::TextEditor::outlineColourId,
-                              (int) juce::Slider::textBoxTextColourId, (int) juce::Slider::trackColourId, (int) juce::Slider::backgroundColourId,
-                              (int) juce::ToggleButton::textColourId, (int) juce::ToggleButton::tickColourId,
-                              (int) juce::ListBox::backgroundColourId })
-            if (c.isColourSpecified (id))
-                if (auto it = remap.find (c.findColour (id).getARGB()); it != remap.end())
-                    c.setColour (id, it->second);
-        for (auto* child : c.getChildren())
-            recolour (*child);
-    };
+    ColourMap maps[3];
+    for (int a = 0; a < 3; ++a)
+        maps[a] = mapBetween (before[a], theme::areaColours ((theme::Area) a));
     for (int i = 0; i < juce::TopLevelWindow::getNumTopLevelWindows(); ++i)
         if (auto* w = juce::TopLevelWindow::getTopLevelWindow (i))
-            recolour (*w);
-    recolour (*this);
+            recolourTree (*w, maps, theme::Area::main);
+    if (getParentComponent() == nullptr)
+        recolourTree (*this, maps, theme::Area::main);
     theme::apply (juce::LookAndFeel::getDefaultLookAndFeel());
+    updateAreaLooks();
     appProperties.getUserSettings()->setValue ("theme", settings.toString());
 
     // Everything repaints in the new colours (and the strips lay out for the skin).
@@ -1236,7 +1286,25 @@ void MainComponent::showMultiMeter()
                 safe->editorWindows.erase (id);
         });
     };
-    editorWindows[id] = std::make_unique<EditorWindow> ("MultiMeter (Master)", new MultiMeterPanel (engine), true, closer);
+    auto* panel = new MultiMeterPanel (engine);
+    theme::AreaScope::tag (*panel, theme::Area::meter);
+    recolourArea (*panel, theme::Area::meter);
+    editorWindows[id] = makePinnedWindow ("MultiMeter (Master)", panel, true, closer, "pinMultiMeter");
+}
+
+std::unique_ptr<EditorWindow> MainComponent::makePinnedWindow (const juce::String& title, juce::Component* content, bool resizable,
+                                                               std::function<void()> closer, const juce::String& pinKey)
+{
+    const bool pinned = appProperties.getUserSettings()->getBoolValue (pinKey, true);
+    auto* frame = new PinFrame (content, pinned);
+    auto window = std::make_unique<EditorWindow> (title, frame, resizable, std::move (closer));
+    window->setPinned (pinned);
+    frame->onPinChanged = [this, w = window.get(), pinKey] (bool on)
+    {
+        w->setPinned (on);
+        appProperties.getUserSettings()->setValue (pinKey, on);
+    };
+    return window;
 }
 
 void MainComponent::showPerformanceWindow()

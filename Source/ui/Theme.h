@@ -129,6 +129,9 @@ namespace riff::theme
         // empty: the same as the mixer and the rest of the app.
         juce::String editorTheme;
 
+        // The toolbar (control bar, transport, Toolbar row) and the MultiMeter with themes of their own, the same way.
+        juce::String toolbarTheme, meterTheme;
+
         // The edit windows (tracks area and editors): your own colours (ARGB), 0: the skin's.
         juce::uint32 editBack = 0, gridBarColour = 0, gridBeatColour = 0, rollBack = 0;
 
@@ -172,4 +175,29 @@ namespace riff::theme
 
     /** Every theme colour (to repaint controls that copied one when the theme changes). */
     std::vector<juce::Colour*> allColours();
+
+    /** Parts of the app with a theme of their own (Themes > Theme for). While one is entered (from its paint() to its
+        paintOverChildren()), every theme colour and setting is that part's; leaving puts the main ones back. */
+    enum class Area { main = 0, toolbar, meter };
+    void enterArea (Area);
+    void leaveArea();
+    bool areaOwn (Area);
+    /** allColours()'s values as that part has them (the main ones when it has no theme of its own) */
+    std::vector<juce::Colour> areaColours (Area);
+
+    /** In an area's theme for as long as it lives (for code that copies theme colours into controls) */
+    struct ScopedArea
+    {
+        explicit ScopedArea (Area a) { enterArea (a); }
+        ~ScopedArea() { leaveArea(); }
+        ScopedArea (const ScopedArea&) = delete;
+        ScopedArea& operator= (const ScopedArea&) = delete;
+    };
+
+    /** A component whose children are painted in an area's theme */
+    struct AreaScope
+    {
+        static void tag (juce::Component& c, Area a) { c.getProperties().set ("themeArea", (int) a); }
+        static Area of (const juce::Component& c) { return (Area) (int) c.getProperties().getWithDefault ("themeArea", 0); }
+    };
 }

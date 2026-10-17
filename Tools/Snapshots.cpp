@@ -917,6 +917,28 @@ public:
                 save (meter, "multimeter-xenon.png");
                 main.applyTheme ({});
             }
+            {
+                // Parts with themes of their own: the MultiMeter Studio White and the toolbar Xenon, the rest as it is
+                theme::Settings white, xenon, mixed;
+                white.skin = theme::Skin::white;
+                xenon.skin = theme::Skin::xenon;
+                mixed.meterTheme = white.toString();
+                mixed.toolbarTheme = xenon.toString();
+                main.applyTheme (mixed);
+                theme::AreaScope::tag (meter, theme::Area::meter);
+                main.recolourArea (meter, theme::Area::meter);
+                meter.resized();
+                for (int block = 0; block < 10; ++block)
+                {
+                    meter.take (mix.getReadPointer (0, (block * 1600) % 46000), mix.getReadPointer (1, (block * 1600) % 46000), 1600);
+                    pump (main, 20);
+                }
+                save (meter, "multimeter-own-theme.png");
+                main.closeMixer();
+                pump (main, 50);
+                save (main, "toolbar-own-theme.png");
+                main.applyTheme ({});
+            }
         }
         {
             // Automix, after a run

@@ -218,3 +218,31 @@ TEST_CASE ("The editor can have a theme of its own", "[theme]")
     CHECK_FALSE (theme::glassRegions());   // (the editor's: Studio White's regions are filled)
     theme::set ({});
 }
+
+TEST_CASE ("The toolbar and the MultiMeter can have themes of their own", "[theme]")
+{
+    theme::Settings xenon, white, mixed;
+    xenon.skin = theme::Skin::xenon;
+    white.skin = theme::Skin::white;
+    mixed.toolbarTheme = xenon.toString();
+    mixed.meterTheme = white.toString();
+
+    // Kept through the settings text
+    const auto back = theme::Settings::fromString (mixed.toString());
+    CHECK (back.toolbarTheme == mixed.toolbarTheme);
+    CHECK (back.meterTheme == mixed.meterTheme);
+    CHECK (back.skin == theme::Skin::studio);
+
+    theme::set (mixed);
+    const auto mainPanel = theme::panel;
+    CHECK (theme::areaOwn (theme::Area::toolbar));
+    {
+        const theme::ScopedArea scope (theme::Area::meter);
+        CHECK (theme::whiteSkin());
+        CHECK (theme::panel != mainPanel);
+    }
+    CHECK (! theme::whiteSkin());          // back to the main theme after
+    CHECK (theme::panel == mainPanel);
+    theme::set ({});
+    CHECK (! theme::areaOwn (theme::Area::toolbar));
+}

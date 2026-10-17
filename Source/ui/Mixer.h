@@ -367,6 +367,7 @@ private:
     juce::TextButton consoleButton { "EQ/Dyn" };  // show the console section (EQ and Dynamics) on the strips
     juce::TextButton busCompButton { "Bus Comp" };
     juce::TextButton automixButton { "Automix" }; // show the Master Bus Compressor beside the master
+    juce::TextButton commentsButton { "Comments" };   // the notes boxes under the strips, on or off
     float stripScale() const;
     juce::Array<juce::PluginDescription> stripCandidates;
     int syncCounter = 0;
@@ -379,7 +380,8 @@ private:
 
 public:
     /** View > Show Comments in Mixer: a notes box under each channel (as in Pro Tools). */
-    void setShowComments (bool show) { showComments = show; resized(); }
+    void setShowComments (bool show) { showComments = show; commentsButton.setToggleState (show, juce::dontSendNotification); resized(); }
+    std::function<void (bool shown)> onCommentsToggled;   // (the main window keeps the choice)
     bool getShowComments() const noexcept { return showComments; }
 private:
     bool showComments = false;
