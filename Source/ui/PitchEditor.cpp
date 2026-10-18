@@ -8,14 +8,27 @@ namespace riff
 
 namespace
 {
-    // Kept on the region: the recording the edits apply to, and the edits
+    // Kept on the region: the recording the edits apply to, the edits, and the notes' boundaries (after splits and joins)
     const juce::Identifier pitchSource ("pitchSource"), pitchSourceOffset ("pitchSourceOffset"),
-                           pitchSourceLength ("pitchSourceLength"), pitchEdits ("pitchEdits");
+                           pitchSourceLength ("pitchSourceLength"), pitchEdits ("pitchEdits"), pitchSegments ("pitchSegments");
 
-    constexpr int keyboardWidth = 38, toolbarHeight = 30;
-    const juce::Colour blobColour (0xffe08a2c), blobSelected (0xffffc04a);
+    constexpr int menuHeight = 30, rulerHeight = 18, regionBarHeight = 16, keyboardWidth = 44, statusHeight = 16;
 
     bool isBlackKey (int midi) { const auto pc = ((midi % 12) + 12) % 12; return pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10; }
+
+    juce::String percent (double v) { return juce::String (juce::roundToInt (v)) + "%"; }
+
+    // Scale Quantize's scales (intervals from the root)
+    struct ScaleKind { const char* name; std::vector<int> steps; };
+    const std::vector<ScaleKind>& scaleKinds()
+    {
+        static const std::vector<ScaleKind> kinds {
+            { "Major", { 0, 2, 4, 5, 7, 9, 11 } }, { "Minor", { 0, 2, 3, 5, 7, 8, 10 } },
+            { "Chromatic", { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 } }, { "Major Pentatonic", { 0, 2, 4, 7, 9 } },
+            { "Minor Pentatonic", { 0, 3, 5, 7, 10 } }, { "Blues", { 0, 3, 5, 6, 7, 10 } }, { "Harmonic Minor", { 0, 2, 3, 5, 7, 8, 11 } },
+            { "Dorian", { 0, 2, 3, 5, 7, 9, 10 } }, { "Mixolydian", { 0, 2, 4, 5, 7, 9, 10 } } };
+        return kinds;
+    }
 }
 
 PitchEditor::PitchEditor (juce::ValueTree r, juce::UndoManager& um, juce::AudioFormatManager& f, juce::File folder)
@@ -23,46 +36,32 @@ PitchEditor::PitchEditor (juce::ValueTree r, juce::UndoManager& um, juce::AudioF
 {
     setWantsKeyboardFocus (true);
     setOpaque (true);
+    setupInspector();
 
-    amountSlider.setSliderStyle (juce::Slider::LinearHorizontal);
-    amountSlider.setRange (0.0, 100.0, 1.0);
-    amountSlider.setValue (100.0, juce::dontSendNotification);
-    amountSlider.setTextValueSuffix ("%");
-    amountSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 20);
-    amountSlider.setTooltip ("How far Correct and To Key move the notes, and how much Straighten flattens them (100%: all the way)");
-    addAndMakeVisible (amountSlider);
-
-    correctButton.setTooltip ("The selected notes (or all) onto the nearest semitone, by the amount set (Logic's Pitch Correction)");
-    keyButton.setTooltip ("The selected notes (or all) onto the nearest note of the song's key");
-    straightenButton.setTooltip ("Flatten the selected notes' drift and vibrato towards each note's centre, by the amount set");
-    resetButton.setTooltip ("The selected notes (or all) back as they were sung");
-    correctButton.onClick = [this]
-    {
-        pitchcorrect::correct (edits, analysis, targets(), amountSlider.getValue() / 100.0);
-        commit ("Correct Pitch");
-    };
-    keyButton.onClick = [this]
-    {
-        pitchcorrect::correct (edits, analysis, targets(), amountSlider.getValue() / 100.0, songScale ? songScale() : std::vector<int>());
-        commit ("Correct Pitch to Key");
-    };
-    straightenButton.onClick = [this]
-    {
-        for (const auto i : targets())
-            edits[(size_t) i].drift = amountSlider.getValue() / 100.0;
-        commit ("Straighten Pitch");
-    };
-    resetButton.onClick = [this]
-    {
-        for (const auto i : targets())
-            edits[(size_t) i] = {};
-        commit ("Reset Pitch");
-    };
-    for (auto* b : { &correctButton, &keyButton, &straightenButton, &resetButton })
+    // The menus and tools above, as Logic's editor
+    editMenu.onClick = [this] { showEditMenu(); };
+    functionsMenu.onClick = [this] { showFunctionsMenu(); };
+    viewMenu.onClick = [this] { showViewMenu(); };
+    pointerTool.setButtonText ("Pointer");
+    scissorsTool.setButtonText ("Scissors");
+    glueTool.setButtonText ("Glue");
+    pointerTool.setTooltip ("Pointer: select notes; drag them up or down (pitch) or sideways (time); their hot spots for drift, fine pitch, gain, vibrato and formant");
+    scissorsTool.setTooltip ("Scissors: click a note to split it there");
+    glueTool.setTooltip ("Glue: click to join the selected notes (or a note and the next) into one");
+    pointerTool.onClick = [this] { setTool (Tool::pointer); };
+    scissorsTool.onClick = [this] { setTool (Tool::scissors); };
+    glueTool.onClick = [this] { setTool (Tool::glue); };
+    for (auto* b : { &editMenu, &functionsMenu, &viewMenu, &pointerTool, &scissorsTool, &glueTool })
     {
         b->setWantsKeyboardFocus (false);
         addAndMakeVisible (b);
     }
+    for (auto* b : { &pointerTool, &scissorsTool, &glueTool })
+    {
+        b->setClickingTogglesState (false);
+        b->setColour (juce::TextButton::buttonOnColourId, theme::accent);
+    }
+    setTool (Tool::pointer);
     status.setFont (juce::FontOptions (11.0f));
     status.setColour (juce::Label::textColourId, theme::dimText);
     addAndMakeVisible (status);
@@ -81,6 +80,173 @@ PitchEditor::~PitchEditor()
         worker->stopThread (4000);
 }
 
+//==============================================================================
+void PitchEditor::setupInspector()
+{
+    nameLabel.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+    nameLabel.setText (region[ids::name].toString(), juce::dontSendNotification);
+    notesLabel.setFont (juce::FontOptions (11.5f));
+    notesLabel.setColour (juce::Label::textColourId, theme::dimText);
+    for (auto* l : { &nameLabel, &notesLabel })
+        addAndMakeVisible (l);
+
+    timeGridBox.addItemList ({ "off", "1/4", "1/8", "1/16", "1/32", "1/8 Triplet", "1/16 Triplet" }, 1);
+    timeGridBox.setSelectedId (4, juce::dontSendNotification);
+    timeGridBox.setTooltip ("Time Quantize: the grid Q moves the selected notes (or all) onto");
+    scaleKeyBox.addItem ("Off", 1);
+    scaleKeyBox.addItem ("Song key", 2);
+    for (int pc = 0; pc < 12; ++pc)
+        scaleKeyBox.addItem (juce::MidiMessage::getMidiNoteName (pc, true, false, 3), 3 + pc);
+    scaleKeyBox.setSelectedId (2, juce::dontSendNotification);
+    scaleKeyBox.setTooltip ("Scale Quantize: the key the notes go to (Song key: the project's key)");
+    for (int i = 0; i < (int) scaleKinds().size(); ++i)
+        scaleModeBox.addItem (scaleKinds()[(size_t) i].name, i + 1);
+    scaleModeBox.setSelectedId (1, juce::dontSendNotification);
+    scaleModeBox.setTooltip ("Scale Quantize: the scale (with Song key: the project's own)");
+    timeQButton.setTooltip ("Time Quantize the selected notes (or all), by the Strength");
+    scaleQButton.setTooltip ("Scale Quantize the selected notes (or all): each onto the nearest note of the scale");
+    timeQButton.onClick = [this] { quantizeTime(); };
+    scaleQButton.onClick = [this] { quantizeScale(); };
+    for (auto* c : std::initializer_list<juce::Component*> { &timeGridBox, &scaleKeyBox, &scaleModeBox, &timeQButton, &scaleQButton })
+    {
+        c->setWantsKeyboardFocus (false);
+        addAndMakeVisible (c);
+    }
+
+    struct Spec { juce::Slider* slider; double lo, hi, start; const char* tip; };
+    const Spec specs[] {
+        { &strengthSlider, 0.0, 100.0, 100.0, "Time Quantize strength: how far the notes move to the grid" },
+        { &correctionSlider, 0.0, 100.0, 0.0, "Pitch Correction: how far the selected notes (or all) go onto the nearest semitone" },
+        { &gainSlider, -30.0, 12.0, 0.0, "Gain of the selected notes (or all), in dB" },
+        { &driftSlider, 0.0, 100.0, 0.0, "Pitch Drift: how much of the notes' slow drift (scoops, sags) is flattened (100%: none left)" },
+        { &vibratoSlider, 0.0, 200.0, 100.0, "Vibrato: 0% none, 100% as sung, 200% twice as wide" },
+        { &formantSlider, -12.0, 12.0, 0.0, "Formant Shift: the voice's character darker or brighter, its pitch kept (semitones)" } };
+    for (const auto& spec : specs)
+    {
+        auto& s = *spec.slider;
+        s.setSliderStyle (juce::Slider::LinearHorizontal);
+        s.setRange (spec.lo, spec.hi, &s == &formantSlider ? 0.1 : 1.0);
+        s.setValue (spec.start, juce::dontSendNotification);
+        s.setTextBoxStyle (juce::Slider::TextBoxRight, false, 46, 18);
+        s.setTooltip (spec.tip);
+        s.setWantsKeyboardFocus (false);
+        if (&s != &strengthSlider)
+        {
+            s.onValueChange = [this, &s] { if (s.isMouseButtonDown()) sliderChanged (s, false); };
+            s.onDragEnd = [this, &s] { sliderChanged (s, true); };
+        }
+        addAndMakeVisible (s);
+    }
+    strengthSlider.setTextValueSuffix ("");
+    gainSlider.setTextValueSuffix (" dB");
+
+    for (const auto* text : { "Time Quantize", "Strength", "Scale Quantize", "Pitch Correction", "Gain", "Pitch Drift", "Vibrato", "Formant Shift" })
+    {
+        auto* l = captions.add (new juce::Label ({}, text));
+        l->setFont (juce::FontOptions (12.5f));
+        l->setColour (juce::Label::textColourId, theme::dimText);
+        addAndMakeVisible (l);
+    }
+}
+
+void PitchEditor::refreshInspector()
+{
+    // The values of the first selected note (or the first note)
+    notesLabel.setText (ready ? (selected.empty() ? juce::String ((int) analysis.notes.size()) + " notes (all)"
+                                                  : juce::String ((int) selected.size()) + " of " + juce::String ((int) analysis.notes.size()) + " notes selected")
+                              : juce::String ("Finding the notes..."),
+                        juce::dontSendNotification);
+    const auto t = targets();
+    if (t.empty() || edits.empty())
+        return;
+    const auto& e = edits[(size_t) t.front()];
+    correctionSlider.setValue (e.snap * 100.0, juce::dontSendNotification);
+    gainSlider.setValue (e.gain, juce::dontSendNotification);
+    driftSlider.setValue (e.drift * 100.0, juce::dontSendNotification);
+    vibratoSlider.setValue (e.vibrato * 100.0, juce::dontSendNotification);
+    formantSlider.setValue (e.formant, juce::dontSendNotification);
+}
+
+void PitchEditor::sliderChanged (juce::Slider& s, bool finished)
+{
+    if (! ready)
+        return;
+    const auto v = s.getValue();
+    for (const auto i : targets())
+    {
+        auto& e = edits[(size_t) i];
+        if (&s == &correctionSlider)    e.snap = v / 100.0;
+        else if (&s == &gainSlider)     e.gain = v;
+        else if (&s == &driftSlider)    e.drift = v / 100.0;
+        else if (&s == &vibratoSlider)  e.vibrato = v / 100.0;
+        else if (&s == &formantSlider)  e.formant = v;
+    }
+    if (finished)
+        commit (&s == &correctionSlider ? "Pitch Correction" : &s == &gainSlider ? "Note Gain" : &s == &driftSlider ? "Pitch Drift"
+                : &s == &vibratoSlider ? "Vibrato" : "Formant Shift");
+    else
+    {
+        liveDirty = true;   // (heard as the slider moves)
+        repaint();
+    }
+}
+
+std::vector<int> PitchEditor::scaleNotes() const
+{
+    const auto key = scaleKeyBox.getSelectedId();
+    if (key <= 1)
+        return {};
+    if (key == 2 && songScale)
+        return songScale();
+    const auto root = juce::jmax (0, key - 3);
+    std::vector<int> notes;
+    for (const auto step : scaleKinds()[(size_t) juce::jlimit (0, (int) scaleKinds().size() - 1, scaleModeBox.getSelectedId() - 1)].steps)
+        notes.push_back ((root + step) % 12);
+    return notes;
+}
+
+void PitchEditor::quantizeScale()
+{
+    if (! ready || scaleKeyBox.getSelectedId() <= 1)
+    {
+        status.setText ("Scale Quantize: choose a key first", juce::dontSendNotification);
+        return;
+    }
+    pitchcorrect::correct (edits, analysis, targets(), 1.0, scaleNotes());
+    commit ("Scale Quantize");
+}
+
+void PitchEditor::quantizeTime()
+{
+    if (! ready)
+        return;
+    const double grids[] { 0.0, 1.0, 0.5, 0.25, 0.125, 1.0 / 3.0, 1.0 / 6.0 };
+    const auto grid = grids[juce::jlimit (0, 6, timeGridBox.getSelectedId() - 1)];
+    const auto project = region.getParent().getParent();
+    if (grid <= 0.0 || ! project.isValid())
+        return;
+    const auto map = model::tempoMapOf (project);
+    const double regionStart = region[ids::start];
+    const auto strength = strengthSlider.getValue() / 100.0;
+    for (const auto i : targets())
+    {
+        const auto now = regionStart + analysis.frameToSeconds (analysis.notes[(size_t) i].startFrame) + edits[(size_t) i].time;
+        const auto snapped = map.secondsAt (std::round (map.beatAt (now) / grid) * grid);
+        edits[(size_t) i].time += strength * (snapped - now);
+    }
+    liveWhole = true;
+    commit ("Time Quantize");
+}
+
+void PitchEditor::setForTargets (std::function<void (pitchcorrect::NoteEdit&)> change, const juce::String& undoName)
+{
+    for (const auto i : targets())
+        change (edits[(size_t) i]);
+    commit (undoName);
+    refreshInspector();
+}
+
+//==============================================================================
 void PitchEditor::load()
 {
     // The recording the edits apply to: the one kept from the first pitch edit (if the region is still that long),
@@ -92,6 +258,7 @@ void PitchEditor::load()
         sourceOffset = region[pitchSourceOffset];
         sourceLength = region[pitchSourceLength];
         lastCommitted = region[pitchEdits].toString();
+        lastSegments = region[pitchSegments].toString();
     }
     else
     {
@@ -100,25 +267,28 @@ void PitchEditor::load()
         sourceOffset = region[ids::offset];
         sourceLength = region[ids::length];
         lastCommitted = {};
+        lastSegments = {};
     }
     ready = false;
-    status.setText ("Finding the notes...", juce::dontSendNotification);
+    ++loadGeneration;
+    refreshInspector();
 
     struct Job final : juce::Thread
     {
-        Job (PitchEditor& e) : juce::Thread ("Pitch analysis"), editor (e) {}
+        Job (PitchEditor& e) : juce::Thread ("Pitch analysis"), editor (e), generation (e.loadGeneration) {}
         void run() override
         {
             auto result = editor.analyseSource();
             if (threadShouldExit())
                 return;
-            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<PitchEditor> (&editor), result = std::move (result)]() mutable
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<PitchEditor> (&editor), result = std::move (result), g = generation]() mutable
             {
-                if (safe != nullptr)
+                if (safe != nullptr && ! safe->ready && safe->loadGeneration == g)   // (not when analyseNow got there first)
                     safe->useAnalysis (std::move (result.first), std::move (result.second));
             });
         }
         PitchEditor& editor;
+        const int generation;
     };
     if (worker != nullptr)
         worker->stopThread (4000);
@@ -134,14 +304,33 @@ std::pair<juce::AudioBuffer<float>, pitchcorrect::Analysis> PitchEditor::analyse
     return { std::move (audio), std::move (result) };
 }
 
+void PitchEditor::resetSegmentsAndEdits()
+{
+    analysis = original;
+    pitchcorrect::applySegments (analysis, lastSegments);
+    edits = pitchcorrect::fromString (lastCommitted, analysis.notes.size());
+    selected.clear();
+}
+
 void PitchEditor::useAnalysis (juce::AudioBuffer<float> audio, pitchcorrect::Analysis result)
 {
     source = std::move (audio);
-    analysis = std::move (result);
-    edits = pitchcorrect::fromString (lastCommitted, analysis.notes.size());
+    original = std::move (result);
+    resetSegmentsAndEdits();
     maxLevel = 1.0e-3f;
     for (const auto l : analysis.level)
         maxLevel = juce::jmax (maxLevel, l);
+
+    // The waveform (a peak every 256 samples), drawn behind the notes
+    peaks.assign ((size_t) (source.getNumSamples() / peakStep + 1), 0.0f);
+    for (int c = 0; c < source.getNumChannels(); ++c)
+        for (int i = 0; i < source.getNumSamples(); ++i)
+            peaks[(size_t) (i / peakStep)] = juce::jmax (peaks[(size_t) (i / peakStep)], std::abs (source.getSample (c, i)));
+    const auto loudest = juce::jmax (1.0e-4f, *std::max_element (peaks.begin(), peaks.end()));
+    for (auto& p : peaks)
+        p /= loudest;
+
+    // The notes' range with a little room (at least an octave), so the rows are big enough to work on
     double lo = 127.0, hi = 0.0;
     for (const auto& n : analysis.notes)
     {
@@ -150,21 +339,20 @@ void PitchEditor::useAnalysis (juce::AudioBuffer<float> audio, pitchcorrect::Ana
     }
     if (hi < lo)
         lo = 55.0, hi = 67.0;
-    // The notes' range with a little room (at least an octave), so the rows are big enough to work on
-    lowMidi = std::floor (lo) - 2.0;
-    highMidi = std::ceil (hi) + 2.0;
-    if (highMidi - lowMidi < 13.0)
+    lowMidi = std::floor (lo) - 3.0;
+    highMidi = std::ceil (hi) + 3.0;
+    if (highMidi - lowMidi < 14.0)
     {
         const auto middle = 0.5 * (lowMidi + highMidi);
-        lowMidi = std::floor (middle - 6.5);
-        highMidi = lowMidi + 13.0;
+        lowMidi = std::floor (middle - 7.0);
+        highMidi = lowMidi + 14.0;
     }
     ready = true;
     if (cache != nullptr && region[pitchSource].toString().isNotEmpty())
         ensureLive();   // (edited before: changes are heard at once from here)
-    status.setText (juce::String ((int) analysis.notes.size()) + " notes. Drag one up or down (Option: by cents); "
-                    "double-click: nearest semitone. Wheel: up/down, Option-wheel: row size, Cmd-wheel: zoom. Click the ruler to move the playhead.",
-                    juce::dontSendNotification);
+    status.setText ("Drag a note up or down (Option: cents) or sideways (time); its hot spots: drift, fine pitch, gain, vibrato, formant. "
+                    "Wheel: up/down, Option-wheel: row size, Cmd-wheel: zoom.", juce::dontSendNotification);
+    refreshInspector();
     repaint();
 }
 
@@ -181,22 +369,28 @@ void PitchEditor::analyseNow()
 
 void PitchEditor::valueTreePropertyChanged (juce::ValueTree& t, const juce::Identifier& p)
 {
-    if (t != region)
+    if (t != region || committing)
         return;
-    if (p == pitchEdits && ready && region[pitchEdits].toString() != lastCommitted)
+    if ((p == pitchEdits || p == pitchSegments) && ready
+        && (region[pitchEdits].toString() != lastCommitted || region[pitchSegments].toString() != lastSegments))
     {
-        // Undo or redo: the edits as they were
+        // Undo or redo: the notes and edits as they were
         lastCommitted = region[pitchEdits].toString();
-        edits = pitchcorrect::fromString (lastCommitted, analysis.notes.size());
+        lastSegments = region[pitchSegments].toString();
+        resetSegmentsAndEdits();
+        liveWhole = true;
         if (cache != nullptr && ensureLive())
         {
             applyLive (edits);
             writeLiveSoon();
         }
+        refreshInspector();
         repaint();
     }
     else if ((p == ids::length || p == ids::offset) && ready && std::abs ((double) region[ids::length] - sourceLength) > 1.0e-6)
         load();   // trimmed: the notes again
+    else if (p == ids::name)
+        nameLabel.setText (region[ids::name].toString(), juce::dontSendNotification);
 }
 
 std::vector<int> PitchEditor::targets() const
@@ -210,16 +404,21 @@ std::vector<int> PitchEditor::targets() const
     return result;
 }
 
+//==============================================================================
 void PitchEditor::commit (const juce::String& undoName)
 {
     if (! ready)
         return;
     const auto text = pitchcorrect::toString (edits);
-    if (text == lastCommitted)
+    const auto segments = analysis.notes.size() == original.notes.size() && pitchcorrect::segmentsToString (analysis) == pitchcorrect::segmentsToString (original)
+                              ? juce::String() : pitchcorrect::segmentsToString (analysis);
+    if (text == lastCommitted && segments == lastSegments)
     {
         repaint();
         return;
     }
+    if (segments != lastSegments)
+        liveWhole = true;
 
     if (cache != nullptr && ensureLive())
     {
@@ -227,8 +426,14 @@ void PitchEditor::commit (const juce::String& undoName)
         applyLive (edits);
         writeLiveSoon();
         lastCommitted = text;
+        lastSegments = segments;
         undoManager.beginNewTransaction ("Pitch: " + undoName);
-        region.setProperty (pitchEdits, text, &undoManager);
+        {
+            const juce::ScopedValueSetter<bool> own (committing, true);
+            region.setProperty (pitchSegments, segments, &undoManager);
+            region.setProperty (pitchEdits, text, &undoManager);
+        }
+        refreshInspector();
         repaint();
         return;
     }
@@ -241,9 +446,9 @@ void PitchEditor::commit (const juce::String& undoName)
     {
         std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (dest);
         juce::WavAudioFormat wav;
-        if (auto writer2 = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (analysis.sampleRate)
-                                                            .withNumChannels (rendered.getNumChannels()).withBitsPerSample (24)))
-            written = writer2->writeFromAudioSampleBuffer (rendered, 0, rendered.getNumSamples());
+        if (auto w = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (analysis.sampleRate)
+                                                      .withNumChannels (rendered.getNumChannels()).withBitsPerSample (24)))
+            written = w->writeFromAudioSampleBuffer (rendered, 0, rendered.getNumSamples());
     }
     juce::MouseCursor::hideWaitCursor();
     if (! written)
@@ -253,14 +458,18 @@ void PitchEditor::commit (const juce::String& undoName)
     }
 
     lastCommitted = text;
+    lastSegments = segments;
     undoManager.beginNewTransaction ("Pitch: " + undoName);
+    const juce::ScopedValueSetter<bool> own (committing, true);
     region.setProperty (pitchSource, sourceFile.getFullPathName(), &undoManager);
     region.setProperty (pitchSourceOffset, sourceOffset, &undoManager);
     region.setProperty (pitchSourceLength, sourceLength, &undoManager);
+    region.setProperty (pitchSegments, segments, &undoManager);
     region.setProperty (pitchEdits, text, &undoManager);
     region.setProperty (ids::file, dest.getFullPathName(), &undoManager);
     region.setProperty (ids::offset, 0.0, &undoManager);
     region.setProperty (ids::length, sourceLength, &undoManager);
+    refreshInspector();
     repaint();
 }
 
@@ -277,16 +486,22 @@ bool PitchEditor::ensureLive()
                                                                           + region[ids::id].toString().substring (0, 8)) + ".wav");
     if (const juce::File playing (region[ids::file].toString()); region[pitchSource].toString().isNotEmpty() && playing != sourceFile)
         liveFile = playing;   // (edited before: the same file again)
+    auto committedAnalysis = original;
+    pitchcorrect::applySegments (committedAnalysis, lastSegments);
+    liveEdits = pitchcorrect::fromString (lastCommitted, committedAnalysis.notes.size());
+    const auto rendered = pitchcorrect::render (source, committedAnalysis, liveEdits);
     auto made = std::make_shared<DecodedAudio>();
     made->sampleRate = analysis.sampleRate;
-    const auto rendered = pitchcorrect::render (source, analysis, liveEdits = pitchcorrect::fromString (lastCommitted, analysis.notes.size()));
     made->buffer.setSize (2, rendered.getNumSamples());
     for (int c = 0; c < 2; ++c)
         made->buffer.copyFrom (c, 0, rendered, juce::jmin (c, rendered.getNumChannels() - 1), 0, rendered.getNumSamples());
     live = made;
+    if (committedAnalysis.notes.size() != analysis.notes.size())
+        liveWhole = true;
     cache->put (liveFile, live);
 
     // (not an undo step of its own: the region keeps playing this file, Undo takes back the edits in it)
+    const juce::ScopedValueSetter<bool> own (committing, true);
     region.setProperty (pitchSource, sourceFile.getFullPathName(), nullptr);
     region.setProperty (pitchSourceOffset, sourceOffset, nullptr);
     region.setProperty (pitchSourceLength, sourceLength, nullptr);
@@ -301,7 +516,16 @@ void PitchEditor::applyLive (const std::vector<pitchcorrect::NoteEdit>& target)
 {
     if (live == nullptr)
         return;
-    liveEdits.resize (analysis.notes.size());
+    // Notes split or joined (or moved in time): all of it again; else just the notes that changed
+    if (liveWhole || liveEdits.size() != analysis.notes.size())
+    {
+        const auto all = pitchcorrect::render (source, analysis, target);
+        for (int c = 0; c < live->buffer.getNumChannels(); ++c)
+            live->buffer.copyFrom (c, 0, all, juce::jmin (c, all.getNumChannels() - 1), 0, juce::jmin (all.getNumSamples(), live->buffer.getNumSamples()));
+        liveEdits = target;
+        liveWhole = false;
+        return;
+    }
     int from = std::numeric_limits<int>::max(), to = 0;
     for (size_t i = 0; i < analysis.notes.size() && i < target.size(); ++i)
         if (! (target[i] == liveEdits[i]))
@@ -345,17 +569,20 @@ void PitchEditor::writeLiveSoon()
 std::vector<pitchcorrect::NoteEdit> PitchEditor::editsWithDrag() const
 {
     auto result = edits;
-    if (dragNote >= 0)
+    if (dragNote >= 0 && dragSpot == Spot::none)
         for (const auto i : selected)
             if (juce::isPositiveAndBelow (i, (int) result.size()))
+            {
                 result[(size_t) i].shift += dragShift;
+                result[(size_t) i].time += dragTime;
+            }
     return result;
 }
 
 void PitchEditor::timerCallback()
 {
-    // While dragging: the notes heard where they're being moved to
-    if (liveDirty && cache != nullptr && ready)
+    // While dragging or sliding: heard where it's going (moves in time once you let go)
+    if (liveDirty && cache != nullptr && ready && dragAxis != Axis::time)
     {
         liveDirty = false;
         if (ensureLive())
@@ -370,7 +597,6 @@ void PitchEditor::timerCallback()
         {
             const auto oldX = timeToX (shownPlayhead), newX = timeToX (t);
             shownPlayhead = t;
-            // Catch: when zoomed in, the view follows it while playing
             const auto visible = sourceLength / zoom;
             if (isPlaying && isPlaying() && zoom > 1.0 && (t < scroll || t > scroll + visible * 0.95) && t >= 0.0 && t <= sourceLength)
             {
@@ -386,17 +612,21 @@ void PitchEditor::timerCallback()
     }
 }
 
-
-
 //==============================================================================
+juce::Rectangle<int> PitchEditor::menuBarArea() const   { return getLocalBounds().removeFromTop (menuHeight); }
 juce::Rectangle<int> PitchEditor::rulerArea() const
 {
-    return getLocalBounds().withTrimmedTop (toolbarHeight).withTrimmedLeft (keyboardWidth).withHeight (16);
+    return { inspectorWidth + keyboardWidth, menuHeight, juce::jmax (1, getWidth() - inspectorWidth - keyboardWidth), rulerHeight + regionBarHeight };
 }
-
 juce::Rectangle<int> PitchEditor::rollArea() const
 {
-    return getLocalBounds().withTrimmedTop (toolbarHeight + 16).withTrimmedLeft (keyboardWidth).withTrimmedBottom (18);
+    const auto top = menuHeight + rulerHeight + regionBarHeight;
+    return { inspectorWidth + keyboardWidth, top, juce::jmax (1, getWidth() - inspectorWidth - keyboardWidth), juce::jmax (1, getHeight() - top - statusHeight) };
+}
+juce::Rectangle<int> PitchEditor::keyboardArea() const
+{
+    const auto roll = rollArea();
+    return { inspectorWidth, roll.getY(), keyboardWidth, roll.getHeight() };
 }
 
 float PitchEditor::timeToX (double seconds) const
@@ -415,121 +645,149 @@ double PitchEditor::xToTime (float x) const
 float PitchEditor::midiToY (double midi) const
 {
     const auto area = rollArea();
-    return (float) area.getBottom() - (float) ((midi - lowMidi) / (highMidi - lowMidi)) * (float) area.getHeight();
+    return (float) area.getBottom() - (float) ((midi - lowMidi + 0.5) / (highMidi - lowMidi)) * (float) area.getHeight();
 }
 
 double PitchEditor::yToMidi (float y) const
 {
     const auto area = rollArea();
-    return lowMidi + ((float) area.getBottom() - y) / (float) juce::jmax (1, area.getHeight()) * (highMidi - lowMidi);
+    return lowMidi - 0.5 + ((float) area.getBottom() - y) / (float) juce::jmax (1, area.getHeight()) * (highMidi - lowMidi);
 }
 
-juce::Path PitchEditor::blobFor (size_t index, double shiftNow) const
+juce::Rectangle<float> PitchEditor::noteBox (int index, const pitchcorrect::NoteEdit& e) const
 {
-    // Thick where it's loud: its top and bottom edges follow the loudness, round the note's (moved) centre
-    const auto& note = analysis.notes[index];
+    const auto& n = analysis.notes[(size_t) index];
     const auto rowHeight = (float) rollArea().getHeight() / (float) (highMidi - lowMidi);
-    const auto y = midiToY (note.centre + shiftNow);
-    juce::Path p;
-    std::vector<juce::Point<float>> top, bottom;
-    for (int step = note.startFrame;; step += 2)
-    {
-        const auto f = juce::jmin (step, note.endFrame);
-        const auto x = timeToX (analysis.frameToSeconds (f));
-        const auto level = analysis.level[(size_t) juce::jlimit (0, (int) analysis.level.size() - 1, f)] / maxLevel;
-        auto half = 2.0f + rowHeight * 0.48f * std::sqrt (juce::jlimit (0.0f, 1.0f, level));
-        if (f == note.startFrame || f >= note.endFrame)
-            half *= 0.5f;
-        top.push_back ({ x, y - half });
-        bottom.push_back ({ x, y + half });
-        if (f >= note.endFrame)
-            break;
-    }
-    if (top.size() < 2)
-        return p;
-    p.startNewSubPath (top.front());
-    for (size_t i = 1; i < top.size(); ++i)
-        p.lineTo (top[i]);
-    for (size_t i = bottom.size(); i-- > 0;)
-        p.lineTo (bottom[i]);
-    p.closeSubPath();
-    return p.createPathWithRoundedCorners (3.0f);
+    const auto x0 = timeToX (analysis.frameToSeconds (n.startFrame) + e.time), x1 = timeToX (analysis.frameToSeconds (n.endFrame) + e.time);
+    const auto y = midiToY (pitchcorrect::centreAfter (n, e));
+    const auto h = juce::jmax (9.0f, rowHeight);
+    return { x0, y - h * 0.5f, juce::jmax (4.0f, x1 - x0), h };
 }
 
 int PitchEditor::noteAt (juce::Point<float> pos) const
 {
+    const auto shown = editsWithDrag();
     for (int i = (int) analysis.notes.size(); --i >= 0;)
-    {
-        const auto& n = analysis.notes[(size_t) i];
-        const auto shift = edits[(size_t) i].shift + (selected.count (i) > 0 && dragNote >= 0 ? dragShift : 0.0);
-        const auto x0 = timeToX (analysis.frameToSeconds (n.startFrame)), x1 = timeToX (analysis.frameToSeconds (n.endFrame));
-        const auto y = midiToY (n.centre + shift);
-        const auto rowHeight = (float) rollArea().getHeight() / (float) (highMidi - lowMidi);
-        if (pos.x >= x0 && pos.x <= x1 && std::abs (pos.y - y) <= juce::jmax (6.0f, rowHeight * 0.6f))
+        if (noteBox (i, shown[(size_t) i]).expanded (0.0f, 3.0f).contains (pos))
             return i;
-    }
     return -1;
+}
+
+std::array<juce::Rectangle<float>, 6> PitchEditor::spotBoxes (int note) const
+{
+    // As Logic: top left, top middle, top right; bottom left, bottom middle, bottom right
+    const auto b = noteBox (note, editsWithDrag()[(size_t) note]);
+    constexpr float s = 8.0f;
+    const auto top = b.getY() - s * 0.5f, bottom = b.getBottom() - s * 0.5f;
+    return { juce::Rectangle<float> (b.getX() + 1.0f, top, s, s), juce::Rectangle<float> (b.getCentreX() - s * 0.5f, top, s, s),
+             juce::Rectangle<float> (b.getRight() - s - 1.0f, top, s, s), juce::Rectangle<float> (b.getX() + 1.0f, bottom, s, s),
+             juce::Rectangle<float> (b.getCentreX() - s * 0.5f, bottom, s, s), juce::Rectangle<float> (b.getRight() - s - 1.0f, bottom, s, s) };
+}
+
+PitchEditor::Spot PitchEditor::spotAt (int note, juce::Point<float> p) const
+{
+    if (note < 0 || noteBox (note, edits[(size_t) note]).getWidth() < 34.0f)
+        return Spot::none;
+    const auto boxes = spotBoxes (note);
+    const Spot spots[] { Spot::driftStart, Spot::finePitch, Spot::driftEnd, Spot::gain, Spot::vibrato, Spot::formant };
+    for (int i = 0; i < 6; ++i)
+        if (boxes[(size_t) i].expanded (2.0f).contains (p))
+            return spots[i];
+    return Spot::none;
 }
 
 //==============================================================================
 void PitchEditor::paint (juce::Graphics& g)
 {
     g.fillAll (theme::background);
+
+    // The menu bar, and the inspector panel
+    g.setColour (theme::toolbarDark);
+    g.fillRect (menuBarArea());
+    g.setColour (theme::panel);
+    g.fillRect (0, menuHeight, inspectorWidth, getHeight() - menuHeight);
+    g.setColour (juce::Colours::black.withAlpha (0.5f));
+    g.fillRect (inspectorWidth - 1, menuHeight, 1, getHeight() - menuHeight);
+    for (auto* c : captions)
+        if (c->getText() == "Scale Quantize" || c->getText() == "Pitch Correction" || c->getText() == "Gain")
+        {
+            g.setColour (juce::Colours::black.withAlpha (0.35f));
+            g.fillRect (6, c->getY() - 5, inspectorWidth - 12, 1);
+        }
+
     const auto area = rollArea();
     const auto rowHeight = (float) area.getHeight() / (float) (highMidi - lowMidi);
+    const auto project = region.getParent().getParent();
+    const double regionStart = region[ids::start];
+    const auto trackColour = region.getParent().isValid() ? model::trackColour (region.getParent()) : theme::accent;
 
-    // Toolbar strip
-    g.setColour (theme::toolbarDark);
-    g.fillRect (getLocalBounds().removeFromTop (toolbarHeight));
-
-    // Rows, and the keyboard with the notes' names
-    for (int m = (int) std::floor (lowMidi); m <= (int) std::ceil (highMidi); ++m)
+    // Ruler (the song's bars) and the region's bar under it, as Logic
     {
-        const auto y0 = midiToY (m + 0.5), y1 = midiToY (m - 0.5);
-        const auto row = juce::Rectangle<float> ((float) area.getX(), y0, (float) area.getWidth(), y1 - y0).getIntersection (area.toFloat());
-        g.setColour (isBlackKey (m) ? theme::rollBlack : theme::rollWhite);
-        g.fillRect (row);
-        g.setColour (theme::gridBeat.withAlpha (0.35f));
-        g.fillRect (row.getX(), row.getBottom() - 0.5f, row.getWidth(), 0.5f);
-        const auto key = juce::Rectangle<float> (0.0f, y0, (float) keyboardWidth - 2.0f, y1 - y0).getIntersection (
-            juce::Rectangle<float> (0.0f, (float) area.getY(), (float) keyboardWidth, (float) area.getHeight()));
-        g.setColour (isBlackKey (m) ? theme::keysBlack : theme::keysWhite);
-        g.fillRect (key);
-        if (m % 12 == 0 || rowHeight >= 11.0f)
-        {
-            g.setColour (isBlackKey (m) ? theme::keysWhite : theme::keysBlack.withAlpha (0.8f));
-            g.setFont (juce::FontOptions (juce::jmin (11.0f, rowHeight * 0.9f)));
-            g.drawText (juce::MidiMessage::getMidiNoteName (m, true, true, 3), key.reduced (3.0f, 0.0f), juce::Justification::centredRight, false);
-        }
-    }
-
-    // The ruler: the song's bars over the region
-    {
-        const auto ruler = rulerArea();
+        const auto r = rulerArea();
         g.setColour (theme::ruler);
-        g.fillRect (ruler);
-        const auto project = region.getParent().getParent();
+        g.fillRect (r.withHeight (rulerHeight));
         if (project.isValid() && sourceLength > 0.0)
         {
             const auto map = model::tempoMapOf (project);
-            const double start = region[ids::start];
-            const auto b0 = map.beatAt (start + xToTime ((float) area.getX())), b1 = map.beatAt (start + xToTime ((float) area.getRight()));
+            const auto b0 = map.beatAt (regionStart + xToTime ((float) area.getX())), b1 = map.beatAt (regionStart + xToTime ((float) area.getRight()));
             const auto pixelsPerBeat = (double) area.getWidth() / juce::jmax (1.0e-3, b1 - b0);
             const auto step = pixelsPerBeat > 24.0 ? 1.0 : pixelsPerBeat > 6.0 ? 4.0 : 16.0;
-            g.setFont (juce::FontOptions (10.0f));
+            g.setFont (juce::FontOptions (11.0f));
             for (auto b = std::ceil (b0 / step) * step; b <= b1; b += step)
             {
-                const auto x = timeToX (map.secondsAt (b) - start);
+                const auto x = timeToX (map.secondsAt (b) - regionStart);
                 const auto [bar, beat] = map.barAndBeat (b);
                 const bool isBar = beat < 1.0e-6;
-                g.setColour (theme::text.withAlpha (isBar ? 0.7f : 0.35f));
-                g.fillRect (x, (float) ruler.getBottom() - (isBar ? 10.0f : 5.0f), 1.0f, isBar ? 10.0f : 5.0f);
+                g.setColour (theme::text.withAlpha (isBar ? 0.75f : 0.35f));
+                g.fillRect (x, (float) r.getY() + (isBar ? 2.0f : 11.0f), 1.0f, isBar ? 16.0f : 7.0f);
                 if (isBar)
-                    g.drawText (juce::String (bar + 1), juce::Rectangle<float> (x + 3.0f, (float) ruler.getY(), 30.0f, 11.0f), juce::Justification::left, false);
+                    g.drawText (juce::String (bar + 1), juce::Rectangle<float> (x + 3.0f, (float) r.getY() + 1.0f, 30.0f, 13.0f), juce::Justification::left, false);
             }
         }
-        g.setColour (juce::Colours::black.withAlpha (0.5f));
-        g.fillRect (ruler.withTop (ruler.getBottom() - 1));
+        auto bar = r.withTrimmedTop (rulerHeight).toFloat();
+        const auto x0 = juce::jmax (bar.getX(), timeToX (0.0)), x1 = juce::jmin (bar.getRight(), timeToX (sourceLength));
+        g.setColour (trackColour.brighter (0.6f).withAlpha (0.85f));
+        g.fillRect (juce::Rectangle<float>::leftTopRightBottom (x0, bar.getY(), x1, bar.getBottom()));
+        g.setColour (juce::Colours::black.withAlpha (0.8f));
+        g.setFont (juce::FontOptions (11.5f));
+        g.drawText (region[ids::name].toString(), juce::Rectangle<float>::leftTopRightBottom (x0 + 6.0f, bar.getY(), x1, bar.getBottom()),
+                    juce::Justification::centredLeft, true);
+    }
+
+    // The keyboard (a piano on its side) and the rows
+    {
+        const auto keys = keyboardArea().toFloat();
+        g.setColour (juce::Colour (0xffe8e8e8));
+        g.fillRect (keys);
+        for (int m = (int) std::floor (lowMidi) - 1; m <= (int) std::ceil (highMidi) + 1; ++m)
+        {
+            const auto y0 = midiToY (m + 0.5), y1 = midiToY (m - 0.5);
+            const auto row = juce::Rectangle<float> ((float) area.getX(), y0, (float) area.getWidth(), y1 - y0).getIntersection (area.toFloat());
+            g.setColour (isBlackKey (m) ? theme::rollBlack : theme::rollWhite);
+            g.fillRect (row);
+            g.setColour (juce::Colours::black.withAlpha (0.18f));
+            g.fillRect (row.getX(), row.getBottom() - 0.5f, row.getWidth(), 0.5f);
+            const auto key = juce::Rectangle<float> (keys.getX(), y0, keys.getWidth(), y1 - y0).getIntersection (keys);
+            if (isBlackKey (m))
+            {
+                g.setColour (juce::Colour (0xff1c1c1e));
+                g.fillRect (key.withWidth (keys.getWidth() * 0.6f));
+            }
+            else
+            {
+                g.setColour (juce::Colours::black.withAlpha (0.25f));
+                if (m % 12 == 0 || m % 12 == 5)
+                    g.fillRect (key.getX(), key.getBottom() - 0.6f, key.getWidth(), 0.6f);
+            }
+            if (m % 12 == 0)
+            {
+                g.setColour (juce::Colour (0xff333333));
+                g.setFont (juce::FontOptions (juce::jmin (11.0f, juce::jmax (8.0f, rowHeight * 0.95f)), juce::Font::bold));
+                g.drawText (juce::MidiMessage::getMidiNoteName (m, true, true, 3), key.withTrimmedRight (3.0f), juce::Justification::centredRight, false);
+            }
+        }
+        g.setColour (juce::Colours::black.withAlpha (0.6f));
+        g.fillRect (keys.getRight() - 1.0f, keys.getY(), 1.0f, keys.getHeight());
     }
 
     if (! ready)
@@ -543,61 +801,113 @@ void PitchEditor::paint (juce::Graphics& g)
     juce::Graphics::ScopedSaveState clip (g);
     g.reduceClipRegion (area);
 
-    // The notes: blobs, their pitch curves (as they'll sound), and their names
-    for (size_t i = 0; i < analysis.notes.size(); ++i)
+    // Beat and bar lines
+    if (project.isValid())
     {
-        const auto& n = analysis.notes[i];
-        const auto& e = edits[i];
-        const bool isSelected = selected.count ((int) i) > 0;
-        const auto shiftNow = e.shift + (isSelected && dragNote >= 0 ? dragShift : 0.0);
-        const auto blob = blobFor (i, shiftNow);
-        if (e.isNeutral() && ! (isSelected && dragNote >= 0))
-            g.setColour (blobColour.withAlpha (0.78f));
-        else
-            g.setColour (blobColour.brighter (0.2f).withAlpha (0.9f));
-        if (isSelected)
-            g.setColour (blobSelected.withAlpha (0.92f));
-        g.fillPath (blob);
-        g.setColour (juce::Colours::black.withAlpha (0.5f));
-        g.strokePath (blob, juce::PathStrokeType (1.0f));
-
-        // Where it was sung, when it's been moved
-        if (std::abs (shiftNow) > 0.02)
+        const auto map = model::tempoMapOf (project);
+        const auto b0 = map.beatAt (regionStart + xToTime ((float) area.getX())), b1 = map.beatAt (regionStart + xToTime ((float) area.getRight()));
+        const auto pixelsPerBeat = (double) area.getWidth() / juce::jmax (1.0e-3, b1 - b0);
+        const auto step = pixelsPerBeat > 60.0 ? 0.25 : pixelsPerBeat > 15.0 ? 1.0 : 4.0;
+        for (auto b = std::ceil (b0 / step) * step; b <= b1; b += step)
         {
-            g.setColour (juce::Colours::white.withAlpha (0.25f));
-            const auto y = midiToY (n.centre);
-            g.drawHorizontalLine ((int) y, timeToX (analysis.frameToSeconds (n.startFrame)), timeToX (analysis.frameToSeconds (n.endFrame)));
+            const auto isBar = map.barAndBeat (b).second < 1.0e-6;
+            g.setColour (isBar ? theme::gridBar : theme::gridBeat.withAlpha (0.6f));
+            g.fillRect (timeToX (map.secondsAt (b) - regionStart), (float) area.getY(), 1.0f, (float) area.getHeight());
         }
+    }
 
-        juce::Path curve;
-        bool started = false;
-        for (int f = n.startFrame; f < n.endFrame; ++f)
+    // The waveform behind the notes, as Logic
+    if (showWaveform && ! peaks.empty())
+    {
+        const auto mid = (float) area.getCentreY(), halfHeight = (float) area.getHeight() * 0.48f;
+        g.setColour (trackColour.withAlpha (0.11f));
+        for (int x = area.getX(); x < area.getRight(); ++x)
         {
-            const auto m = (double) analysis.midi[(size_t) f];
-            if (m <= 0.0)
+            const auto t0 = xToTime ((float) x), t1 = xToTime ((float) x + 1.0f);
+            const auto i0 = juce::jmax (0, (int) (t0 * analysis.sampleRate) / peakStep), i1 = juce::jmin ((int) peaks.size() - 1, (int) (t1 * analysis.sampleRate) / peakStep);
+            float p = 0.0f;
+            for (int i = i0; i <= i1; ++i)
+                p = juce::jmax (p, peaks[(size_t) i]);
+            if (p > 0.002f)
+                g.fillRect ((float) x, mid - p * halfHeight, 1.0f, p * halfHeight * 2.0f);
+        }
+    }
+
+    // The notes: a box at the pitch each sounds at, its pitch curve through it
+    const auto shown = editsWithDrag();
+    const auto noteFill = trackColour.darker (0.35f), noteLine = trackColour.brighter (0.55f);
+    for (int i = 0; i < (int) analysis.notes.size(); ++i)
+    {
+        const auto& n = analysis.notes[(size_t) i];
+        const auto& e = shown[(size_t) i];
+        const bool isSelected = selected.count (i) > 0;
+        const auto box = noteBox (i, e);
+        g.setColour (noteFill.withAlpha (isSelected ? 0.85f : 0.6f));
+        g.fillRoundedRectangle (box, 2.5f);
+        g.setColour (isSelected ? juce::Colours::white : noteLine.withAlpha (0.9f));
+        g.drawRoundedRectangle (box, 2.5f, isSelected ? 1.6f : 1.0f);
+
+        // Its level as a bar along the top (darker when turned down), as Logic's box shows it
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.fillRect (box.reduced (2.0f, 0.0f).withHeight (2.0f).translated (0.0f, 2.0f));
+
+        if (showCurves)
+        {
+            // Where it was sung, when it's been moved
+            const auto moved = std::abs (pitchcorrect::centreAfter (n, e) - n.centre) > 0.02 || std::abs (e.time) > 1.0e-4;
+            if (moved)
             {
-                started = false;
-                continue;
+                g.setColour (juce::Colours::white.withAlpha (0.18f));
+                const auto o = noteBox (i, {});
+                g.drawRoundedRectangle (o, 2.5f, 1.0f);
             }
-            const auto shown = m + shiftNow + e.drift * (n.centre - m);
-            const juce::Point<float> p (timeToX (analysis.frameToSeconds (f)), midiToY (shown));
-            if (! started)
-                curve.startNewSubPath (p);
-            else
-                curve.lineTo (p);
-            started = true;
+            const auto curve = pitchcorrect::curveAfter (analysis, i, e);
+            juce::Path p;
+            bool started = false;
+            for (size_t k = 0; k < curve.size(); ++k)
+            {
+                if (curve[k] <= 0.0f)
+                {
+                    started = false;
+                    continue;
+                }
+                const juce::Point<float> pt (timeToX (analysis.frameToSeconds (n.startFrame + (int) k) + e.time), midiToY (curve[k]));
+                if (! started)
+                    p.startNewSubPath (pt);
+                else
+                    p.lineTo (pt);
+                started = true;
+            }
+            g.setColour (noteLine.brighter (0.4f).withAlpha (0.95f));
+            g.strokePath (p, juce::PathStrokeType (1.3f));
         }
-        g.setColour (juce::Colours::white.withAlpha (0.85f));
-        g.strokePath (curve, juce::PathStrokeType (1.2f));
 
-        const auto pitch = n.centre + shiftNow;
-        const auto cents = juce::roundToInt ((pitch - std::round (pitch)) * 100.0);
-        g.setColour (theme::text);
-        g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
-        g.drawText (juce::MidiMessage::getMidiNoteName (juce::roundToInt (pitch), true, true, 3)
-                        + (cents != 0 ? (cents > 0 ? " +" : " ") + juce::String (cents) : juce::String()),
-                    juce::Rectangle<float> (timeToX (analysis.frameToSeconds (n.startFrame)), midiToY (pitch) - rowHeight * 0.5f - 15.0f, 80.0f, 13.0f),
-                    juce::Justification::centredLeft, false);
+        // Its name and how far off the semitone it sounds, when there's room
+        if (box.getWidth() > 26.0f)
+        {
+            const auto pitch = pitchcorrect::centreAfter (n, e);
+            const auto cents = juce::roundToInt ((pitch - std::round (pitch)) * 100.0);
+            g.setColour (theme::text.withAlpha (0.85f));
+            g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+            g.drawText (juce::MidiMessage::getMidiNoteName (juce::roundToInt (pitch), true, true, 3)
+                            + (cents != 0 ? (cents > 0 ? " +" : " ") + juce::String (cents) : juce::String()),
+                        juce::Rectangle<float> (box.getX() + 2.0f, box.getY() - 14.0f, 80.0f, 12.0f), juce::Justification::centredLeft, false);
+        }
+    }
+
+    // Hot spots on the note under the mouse
+    if (tool == Tool::pointer && juce::isPositiveAndBelow (hoverNote, (int) analysis.notes.size()) && noteBox (hoverNote, shown[(size_t) hoverNote]).getWidth() >= 34.0f)
+    {
+        const auto boxes = spotBoxes (hoverNote);
+        const Spot spots[] { Spot::driftStart, Spot::finePitch, Spot::driftEnd, Spot::gain, Spot::vibrato, Spot::formant };
+        for (int k = 0; k < 6; ++k)
+        {
+            const bool hot = spots[k] == hoverSpot || spots[k] == dragSpot;
+            g.setColour (hot ? theme::accent : juce::Colours::white.withAlpha (0.85f));
+            g.fillRect (boxes[(size_t) k]);
+            g.setColour (juce::Colours::black.withAlpha (0.8f));
+            g.drawRect (boxes[(size_t) k], 1.0f);
+        }
     }
 
     // The playhead
@@ -605,7 +915,7 @@ void PitchEditor::paint (juce::Graphics& g)
     {
         const auto x = timeToX (shownPlayhead);
         g.setColour (juce::Colours::white.withAlpha (0.9f));
-        g.fillRect (x, (float) rulerArea().getY(), 1.0f, (float) (area.getBottom() - rulerArea().getY()));
+        g.fillRect (x, (float) area.getY(), 1.0f, (float) area.getHeight());
     }
 
     if (rubberBanding && ! rubberBand.isEmpty())
@@ -615,24 +925,233 @@ void PitchEditor::paint (juce::Graphics& g)
         g.setColour (theme::accent);
         g.drawRect (rubberBand, 1.0f);
     }
+
+    // What a drag is changing
+    if (dragReadout.isNotEmpty())
+    {
+        const auto at = getMouseXYRelative().toFloat();
+        const auto box = juce::Rectangle<float> (at.x + 14.0f, at.y - 24.0f, 130.0f, 18.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.8f));
+        g.fillRoundedRectangle (box, 4.0f);
+        g.setColour (juce::Colours::white);
+        g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+        g.drawText (dragReadout, box, juce::Justification::centred, false);
+    }
 }
 
 void PitchEditor::resized()
 {
-    auto bar = getLocalBounds().removeFromTop (toolbarHeight).reduced (6, 4);
-    correctButton.setBounds (bar.removeFromLeft (70));
-    bar.removeFromLeft (4);
-    keyButton.setBounds (bar.removeFromLeft (64));
-    bar.removeFromLeft (4);
-    straightenButton.setBounds (bar.removeFromLeft (82));
-    bar.removeFromLeft (8);
-    amountSlider.setBounds (bar.removeFromLeft (170));
-    bar.removeFromLeft (8);
-    resetButton.setBounds (bar.removeFromLeft (56));
-    status.setBounds (getLocalBounds().removeFromBottom (18).withTrimmedLeft (keyboardWidth));
+    auto bar = menuBarArea().reduced (6, 4);
+    editMenu.setBounds (bar.removeFromLeft (52));
+    bar.removeFromLeft (2);
+    functionsMenu.setBounds (bar.removeFromLeft (84));
+    bar.removeFromLeft (2);
+    viewMenu.setBounds (bar.removeFromLeft (52));
+    bar.removeFromLeft (14);
+    pointerTool.setBounds (bar.removeFromLeft (62));
+    bar.removeFromLeft (2);
+    scissorsTool.setBounds (bar.removeFromLeft (66));
+    bar.removeFromLeft (2);
+    glueTool.setBounds (bar.removeFromLeft (48));
+    status.setBounds (getLocalBounds().removeFromBottom (statusHeight).withTrimmedLeft (inspectorWidth + 4));
+
+    // The inspector, as Logic's
+    auto panel = juce::Rectangle<int> (0, menuHeight, inspectorWidth, getHeight() - menuHeight).reduced (10, 6);
+    nameLabel.setBounds (panel.removeFromTop (20));
+    notesLabel.setBounds (panel.removeFromTop (16));
+    panel.removeFromTop (6);
+    const auto caption = [this] (const juce::String& text) -> juce::Label*
+    {
+        for (auto* c : captions)
+            if (c->getText() == text)
+                return c;
+        return nullptr;
+    };
+    const auto row = 22;
+    caption ("Time Quantize")->setBounds (panel.removeFromTop (18));
+    {
+        auto r = panel.removeFromTop (row);
+        timeQButton.setBounds (r.removeFromRight (30));
+        r.removeFromRight (4);
+        timeGridBox.setBounds (r);
+    }
+    panel.removeFromTop (3);
+    {
+        auto r = panel.removeFromTop (row);
+        caption ("Strength")->setBounds (r.removeFromLeft (60));
+        strengthSlider.setBounds (r);
+    }
+    panel.removeFromTop (10);
+    caption ("Scale Quantize")->setBounds (panel.removeFromTop (18));
+    {
+        auto r = panel.removeFromTop (row);
+        scaleQButton.setBounds (r.removeFromRight (30));
+        r.removeFromRight (4);
+        scaleKeyBox.setBounds (r.removeFromLeft (r.getWidth() / 2 - 2));
+        r.removeFromLeft (4);
+        scaleModeBox.setBounds (r);
+    }
+    panel.removeFromTop (10);
+    for (auto [name, slider] : { std::pair { "Pitch Correction", &correctionSlider }, std::pair { "Gain", &gainSlider },
+                                 std::pair { "Pitch Drift", &driftSlider }, std::pair { "Vibrato", &vibratoSlider }, std::pair { "Formant Shift", &formantSlider } })
+    {
+        caption (name)->setBounds (panel.removeFromTop (17));
+        slider->setBounds (panel.removeFromTop (row));
+        panel.removeFromTop (juce::String (name) == "Gain" ? 10 : 4);
+    }
+    const bool fits = panel.getHeight() >= 0;
+    for (auto* c : std::initializer_list<juce::Component*> { &driftSlider, &vibratoSlider, &formantSlider, caption ("Pitch Drift"), caption ("Vibrato"), caption ("Formant Shift") })
+        c->setVisible (fits);   // (a short pane: they're in the Functions menu and on the notes' hot spots)
 }
 
 //==============================================================================
+void PitchEditor::setTool (Tool t)
+{
+    tool = t;
+    pointerTool.setToggleState (t == Tool::pointer, juce::dontSendNotification);
+    scissorsTool.setToggleState (t == Tool::scissors, juce::dontSendNotification);
+    glueTool.setToggleState (t == Tool::glue, juce::dontSendNotification);
+    setMouseCursor (t == Tool::scissors ? juce::MouseCursor::IBeamCursor : juce::MouseCursor::NormalCursor);
+    repaint();
+}
+
+void PitchEditor::splitAt (int note, double seconds)
+{
+    if (! ready || ! juce::isPositiveAndBelow (note, (int) analysis.notes.size()))
+        return;
+    const auto frame = (int) std::lround ((seconds - edits[(size_t) note].time) * analysis.sampleRate / analysis.hop);
+    const auto before = analysis.notes.size();
+    pitchcorrect::splitNote (analysis, edits, note, frame);
+    if (analysis.notes.size() == before)
+        return;
+    selected = { note, note + 1 };
+    commit ("Split Note");
+}
+
+void PitchEditor::joinSelected()
+{
+    if (! ready || selected.size() < 2)
+        return;
+    std::vector<int> which (selected.begin(), selected.end());
+    pitchcorrect::joinNotes (analysis, edits, which);
+    selected = { which.front() };
+    commit ("Join Notes");
+}
+
+void PitchEditor::showEditMenu()
+{
+    juce::PopupMenu m;
+    m.addItem ("Select All", [this] { for (int i = 0; i < (int) analysis.notes.size(); ++i) selected.insert (i); refreshInspector(); repaint(); });
+    m.addItem ("Deselect All", [this] { selected.clear(); refreshInspector(); repaint(); });
+    m.addItem ("Select Notes Off the Semitone (more than 10 cents)", [this]
+    {
+        selected.clear();
+        for (int i = 0; i < (int) analysis.notes.size(); ++i)
+        {
+            const auto c = pitchcorrect::centreAfter (analysis.notes[(size_t) i], edits[(size_t) i]);
+            if (std::abs (c - std::round (c)) > 0.1)
+                selected.insert (i);
+        }
+        refreshInspector();
+        repaint();
+    });
+    m.addSeparator();
+    m.addItem ("Split at Playhead", [this]
+    {
+        const auto t = shownPlayhead;
+        for (int i = 0; i < (int) analysis.notes.size(); ++i)
+        {
+            const auto b = noteBox (i, edits[(size_t) i]);
+            if (timeToX (t) > b.getX() && timeToX (t) < b.getRight())
+            {
+                splitAt (i, t);
+                return;
+            }
+        }
+    });
+    m.addItem ("Join Selected Notes", selected.size() >= 2, false, [this] { joinSelected(); });
+    m.addSeparator();
+    m.addItem ("Reset Selected Notes (as sung)", [this] { setForTargets ([] (auto& e) { e = {}; }, "Reset Pitch"); });
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&editMenu));
+}
+
+void PitchEditor::showFunctionsMenu()
+{
+    juce::PopupMenu m;
+    m.addSectionHeader (selected.empty() ? "All notes" : juce::String ((int) selected.size()) + " selected notes");
+    m.addItem ("Set to Perfect Pitch", [this] { setForTargets ([] (auto& e) { e.snap = 1.0; }, "Set to Perfect Pitch"); });
+    m.addItem ("Set Pitch Drift to 0%", [this] { setForTargets ([] (auto& e) { e.drift = 1.0; }, "Pitch Drift to 0%"); });
+    m.addItem ("Set Vibrato to 0%", [this] { setForTargets ([] (auto& e) { e.vibrato = 0.0; }, "Vibrato to 0%"); });
+    m.addItem ("Set Vibrato to 100% (as sung)", [this] { setForTargets ([] (auto& e) { e.vibrato = 1.0; }, "Vibrato to 100%"); });
+    m.addItem ("Set Formant Shift to 0", [this] { setForTargets ([] (auto& e) { e.formant = 0.0; }, "Formant Shift to 0"); });
+    m.addItem ("Set Gain to 0 dB", [this] { setForTargets ([] (auto& e) { e.gain = 0.0; }, "Gain to 0 dB"); });
+    m.addItem ("Set Time Back (as sung)", [this] { liveWhole = true; setForTargets ([] (auto& e) { e.time = 0.0; }, "Time as Sung"); });
+    m.addSeparator();
+    m.addItem ("Scale Quantize (Q)", [this] { quantizeScale(); });
+    m.addItem ("Time Quantize (Q)", [this] { quantizeTime(); });
+    m.addSeparator();
+    m.addItem ("Transpose Up a Semitone", [this] { setForTargets ([] (auto& e) { e.shift += 1.0; }, "Transpose"); });
+    m.addItem ("Transpose Down a Semitone", [this] { setForTargets ([] (auto& e) { e.shift -= 1.0; }, "Transpose"); });
+    m.addItem ("Transpose Up an Octave", [this] { setForTargets ([] (auto& e) { e.shift += 12.0; }, "Transpose"); });
+    m.addItem ("Transpose Down an Octave", [this] { setForTargets ([] (auto& e) { e.shift -= 12.0; }, "Transpose"); });
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&functionsMenu));
+}
+
+void PitchEditor::showViewMenu()
+{
+    juce::PopupMenu m;
+    m.addItem ("Waveform Behind the Notes", true, showWaveform, [this] { showWaveform = ! showWaveform; repaint(); });
+    m.addItem ("Pitch Curves", true, showCurves, [this] { showCurves = ! showCurves; repaint(); });
+    m.addSeparator();
+    m.addItem ("Zoom to Fit", [this]
+    {
+        zoom = 1.0;
+        scroll = 0.0;
+        double lo = 127.0, hi = 0.0;
+        for (const auto& n : analysis.notes)
+        {
+            lo = juce::jmin (lo, n.centre);
+            hi = juce::jmax (hi, n.centre);
+        }
+        if (hi >= lo)
+        {
+            lowMidi = std::floor (lo) - 3.0;
+            highMidi = juce::jmax (lowMidi + 14.0, std::ceil (hi) + 3.0);
+        }
+        repaint();
+    });
+    m.addItem ("Zoom In", [this] { zoom = juce::jmin (64.0, zoom * 1.5); repaint(); });
+    m.addItem ("Zoom Out", [this] { zoom = juce::jmax (1.0, zoom / 1.5); scroll = juce::jmin (scroll, sourceLength - sourceLength / zoom); repaint(); });
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&viewMenu));
+}
+
+//==============================================================================
+void PitchEditor::mouseMove (const juce::MouseEvent& e)
+{
+    if (! ready)
+        return;
+    const auto note = rollArea().contains (e.getPosition()) ? noteAt (e.position) : -1;
+    const auto spot = tool == Tool::pointer ? spotAt (note, e.position) : Spot::none;
+    if (note != hoverNote || spot != hoverSpot)
+    {
+        hoverNote = note;
+        hoverSpot = spot;
+        setMouseCursor (tool == Tool::scissors ? juce::MouseCursor::IBeamCursor
+                        : spot != Spot::none ? juce::MouseCursor::UpDownResizeCursor : juce::MouseCursor::NormalCursor);
+        repaint();
+    }
+}
+
+void PitchEditor::mouseExit (const juce::MouseEvent&)
+{
+    if (hoverNote >= 0)
+    {
+        hoverNote = -1;
+        hoverSpot = Spot::none;
+        repaint();
+    }
+}
+
 void PitchEditor::mouseDown (const juce::MouseEvent& e)
 {
     grabKeyboardFocus();
@@ -646,12 +1165,28 @@ void PitchEditor::mouseDown (const juce::MouseEvent& e)
     if (! ready || ! rollArea().contains (e.getPosition()))
         return;
     const auto note = noteAt (e.position);
+
+    if (tool == Tool::scissors)
+    {
+        if (note >= 0)
+            splitAt (note, xToTime (e.position.x));
+        return;
+    }
+    if (tool == Tool::glue)
+    {
+        if (note >= 0 && selected.count (note) == 0 && note + 1 < (int) analysis.notes.size())
+            selected = { note, note + 1 };
+        joinSelected();
+        return;
+    }
+
     if (note < 0)
     {
         if (! e.mods.isShiftDown())
             selected.clear();
         rubberBanding = true;
         rubberBand = {};
+        refreshInspector();
         repaint();
         return;
     }
@@ -664,8 +1199,13 @@ void PitchEditor::mouseDown (const juce::MouseEvent& e)
     }
     else if (selected.count (note) == 0)
         selected = { note };
+    selected.insert (note);
     dragNote = note;
-    dragShift = 0.0;
+    dragSpot = spotAt (note, e.position);
+    dragAxis = Axis::undecided;
+    dragShift = dragTime = 0.0;
+    dragStartEdits = edits;
+    refreshInspector();
     repaint();
 }
 
@@ -676,34 +1216,81 @@ void PitchEditor::mouseDrag (const juce::MouseEvent& e)
         rubberBand = juce::Rectangle<float> (e.mouseDownPosition, e.position);
         std::set<int> inside;
         for (int i = 0; i < (int) analysis.notes.size(); ++i)
-        {
-            const auto& n = analysis.notes[(size_t) i];
-            const auto box = juce::Rectangle<float>::leftTopRightBottom (timeToX (analysis.frameToSeconds (n.startFrame)), midiToY (n.centre + edits[(size_t) i].shift) - 4.0f,
-                                                                         timeToX (analysis.frameToSeconds (n.endFrame)), midiToY (n.centre + edits[(size_t) i].shift) + 4.0f);
-            if (box.intersects (rubberBand))
+            if (noteBox (i, edits[(size_t) i]).intersects (rubberBand))
                 inside.insert (i);
-        }
         if (! e.mods.isShiftDown())
             selected = inside;
         else
             selected.insert (inside.begin(), inside.end());
+        refreshInspector();
         repaint();
         return;
     }
     if (dragNote < 0)
         return;
-    // Semitone steps that land the dragged note on a semitone (Option: free, in cents)
-    const auto semitones = -(double) e.getDistanceFromDragStartY() / ((double) rollArea().getHeight() / (highMidi - lowMidi));
-    const auto& n = analysis.notes[(size_t) dragNote];
-    const auto from = n.centre + edits[(size_t) dragNote].shift;
-    dragShift = e.mods.isAltDown() ? std::round (semitones * 100.0) / 100.0
-                                   : std::round (from + semitones) - from;
-    liveDirty = true;   // (heard where it's going, on the next tick)
+    const auto dy = (double) -e.getDistanceFromDragStartY();
+
+    // A hot spot: up and down changes its value, on every selected note
+    if (dragSpot != Spot::none)
+    {
+        for (const auto i : selected)
+        {
+            auto& ed = edits[(size_t) i];
+            const auto& from = dragStartEdits[(size_t) i];
+            switch (dragSpot)
+            {
+                case Spot::driftStart: case Spot::driftEnd: ed.drift = juce::jlimit (0.0, 1.0, from.drift + dy / 80.0); break;
+                case Spot::finePitch:  ed.shift = from.shift + (e.mods.isShiftDown() ? 0.25 : 1.0) * dy / 100.0; break;
+                case Spot::gain:       ed.gain = juce::jlimit (-30.0, 12.0, from.gain + dy * 0.2); break;
+                case Spot::vibrato:    ed.vibrato = juce::jlimit (0.0, 2.0, from.vibrato + dy / 80.0); break;
+                case Spot::formant:    ed.formant = juce::jlimit (-12.0, 12.0, from.formant + dy * 0.05); break;
+                case Spot::none: break;
+            }
+        }
+        const auto& ed = edits[(size_t) dragNote];
+        switch (dragSpot)
+        {
+            case Spot::driftStart: case Spot::driftEnd: dragReadout = "Pitch Drift " + percent ((1.0 - ed.drift) * 100.0); break;
+            case Spot::finePitch:
+            {
+                const auto c = pitchcorrect::centreAfter (analysis.notes[(size_t) dragNote], ed);
+                dragReadout = "Fine Pitch " + juce::String (juce::roundToInt ((c - std::round (c)) * 100.0)) + " cents";
+                break;
+            }
+            case Spot::gain:       dragReadout = "Gain " + juce::String (ed.gain, 1) + " dB"; break;
+            case Spot::vibrato:    dragReadout = "Vibrato " + percent (ed.vibrato * 100.0); break;
+            case Spot::formant:    dragReadout = "Formant " + juce::String (ed.formant, 1); break;
+            case Spot::none: break;
+        }
+        liveDirty = true;
+        refreshInspector();
+        repaint();
+        return;
+    }
+
+    // The note itself: up and down by semitones (Option: cents), or sideways in time, whichever way it goes first
+    if (dragAxis == Axis::undecided && e.getDistanceFromDragStart() > 4)
+        dragAxis = std::abs (e.getDistanceFromDragStartX()) > std::abs (e.getDistanceFromDragStartY()) ? Axis::time : Axis::pitch;
+    if (dragAxis == Axis::pitch)
+    {
+        const auto semitones = dy / ((double) rollArea().getHeight() / (highMidi - lowMidi));
+        const auto from = pitchcorrect::centreAfter (analysis.notes[(size_t) dragNote], edits[(size_t) dragNote]);
+        dragShift = e.mods.isAltDown() ? std::round (semitones * 100.0) / 100.0 : std::round (from + semitones) - from;
+        dragReadout = juce::MidiMessage::getMidiNoteName (juce::roundToInt (from + dragShift), true, true, 3)
+                      + (e.mods.isAltDown() ? "  " + juce::String (juce::roundToInt (dragShift * 100.0)) + " cents" : juce::String());
+        liveDirty = true;
+    }
+    else if (dragAxis == Axis::time)
+    {
+        dragTime = xToTime (e.position.x) - xToTime (e.mouseDownPosition.x);
+        dragReadout = (dragTime >= 0.0 ? "+" : "") + juce::String (dragTime * 1000.0, 0) + " ms";
+    }
     repaint();
 }
 
 void PitchEditor::mouseUp (const juce::MouseEvent&)
 {
+    dragReadout = {};
     if (rubberBanding)
     {
         rubberBanding = false;
@@ -711,26 +1298,43 @@ void PitchEditor::mouseUp (const juce::MouseEvent&)
         repaint();
         return;
     }
-    if (dragNote >= 0 && std::abs (dragShift) > 1.0e-4)
+    if (dragNote >= 0 && dragSpot != Spot::none)
+    {
+        dragNote = -1;
+        dragSpot = Spot::none;
+        commit ("Note Hot Spot");
+        return;
+    }
+    if (dragNote >= 0 && (std::abs (dragShift) > 1.0e-4 || std::abs (dragTime) > 1.0e-4))
     {
         for (const auto i : selected)
+        {
             edits[(size_t) i].shift += dragShift;
+            edits[(size_t) i].time += dragTime;
+        }
+        if (std::abs (dragTime) > 1.0e-4)
+            liveWhole = true;
+        const auto name = std::abs (dragTime) > 1.0e-4 ? "Move Notes in Time" : "Move Notes";
         dragNote = -1;
-        dragShift = 0.0;
-        commit ("Move Notes");
+        dragShift = dragTime = 0.0;
+        dragAxis = Axis::undecided;
+        commit (name);
         return;
     }
     dragNote = -1;
-    dragShift = 0.0;
+    dragShift = dragTime = 0.0;
+    dragAxis = Axis::undecided;
     repaint();
 }
 
 void PitchEditor::mouseDoubleClick (const juce::MouseEvent& e)
 {
-    if (const auto note = noteAt (e.position); note >= 0)
+    if (const auto note = noteAt (e.position); note >= 0 && tool == Tool::pointer)
     {
-        pitchcorrect::correct (edits, analysis, { note }, 1.0);
-        commit ("Note to Semitone");
+        // Onto the semitone (Logic: Set to Perfect Pitch for the note)
+        edits[(size_t) note].snap = 1.0;
+        commit ("Note to Perfect Pitch");
+        refreshInspector();
     }
 }
 
@@ -738,7 +1342,6 @@ void PitchEditor::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWh
 {
     if (e.mods.isCommandDown() || e.mods.isCtrlDown())
     {
-        // Zoom in time round the mouse
         const auto anchor = xToTime (e.position.x);
         zoom = juce::jlimit (1.0, 64.0, zoom * (wheel.deltaY > 0 ? 1.25 : 0.8));
         const auto visible = sourceLength / zoom;
@@ -752,7 +1355,6 @@ void PitchEditor::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWh
     }
     else if (e.mods.isAltDown())
     {
-        // Taller or shorter rows, round the pitch under the mouse
         const auto anchor = yToMidi (e.position.y);
         const auto span = juce::jlimit (8.0, 60.0, (highMidi - lowMidi) * (wheel.deltaY > 0 ? 0.85 : 1.18));
         const auto t = (anchor - lowMidi) / (highMidi - lowMidi);
@@ -761,10 +1363,8 @@ void PitchEditor::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWh
     }
     else
     {
-        // Up and down through the notes
-        const auto step = (wheel.deltaY > 0 ? 1.0 : -1.0);
         const auto span = highMidi - lowMidi;
-        lowMidi = juce::jlimit (0.0, 127.0 - span, lowMidi + step);
+        lowMidi = juce::jlimit (0.0, 127.0 - span, lowMidi + (wheel.deltaY > 0 ? 1.0 : -1.0));
         highMidi = lowMidi + span;
     }
     repaint();
@@ -778,16 +1378,12 @@ bool PitchEditor::keyPressed (const juce::KeyPress& key)
     if (key.isKeyCode (juce::KeyPress::upKey) || key.isKeyCode (juce::KeyPress::downKey))
     {
         const auto dir = key.isKeyCode (juce::KeyPress::upKey) ? 1.0 : -1.0;
-        for (const auto i : targets())
-            edits[(size_t) i].shift += dir * (fine ? 0.1 : 1.0);
-        commit (fine ? "Pitch by Cents" : "Pitch by a Semitone");
+        setForTargets ([dir, fine] (auto& e) { e.shift += dir * (fine ? 0.1 : 1.0); }, fine ? "Pitch by Cents" : "Pitch by a Semitone");
         return true;
     }
     if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey)
     {
-        for (const auto i : targets())
-            edits[(size_t) i] = {};
-        commit ("Reset Pitch");
+        setForTargets ([] (auto& e) { e = {}; }, "Reset Pitch");
         return true;
     }
     if (key == juce::KeyPress ('a', juce::ModifierKeys::commandModifier, 0))
@@ -795,13 +1391,23 @@ bool PitchEditor::keyPressed (const juce::KeyPress& key)
         selected.clear();
         for (int i = 0; i < (int) analysis.notes.size(); ++i)
             selected.insert (i);
+        refreshInspector();
         repaint();
         return true;
     }
     if (key == juce::KeyPress::escapeKey)
     {
         selected.clear();
+        setTool (Tool::pointer);
+        refreshInspector();
         repaint();
+        return true;
+    }
+    // Tools, as the T menu's letters
+    const auto c = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
+    if (! key.getModifiers().isAnyModifierKeyDown() && (c == 't' || c == 'i' || c == 'g'))
+    {
+        setTool (c == 'i' ? Tool::scissors : c == 'g' ? Tool::glue : Tool::pointer);
         return true;
     }
     return false;

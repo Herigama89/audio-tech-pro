@@ -1,4 +1,5 @@
 #include "PitchCorrect.h"
+#include "AudioEdit.h"
 
 namespace riff::pitchcorrect
 {
@@ -203,16 +204,20 @@ juce::AudioBuffer<float> synthesise (const juce::AudioBuffer<float>& audio, cons
     const auto rate = a.sampleRate;
 
     // What each frame gets: its note's shift (and straightening), its note's gain; smoothed over ~25 ms
-    std::vector<double> shift ((size_t) frames, 0.0), gain ((size_t) frames, 0.0);
+    std::vector<double> shift ((size_t) frames, 0.0), gain ((size_t) frames, 0.0), formant ((size_t) frames, 0.0);
     for (size_t i = 0; i < a.notes.size() && i < edits.size(); ++i)
     {
         const auto& note = a.notes[i];
         const auto& e = edits[i];
+        const auto curve = curveAfter (a, (int) i, e);
+        const auto plain = centreAfter (note, e) - note.centre;
         for (int f = juce::jmax (0, note.startFrame); f < juce::jmin (frames, note.endFrame); ++f)
         {
             const auto m = (double) a.midi[(size_t) f];
-            shift[(size_t) f] = e.shift + (m > 0.0 ? e.drift * (note.centre - m) : 0.0);
+            const auto shaped = (double) curve[(size_t) (f - note.startFrame)];
+            shift[(size_t) f] = m > 0.0 && shaped > 0.0 ? shaped - m : plain;
             gain[(size_t) f] = e.gain;
+            formant[(size_t) f] = e.formant;
         }
     }
     const auto smooth = [frames] (std::vector<double> v, int radius)
@@ -230,6 +235,7 @@ juce::AudioBuffer<float> synthesise (const juce::AudioBuffer<float>& audio, cons
     };
     shift = smooth (shift, 2);
     gain = smooth (gain, 3);
+    formant = smooth (formant, 3);
     const auto atSample = [&] (const std::vector<double>& v, double s)
     {
         const auto pos = juce::jlimit (0.0, (double) (frames - 1), s / a.hop);
@@ -309,14 +315,36 @@ juce::AudioBuffer<float> synthesise (const juce::AudioBuffer<float>& audio, cons
         const auto ratio = pitched ? std::pow (2.0, atSample (shift, ts) / 12.0) : 1.0;
         const auto g = (float) juce::Decibels::decibelsToGain (atSample (gain, ts));
         const auto centre = (int) std::lround (ts);
+        // Formant shift: the grain read faster (brighter) or slower (darker), its period's spacing kept
+        const auto fs = pitched ? std::pow (2.0, atSample (formant, ts) / 12.0) : 1.0;
+        const bool resampled = std::abs (fs - 1.0) > 1.0e-3;
         for (int j = -half; j <= half; ++j)
         {
-            const auto src = a0 + j, dst = centre + j;
-            if (src < 0 || src >= n || dst < base || dst >= end)
+            const auto dst = centre + j;
+            if (dst < base || dst >= end)
                 continue;
             const auto w = 0.5f + 0.5f * std::cos (juce::MathConstants<float>::pi * (float) j / (float) half);
-            for (int c = 0; c < channels; ++c)
-                out.getWritePointer (c)[dst - base] += audio.getReadPointer (c)[src] * w * g;
+            if (resampled)
+            {
+                const auto pos = a0 + j * fs;
+                const auto i0 = (int) std::floor (pos);
+                if (i0 < 0 || i0 + 1 >= n)
+                    continue;
+                const auto t = (float) (pos - i0);
+                for (int c = 0; c < channels; ++c)
+                {
+                    const auto* in = audio.getReadPointer (c);
+                    out.getWritePointer (c)[dst - base] += (in[i0] + (in[i0 + 1] - in[i0]) * t) * w * g;
+                }
+            }
+            else
+            {
+                const auto src = a0 + j;
+                if (src < 0 || src >= n)
+                    continue;
+                for (int c = 0; c < channels; ++c)
+                    out.getWritePointer (c)[dst - base] += audio.getReadPointer (c)[src] * w * g;
+            }
             weight[(size_t) (dst - base)] += w;
         }
         ts += juce::jmax (4.0, period / ratio);
@@ -339,7 +367,33 @@ juce::AudioBuffer<float> render (const juce::AudioBuffer<float>& audio, const An
         anything = anything || ! e.isNeutral();
     if (! anything || audio.getNumSamples() < 4)
         return audio;
-    return synthesise (audio, a, edits, 0, audio.getNumSamples());
+    auto result = synthesise (audio, a, edits, 0, audio.getNumSamples());
+
+    // Notes moved in time: every note's start and end pinned where it goes, the audio between stretched to fit
+    bool moved = false;
+    for (const auto& e : edits)
+        moved = moved || std::abs (e.time) > 1.0e-5;
+    if (moved)
+    {
+        std::vector<std::pair<double, double>> anchors;
+        for (size_t i = 0; i < a.notes.size() && i < edits.size(); ++i)
+        {
+            const auto s0 = a.frameToSeconds (a.notes[i].startFrame), s1 = a.frameToSeconds (a.notes[i].endFrame);
+            anchors.push_back ({ s0, s0 + edits[i].time });
+            anchors.push_back ({ s1, s1 + edits[i].time });
+        }
+        std::sort (anchors.begin(), anchors.end());
+        const auto length = audio.getNumSamples() / a.sampleRate;
+        std::vector<std::pair<double, double>> kept;
+        for (const auto& [from, to] : anchors)
+            if (from > 0.01 && from < length - 0.01 && to > 0.005 && to < length - 0.005
+                && (kept.empty() || (from > kept.back().first + 0.003 && to > kept.back().second + 0.003)))
+                kept.push_back ({ from, to });
+        auto warped = audioedit::flexWarp (result, a.sampleRate, kept);
+        warped.setSize (warped.getNumChannels(), audio.getNumSamples(), true, true);   // (the same length: the end is pinned)
+        result = std::move (warped);
+    }
+    return result;
 }
 
 std::pair<int, int> noteSpan (const Analysis& a, int index)
@@ -358,6 +412,16 @@ void renderInto (juce::AudioBuffer<float>& dest, const juce::AudioBuffer<float>&
     to = juce::jlimit (from, juce::jmin (audio.getNumSamples(), dest.getNumSamples()), to);
     if (to - from < 2)
         return;
+
+    // Notes moved in time change the whole stretch round them: all of it again
+    for (const auto& e : edits)
+        if (std::abs (e.time) > 1.0e-5)
+        {
+            const auto all = render (audio, a, edits);
+            for (int c = 0; c < dest.getNumChannels(); ++c)
+                dest.copyFrom (c, 0, all, juce::jmin (c, all.getNumChannels() - 1), 0, juce::jmin (dest.getNumSamples(), all.getNumSamples()));
+            return;
+        }
 
     // Nothing changed round here: the recording as it is
     bool anything = false;
@@ -398,7 +462,8 @@ juce::String toString (const std::vector<NoteEdit>& edits)
     for (size_t i = 0; i < edits.size(); ++i)
         if (! edits[i].isNeutral())
             parts.add (juce::String ((int) i) + ":" + juce::String (edits[i].shift, 4) + ":" + juce::String (edits[i].drift, 3)
-                       + ":" + juce::String (edits[i].gain, 2));
+                       + ":" + juce::String (edits[i].gain, 2) + ":" + juce::String (edits[i].vibrato, 3) + ":" + juce::String (edits[i].formant, 3)
+                       + ":" + juce::String (edits[i].snap, 3) + ":" + juce::String (edits[i].time, 5));
     return parts.joinIntoString (";");
 }
 
@@ -417,6 +482,13 @@ std::vector<NoteEdit> fromString (const juce::String& text, size_t numNotes)
         edits[(size_t) i].drift = juce::jlimit (0.0, 1.0, v[2].getDoubleValue());
         if (v.size() >= 4)
             edits[(size_t) i].gain = v[3].getDoubleValue();
+        if (v.size() >= 8)
+        {
+            edits[(size_t) i].vibrato = juce::jlimit (0.0, 2.0, v[4].getDoubleValue());
+            edits[(size_t) i].formant = juce::jlimit (-12.0, 12.0, v[5].getDoubleValue());
+            edits[(size_t) i].snap = juce::jlimit (0.0, 1.0, v[6].getDoubleValue());
+            edits[(size_t) i].time = v[7].getDoubleValue();
+        }
     }
     return edits;
 }
@@ -447,6 +519,127 @@ void correct (std::vector<NoteEdit>& edits, const Analysis& analysis, const std:
         }
         edits[(size_t) i].shift += amount * (target - now);
     }
+}
+
+//==============================================================================
+double centreAfter (const Note& note, const NoteEdit& edit)
+{
+    const auto moved = note.centre + edit.shift;
+    return moved + edit.snap * (std::round (moved) - moved);
+}
+
+std::vector<float> curveAfter (const Analysis& a, int index, const NoteEdit& e)
+{
+    std::vector<float> out;
+    if (! juce::isPositiveAndBelow (index, (int) a.notes.size()))
+        return out;
+    const auto& note = a.notes[(size_t) index];
+    const int count = juce::jmax (0, note.endFrame - note.startFrame);
+    out.assign ((size_t) count, 0.0f);
+
+    // Its slow part (a moving average over ~80 ms) is the drift; what's left round it is the vibrato
+    const int radius = juce::jmax (2, (int) std::lround (0.04 * a.sampleRate / a.hop));
+    std::vector<double> slow ((size_t) count, 0.0);
+    for (int k = 0; k < count; ++k)
+    {
+        double sum = 0.0;
+        int n = 0;
+        for (int j = juce::jmax (0, k - radius); j <= juce::jmin (count - 1, k + radius); ++j)
+            if (const auto m = a.midi[(size_t) (note.startFrame + j)]; m > 0.0f)
+            {
+                sum += m;
+                ++n;
+            }
+        slow[(size_t) k] = n > 0 ? sum / n : note.centre;
+    }
+    const auto target = centreAfter (note, e);
+    for (int k = 0; k < count; ++k)
+    {
+        const auto m = (double) a.midi[(size_t) (note.startFrame + k)];
+        if (m <= 0.0)
+            continue;
+        const auto driftPart = slow[(size_t) k] - note.centre;
+        const auto vibratoPart = m - slow[(size_t) k];
+        out[(size_t) k] = (float) (target + driftPart * (1.0 - e.drift) + vibratoPart * e.vibrato);
+    }
+    return out;
+}
+
+namespace
+{
+    void describe (const Analysis& a, Note& note)
+    {
+        std::vector<float> pitches;
+        double loudness = 0.0;
+        for (int k = note.startFrame; k < note.endFrame; ++k)
+        {
+            if (a.midi[(size_t) k] > 0.0f)
+                pitches.push_back (a.midi[(size_t) k]);
+            loudness += a.level[(size_t) k];
+        }
+        if (! pitches.empty())
+            note.centre = median (pitches);
+        note.level = (float) (loudness / juce::jmax (1, note.endFrame - note.startFrame));
+    }
+}
+
+void splitNote (Analysis& a, std::vector<NoteEdit>& edits, int index, int frame)
+{
+    if (! juce::isPositiveAndBelow (index, (int) a.notes.size()))
+        return;
+    auto& note = a.notes[(size_t) index];
+    if (frame <= note.startFrame + 2 || frame >= note.endFrame - 2)
+        return;
+    Note second = note;
+    second.startFrame = frame;
+    note.endFrame = frame;
+    describe (a, note);
+    describe (a, second);
+    a.notes.insert (a.notes.begin() + index + 1, second);
+    edits.resize (a.notes.size() - 1);
+    edits.insert (edits.begin() + index + 1, edits[(size_t) index]);
+}
+
+void joinNotes (Analysis& a, std::vector<NoteEdit>& edits, std::vector<int> indices)
+{
+    std::sort (indices.begin(), indices.end());
+    indices.erase (std::unique (indices.begin(), indices.end()), indices.end());
+    if (indices.size() < 2 || indices.front() < 0 || indices.back() >= (int) a.notes.size())
+        return;
+    edits.resize (a.notes.size());
+    auto& first = a.notes[(size_t) indices.front()];
+    first.endFrame = a.notes[(size_t) indices.back()].endFrame;
+    describe (a, first);
+    // Everything between the first and the last becomes part of the first
+    a.notes.erase (a.notes.begin() + indices.front() + 1, a.notes.begin() + indices.back() + 1);
+    edits.erase (edits.begin() + indices.front() + 1, edits.begin() + indices.back() + 1);
+}
+
+juce::String segmentsToString (const Analysis& a)
+{
+    juce::StringArray parts;
+    for (const auto& n : a.notes)
+        parts.add (juce::String (n.startFrame) + "-" + juce::String (n.endFrame));
+    return parts.joinIntoString (",");
+}
+
+void applySegments (Analysis& a, const juce::String& text)
+{
+    if (text.isEmpty())
+        return;
+    std::vector<Note> notes;
+    for (const auto& part : juce::StringArray::fromTokens (text, ",", ""))
+    {
+        Note n;
+        n.startFrame = juce::jlimit (0, (int) a.midi.size(), part.upToFirstOccurrenceOf ("-", false, false).getIntValue());
+        n.endFrame = juce::jlimit (n.startFrame, (int) a.midi.size(), part.fromFirstOccurrenceOf ("-", false, false).getIntValue());
+        if (n.endFrame - n.startFrame < 2)
+            continue;
+        describe (a, n);
+        notes.push_back (n);
+    }
+    if (! notes.empty())
+        a.notes = std::move (notes);
 }
 
 } // namespace riff::pitchcorrect

@@ -34,15 +34,37 @@ namespace riff::pitchcorrect
     /** Tracks the pitch (YIN, every ~5 ms) and finds the notes. */
     Analysis analyse (const juce::AudioBuffer<float>& audio, double sampleRate);
 
-    /** What's been done to one note. */
+    /** What's been done to one note (Logic's Flex Pitch hot spots and Pitch Correction). */
     struct NoteEdit
     {
-        double shift = 0.0;   // semitones (fractional: cents)
-        double drift = 0.0;   // 0..1: how far its wobble (drift and vibrato) is straightened towards its centre
-        double gain = 0.0;    // dB
+        double shift = 0.0;     // semitones (fractional: cents)
+        double drift = 0.0;     // 0..1: its slow drift (scoops, sags) flattened towards its centre
+        double gain = 0.0;      // dB
+        double vibrato = 1.0;   // its fast wobble: 0 none, 1 as sung, up to 2 twice as wide
+        double formant = 0.0;   // semitones: the voice's character brighter (up) or darker (down), the pitch kept
+        double snap = 0.0;      // 0..1: Pitch Correction, how far its centre goes onto the nearest semitone
+        double time = 0.0;      // seconds: moved later (or earlier), the audio either side stretching
         bool operator== (const NoteEdit&) const = default;
-        bool isNeutral() const { return std::abs (shift) < 1.0e-4 && drift < 1.0e-4 && std::abs (gain) < 1.0e-4; }
+        bool isNeutral() const
+        {
+            return std::abs (shift) < 1.0e-4 && drift < 1.0e-4 && std::abs (gain) < 1.0e-4 && std::abs (vibrato - 1.0) < 1.0e-4
+                && std::abs (formant) < 1.0e-4 && snap < 1.0e-4 && std::abs (time) < 1.0e-5;
+        }
     };
+
+    /** Where a note's centre sounds after its edit (its shift and correction). */
+    double centreAfter (const Note& note, const NoteEdit& edit);
+
+    /** A note's pitch curve after its edit (frames startFrame..endFrame-1; 0 where unpitched): drift, vibrato, shift. */
+    std::vector<float> curveAfter (const Analysis& analysis, int noteIndex, const NoteEdit& edit);
+
+    /** Split a note at a frame (both halves keep its edit), or join neighbouring notes into one (the first one's edit). */
+    void splitNote (Analysis& analysis, std::vector<NoteEdit>& edits, int noteIndex, int frame);
+    void joinNotes (Analysis& analysis, std::vector<NoteEdit>& edits, std::vector<int> noteIndices);
+
+    /** The notes' boundaries as text (kept on the region after a split or join) and back. */
+    juce::String segmentsToString (const Analysis& analysis);
+    void applySegments (Analysis& analysis, const juce::String& text);
 
     /** The audio with the notes moved (one edit per note, in the analysis' order). */
     juce::AudioBuffer<float> render (const juce::AudioBuffer<float>& audio, const Analysis& analysis, const std::vector<NoteEdit>& edits);

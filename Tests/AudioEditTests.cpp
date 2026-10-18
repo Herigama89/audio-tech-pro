@@ -318,6 +318,7 @@ TEST_CASE ("Pitch editor: notes found, moved and straightened, length kept", "[a
     };
     edits[0] = {};
     edits[0].drift = 1.0;
+    edits[0].vibrato = 0.0;
     const auto straight = pitchcorrect::analyse (pitchcorrect::render (voice, analysis, edits), rate);
     REQUIRE (! straight.notes.empty());
     CHECK (swing (analysis, analysis.notes[0]) > 0.6f);
@@ -330,4 +331,49 @@ TEST_CASE ("Pitch editor: notes found, moved and straightened, length kept", "[a
     CHECK_THAT (analysis.notes[1].centre + fix[1].shift, WithinAbs (std::round (analysis.notes[1].centre + 0.4), 1e-9));
     const auto text = pitchcorrect::toString (fix);
     CHECK (pitchcorrect::fromString (text, 2)[1].shift == juce::String (fix[1].shift, 4).getDoubleValue());
+
+    // Pitch Correction as an amount kept on the note; formant and vibrato and time round-trip as text
+    std::vector<pitchcorrect::NoteEdit> more (2);
+    more[1].shift = 0.4;
+    more[1].snap = 1.0;
+    more[0].formant = 3.0;
+    more[0].vibrato = 1.5;
+    more[0].time = 0.05;
+    CHECK_THAT (pitchcorrect::centreAfter (analysis.notes[1], more[1]), WithinAbs (std::round (analysis.notes[1].centre + 0.4), 1e-9));
+    const auto back = pitchcorrect::fromString (pitchcorrect::toString (more), 2);
+    CHECK_THAT (back[0].formant, WithinAbs (3.0, 1e-6));
+    CHECK_THAT (back[0].vibrato, WithinAbs (1.5, 1e-6));
+    CHECK_THAT (back[0].time, WithinAbs (0.05, 1e-6));
+
+    // A formant shift keeps the pitch
+    std::vector<pitchcorrect::NoteEdit> bright (2);
+    bright[1].formant = 4.0;
+    const auto brighter = pitchcorrect::analyse (pitchcorrect::render (voice, analysis, bright), rate);
+    REQUIRE (brighter.notes.size() == 2);
+    CHECK_THAT (brighter.notes[1].centre, WithinAbs (60.0, 0.35));
+
+    // Moved later in time: the note starts later, the length stays
+    std::vector<pitchcorrect::NoteEdit> later (2);
+    later[1].time = 0.06;
+    const auto shifted = pitchcorrect::render (voice, analysis, later);
+    CHECK (shifted.getNumSamples() == voice.getNumSamples());
+    const auto lateAnalysis = pitchcorrect::analyse (shifted, rate);
+    REQUIRE (lateAnalysis.notes.size() == 2);
+    CHECK_THAT (lateAnalysis.frameToSeconds (lateAnalysis.notes[1].startFrame) - analysis.frameToSeconds (analysis.notes[1].startFrame),
+                WithinAbs (0.06, 0.02));
+
+    // Split and join
+    auto cut = analysis;
+    std::vector<pitchcorrect::NoteEdit> cutEdits (2);
+    const auto middle = (cut.notes[0].startFrame + cut.notes[0].endFrame) / 2;
+    pitchcorrect::splitNote (cut, cutEdits, 0, middle);
+    REQUIRE (cut.notes.size() == 3);
+    CHECK (cut.notes[0].endFrame == middle);
+    const auto segments = pitchcorrect::segmentsToString (cut);
+    auto again2 = analysis;
+    pitchcorrect::applySegments (again2, segments);
+    CHECK (again2.notes.size() == 3);
+    pitchcorrect::joinNotes (cut, cutEdits, { 0, 1 });
+    CHECK (cut.notes.size() == 2);
+    CHECK (cutEdits.size() == 2);
 }

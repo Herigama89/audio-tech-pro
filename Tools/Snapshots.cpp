@@ -277,7 +277,7 @@ public:
                 auto vocal = model::addTrack (main.project, "Vocal", nullptr);
                 auto take = model::addRegion (vocal, wavFile, 0.0, 4.0, nullptr);
                 PitchEditor pitch (take, main.undoManager, main.engine.getFormatManager(), juce::File::getSpecialLocation (juce::File::tempDirectory));
-                pitch.setSize (1000, 430);
+                pitch.setSize (1200, 560);
                 pitch.analyseNow();
                 std::cout << "pitch editor notes: " << pitch.analysis.notes.size() << std::endl;
                 if (pitch.analysis.notes.size() >= 3)
@@ -286,7 +286,10 @@ public:
                     pitch.edits[0].shift = std::round (pitch.analysis.notes[0].centre) - pitch.analysis.notes[0].centre;
                     pitch.selected = { 1 };
                     pitch.edits[1].shift = 2.0;
+                    pitch.edits[1].gain = -4.0;
                     pitch.commit ("Snapshot");
+                    pitch.refreshInspector();
+                    pitch.hoverNote = 1;   // (its hot spots shown)
                 }
                 pump (main, 50);
                 save (pitch, "pitch-editor.png");
