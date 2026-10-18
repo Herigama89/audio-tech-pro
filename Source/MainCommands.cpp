@@ -266,7 +266,7 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::automix:                showAutomix(); break;
         case commands::toggleMixerComments:
             mixer.setShowComments (! mixer.getShowComments());
-            appProperties.getUserSettings()->setValue ("mixerComments", mixer.getShowComments());
+            appProperties.getUserSettings()->setValue ("mixerCommentsShown", mixer.getShowComments());
             if (! mixer.isVisible() && mixer.getShowComments())
                 showMixer();
             commandManager.commandStatusChanged();

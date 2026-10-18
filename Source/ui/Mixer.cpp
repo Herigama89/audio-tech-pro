@@ -2689,27 +2689,58 @@ void MixerPanel::layOutComments (int stripW, int top)
 {
     while (commentBoxes.size() < (showComments ? strips.size() : 0))
     {
-        // Only a click on it starts typing: selecting a channel (or Tab moving the focus along) never does
+        // A comment box is only text to read: nothing turns it on (not selecting a channel, not a click, not Tab).
+        // Double-click it to type; Return, Esc or clicking elsewhere ends that.
         struct CommentBox final : juce::TextEditor
         {
-            void focusGained (FocusChangeType cause) override
+            CommentBox() { stopEditing(); }
+
+            void startEditing()
             {
-                juce::TextEditor::focusGained (cause);
-                if (cause != focusChangedByMouseClick)
-                    juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<CommentBox> (this)]
-                    {
-                        if (safe == nullptr || ! safe->hasKeyboardFocus (false))
-                            return;
-                        // Back to the window, so the app's keys (Space, X...) keep working
-                        for (auto* c = safe->getParentComponent(); c != nullptr; c = c->getParentComponent())
-                            if (c->getWantsKeyboardFocus())
-                            {
-                                c->grabKeyboardFocus();
-                                return;
-                            }
-                        safe->giveAwayKeyboardFocus();
-                    });
+                editing = true;
+                setReadOnly (false);
+                setCaretVisible (true);
+                setWantsKeyboardFocus (true);
+                setMouseClickGrabsKeyboardFocus (true);
+                grabKeyboardFocus();
+                moveCaretToEnd();
             }
+            void stopEditing()
+            {
+                editing = false;
+                setReadOnly (true);
+                setCaretVisible (false);
+                setWantsKeyboardFocus (false);
+                setMouseClickGrabsKeyboardFocus (false);
+            }
+            void mouseDown (const juce::MouseEvent& e) override        { if (editing) juce::TextEditor::mouseDown (e); }
+            void mouseDrag (const juce::MouseEvent& e) override        { if (editing) juce::TextEditor::mouseDrag (e); }
+            void mouseUp (const juce::MouseEvent& e) override          { if (editing) juce::TextEditor::mouseUp (e); }
+            void mouseDoubleClick (const juce::MouseEvent& e) override
+            {
+                if (editing)
+                    juce::TextEditor::mouseDoubleClick (e);
+                else
+                    startEditing();
+            }
+            void focusLost (FocusChangeType cause) override
+            {
+                juce::TextEditor::focusLost (cause);   // (saves)
+                stopEditing();
+                // Back to the window, so the app's keys (Space, X...) keep working
+                juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<CommentBox> (this)]
+                {
+                    if (safe == nullptr || juce::Component::getCurrentlyFocusedComponent() != nullptr)
+                        return;
+                    for (auto* c = safe->getParentComponent(); c != nullptr; c = c->getParentComponent())
+                        if (c->getWantsKeyboardFocus())
+                        {
+                            c->grabKeyboardFocus();
+                            return;
+                        }
+                });
+            }
+            bool editing = false;
         };
         auto* box = commentBoxes.add (new CommentBox());
         box->setExplicitFocusOrder (0);
@@ -2733,7 +2764,7 @@ void MixerPanel::layOutComments (int stripW, int top)
         box->setBounds (i * stripW + 1, top + 2, stripW - 2, commentsHeight - 4);
         if (! box->hasKeyboardFocus (true))
             box->setText (track[ids::comment].toString(), juce::dontSendNotification);
-        box->setTooltip (track[ids::name].toString() + ": your notes on this track");
+        box->setTooltip (track[ids::name].toString() + ": your notes on this track. Double-click to write; the Comments key in the header hides them.");
         auto save = [this, box, track]() mutable
         {
             if (box->getText() == track[ids::comment].toString())

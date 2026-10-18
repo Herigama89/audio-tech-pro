@@ -863,6 +863,23 @@ public:
                 main.mixer.relayoutStrips();
                 pump (main, 200);
                 save (main, juce::String (name) + "-mixer.png");
+                {
+                    // Selecting channels and clicking the comment boxes never starts typing in them
+                    if (main.mixer.onSelectTrack)
+                        for (const auto& t : main.project)
+                            if (t.hasType (ids::TRACK))
+                                main.mixer.onSelectTrack (t[ids::id].toString(), {});
+                    pump (main, 50);
+                    for (auto* box : main.mixer.commentBoxes)
+                    {
+                        box->grabKeyboardFocus();
+                        if (! box->isReadOnly())
+                            std::cout << "comment focus check: FAIL (editable without a double-click)" << std::endl;
+                    }
+                    pump (main, 50);
+                    auto* focused = juce::Component::getCurrentlyFocusedComponent();
+                    std::cout << "comment focus check: " << (dynamic_cast<juce::TextEditor*> (focused) != nullptr ? "FAIL (a comment box took the keys)" : "ok") << std::endl;
+                }
                 main.mixer.setShowComments (false);
                 main.closeMixer();
             }

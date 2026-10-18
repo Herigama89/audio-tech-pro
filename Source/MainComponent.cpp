@@ -582,10 +582,10 @@ MainComponent::MainComponent (bool openAudioDevice)
         showMeters = settings->getBoolValue ("viewMeters", true);
         showTrackHeaders = settings->getBoolValue ("viewTrackHeaders", true);
         TrackHeader::showInserts = settings->getBoolValue ("viewHeaderInserts", false);
-        mixer.setShowComments (settings->getBoolValue ("mixerComments", false));
+        mixer.setShowComments (settings->getBoolValue ("mixerCommentsShown", false));
         mixer.onCommentsToggled = [this] (bool shown)
         {
-            appProperties.getUserSettings()->setValue ("mixerComments", shown);
+            appProperties.getUserSettings()->setValue ("mixerCommentsShown", shown);
             commandManager.commandStatusChanged();
         };
         applyPanelVisibility();
