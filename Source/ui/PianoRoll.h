@@ -72,6 +72,13 @@ public:
     /** Every key the piano roll knows, as text (shown by Tools > Keyboard Shortcuts, and the ? key) */
     juce::String shortcutsText();
     void showShortcuts();
+    /** Snap on or off (the N key): off remembers the grid it had, on puts it back */
+    void setSnapOn (bool on)
+    {
+        if (! on && snapBox.getSelectedId() != 2) { lastSnapId = snapBox.getSelectedId(); snapBox.setSelectedId (2); }
+        else if (on && snapBox.getSelectedId() == 2) snapBox.setSelectedId (lastSnapId);
+    }
+    int lastSnapId = 1;
     void mouseEnter (const juce::MouseEvent&) override;
 private:
     double lastLength = 0.0;            // FL's pencil: new notes as long as the last one you drew or touched

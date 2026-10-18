@@ -935,6 +935,27 @@ public:
                 main.applyTheme ({});
             }
             {
+                // Tracks filled with their colours, shaded bars, your own text colour; then tinted with a dotted grid
+                theme::Settings filled;
+                filled.trackColouring = 2;
+                filled.gridStyle = 1;
+                filled.textColour = 0xffffd27a;
+                main.applyTheme (filled);
+                pump (main, 100);
+                save (main, "tracks-filled.png");
+                main.showMixer();
+                pump (main, 150);
+                save (main, "mixer-filled.png");
+                main.closeMixer();
+                theme::Settings tinted;
+                tinted.trackColouring = 1;
+                tinted.gridStyle = 3;
+                main.applyTheme (tinted);
+                pump (main, 100);
+                save (main, "tracks-tinted-dotted.png");
+                main.applyTheme ({});
+            }
+            {
                 // Parts with themes of their own: the MultiMeter Studio White and the toolbar Xenon, the rest as it is
                 theme::Settings white, xenon, mixed;
                 white.skin = theme::Skin::white;

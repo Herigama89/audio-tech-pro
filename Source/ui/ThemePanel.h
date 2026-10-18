@@ -67,6 +67,8 @@ private:
     // The cycle (locators) and marker colours
     juce::TextButton markButtons[2], markDefaultButton { "Skin's" };
     juce::TextButton editButtons[4], editDefaultButton { "Skin's" };   // the edit windows: tracks, bar lines, beat lines, piano roll
+    juce::TextButton textButtons[2], textDefaultButton { "Skin's" };   // your own text colours: the app's, the strips'
+    juce::ComboBox trackColourBox, gridStyleBox;                       // tracks in their colours; the grid's look
     juce::TextButton& colourButton (int which);
 
     // REAPER themes: load one (copied into the app's folder), or choose one loaded before

@@ -36,6 +36,11 @@ public:
     // Reading its gain reduction: its own meter (if it moves), else from the levels in and out
     float restingDiff = 0.0f, lastMeterValue = 0.0f;
     bool haveRestingDiff = false, meterSeen = false, meterMoves = false;
+    // Whether the plugin's make-up knob is changing its output now (it isn't while its compressor is switched off)
+    float lastMakeup = 0.0f, lastDiff = 0.0f;   // (before the knob last moved)
+    int judgeIn = 0;                            // frames until the output has settled after a turn of the knob
+    bool haveLastMakeup = false, makeupApplied = true;
+    bool compressorSwitchedOn() const;
     juce::AudioPluginInstance* lastPlugin = nullptr;
     bool showFaceForTesting = false;   // (the snapshot tool: the console face without a plugin chosen)
     void paintFace (juce::Graphics& g, juce::Colour plateTop, juce::Colour plateBottom);   // (the still parts, drawn once)

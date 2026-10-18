@@ -246,3 +246,21 @@ TEST_CASE ("The toolbar and the MultiMeter can have themes of their own", "[them
     theme::set ({});
     CHECK (! theme::areaOwn (theme::Area::toolbar));
 }
+
+TEST_CASE ("Your own text colours, track colouring and grid style", "[theme]")
+{
+    theme::Settings s;
+    s.textColour = 0xffffd27a;
+    s.stripTextColour = 0xff102030;
+    s.trackColouring = 2;
+    s.gridStyle = 3;
+    const auto back = theme::Settings::fromString (s.toString());
+    CHECK (back == s);
+    theme::set (s);
+    CHECK (theme::text == juce::Colour (0xffffd27a));
+    CHECK (theme::stripInk == juce::Colour (0xff102030));
+    CHECK (theme::trackColouring() == 2);
+    CHECK (theme::gridStyle() == 3);
+    theme::set ({});
+    CHECK (theme::text != juce::Colour (0xffffd27a));
+}

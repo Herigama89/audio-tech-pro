@@ -600,7 +600,9 @@ double PianoRoll::gridSeconds() const
 
 double PianoRoll::snapContent (double c, double grid) const
 {
-    // The grid follows the song's bars (and the tempo track), not the region's start.
+    // The grid follows the song's bars (and the tempo track), not the region's start. Snap off: anywhere.
+    if (grid <= 0.0)
+        return juce::jmax (0.0, c);
     const double regionStart = region[ids::start], offset = region[ids::offset];
     const auto map = model::tempoMapOf (region.getParent().getParent());
     const auto t = regionStart + c - offset;
@@ -745,6 +747,18 @@ void PianoRoll::paint (juce::Graphics& g)
         const auto bFrom = map.beatAt (juce::jmax (0.0, regionStart + xToContent ((float) area.getX()) - offset));
         const auto bTo = map.beatAt (juce::jmax (0.0, regionStart + xToContent ((float) area.getRight()) - offset));
 
+        // Shaded grids: every other bar (or beat) a shade darker
+        if (const auto style = theme::gridStyle(); style == 1 || style == 4)
+            for (auto beat = (juce::int64) std::floor (bFrom); (double) beat <= bTo; ++beat)
+            {
+                const auto bar = map.barAndBeat ((double) beat).first;
+                if (! (style == 1 ? (bar % 2 == 1) : (beat % 2 == 1)))
+                    continue;
+                const auto x0 = contentToX (map.secondsAt ((double) beat) - regionStart + offset);
+                const auto x1 = contentToX (map.secondsAt ((double) beat + 1.0) - regionStart + offset);
+                theme::shadeGridSpan (g, x0, x1, (float) area.getY(), (float) area.getHeight());
+            }
+
         for (auto k = (juce::int64) std::floor (bFrom / gridBeats); (double) k * gridBeats <= bTo; ++k)
         {
             const auto b = (double) k * gridBeats;
@@ -753,8 +767,8 @@ void PianoRoll::paint (juce::Graphics& g)
             const bool isBar = inBar < 1e-6 || std::abs (inBar - map.beatsPerBarAt (b)) < 1e-6;
             juce::ignoreUnused (beatsPerBar);
             const bool isBeat = std::abs (std::remainder (b, 1.0)) < 1e-6;
-            g.setColour (isBar ? theme::gridBar.brighter (0.3f) : isBeat ? theme::gridBar : theme::gridBeat);
-            g.fillRect (x, (float) area.getY(), 1.0f, (float) area.getHeight());
+            theme::drawGridLine (g, x, (float) area.getY(), (float) area.getHeight(), isBar, isBeat,
+                                 isBar ? theme::gridBar.brighter (0.3f) : isBeat ? theme::gridBar : theme::gridBeat);
         }
 
         // Shade outside the region's window.

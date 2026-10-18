@@ -366,6 +366,8 @@ private:
     juce::OwnedArray<juce::TextButton> functionKeys;
     juce::Rectangle<int> functionBarArea, tracksBarArea;
     juce::TextButton waveformZoomButton, fitVerticalButton, fitHorizontalButton;
+    juce::TextButton catchButton { "Catch" };   // the view follows the playhead (Logic's Catch)
+    void setSnapOn (bool on);
     juce::Slider verticalZoom, horizontalZoom;
     static constexpr int functionBarHeight = 34, tracksBarHeight = 30;
     void zoomToFit (bool horizontally, bool vertically);

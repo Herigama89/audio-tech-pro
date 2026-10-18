@@ -118,6 +118,11 @@ MainComponent::MainComponent (bool openAudioDevice)
         b->setClickingTogglesState (false);
         addAndMakeVisible (b);
     }
+    catchButton.setTooltip ("Catch: the tracks area follows the playhead while it plays. Off, the view stays where you put it (Control-Period).");
+    catchButton.setWantsKeyboardFocus (false);
+    catchButton.setColour (juce::TextButton::buttonOnColourId, theme::accent);
+    catchButton.onClick = [this] { commandManager.invokeDirectly (commands::toggleCatch, true); };
+    addAndMakeVisible (catchButton);
     for (auto* s : { &verticalZoom, &horizontalZoom })
     {
         s->setSliderStyle (juce::Slider::LinearHorizontal);
@@ -512,6 +517,10 @@ MainComponent::MainComponent (bool openAudioDevice)
     engine.setRecordBitDepth (appProperties.getUserSettings()->getIntValue ("recordBitDepth", 24));
 
     engine.setStopOnClip (appProperties.getUserSettings()->getBoolValue ("stopOnClip", false));
+    engine.setSuspendWhenSilent (appProperties.getUserSettings()->getBoolValue ("suspendPlugins", true));
+    timeline.catchPlayhead = appProperties.getUserSettings()->getBoolValue ("catchPlayhead", true);
+    catchButton.setClickingTogglesState (false);
+    catchButton.setToggleState (timeline.catchPlayhead, juce::dontSendNotification);
     clipStopButton.setToggleState (engine.getStopOnClip(), juce::dontSendNotification);
     recentProjects.setMaxNumberOfItems (12);
     recentProjects.restoreFromString (appProperties.getUserSettings()->getValue ("recentProjects"));
@@ -1131,6 +1140,8 @@ void MainComponent::resized()
         bar.removeFromLeft (10);
         toolBox.setBounds (bar.removeFromLeft (110));
         toolBox.setVisible (true);
+        bar.removeFromLeft (8);
+        catchButton.setBounds (bar.removeFromLeft (58));
 
         auto right = [&bar] (juce::Component& c, int w, int gapAfter = 6) { c.setBounds (bar.removeFromRight (w)); bar.removeFromRight (gapAfter); };
         right (horizontalZoom, 90, 2);
@@ -2469,8 +2480,8 @@ void MainComponent::timerCallback()
         showError ("Recording glitch", "The disk couldn't keep up, so a moment of audio was lost. "
                                        "Try a larger buffer size under Audio, or record to a faster drive.");
 
-    // Follow the playhead: page forward when it reaches the right edge.
-    if (playing)
+    // Follow the playhead: page forward when it reaches the right edge (unless Catch is off).
+    if (playing && timeline.catchPlayhead)
     {
         const auto x = timeline.timeToX (playhead);
         if (x > (float) canvas.getWidth() - 20.0f || x < 0.0f)

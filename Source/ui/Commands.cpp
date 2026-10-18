@@ -108,6 +108,9 @@ const std::vector<Info>& all()
         { toggleMetronome,        "Metronome",                  "Transport", "Turn the click on or off" },
         { toggleCountIn,          "Count-in",                   "Transport", "One bar of click before recording" },
         { toggleAutopunch,        "Autopunch",                  "Transport", "Record only between the punch locators (the red bar under the cycle; drag it in the ruler)" },
+        { toggleSnap,             "Snap to Grid",               "Edit",      "Snap on or off: regions and notes land on the grid, or anywhere (Cmd while dragging does the opposite once)" },
+        { toggleCatch,            "Catch Playhead",             "View",      "The tracks area follows the playhead while it plays (Logic's Catch); off, the view stays where you put it" },
+        { toggleSuspendPlugins,   "Suspend Plug-ins When Silent", "Mix",     "Plug-ins on a track that's silent stop working until sound comes again, to save CPU (as Cubase's VST3 suspend and FL Studio's Smart Disable)" },
         { toggleStopOnClip,       "Stop Recording on Clip",     "Transport", "Recording stops by itself if a mic or instrument input clips (hits 0 dB); the take keeps what came before" },
         { toggleReplace,          "Replace",                    "Transport", "A recording replaces the parts of regions it covers" },
         { toggleMidiMerge,        "Merge MIDI Recordings",      "Transport", "MIDI recorded over a MIDI region is merged into it" },
@@ -231,6 +234,12 @@ namespace
             case rewindBar:              return { key (',') };
             case forwardBar:             return { key ('.') };
             case toggleCycle:            return { key ('c') };
+            case toggleSnap:             return { key ('n') };
+           #if JUCE_MAC
+            case toggleCatch:            return { key ('.', ctrl) };
+           #else
+            case toggleCatch:            return {};
+           #endif
             case toggleMetronome:        return { key ('k') };
             case toggleCountIn:          return { key ('k', shift) };
             case toggleAutopunch:        return { key ('i', opt | cmd) };

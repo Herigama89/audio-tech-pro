@@ -40,7 +40,8 @@ namespace riff::commands
         openMixerWindow = 0x2d01, openEditorWindow, themeSettings,
         toggleControlBar = 0x2e01, toggleToolbar, toggleStatusBar, toggleMeters, toggleTrackHeaders, showAllPanels, hideAllPanels, createTrackStack,
         showNotepad = 0x2f01, showBrowser, toggleQuickHelp, waveformZoom, zoomToFitAll, showPerformance, audioSuite, toggleStopOnClip,
-        toggleHeaderInserts = 0x3001, toggleExclusiveSolo, showMultiMeter, toggleMixerComments, automix
+        toggleHeaderInserts = 0x3001, toggleExclusiveSolo, showMultiMeter, toggleMixerComments, automix,
+        toggleSnap = 0x3101, toggleCatch, toggleSuspendPlugins
     };
 
     struct Info

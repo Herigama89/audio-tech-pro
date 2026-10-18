@@ -246,15 +246,17 @@ void TrackHeader::followAutomation (double time)
 
 void TrackHeader::paint (juce::Graphics& g)
 {
-    // (follows the theme when it changes)
-    if (nameLabel.findColour (juce::Label::textColourId) != theme::stripInk)
-        nameLabel.setColour (juce::Label::textColourId, theme::stripInk);
-
     const bool selected = timeline.isTrackSelected (track[ids::id].toString());
     auto area = getLocalBounds();
 
-    // The grey channel face, as on the mixer strips (a little lighter when selected)
-    const auto body = selected ? theme::stripFace.brighter (0.12f) : theme::stripFace;
+    // The grey channel face, as on the mixer strips (a little lighter when selected), in the track's colour
+    // when Themes > Tracks says so
+    const auto body = theme::trackFace (selected ? theme::stripFace.brighter (0.12f) : theme::stripFace, model::trackColour (track));
+    const auto ink = theme::inkOn (body, theme::stripInk);
+
+    // (follows the theme when it changes)
+    if (nameLabel.findColour (juce::Label::textColourId) != ink)
+        nameLabel.setColour (juce::Label::textColourId, ink);
     g.setGradientFill (juce::ColourGradient (body.brighter (0.05f), 0.0f, 0.0f, body.darker (0.06f), 0.0f, (float) getHeight(), false));
     g.fillRect (area);
     {
@@ -300,7 +302,7 @@ void TrackHeader::paint (juce::Graphics& g)
         kind = "Frozen";
     if (const int group = track.getProperty (ids::group, 0); group > 0)
         kind << (kind.isEmpty() ? "" : "  ") << "G" << group;
-    g.setColour ((bool) track[ids::frozen] ? theme::knobArc.darker (0.3f) : theme::stripInkDim);
+    g.setColour ((bool) track[ids::frozen] ? theme::knobArc.darker (0.3f) : (theme::trackColouring() == 2 ? ink.withAlpha (0.65f) : theme::stripInkDim));
     g.drawText (kind, nameLabel.getBounds().translated (3, 18).withHeight (12), juce::Justification::centredLeft, false);
 
     // A stack's main track: a disclosure triangle to fold its tracks away. Its tracks: a line in the number column.

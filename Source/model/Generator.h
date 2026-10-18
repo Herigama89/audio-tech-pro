@@ -76,9 +76,11 @@ namespace riff::generator
         Adds the result to a project: an instrument track per part with one MIDI
         region of `bars` bars starting at `startSeconds`, named after the genre.
         Sets the project's tempo first when `setTempo` is true. Returns the new tracks.
+        `replaceGenerated`: a part generated before (its track still there) gets the new notes in its own track,
+        in place of its generated region and where that was; the track (and the instrument you gave it) stays.
     */
     juce::Array<juce::ValueTree> apply (juce::ValueTree project, const Result& result, const Settings& settings,
-                                        double startSeconds, bool setTempo, juce::UndoManager* um);
+                                        double startSeconds, bool setTempo, juce::UndoManager* um, bool replaceGenerated = false);
 
     /**
         Logic's Drummer and Session Players: a region that a player plays, in a genre, set by

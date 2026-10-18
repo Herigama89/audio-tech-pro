@@ -470,6 +470,17 @@ void applyColours (const Settings& s)
     for (auto [chosen, target] : { std::pair { s.meterLow, &meterGreen }, std::pair { s.meterMid, &meterAmber }, std::pair { s.meterPeak, &meterRed } })
         if (chosen != 0)
             *target = adjust (juce::Colour (chosen), Role::meter, s, base.getBrightness());
+    // Your own text colours (the dim ones a step towards the background)
+    if (s.textColour != 0)
+    {
+        text = ink = juce::Colour (s.textColour);
+        dimText = inkDim = text.interpolatedWith (background, 0.38f);
+    }
+    if (s.stripTextColour != 0)
+    {
+        stripInk = juce::Colour (s.stripTextColour);
+        stripInkDim = stripInk.interpolatedWith (stripFace, 0.38f);
+    }
     if (s.locatorColour != 0) locators = juce::Colour (s.locatorColour);
     if (s.markerColour != 0)  markers = juce::Colour (s.markerColour);
 
@@ -503,6 +514,56 @@ void applyColours (const Settings& s)
 }
 
 const Settings& current() { return settingsNow(); }
+
+int trackColouring() { return settingsNow().trackColouring; }
+
+juce::Colour trackFace (juce::Colour face, juce::Colour trackColour)
+{
+    switch (trackColouring())
+    {
+        case 1:  return face.interpolatedWith (trackColour, 0.32f);
+        case 2:  return trackColour.interpolatedWith (face, 0.12f);
+        default: return face;
+    }
+}
+
+juce::Colour inkOn (juce::Colour face, juce::Colour normalInk)
+{
+    // The usual ink if it reads; else black or white, whichever reads better
+    const auto contrast = std::abs (face.getPerceivedBrightness() - normalInk.getPerceivedBrightness());
+    if (contrast > 0.35f)
+        return normalInk;
+    return face.getPerceivedBrightness() > 0.55f ? juce::Colour (0xff101214) : juce::Colour (0xfff2f3f5);
+}
+
+int gridStyle() { return editorSettings().gridStyle; }
+
+void drawGridLine (juce::Graphics& g, float x, float top, float height, bool isBar, bool isBeat, juce::Colour colour)
+{
+    switch (gridStyle())
+    {
+        case 5: return;                                       // none
+        case 2: if (! isBar) return; break;                   // bars only
+        case 3:                                               // dotted: bars solid, the rest dots
+            if (! isBar)
+            {
+                g.setColour (colour.withMultipliedAlpha (isBeat ? 1.0f : 0.8f));
+                for (float y = top; y < top + height; y += 4.0f)
+                    g.fillRect (x, y, 1.0f, juce::jmin (1.5f, top + height - y));
+                return;
+            }
+            break;
+        default: break;
+    }
+    g.setColour (colour);
+    g.fillRect (x, top, 1.0f, height);
+}
+
+void shadeGridSpan (juce::Graphics& g, float x0, float x1, float top, float height)
+{
+    g.setColour (juce::Colours::black.withAlpha (0.17f));
+    g.fillRect (x0, top, x1 - x0, height);
+}
 bool imageSkin() { return settingsNow().skin == Skin::studio; }
 bool whiteSkin() { return settingsNow().skin == Skin::white; }
 bool xenonSkin() { return settingsNow().skin == Skin::xenon; }
@@ -574,7 +635,9 @@ juce::String Settings::toString() const
                                juce::String::toHexString ((int) gridBeatColour), juce::String::toHexString ((int) rollBack),
                                juce::String (knobStyle), juce::String (buttonStyle), juce::String (meterStyle),
                                juce::URL::addEscapeChars (editorTheme, false),
-                               juce::URL::addEscapeChars (toolbarTheme, false), juce::URL::addEscapeChars (meterTheme, false) }.joinIntoString (";");
+                               juce::URL::addEscapeChars (toolbarTheme, false), juce::URL::addEscapeChars (meterTheme, false),
+                               juce::String::toHexString ((int) textColour), juce::String::toHexString ((int) stripTextColour),
+                               juce::String (trackColouring), juce::String (gridStyle) }.joinIntoString (";");
 }
 
 Settings Settings::fromString (const juce::String& text)
@@ -634,6 +697,13 @@ Settings Settings::fromString (const juce::String& text)
     {
         s.toolbarTheme = juce::URL::removeEscapeChars (v[28]);
         s.meterTheme = juce::URL::removeEscapeChars (v[29]);
+    }
+    if (v.size() >= 34)
+    {
+        s.textColour = (juce::uint32) v[30].getHexValue32();
+        s.stripTextColour = (juce::uint32) v[31].getHexValue32();
+        s.trackColouring = juce::jlimit (0, 2, v[32].getIntValue());
+        s.gridStyle = juce::jlimit (0, 5, v[33].getIntValue());
     }
     return s;
 }

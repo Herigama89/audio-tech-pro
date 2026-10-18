@@ -132,6 +132,13 @@ namespace riff::theme
         // The toolbar (control bar, transport, Toolbar row) and the MultiMeter with themes of their own, the same way.
         juce::String toolbarTheme, meterTheme;
 
+        // Your own text colours (ARGB, 0: the skin's): the app's text, and the writing on the channel strips.
+        juce::uint32 textColour = 0, stripTextColour = 0;
+        // The tracks in their colours: 0 a tab on the left (the skin's way), 1 tinted, 2 filled (as Cubase, FL Studio, Logic).
+        int trackColouring = 0;
+        // The grid: 0 lines, 1 shaded bars, 2 bars only, 3 dotted, 4 shaded beats (FL Studio), 5 none.
+        int gridStyle = 0;
+
         // The edit windows (tracks area and editors): your own colours (ARGB), 0: the skin's.
         juce::uint32 editBack = 0, gridBarColour = 0, gridBeatColour = 0, rollBack = 0;
 
@@ -169,6 +176,19 @@ namespace riff::theme
     int knobStyle();
     int buttonStyle();
     int meterStyle();
+
+    /** Themes > Tracks: how much of a track's header (and mixer strip) takes the track's colour. 0 tab, 1 tinted, 2 filled */
+    int trackColouring();
+    /** A track's header or strip face in its colour (as Themes > Tracks says), and ink that reads on it */
+    juce::Colour trackFace (juce::Colour face, juce::Colour trackColour);
+    juce::Colour inkOn (juce::Colour face, juce::Colour normalInk);
+
+    /** Themes > Grid: how bars and beats are drawn in the tracks area and the editors */
+    int gridStyle();
+    /** One grid line (as the grid style draws it) */
+    void drawGridLine (juce::Graphics& g, float x, float top, float height, bool isBar, bool isBeat, juce::Colour colour);
+    /** The shaded grid styles: a stretch (a bar or a beat) in the darker shade */
+    void shadeGridSpan (juce::Graphics& g, float x0, float x1, float top, float height);
 
     /** The editor's own theme when it has one (else the main one): its waveforms, regions and colours. */
     const Settings& editorSettings();

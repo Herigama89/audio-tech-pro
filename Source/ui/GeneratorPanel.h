@@ -19,7 +19,9 @@ public:
         generator::Settings settings;
         bool useGenreTempo = true;
         bool replaceLast = false;
+        bool replaceGenerated = false;   // the new take goes into the parts' tracks generated before, where their regions were
     };
+    inline static bool replaceByDefault = false;   // (remembered while the app runs)
 
     GeneratorPanel (const generator::Settings& initial, bool useGenreTempo, std::function<void (const Request&)> onGenerate);
 
@@ -39,6 +41,7 @@ private:
     juce::ToggleButton drumsButton { "Drums" }, bassButton { "Bass" }, chordsButton { "Chords" }, melodyButton { "Melody" };
     juce::Slider variationSlider;
     juce::ToggleButton tempoButton;
+    juce::ToggleButton replaceButton { "Replace what was generated before (same tracks, same place)" };
     juce::TextButton generateButton { "Generate" }, anotherButton { "Try another" };
 
     juce::uint32 seed = 1;

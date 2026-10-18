@@ -202,3 +202,40 @@ TEST_CASE ("Generator: apply adds instrument tracks with MIDI, in one undo step"
     um.redo();
     CHECK (model::numTracks (project) == 5);
 }
+
+TEST_CASE ("Generator: replacing puts the new take in the same tracks and places", "[generator]")
+{
+    auto project = model::createProject();
+    gen::Settings s;
+    s.seed = 3;
+    s.bars = 4;
+    const auto first = gen::apply (project, gen::generate (s), s, 0.0, false, nullptr);
+    const auto tracksBefore = model::numTracks (project);
+    REQUIRE (first.size() >= 2);
+
+    // You give the bass your own instrument and move its region to bar 3
+    auto bass = first[1];
+    bass.setProperty (ids::instrument, "my synth", nullptr);
+    auto region = bass.getChildWithName (ids::REGION);
+    REQUIRE (region.isValid());
+    const auto moved = 2.0 * 4.0 * model::secondsPerBeat (project);
+    region.setProperty (ids::start, moved, nullptr);
+
+    s.seed = 99;
+    const auto again = gen::apply (project, gen::generate (s), s, 30.0, false, nullptr, true);
+    CHECK (model::numTracks (project) == tracksBefore);          // no new tracks
+    CHECK (again[1] == bass);
+    CHECK (bass[ids::instrument].toString() == "my synth");      // your instrument stays
+    int regions = 0;
+    for (const auto& r : bass)
+        if (r.hasType (ids::REGION))
+        {
+            ++regions;
+            CHECK (std::abs ((double) r[ids::start] - moved) < 1.0e-9);   // where it was, not at the playhead
+        }
+    CHECK (regions == 1);
+
+    // Without replacing: new tracks
+    gen::apply (project, gen::generate (s), s, 0.0, false, nullptr, false);
+    CHECK (model::numTracks (project) > tracksBefore);
+}

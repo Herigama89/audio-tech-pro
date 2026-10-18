@@ -241,6 +241,41 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
         editButtons[i].onClick = [this, i] { chooseMeterColour (7 + i); };
         addAndMakeVisible (editButtons[i]);
     }
+    const char* textNames[] { "Text", "Strip text" };
+    const char* textTips[] { "The app's text: menus, labels, the toolbar and panels", "The writing on the channel strips and track headers" };
+    for (int i = 0; i < 2; ++i)
+    {
+        textButtons[i].setButtonText (textNames[i]);
+        textButtons[i].setTooltip (textTips[i]);
+        textButtons[i].onClick = [this, i] { chooseMeterColour (11 + i); };
+        addAndMakeVisible (textButtons[i]);
+    }
+    textDefaultButton.setTooltip ("Back to the skin's own text colours");
+    textDefaultButton.onClick = [this]
+    {
+        settings.textColour = settings.stripTextColour = 0;
+        changed();
+    };
+    addAndMakeVisible (textDefaultButton);
+
+    trackColourBox.addItemList ({ "Track colour: tab", "Track colour: tinted", "Track colour: filled" }, 1);
+    trackColourBox.setTooltip ("How much of each track takes its colour: a tab at the edge, the header and mixer strip tinted, "
+                               "or filled with it (and the lane washed), as in Cubase, FL Studio and Logic");
+    trackColourBox.onChange = [this]
+    {
+        settings.trackColouring = trackColourBox.getSelectedItemIndex();
+        changed();
+    };
+    addAndMakeVisible (trackColourBox);
+    gridStyleBox.addItemList ({ "Grid: lines", "Grid: shaded bars", "Grid: bars only", "Grid: dotted", "Grid: shaded beats (FL)", "Grid: none" }, 1);
+    gridStyleBox.setTooltip ("How the grid looks in the tracks area and the editors");
+    gridStyleBox.onChange = [this]
+    {
+        settings.gridStyle = gridStyleBox.getSelectedItemIndex();
+        changed();
+    };
+    addAndMakeVisible (gridStyleBox);
+
     editDefaultButton.setTooltip ("Back to the skin's own edit window colours");
     editDefaultButton.onClick = [this]
     {
@@ -304,7 +339,7 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
     }
 
     refreshControls();
-    setSize (460, 120 + (int) rows.size() * 34 + 110 + 40 + 68 + 34 + 30 + 34 + 34 + 34 + 34 - 20 + 34 + (store != nullptr ? 36 : 0));
+    setSize (460, 120 + (int) rows.size() * 34 + 110 + 40 + 68 + 34 + 30 + 34 + 34 + 34 + 34 - 20 + 34 + 68 + (store != nullptr ? 36 : 0));
 }
 
 void ThemePanel::chooseMeterColour (int which)
@@ -337,7 +372,8 @@ void ThemePanel::chooseMeterColour (int which)
 
 juce::TextButton& ThemePanel::colourButton (int which)
 {
-    return which < 3 ? meterButtons[which] : which < 5 ? waveButtons[which - 3] : which < 7 ? markButtons[which - 5] : editButtons[juce::jmin (3, which - 7)];
+    return which < 3 ? meterButtons[which] : which < 5 ? waveButtons[which - 3] : which < 7 ? markButtons[which - 5]
+         : which < 11 ? editButtons[which - 7] : textButtons[juce::jmin (1, which - 11)];
 }
 
 juce::uint32& ThemePanel::colourSlot (int which)
@@ -354,6 +390,8 @@ juce::uint32& ThemePanel::colourSlot (int which)
         case 7:  return settings.editBack;
         case 8:  return settings.gridBarColour;
         case 9:  return settings.gridBeatColour;
+        case 11: return settings.textColour;
+        case 12: return settings.stripTextColour;
         default: return settings.rollBack;
     }
 }
@@ -372,6 +410,8 @@ juce::Colour ThemePanel::colourNow (int which) const
         case 7:  return theme::laneA;
         case 8:  return theme::gridBar;
         case 9:  return theme::gridBeat;
+        case 11: return theme::text;
+        case 12: return theme::stripInk;
         default: return theme::rollWhite;
     }
 }
@@ -384,7 +424,7 @@ void ThemePanel::updateMeterButtons()
         meterButtons[i].setColour (juce::TextButton::buttonColourId, colours[i]);
         meterButtons[i].setColour (juce::TextButton::textColourOffId, colours[i].getPerceivedBrightness() > 0.55f ? juce::Colours::black : juce::Colours::white);
     }
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < 10; ++i)
     {
         auto& b = colourButton (3 + i);
         const auto c = colourNow (3 + i);
@@ -457,6 +497,8 @@ void ThemePanel::refreshControls()
     refreshReaperThemes();
     waveModeBox.setSelectedItemIndex (settings.waveMode + 1, juce::dontSendNotification);
     regionBox.setSelectedItemIndex (settings.glassRegions + 1, juce::dontSendNotification);
+    trackColourBox.setSelectedItemIndex (settings.trackColouring, juce::dontSendNotification);
+    gridStyleBox.setSelectedItemIndex (settings.gridStyle, juce::dontSendNotification);
     for (auto& r : rows)
     {
         r.slider->setValue (r.read (settings), juce::dontSendNotification);
@@ -538,6 +580,8 @@ void ThemePanel::paint (juce::Graphics& g)
         g.drawText ("Keys / Meter", 16, buttonBox.getY(), 94, buttonBox.getHeight(), juce::Justification::centredLeft);
     }
     g.drawText ("Edit windows", 16, editButtons[0].getY(), 94, editButtons[0].getHeight(), juce::Justification::centredLeft);
+    g.drawText ("Text colours", 16, textButtons[0].getY(), 94, textButtons[0].getHeight(), juce::Justification::centredLeft);
+    g.drawText ("Tracks / Grid", 16, trackColourBox.getY(), 94, trackColourBox.getHeight(), juce::Justification::centredLeft);
 
     // A sample of the colours
     auto sample = juce::Rectangle<int> (16, getHeight() - 92, getWidth() - 32, 28);
@@ -646,6 +690,20 @@ void ThemePanel::resized()
     for (auto& b : editButtons)
         b.setBounds (editRow.removeFromLeft (ew).reduced (2, 0));
     editDefaultButton.setBounds (editRow.reduced (2, 0));
+
+    y += 34;
+    auto textRow = juce::Rectangle<int> (110, y, getWidth() - 126, 26);
+    const auto tw = textRow.getWidth() / 3;
+    for (auto& b : textButtons)
+        b.setBounds (textRow.removeFromLeft (tw).reduced (2, 0));
+    textDefaultButton.setBounds (textRow.reduced (2, 0));
+
+    y += 34;
+    {
+        const auto halfW = (getWidth() - 126) / 2 - 2;
+        trackColourBox.setBounds (112, y, halfW, 26);
+        gridStyleBox.setBounds (112 + halfW + 4, y, halfW, 26);
+    }
 
     y += 34;
     const auto half = (getWidth() - 126) / 2 - 2;

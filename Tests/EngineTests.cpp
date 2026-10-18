@@ -2463,3 +2463,72 @@ TEST_CASE ("A channel can play straight to the interface's other outputs", "[eng
     CHECK_THAT (out.getSample (0, 100), WithinAbs (pan * 0.8f, 1e-4));
     CHECK_THAT (out.getSample (3, 100), WithinAbs (pan, 1e-4));
 }
+
+TEST_CASE ("Plug-ins on a silent track rest until sound comes, after their tail has rung out", "[engine]")
+{
+    // An insert that counts its blocks, with a short echo (its tail)
+    struct Counting final : Effect
+    {
+        int blocks = 0;
+        float echo = 0.0f;
+        void prepare (double, int) override {}
+        void process (float* l, float* r, int n) noexcept override
+        {
+            ++blocks;
+            for (int i = 0; i < n; ++i)
+            {
+                echo *= 0.999f;
+                l[i] += echo;
+                r[i] += echo;
+                echo = juce::jmax (echo, std::abs (l[i]) * 0.5f);
+            }
+        }
+        juce::String getName() const override { return "Counting"; }
+    };
+
+    Fixture f;
+    auto counting = std::make_shared<Counting>();
+    auto makeGraph = [&] (bool withLiveInput)
+    {
+        auto graph = std::make_unique<PlaybackGraph>();
+        PlaybackGraph::Track t;
+        t.slot = 0;
+        t.inserts.push_back (counting);
+        t.monitorInput = withLiveInput;
+        t.inputChannel = 0;
+        graph->tracks.push_back (std::move (t));
+        return graph;
+    };
+    f.engine.setGraph (makeGraph (true));
+    f.engine.play();
+
+    juce::AudioBuffer<float> in (1, 512), out (2, 512);
+    const auto run = [&] (int blocks, float level)
+    {
+        for (int b = 0; b < blocks; ++b)
+        {
+            for (int i = 0; i < 512; ++i)
+                in.setSample (0, i, level);
+            f.engine.render (in.getArrayOfReadPointers(), 1, out.getArrayOfWritePointers(), 2, 512);
+        }
+    };
+
+    run (20, 0.3f);                       // sound: it works
+    CHECK (counting->blocks == 20);
+    run (40, 0.0f);                       // silence: it still works while its echo rings out (and a second after)
+    CHECK (counting->blocks > 40);
+    const auto beforeRest = counting->blocks;
+    run (400, 0.0f);                      // ...then rests
+    CHECK (counting->blocks - beforeRest < 260);
+    const auto resting = counting->blocks;
+    run (10, 0.0f);
+    CHECK (counting->blocks == resting);
+    CHECK (f.engine.getSuspendedTracks() == 1);
+    run (1, 0.3f);                        // sound again: awake at once
+    CHECK (counting->blocks == resting + 1);
+
+    // Switched off: it never rests
+    f.engine.setSuspendWhenSilent (false);
+    run (300, 0.0f);
+    CHECK (counting->blocks == resting + 301);
+}

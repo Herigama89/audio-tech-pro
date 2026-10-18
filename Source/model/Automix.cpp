@@ -121,12 +121,14 @@ std::vector<Result> balance (const std::vector<Track>& tracks, const juce::Strin
         results.push_back (r);
     }
 
-    // No fader above +6: if one would have to go higher, everything comes down together (the balance stays).
+    // No fader above 0 dB: if one would have to go higher, everything comes down together (the balance stays),
+    // by up to 12 dB; a track that would need more than that just sits at 0 dB (turn the master up if it's quiet).
     double over = 0.0;
     for (const auto& r : results)
-        over = juce::jmax (over, r.toDb - 6.0);
+        over = juce::jmax (over, r.toDb);
+    over = juce::jmin (over, 12.0);
     for (auto& r : results)
-        r.toDb = juce::jlimit (-60.0, 6.0, r.toDb - over);
+        r.toDb = juce::jlimit (-60.0, 0.0, r.toDb - over);
     return results;
 }
 

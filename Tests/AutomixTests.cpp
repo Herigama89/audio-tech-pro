@@ -40,17 +40,20 @@ TEST_CASE ("Automix: faders set to the genre's balance, measured while they play
 
     const auto results = automix::balance (tracks, "Hip-Hop", -18.0);
     REQUIRE (results.size() == 3);   // the silent one left alone
-    // Each track lands on headroom + its role's level: kick -18, vocal -18, hats -27 (while playing)
-    CHECK_THAT (results[0].toDb, WithinAbs (-8.0, 1e-6));             // -18 - (-10)
-    CHECK_THAT (results[1].toDb, WithinAbs (-18.0 + 24.0 - 0.0 - 0.0 + 0.0, 1e-6) );  // -18 - (-24) = +6
-    CHECK_THAT (results[2].toDb, WithinAbs (-18.0 - 9.0 + 6.0, 1e-6)); // -27 - (-6) = -21
+    // Each track lands on headroom + its role's level: kick -18, vocal -18, hats -27 (while playing). The vocal would
+    // need +6, so everything comes down 6 dB together: no fader above 0 dB.
+    CHECK_THAT (results[0].toDb, WithinAbs (-8.0 - 6.0, 1e-6));       // -18 - (-10), less 6
+    CHECK_THAT (results[1].toDb, WithinAbs (0.0, 1e-6));              // -18 - (-24) = +6, less 6
+    CHECK_THAT (results[2].toDb, WithinAbs (-21.0 - 6.0, 1e-6));      // -27 - (-6) = -21, less 6
     CHECK (results[1].role == automix::Role::leadVocal);
 
-    // A track that would need more than +6 brings everything down together.
+    // A very quiet track: everything comes down by at most 12 dB, and it stops at 0 dB.
     tracks[1].activeRmsDb = -40.0;   // own level -34: would need +16
     const auto down = automix::balance (tracks, "Hip-Hop", -18.0);
-    CHECK_THAT (down[1].toDb, WithinAbs (6.0, 1e-6));
-    CHECK_THAT (down[0].toDb, WithinAbs (-8.0 - 10.0, 1e-6));
+    CHECK_THAT (down[1].toDb, WithinAbs (0.0, 1e-6));
+    CHECK_THAT (down[0].toDb, WithinAbs (-8.0 - 12.0, 1e-6));
+    for (const auto& r : down)
+        CHECK (r.toDb <= 0.0);
 }
 
 TEST_CASE ("A track's level while it plays leaves its silences out", "[automix]")

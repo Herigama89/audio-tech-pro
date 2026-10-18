@@ -275,11 +275,33 @@ void BusCompConsolePanel::refresh()
     repaint();
 }
 
+bool BusCompConsolePanel::compressorSwitchedOn() const
+{
+    // The compressor's own IN (or bypass) switch, when it has one: off, there's no gain reduction to show
+    auto* in = parameterFor (Control::in);
+    if (in == nullptr)
+        return true;
+    const auto name = in->getName (64).toLowerCase();
+    const auto text = in->getCurrentValueAsText().trim().toLowerCase();
+    const bool isBypass = name.contains ("bypass");
+    if (text == "on" || text == "in" || text == "active" || text == "enabled")
+        return ! isBypass;
+    if (text == "off" || text == "out" || text == "bypassed" || text == "disabled")
+        return isBypass;
+    const bool high = in->getValue() > 0.5f;
+    return isBypass ? ! high : high;
+}
+
 float BusCompConsolePanel::gainReduction()
 {
     auto* p = plugin();
     if (p == nullptr)
         return 0.0f;
+    if (! compressorSwitchedOn())
+    {
+        engine.takeBusPluginLevels();   // (dropped)
+        return 0.0f;
+    }
 
     // From the levels in and out: the difference, less the make-up gain. The make-up is learnt
     // from the quietest difference lately (when it isn't compressing, the difference is just the
@@ -292,8 +314,30 @@ float BusCompConsolePanel::gainReduction()
             const auto diff = juce::Decibels::gainToDecibels (in) - juce::Decibels::gainToDecibels (out);
             if (auto* m = parameterFor (Control::makeup))
             {
-                // Its make-up knob says how much it adds back: what's left is the reduction.
-                measured = juce::jlimit (0.0f, 20.0f, diff + console::numberIn (m->getCurrentValueAsText()));
+                // Its make-up knob says how much it adds back: what's left is the reduction. But a turn of the knob
+                // that doesn't change the output (its compressor section off) means the make-up isn't in the signal.
+                const auto makeup = console::numberIn (m->getCurrentValueAsText());
+                if (! haveLastMakeup)
+                {
+                    lastMakeup = makeup;
+                    lastDiff = diff;
+                    haveLastMakeup = true;
+                }
+                else if (judgeIn == 0 && std::abs (makeup - lastMakeup) > 0.5f)
+                    judgeIn = 10;   // the knob moved: see what the output did once it's settled
+                else if (judgeIn > 0 && --judgeIn == 0)
+                {
+                    const auto turned = makeup - lastMakeup, moved = diff - lastDiff;
+                    if (std::abs (moved) < 0.2f * std::abs (turned))
+                        makeupApplied = false;                          // the output didn't follow the knob
+                    else if (std::abs (moved + turned) < 0.5f * std::abs (turned))
+                        makeupApplied = true;                           // it did, by the knob's amount
+                    lastMakeup = makeup;
+                    lastDiff = diff;
+                }
+                if (judgeIn == 0 && std::abs (makeup - lastMakeup) <= 0.5f)
+                    lastDiff = diff;   // (follows the music while the knob rests)
+                measured = juce::jlimit (0.0f, 20.0f, diff + (makeupApplied ? makeup : 0.0f));
             }
             else
             {

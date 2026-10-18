@@ -86,6 +86,9 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::toggleAutopunch: info.setTicked ((bool) project[ids::autopunch]); break;
         case commands::toggleReplace:   info.setTicked ((bool) project[ids::replaceMode]); break;
         case commands::toggleStopOnClip: info.setTicked (engine.getStopOnClip()); break;
+        case commands::toggleSnap:      info.setTicked (timeline.snapMode != TimelineState::Snap::off); break;
+        case commands::toggleCatch:     info.setTicked (timeline.catchPlayhead); break;
+        case commands::toggleSuspendPlugins: info.setTicked (engine.getSuspendWhenSilent()); break;
         case commands::toggleMidiMerge: info.setTicked ((bool) project[ids::midiMerge]); break;
         case commands::eventList:       info.setActive (region.isValid() && model::isMidiRegion (region)); break;
 
@@ -320,6 +323,20 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::toggleCountIn:          project.setProperty (ids::countIn, ! (bool) project[ids::countIn], nullptr); break;
         case commands::toggleAutopunch:        toggleAutopunch(); break;
         case commands::toggleReplace:          project.setProperty (ids::replaceMode, ! (bool) project[ids::replaceMode], nullptr); break;
+        case commands::toggleSnap:
+            setSnapOn (timeline.snapMode == TimelineState::Snap::off);
+            break;
+        case commands::toggleCatch:
+            timeline.catchPlayhead = ! timeline.catchPlayhead;
+            catchButton.setToggleState (timeline.catchPlayhead, juce::dontSendNotification);
+            appProperties.getUserSettings()->setValue ("catchPlayhead", timeline.catchPlayhead);
+            commandManager.commandStatusChanged();
+            break;
+        case commands::toggleSuspendPlugins:
+            engine.setSuspendWhenSilent (! engine.getSuspendWhenSilent());
+            appProperties.getUserSettings()->setValue ("suspendPlugins", engine.getSuspendWhenSilent());
+            commandManager.commandStatusChanged();
+            break;
         case commands::toggleStopOnClip:
             engine.setStopOnClip (! engine.getStopOnClip());
             appProperties.getUserSettings()->setValue ("stopOnClip", engine.getStopOnClip());
@@ -453,6 +470,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             add ({ commands::groupSettings, commands::ioLabels, commands::controllerAssignments });
             menu.addSeparator();
             add ({ commands::toggleExclusiveSolo, commands::showMultiMeter, commands::automix, commands::toggleMixerComments });
+            add ({ commands::toggleSuspendPlugins });
             menu.addSeparator();
             add ({ commands::scanPlugins });
             {
@@ -491,6 +509,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             add ({ commands::openMixerWindow, commands::openEditorWindow, commands::themeSettings });
             menu.addSeparator();
             add ({ commands::zoomIn, commands::zoomOut, commands::zoomVerticalIn, commands::zoomVerticalOut, commands::zoomToFitAll, commands::waveformZoom });
+            add ({ commands::toggleCatch, commands::toggleSnap });
             menu.addSeparator();
             add ({ commands::showAssistant, commands::recordScreen });
             menu.addSeparator();
@@ -592,7 +611,7 @@ void MainComponent::generateMidi (const GeneratorPanel::Request& request)
     const juce::String undoName ("Generate MIDI");
 
     // "Try another": take back the last take, if it's still the last thing done.
-    if (request.replaceLast && ! lastGenerated.isEmpty() && undoManager.canUndo()
+    if (request.replaceLast && ! request.replaceGenerated && ! lastGenerated.isEmpty() && undoManager.canUndo()
         && undoManager.getUndoDescription() == undoName)
     {
         bool allThere = true;
@@ -612,7 +631,7 @@ void MainComponent::generateMidi (const GeneratorPanel::Request& request)
     if (request.useGenreTempo)
         model::setTempo (project, result.tempo, &undoManager);
     const auto start = juce::jmax (0.0, oldBar) * model::secondsPerBeat (project) * oldBeatsPerBar;
-    lastGenerated = generator::apply (project, result, s, start, false, &undoManager);
+    lastGenerated = generator::apply (project, result, s, start, false, &undoManager, request.replaceGenerated);
     undoManager.beginNewTransaction();
 
     if (! lastGenerated.isEmpty())
@@ -1293,4 +1312,23 @@ void MainComponent::deleteSelectedTrack()
     timeline.changed();
 }
 
+} // namespace riff
+
+namespace riff
+{
+void MainComponent::setSnapOn (bool on)
+{
+    // N: snap off (remembering the grid), or back on to it; the piano roll follows
+    if (! on && timeline.snapMode != TimelineState::Snap::off)
+    {
+        timeline.snapBeforeOff = timeline.snapMode;
+        timeline.snapMode = TimelineState::Snap::off;
+    }
+    else if (on && timeline.snapMode == TimelineState::Snap::off)
+        timeline.snapMode = timeline.snapBeforeOff == TimelineState::Snap::off ? TimelineState::Snap::smart : timeline.snapBeforeOff;
+    snapBox.setSelectedId ((int) timeline.snapMode + 1, juce::dontSendNotification);
+    pianoRoll.setSnapOn (on);
+    statusLabel.setText (on ? "Snap on" : "Snap off: regions and notes go anywhere (N turns it back on)", juce::dontSendNotification);
+    commandManager.commandStatusChanged();
+}
 } // namespace riff

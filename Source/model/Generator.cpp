@@ -648,8 +648,9 @@ namespace player
 
 //==============================================================================
 juce::Array<juce::ValueTree> apply (juce::ValueTree project, const Result& result, const Settings& settings,
-                                    double startSeconds, bool setTempo, juce::UndoManager* um)
+                                    double startSeconds, bool setTempo, juce::UndoManager* um, bool replaceGenerated)
 {
+    static const juce::Identifier generatedPart ("generatedPart"), generatedRegion ("generated");
     if (setTempo)
         model::setTempo (project, result.tempo, um);
 
@@ -660,7 +661,36 @@ juce::Array<juce::ValueTree> apply (juce::ValueTree project, const Result& resul
 
     for (const auto& part : result.parts)
     {
+        // Replacing: the last track this part was generated on, its generated regions out (the new one goes where they were)
+        if (replaceGenerated)
+        {
+            juce::ValueTree existing;
+            for (const auto& t : project)
+                if (t.hasType (ids::TRACK) && t[generatedPart].toString() == part.name)
+                    existing = t;
+            if (existing.isValid())
+            {
+                auto at = startSeconds;
+                bool found = false;
+                for (int i = existing.getNumChildren(); --i >= 0;)
+                    if (auto r = existing.getChild (i); r.hasType (ids::REGION) && (bool) r[generatedRegion])
+                    {
+                        at = found ? juce::jmin (at, (double) r[ids::start]) : (double) r[ids::start];
+                        found = true;
+                        model::deleteRegion (r, um);
+                    }
+                auto region = model::addMidiRegion (existing, at, settings.bars * 4.0 * secondsPerBeat, um);
+                region.setProperty (ids::name, genreName + " " + part.name, um);
+                region.setProperty (generatedRegion, true, um);
+                for (const auto& n : part.notes)
+                    model::addNote (region, n.pitch, n.start * secondsPerBeat, n.length * secondsPerBeat, n.velocity, nullptr);
+                tracks.add (existing);
+                continue;
+            }
+        }
+
         auto track = model::addTrack (project, genreName + " " + part.name, um, -1, model::instrumentKind);
+        track.setProperty (generatedPart, part.name, um);
 
         // A starting sound on the built-in synth, until you choose your own instrument.
         auto sound = [&] (int wave, double cutoff, double attack, double decay, double sustain, double release, double gain)
@@ -686,6 +716,7 @@ juce::Array<juce::ValueTree> apply (juce::ValueTree project, const Result& resul
 
         auto region = model::addMidiRegion (track, startSeconds, settings.bars * 4.0 * secondsPerBeat, um);
         region.setProperty (ids::name, genreName + " " + part.name, um);
+        region.setProperty (generatedRegion, true, um);
 
         // Notes go in without their own undo steps: undoing removes the region with them.
         for (const auto& n : part.notes)

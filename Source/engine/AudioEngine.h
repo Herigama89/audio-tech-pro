@@ -126,6 +126,13 @@ public:
 
     /** Recording stops by itself when an input clips (the take keeps what came before). */
     void setStopOnClip (bool on) noexcept { stopOnClip.store (on); }
+
+    /** Plug-ins on a silent track stop working (their output was silent for a second too, so tails have rung out)
+        until sound comes again, as Cubase's VST3 suspend and FL Studio's Smart Disable. On by default. */
+    void setSuspendWhenSilent (bool on) noexcept { suspendWhenSilent.store (on); }
+    bool getSuspendWhenSilent() const noexcept { return suspendWhenSilent.load(); }
+    /** How many tracks' plug-ins were resting in the last block (for the Performance window) */
+    int getSuspendedTracks() const noexcept { return suspendedNow.load (std::memory_order_relaxed); }
     bool getStopOnClip() const noexcept { return stopOnClip.load(); }
     /** True (once) when a recorded input clipped; with Stop on Clip on, the main window then stops recording. */
     bool takeRecordingClipped() noexcept { return recordClipped.exchange (false); }
@@ -461,7 +468,14 @@ private:
     juce::AudioBuffer<float> streamBuffer;   // a streamed file's audio for one block
     std::array<std::unique_ptr<DelayLine>, PlaybackGraph::maxTracks> trackDelays;
     std::unique_ptr<DelayLine> directDelayLine;
-    struct TrackState { juce::SmoothedValue<float> gainL, gainR; bool initialised = false; };
+    struct TrackState
+    {
+        juce::SmoothedValue<float> gainL, gainR;
+        bool initialised = false;
+        juce::int64 quietFor = 0;   // samples both into and out of its plug-ins have been silent (for suspending them)
+    };
+    std::atomic<bool> suspendWhenSilent { true };
+    std::atomic<int> suspendedNow { 0 }, suspendedCount { 0 };
     std::array<TrackState, PlaybackGraph::maxTracks> trackStates;
     juce::SmoothedValue<float> masterGain;
     MasterBusCompressor busComp;

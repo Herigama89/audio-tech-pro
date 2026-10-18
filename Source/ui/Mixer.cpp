@@ -1412,6 +1412,13 @@ void ChannelStrip::paint (juce::Graphics& g)
     if (channel && console && theme::imageSkin())
         g.setOpacity (1.0f), g.drawImage (skin::stripTop(), juce::Rectangle<float> (0.0f, 0.0f, w, (float) topHeight + 1.0f));
 
+    // Themes > Tracks: the strip in its track's colour (tinted, or strongly), as in Cubase and FL Studio
+    if (channel && theme::trackColouring() > 0)
+    {
+        g.setColour (model::trackColour (track).withAlpha (theme::trackColouring() == 2 ? 0.42f : 0.2f));
+        g.fillRect (bounds.withTrimmedRight (1));
+    }
+
     // Without the console section: the channel number, and the pan value beside its knob.
     if (! console)
     {

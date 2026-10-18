@@ -101,6 +101,7 @@ namespace riff::toolicons
                 break;
             case Tool::zoom:
             case Tool::marquee:
+            case Tool::select:
                 break;
         }
         return p;
@@ -157,6 +158,23 @@ namespace riff::toolicons
                 p.startNewSubPath (8.5f, 6.0f);  p.lineTo (12.0f, 2.5f);  p.lineTo (15.5f, 6.0f);
                 p.startNewSubPath (8.5f, 18.0f); p.lineTo (12.0f, 21.5f); p.lineTo (15.5f, 18.0f);
                 break;
+            case Tool::select:
+            {
+                // A dashed box with a small arrow in its corner
+                const float d = 2.6f;
+                for (float x = 2.5f; x < 17.5f; x += d * 2.0f) { p.startNewSubPath (x, 3.0f); p.lineTo (juce::jmin (17.5f, x + d), 3.0f); }
+                for (float x = 2.5f; x < 12.0f; x += d * 2.0f) { p.startNewSubPath (x, 17.5f); p.lineTo (juce::jmin (12.0f, x + d), 17.5f); }
+                for (float y = 3.0f; y < 17.5f; y += d * 2.0f) { p.startNewSubPath (2.5f, y); p.lineTo (2.5f, juce::jmin (17.5f, y + d)); }
+                for (float y = 3.0f; y < 12.0f; y += d * 2.0f) { p.startNewSubPath (17.5f, y); p.lineTo (17.5f, juce::jmin (12.0f, y + d)); }
+                p.startNewSubPath (14.0f, 13.0f);
+                p.lineTo (14.0f, 22.0f);
+                p.lineTo (16.6f, 19.6f);
+                p.lineTo (18.3f, 23.0f);
+                p.startNewSubPath (16.6f, 19.6f);
+                p.lineTo (20.5f, 19.6f);
+                p.closeSubPath();
+                break;
+            }
             case Tool::pointer: case Tool::pencil: case Tool::eraser: case Tool::glue: case Tool::text:
                 break;
         }
@@ -205,6 +223,7 @@ namespace riff::toolicons
             case Tool::solo:     return "Solo";
             case Tool::text:     return "Text";
             case Tool::gain:     return "Gain";
+            case Tool::select:   return "Select";
         }
         return "";
     }
@@ -226,6 +245,7 @@ namespace riff::toolicons
             case Tool::fade:     return 'a';
             case Tool::marquee:  return 'r';
             case Tool::gain:     return 'n';
+            case Tool::select:   return 'l';
         }
         return 0;
     }
@@ -247,6 +267,7 @@ namespace riff::toolicons
             case Tool::solo:     return "hear one region";
             case Tool::text:     return "rename";
             case Tool::gain:     return "drag a region up or down to change its level";
+            case Tool::select:   return "drag a box round regions to select them (even starting on one)";
         }
         return "";
     }
@@ -259,6 +280,7 @@ namespace riff::toolicons
             case Tool::pointer: return juce::MouseCursor::NormalCursor;
             case Tool::text:    return juce::MouseCursor::IBeamCursor;
             case Tool::marquee: return juce::MouseCursor::CrosshairCursor;
+            case Tool::select:  return juce::MouseCursor::CrosshairCursor;
             default: break;
         }
 
@@ -296,5 +318,5 @@ namespace riff::toolicons
     }
 
     constexpr Tool all[] { Tool::pointer, Tool::pencil, Tool::eraser, Tool::text, Tool::scissors, Tool::glue,
-                           Tool::solo, Tool::mute, Tool::zoom, Tool::fade, Tool::marquee, Tool::gain };
+                           Tool::solo, Tool::mute, Tool::zoom, Tool::fade, Tool::marquee, Tool::select, Tool::gain };
 }

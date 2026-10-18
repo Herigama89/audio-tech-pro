@@ -1090,6 +1090,7 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
         offset += n;
     }
 
+    suspendedNow.store (suspendedCount.exchange (0, std::memory_order_relaxed), std::memory_order_relaxed);
     callbackCounter.fetch_add (1, std::memory_order_release);
 }
 
@@ -1535,12 +1536,24 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         const auto a = juce::FloatVectorOperations::findMinAndMax (l, n), b = juce::FloatVectorOperations::findMinAndMax (r, n);
         return juce::jmax (std::abs (a.getStart()), std::abs (a.getEnd()), std::abs (b.getStart()), std::abs (b.getEnd()));
     };
-    storeMax (stripInPeaks[(size_t) track.slot], peakOf (tL, tR));
-    for (const auto& effect : track.stripPlugins)
-    {
-        effect->setPosition (chunkPosition, chunkPlaying, chunkBpm);
-        effect->process (tL, tR, n);
-    }
+    const auto inputPeak = peakOf (tL, tR);
+    storeMax (stripInPeaks[(size_t) track.slot], inputPeak);
+
+    // Suspended: nothing has come in, and nothing has come out of the plug-ins for a second (tails rung out),
+    // so they rest until sound comes again (it wakes them in the same block).
+    constexpr float silent = 1.0e-5f;   // -100 dB
+    const auto rate = sampleRate.load();
+    const bool suspended = suspendWhenSilent.load (std::memory_order_relaxed) && ! bouncing.load (std::memory_order_relaxed)
+                           && hasInserts && inputPeak < silent && state.quietFor >= (juce::int64) rate;
+    if (suspended)
+        suspendedCount.fetch_add (1, std::memory_order_relaxed);
+
+    if (! suspended)
+        for (const auto& effect : track.stripPlugins)
+        {
+            effect->setPosition (chunkPosition, chunkPlaying, chunkBpm);
+            effect->process (tL, tR, n);
+        }
 
     if (track.console.isActive())
     {
@@ -1563,6 +1576,8 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
 
     for (const auto& effect : track.inserts)
     {
+        if (suspended)
+            break;
         effect->setPosition (chunkPosition, chunkPlaying, chunkBpm);
         const PlaybackGraph::Track::Sidechain* side = nullptr;
         for (const auto& s : track.sidechains)
@@ -1574,6 +1589,10 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         if (side != nullptr)
             effect->setSidechain (nullptr, nullptr);
     }
+
+    // How long it's been quiet in and out (the plug-ins rest after a second of it)
+    if (! suspended)
+        state.quietFor = (inputPeak < silent && peakOf (tL, tR) < silent) ? state.quietFor + n : 0;
 
     // Delay compensation: line this track up with the slowest one.
     const auto compensation = track.isBus ? track.postDelay : track.preDelay;

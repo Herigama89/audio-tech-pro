@@ -42,6 +42,11 @@ GeneratorPanel::GeneratorPanel (const generator::Settings& initial, bool useGenr
 
     tempoButton.setTooltip ("Set the project's tempo to the genre's usual tempo");
     addAndMakeVisible (tempoButton);
+    replaceButton.setTooltip ("On: each part's new notes replace the region it was generated in before, on the same track and at the "
+                              "same place (your instrument stays). Off: new tracks each time.");
+    replaceButton.setToggleState (replaceByDefault, juce::dontSendNotification);
+    replaceButton.onClick = [this] { replaceByDefault = replaceButton.getToggleState(); };
+    addAndMakeVisible (replaceButton);
 
     about.setFont (juce::FontOptions (12.5f, juce::Font::italic));
     about.setColour (juce::Label::textColourId, theme::cream);
@@ -80,7 +85,7 @@ GeneratorPanel::GeneratorPanel (const generator::Settings& initial, bool useGenr
     genreChanged();
     scaleBox.setSelectedId (initial.minor ? 2 : 1, juce::dontSendNotification);   // keep the saved choice
 
-    setSize (460, 400);
+    setSize (460, 430);
 }
 
 void GeneratorPanel::genreChanged()
@@ -117,6 +122,7 @@ void GeneratorPanel::send (bool replaceLast)
     request.settings = currentSettings();
     request.useGenreTempo = tempoButton.getToggleState();
     request.replaceLast = replaceLast;
+    request.replaceGenerated = replaceButton.getToggleState();
 
     if (onGenerate != nullptr)
         onGenerate (request);
@@ -162,6 +168,8 @@ void GeneratorPanel::resized()
     variationSlider.setBounds (row (variationCaption).removeFromLeft (240));
 
     tempoButton.setBounds (area.removeFromTop (rowHeight).withTrimmedLeft (captionWidth - 4));
+    area.removeFromTop (gap);
+    replaceButton.setBounds (area.removeFromTop (rowHeight).withTrimmedLeft (captionWidth - 4));
     area.removeFromTop (gap);
 
     auto buttons = area.removeFromBottom (32);

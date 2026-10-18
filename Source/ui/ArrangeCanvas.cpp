@@ -106,6 +106,12 @@ void ArrangeCanvas::paint (juce::Graphics& g)
 
         g.setColour (selected ? theme::selection.withAlpha (0.6f) : (i % 2 == 0 ? theme::laneA : theme::laneB));
         g.fillRect (0, top, getWidth(), timeline.heightOf (i));
+        if (theme::trackColouring() == 2)
+        {
+            // Filled tracks: the lane in a wash of the track's colour too
+            g.setColour (model::trackColour (track).withAlpha (0.08f));
+            g.fillRect (0, top, getWidth(), timeline.heightOf (i));
+        }
     }
 
     paintGrid (g);
@@ -238,6 +244,21 @@ void ArrangeCanvas::paintGrid (juce::Graphics& g)
     const auto b0 = map.beatAt (timeline.scrollSeconds);
     const auto b1 = map.beatAt (timeline.xToTime ((float) getWidth()));
     const auto bottom = (float) juce::jmin (getHeight(), timeline.trackTop (model::numTracks (project)));
+    const auto top = (float) TimelineState::rulerHeight;
+
+    // Shaded grids: every other bar (or beat) a shade darker
+    if (const auto style = theme::gridStyle(); style == 1 || style == 4)
+    {
+        for (auto beat = (juce::int64) std::floor (b0); (double) beat <= b1; ++beat)
+        {
+            const auto [bar, inBar] = map.barAndBeat ((double) beat);
+            const bool shade = style == 1 ? (bar % 2 == 1) : ((beat % 2) == 1);
+            if (! shade)
+                continue;
+            const auto x0 = timeline.timeToX (map.secondsAt ((double) beat)), x1 = timeline.timeToX (map.secondsAt ((double) beat + 1.0));
+            theme::shadeGridSpan (g, x0, x1, top, bottom - top);
+        }
+    }
 
     for (auto i = (juce::int64) std::floor (b0 / grid); (double) i * grid <= b1; ++i)
     {
@@ -245,10 +266,9 @@ void ArrangeCanvas::paintGrid (juce::Graphics& g)
         const auto x = timeline.timeToX (map.secondsAt (b));
         const auto inBar = map.barAndBeat (b).second;
         const bool isBar = inBar < 1e-6 || std::abs (inBar - map.beatsPerBarAt (b)) < 1e-6;
+        const bool isBeat = std::abs (std::remainder (b, 1.0)) < 1e-6;
         juce::ignoreUnused (beatsPerBar);
-
-        g.setColour (isBar ? theme::gridBar : theme::gridBeat);
-        g.fillRect (x, (float) TimelineState::rulerHeight, 1.0f, bottom - (float) TimelineState::rulerHeight);
+        theme::drawGridLine (g, x, top, bottom - top, isBar, isBeat, isBar ? theme::gridBar : theme::gridBeat);
     }
 }
 
@@ -1270,6 +1290,28 @@ void ArrangeCanvas::mouseDown (const juce::MouseEvent& e)
     auto region = regionAt (e.position, trackIndex);
     const bool onTrack = trackIndex >= 0 && trackIndex < model::numTracks (project);
 
+    // The Select tool: a box round regions, wherever you start (a click on a region selects it; Shift adds)
+    if (timeline.tool == TimelineState::Tool::select && ! e.mods.isPopupMenu())
+    {
+        selectionBeforeRubberBand.clear();
+        if (e.mods.isShiftDown())
+            for (const auto& r : timeline.selectedRegionTrees())
+                selectionBeforeRubberBand.add (r[ids::id].toString());
+        if (region.isValid())
+        {
+            const auto id = region[ids::id].toString();
+            if (e.mods.isShiftDown() && selectionBeforeRubberBand.contains (id))
+                selectionBeforeRubberBand.removeString (id);
+            else
+                selectionBeforeRubberBand.addIfNotAlreadyThere (id);
+        }
+        timeline.selectRegions (selectionBeforeRubberBand);
+        rubberBand = {};
+        dragMode = DragMode::rubberBand;
+        timeline.changed();
+        return;
+    }
+
     if (! region.isValid())
     {
         if (onTrack)
@@ -1874,6 +1916,8 @@ void ArrangeCanvas::useTool (const juce::MouseEvent& e, juce::ValueTree region, 
 
     switch (timeline.tool)
     {
+        case TimelineState::Tool::select:
+            break;   // (handled in mouseDown: a box round regions)
         case TimelineState::Tool::eraser:
             undoManager.beginNewTransaction ("Delete region");
             for (auto& r : selection)
