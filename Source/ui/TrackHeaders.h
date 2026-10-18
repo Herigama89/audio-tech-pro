@@ -16,6 +16,7 @@ namespace riff
 */
 class HeaderInserts final : public juce::Component,
                             public juce::SettableTooltipClient,
+                            public juce::DragAndDropTarget,
                             private juce::ValueTree::Listener
 {
 public:
@@ -23,17 +24,27 @@ public:
     ~HeaderInserts() override;
 
     void paint (juce::Graphics& g) override;
+    void paintOverChildren (juce::Graphics& g) override;
     void mouseUp (const juce::MouseEvent& e) override;
+    void mouseDrag (const juce::MouseEvent& e) override;
+
+    // Plugins dragged up and down, or to another track (here or in the mixer); Option copies
+    bool isInterestedInDragSource (const SourceDetails& details) override;
+    void itemDragMove (const SourceDetails& details) override;
+    void itemDragExit (const SourceDetails& details) override;
+    void itemDropped (const SourceDetails& details) override;
 
     static constexpr int slotHeight = 15, maxSlots = 10;
 
     // Set once by the main window.
     static inline std::function<void (const juce::String& owner, int slot, juce::ValueTree existing, juce::Component& target)> chooseEffect;
     static inline std::function<void (juce::ValueTree insert)> openInsert, copyToSelected;
+    static inline std::function<void (juce::ValueTree insert, const juce::String& toOwner, int slot, bool copy)> moveInsert;
 
 private:
     juce::ValueTree track, mixer;
     juce::UndoManager& undoManager;
+    int dropSlot = -1;
     int slotAt (int y) const;
     juce::Rectangle<int> slotBounds (int index) const;
     juce::ValueTree chain() const;
@@ -61,6 +72,10 @@ public:
     /** View > Show Inserts in Edit Window: the insert column's width when shown. */
     static inline bool showInserts = false;
     static constexpr int insertsWidth = 100;
+
+    /** View > Show I/O in Edit Window: each track's input and output beside its header, as on the mixer strips. */
+    static inline bool showIO = false;
+    static constexpr int ioWidth = 78;
 
     void paint (juce::Graphics& g) override;
     void resized() override;
@@ -109,6 +124,9 @@ private:
     juce::TextButton instrumentButton;
     strip::DragSlider volumeSlider, panKnob;   // dragged as in Logic (the pointer hides while you drag)
     std::unique_ptr<HeaderInserts> inserts;
+    juce::TextButton ioInput, ioOutput;   // (View > Show I/O in Edit Window)
+    void updateIO();
+    void showOutputMenu();
 };
 
 /** The column of track headers, kept in sync with the project's tracks and the vertical scroll. */

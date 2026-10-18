@@ -74,6 +74,7 @@ set(RIFF_CORE_SOURCES
     Source/model/Project.cpp
     Source/model/Automix.cpp
     Source/model/NoteTools.cpp
+    Source/engine/PitchCorrect.cpp
     Source/model/Generator.cpp
     Source/model/ProjectFiles.cpp
     Source/engine/AggregateDevice.cpp
@@ -231,6 +232,7 @@ set(RIFF_UI_SOURCES
     Source/ui/SpectrumAnalyzer.cpp
     Source/ui/LibraryPanel.cpp
     Source/ui/AudioEditorPanel.cpp
+    Source/ui/PitchEditor.cpp
     Source/ui/SmartControls.cpp
     Source/ui/NoteViews.cpp
     Source/ui/PlayerEditor.cpp

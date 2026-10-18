@@ -26,7 +26,7 @@ namespace
     constexpr int fullToolbarHeight = 100;    // two rows: display row, transport row
     constexpr int toolbarTopRow = 50;
     constexpr int baseHeaderWidth = 232;
-    int headerWidth() { return baseHeaderWidth + (TrackHeader::showInserts ? TrackHeader::insertsWidth : 0); }
+    int headerWidth() { return baseHeaderWidth + (TrackHeader::showInserts ? TrackHeader::insertsWidth : 0) + (TrackHeader::showIO ? TrackHeader::ioWidth : 0); }
     constexpr int scrollBarSize = 12;
     constexpr int meterWidth = 84;
     constexpr int statusHeight = 24;
@@ -456,6 +456,11 @@ MainComponent::MainComponent (bool openAudioDevice)
     };
     HeaderInserts::openInsert = [this] (juce::ValueTree insert) { openInsertWindow (insert); };
     HeaderInserts::copyToSelected = [this] (juce::ValueTree insert) { copyInsertToSelected (insert); };
+    HeaderInserts::moveInsert = [this] (juce::ValueTree insert, const juce::String& toOwner, int slot, bool copy)
+    {
+        if (mixer.onMoveInsert)
+            mixer.onMoveInsert (insert, toOwner, slot, copy);
+    };
     mixer.onChooseEffect = [this] (const juce::String& owner, int slot, juce::ValueTree existing, juce::Component& target)
     {
         showEffectMenu (owner, slot, existing, target);
@@ -591,6 +596,7 @@ MainComponent::MainComponent (bool openAudioDevice)
         showMeters = settings->getBoolValue ("viewMeters", true);
         showTrackHeaders = settings->getBoolValue ("viewTrackHeaders", true);
         TrackHeader::showInserts = settings->getBoolValue ("viewHeaderInserts", false);
+        TrackHeader::showIO = settings->getBoolValue ("viewHeaderIO", false);
         mixer.setShowComments (settings->getBoolValue ("mixerCommentsShown", false));
         mixer.onCommentsToggled = [this] (bool shown)
         {

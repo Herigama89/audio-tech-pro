@@ -45,6 +45,30 @@ double detectPitch (const juce::AudioBuffer<float>& audio, double sampleRate, in
 struct PitchedNote { int start, end; double midi; };   // samples; midi 0 when unpitched
 std::vector<PitchedNote> detectNotes (const juce::AudioBuffer<float>& audio, double sampleRate);
 
+/**
+    Audio alignment (as VocAlign and Cubase's AudioAlign): how to warp a dub so its timing follows a guide.
+    Both are compared as loudness in frequency bands every 10 ms, and matched (dynamic time warping), each moment
+    of the dub allowed to move up to `maxShift` seconds. `dubOffset` is where the dub starts after the guide's start
+    (seconds, negative when before). `strength` 0..1: how far each moment goes towards the guide.
+    Returns flexWarp markers: (from, to) seconds from the dub's start.
+*/
+std::vector<std::pair<double, double>> alignToGuide (const juce::AudioBuffer<float>& guide, double guideRate,
+                                                     const juce::AudioBuffer<float>& dub, double dubRate,
+                                                     double dubOffset, double strength = 1.0, double maxShift = 0.5);
+
+/** Consolidate: audio regions (as they play: gain, fades, transpose) mixed into one new file, gaps silent. */
+struct ConsolidatePart
+{
+    juce::File file;
+    double offset = 0.0, length = 0.0, start = 0.0;   // seconds: into the file, how long, where on the timeline
+    float gain = 1.0f;
+    double fadeIn = 0.0, fadeOut = 0.0, fadeInCurve = 0.0, fadeOutCurve = 0.0;
+    double semitones = 0.0;                            // the region's transpose (and fine tune)
+};
+/** Writes them as one 24-bit stereo WAV at the first file's rate; `start` and `length` get where it goes on the timeline. */
+juce::String consolidate (juce::AudioFormatManager& formats, const std::vector<ConsolidatePart>& parts, const juce::File& dest,
+                          double& start, double& length);
+
 /** Reads `length` seconds of a file from `offset` (for analysis). */
 juce::AudioBuffer<float> readRegion (juce::AudioFormatManager& formats, const juce::File& file, double offset, double length, double& sampleRate);
 

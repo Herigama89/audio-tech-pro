@@ -94,14 +94,12 @@ AudioEditorPanel::AudioEditorPanel (juce::ValueTree r, juce::UndoManager& um, ju
 
     flexPitchButton.setClickingTogglesState (true);
     flexPitchButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffd08a1c));
-    flexPitchButton.setTooltip ("Flex Pitch: shows the notes in the audio at their pitch; drag one up or down to change it");
+    flexPitchButton.setTooltip ("Flex Pitch: the notes as blobs at their pitch (as Melodyne); drag them, correct them, straighten them");
     flexPitchButton.onClick = [this]
     {
         if (flexPitchButton.getToggleState())
-        {
             flexTimeButton.setToggleState (false, juce::dontSendNotification);
-            findNotes();
-        }
+        showPitchEditor (flexPitchButton.getToggleState());
         repaint();
     };
     addAndMakeVisible (flexPitchButton);
@@ -115,6 +113,7 @@ AudioEditorPanel::AudioEditorPanel (juce::ValueTree r, juce::UndoManager& um, ju
         if (flexTimeButton.getToggleState())
         {
             flexPitchButton.setToggleState (false, juce::dontSendNotification);
+            showPitchEditor (false);
             findMarkers();
         }
         repaint();
@@ -192,6 +191,37 @@ void AudioEditorPanel::mouseDoubleClick (const juce::MouseEvent& e)
     std::sort (markers.begin(), markers.end());
     selFrom = selTo = 0.0;
     repaint();
+}
+
+void AudioEditorPanel::showPitchEditor (bool show)
+{
+    if (show && pitchEditor == nullptr)
+    {
+        pitchEditor = std::make_unique<PitchEditor> (region, undoManager, formats, editsFolder);
+        pitchEditor->songScale = [r = region]
+        {
+            // The song's key where the region starts
+            std::vector<int> scale;
+            const auto project = r.getParent().getParent();
+            if (! project.isValid())
+                return scale;
+            const auto [root, minor] = model::keyAt (project, (double) r[ids::start]);
+            for (int pc = 0; pc < 12; ++pc)
+                if (model::isInScale (60 + pc, root, minor))
+                    scale.push_back (pc);
+            return scale;
+        };
+        addAndMakeVisible (*pitchEditor);
+    }
+    if (pitchEditor != nullptr)
+    {
+        pitchEditor->setVisible (show);
+        if (show)
+        {
+            resized();
+            pitchEditor->grabKeyboardFocus();
+        }
+    }
 }
 
 void AudioEditorPanel::findNotes()
@@ -275,7 +305,7 @@ void AudioEditorPanel::loadWaveform()
 {
     thumbnail.setSource (new juce::FileInputSource (juce::File (region[ids::file].toString())));
     selFrom = selTo = 0.0;
-    if (flexPitchButton.getToggleState())
+    if (flexPitchButton.getToggleState() && pitchEditor == nullptr)
         findNotes();
     if (flexTimeButton.getToggleState())
         findMarkers();
@@ -318,7 +348,7 @@ void AudioEditorPanel::paint (juce::Graphics& g)
         thumbnail.drawChannels (g, a.reduced (0, 4), offset, offset + length, (float) (double) region.getProperty (ids::gain, 1.0));
 
     // Flex Pitch: each note as a bar at its pitch, with its name.
-    if (flexPitchButton.getToggleState())
+    if (flexPitchButton.getToggleState() && pitchEditor == nullptr)
     {
         const auto [lo, hi] = pitchRange();
         for (size_t i = 0; i < notes.size(); ++i)
@@ -388,6 +418,8 @@ void AudioEditorPanel::resized()
     info.setBounds (bottom.removeFromBottom (24));
     auto row = bottom.removeFromTop (30);
     flexPitchButton.setBounds (row.removeFromRight (90).reduced (2, 0));
+    if (pitchEditor != nullptr)
+        pitchEditor->setBounds (waveArea());
     flexTimeButton.setBounds (row.removeFromRight (90).reduced (2, 0));
     const auto w = row.getWidth() / juce::jmax (1, buttons.size());
     for (auto* b : buttons)

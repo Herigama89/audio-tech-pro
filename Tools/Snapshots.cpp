@@ -28,6 +28,7 @@
 #include "ui/ConsoleStripWindow.h"
 #include "model/NoteTools.h"
 #include "ui/AudioEditorPanel.h"
+#include "ui/PitchEditor.h"
 #include <deque>
 #include "ui/ConsoleLook.h"
 
@@ -242,6 +243,55 @@ public:
             pump (main, 50);
             save (editor, "audio-editor-flex-time.png");
             editor.dragMarker = -1;
+
+            {
+                // The pitch editor on a sung-like line (vibrato, drifting notes, a slide), one note moved and straightened
+                const auto wavFile = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("riff-pitch-voice.wav");
+                {
+                    constexpr double rate = 48000.0;
+                    juce::AudioBuffer<float> voice (1, (int) (4.0 * rate));
+                    voice.clear();
+                    struct N { double from, to, midi, vib, drift; };
+                    const N line[] { { 0.10, 0.60, 57.2, 0.25, 0.0 }, { 0.70, 1.20, 60.0, 0.35, -0.3 }, { 1.30, 2.10, 64.3, 0.5, 0.0 },
+                                     { 2.20, 2.60, 62.0, 0.2, 0.2 }, { 2.70, 3.60, 59.8, 0.6, -0.2 } };
+                    double phase = 0.0;
+                    for (int i = 0; i < voice.getNumSamples(); ++i)
+                    {
+                        const auto t = i / rate;
+                        for (const auto& n : line)
+                            if (t >= n.from && t < n.to)
+                            {
+                                const auto k = (t - n.from) / (n.to - n.from);
+                                const auto midi = n.midi + n.drift * k + n.vib * std::sin (juce::MathConstants<double>::twoPi * 5.2 * t) * std::min (1.0, k * 3.0);
+                                phase += juce::MathConstants<double>::twoPi * 440.0 * std::pow (2.0, (midi - 69.0) / 12.0) / rate;
+                                const auto env = std::min (1.0, (t - n.from) / 0.03) * std::min (1.0, (n.to - t) / 0.05) * (0.6 + 0.4 * std::sin (3.1 * k));
+                                voice.setSample (0, i, (float) (env * (0.3 * std::sin (phase) + 0.15 * std::sin (2.0 * phase) + 0.07 * std::sin (3.0 * phase))));
+                            }
+                    }
+                    wavFile.deleteFile();
+                    std::unique_ptr<juce::OutputStream> out = std::make_unique<juce::FileOutputStream> (wavFile);
+                    juce::WavAudioFormat wav;
+                    auto writer = wav.createWriterFor (out, juce::AudioFormatWriterOptions{}.withSampleRate (rate).withNumChannels (1).withBitsPerSample (24));
+                    writer->writeFromAudioSampleBuffer (voice, 0, voice.getNumSamples());
+                }
+                auto vocal = model::addTrack (main.project, "Vocal", nullptr);
+                auto take = model::addRegion (vocal, wavFile, 0.0, 4.0, nullptr);
+                PitchEditor pitch (take, main.undoManager, main.engine.getFormatManager(), juce::File::getSpecialLocation (juce::File::tempDirectory));
+                pitch.setSize (1000, 430);
+                pitch.analyseNow();
+                std::cout << "pitch editor notes: " << pitch.analysis.notes.size() << std::endl;
+                if (pitch.analysis.notes.size() >= 3)
+                {
+                    pitch.edits[2].drift = 1.0;
+                    pitch.edits[0].shift = std::round (pitch.analysis.notes[0].centre) - pitch.analysis.notes[0].centre;
+                    pitch.selected = { 1 };
+                    pitch.edits[1].shift = 2.0;
+                    pitch.commit ("Snapshot");
+                }
+                pump (main, 50);
+                save (pitch, "pitch-editor.png");
+                main.project.removeChild (vocal, nullptr);
+            }
 
             main.timeline.selectOnly (track[ids::id].toString());
             main.toggleSmartControls();
@@ -840,6 +890,7 @@ public:
             // This batch: Pro Tools and Ableton style skins; inserts in the Edit window; R / I / MM and comments in the mixer;
             // the bus compressor's chooser; clip gain on a selected audio region.
             TrackHeader::showInserts = true;
+            TrackHeader::showIO = true;
             main.resized();
             for (auto* c : main.headers.getChildren())
                 c->resized();
@@ -884,6 +935,7 @@ public:
                 main.closeMixer();
             }
             TrackHeader::showInserts = false;
+            TrackHeader::showIO = false;
             main.resized();
             main.headers.resized();
             main.applyTheme ({});

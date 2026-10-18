@@ -20,6 +20,7 @@ const std::vector<Info>& all()
         { exportStems,            "Export All Tracks as Audio Files...", "File", "Each track (and bus) to its own WAV in a folder, with its plugins, fader and pan, ignoring solo" },
         { importTracks,           "Import Tracks from Project...", "File",   "Bring tracks (regions, plugins, sends, automation) in from another project" },
         { toggleHeaderInserts,    "Show Inserts in Edit Window", "View",     "Each track's insert slots beside its header (as in Pro Tools' Edit window)" },
+        { toggleHeaderIO,         "Show I/O in Edit Window",    "View",      "Each track's input and output beside its header, to choose them there (as on the mixer strips)" },
         { toggleExclusiveSolo,    "Exclusive Solo",             "Mix",       "Soloing a track unsolos the others (as in LUNA)" },
         { showMultiMeter,         "MultiMeter",                 "Mix",       "The master's meters: levels, loudness (LUFS), spectrum, goniometer and phase correlation" },
         { automix,                "Automix...",                 "Mix",       "A balanced starting mix for a genre: each track measured and its fader set (one undo step)" },
@@ -38,7 +39,9 @@ const std::vector<Info>& all()
         { pasteRegions,           "Paste",                      "Edit",      "Paste at the playhead, on the selected track" },
         { selectAllRegions,       "Select All",                 "Edit",      "Select every region" },
         { repeatRegions,          "Repeat",                     "Edit",      "Repeat the selected regions once, right after them" },
-        { joinRegions,            "Join Regions",               "Edit",      "Join the selected MIDI regions on a track into one" },
+        { joinRegions,            "Join Regions",               "Edit",      "Join the selected regions on a track into one (audio: consolidated into one new file)" },
+        { consolidateRegions,     "Consolidate Clips",          "Edit",      "The selected audio regions on each track become one region playing one new file (gain, fades and transpose in it; gaps silent)" },
+        { alignAudio,             "Align Audio to Guide...",    "Edit",      "Lines the timing of the selected regions up with a guide region (the top one), as VocAlign and Cubase's AudioAlign do" },
         { muteRegions,            "Mute Regions",               "Edit",      "Mute or unmute the selected regions" },
         { nudgeLeft,              "Nudge Left",                 "Edit",      "Move the selected regions a 16th note earlier" },
         { nudgeRight,             "Nudge Right",                "Edit",      "Move the selected regions a 16th note later" },
@@ -235,6 +238,7 @@ namespace
             case forwardBar:             return { key ('.') };
             case toggleCycle:            return { key ('c') };
             case toggleSnap:             return { key ('n') };
+            case consolidateRegions:     return { key ('j', shift | cmd) };
            #if JUCE_MAC
             case toggleCatch:            return { key ('.', ctrl) };
            #else

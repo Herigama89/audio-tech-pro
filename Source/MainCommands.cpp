@@ -8,6 +8,7 @@
 #include "ui/Commands.h"
 #include "ui/KeyCommands.h"
 #include "ui/GeneratorPanel.h"
+#include "engine/AudioEdit.h"
 #include "ui/Theme.h"
 #include "AppInfo.h"
 
@@ -57,6 +58,8 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::pasteRegions:    info.setActive (! clipboardRegions.isEmpty() && track.isValid() && ! recording); break;
         case commands::deleteMarker:    info.setActive (project.getChildWithName (ids::MARKERS).getChildWithProperty (ids::id, timeline.selectedMarkerId).isValid()); break;
         case commands::joinRegions:     info.setActive (timeline.selectedRegionTrees().size() > 1 && ! recording); break;
+        case commands::consolidateRegions: info.setActive (! timeline.selectedRegionTrees().isEmpty() && ! recording); break;
+        case commands::alignAudio:      info.setActive (timeline.selectedRegionTrees().size() > 1 && ! recording); break;
         case commands::duplicateTrack:
         case commands::createTrackStack:
         case commands::createFolderStack:
@@ -109,6 +112,7 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::toggleMeters:    info.setTicked (showMeters); break;
         case commands::toggleTrackHeaders: info.setTicked (showTrackHeaders); break;
         case commands::toggleHeaderInserts: info.setTicked (TrackHeader::showInserts); break;
+        case commands::toggleHeaderIO:  info.setTicked (TrackHeader::showIO); break;
         case commands::toggleMixerComments: info.setTicked (mixer.getShowComments()); break;
         case commands::toggleExclusiveSolo: info.setTicked (appProperties.getUserSettings()->getBoolValue ("exclusiveSolo", false)); break;
         case commands::showLibrary:     info.setTicked (libraryPanel != nullptr && libraryPanel->isVisible()); break;
@@ -185,6 +189,8 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::selectAllRegions:       selectAllRegions(); break;
         case commands::repeatRegions:          repeatSelectedRegions(); break;
         case commands::joinRegions:            joinSelectedRegions(); break;
+        case commands::consolidateRegions:     consolidateRegions (timeline.selectedRegionTrees()); break;
+        case commands::alignAudio:             alignAudioToGuide(); break;
         case commands::muteRegions:            muteSelectedRegions(); break;
         case commands::nudgeLeft:              nudgeSelectedRegions (-1); break;
         case commands::nudgeRight:             nudgeSelectedRegions (1); break;
@@ -282,6 +288,15 @@ bool MainComponent::perform (const InvocationInfo& info)
             commandManager.commandStatusChanged();
             break;
         }
+        case commands::toggleHeaderIO:
+            TrackHeader::showIO = ! TrackHeader::showIO;
+            appProperties.getUserSettings()->setValue ("viewHeaderIO", TrackHeader::showIO);
+            for (auto* c : headers.getChildren())
+                c->resized();
+            headers.resized();
+            resized();
+            commandManager.commandStatusChanged();
+            break;
         case commands::toggleHeaderInserts:
             TrackHeader::showInserts = ! TrackHeader::showInserts;
             appProperties.getUserSettings()->setValue ("viewHeaderInserts", TrackHeader::showInserts);
@@ -418,7 +433,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             menu.addSeparator();
             add ({ commands::cutRegions, commands::copyRegions, commands::pasteRegions, commands::deleteSelection, commands::selectAllRegions });
             menu.addSeparator();
-            add ({ commands::splitAtPlayhead, commands::repeatRegions, commands::joinRegions, commands::muteRegions,
+            add ({ commands::splitAtPlayhead, commands::repeatRegions, commands::joinRegions, commands::consolidateRegions, commands::alignAudio, commands::muteRegions,
                    commands::nudgeLeft, commands::nudgeRight, commands::quantize });
             menu.addSeparator();
             add ({ commands::trimStartToPlayhead, commands::trimEndToPlayhead, commands::loopRegions, commands::regionGain, commands::removeFades });
@@ -498,7 +513,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             // As in Logic: show or hide each panel of the main window.
             add ({ commands::toggleControlBar, commands::toggleToolbar, commands::toggleInspector, commands::showSmartControls,
                    commands::showLibrary, commands::showMixer, commands::showPianoRoll, commands::showLoopBrowser,
-                   commands::toggleTrackHeaders, commands::toggleHeaderInserts, commands::toggleMeters, commands::toggleStatusBar });
+                   commands::toggleTrackHeaders, commands::toggleHeaderInserts, commands::toggleHeaderIO, commands::toggleMeters, commands::toggleStatusBar });
             menu.addSeparator();
             add ({ commands::showAllPanels, commands::hideAllPanels });
             menu.addSeparator();
@@ -867,6 +882,14 @@ void MainComponent::repeatSelectedRegions()
 void MainComponent::joinSelectedRegions()
 {
     const auto regions = timeline.selectedRegionTrees();
+    bool anyAudio = false;
+    for (const auto& r : regions)
+        anyAudio = anyAudio || ! model::isMidiRegion (r);
+    if (anyAudio)
+    {
+        consolidateRegions (regions);   // audio: one new file per track
+        return;
+    }
     if (regions.size() < 2)
         return;
 
@@ -879,6 +902,163 @@ void MainComponent::joinSelectedRegions()
     }
     timeline.selectOnlyRegion (joined[ids::id].toString());
     timeline.changed();
+}
+
+void MainComponent::consolidateRegions (const juce::Array<juce::ValueTree>& regions)
+{
+    // Each track's selected audio regions become one region playing one new file (as they sounded: gain, fades,
+    // transpose; the gaps between them silent). MIDI regions are joined.
+    std::map<juce::String, juce::Array<juce::ValueTree>> byTrack;
+    for (const auto& r : regions)
+        if (! model::isMidiRegion (r) && ! model::isRegionMuted (r))
+            byTrack[r.getParent()[ids::id].toString()].add (r);
+    if (byTrack.empty())
+        return;
+    for (const auto& [id, list] : byTrack)
+        for (const auto& r : list)
+            if (model::numTakes (r) > 0)
+            {
+                showError ("Consolidate", "A take folder is selected. Flatten its comp first (or choose one take).");
+                return;
+            }
+
+    juce::MouseCursor::showWaitCursor();
+    undoManager.beginNewTransaction ("Consolidate");
+    juce::StringArray made;
+    juce::String problem;
+    for (const auto& [id, list] : byTrack)
+    {
+        auto track = model::findById (project, id);
+        std::vector<audioedit::ConsolidatePart> parts;
+        for (const auto& r : list)
+        {
+            audioedit::ConsolidatePart p;
+            p.file = juce::File (r[ids::file].toString());
+            p.offset = r[ids::offset];
+            p.length = r[ids::length];
+            p.start = r[ids::start];
+            p.gain = (float) (double) r.getProperty (ids::gain, 1.0);
+            p.fadeIn = r.getProperty (ids::fadeIn, 0.0);
+            p.fadeOut = r.getProperty (ids::fadeOut, 0.0);
+            p.fadeInCurve = r.getProperty (ids::fadeInCurve, 0.0);
+            p.fadeOutCurve = r.getProperty (ids::fadeOutCurve, 0.0);
+            p.semitones = (double) r.getProperty (ids::transpose, 0.0) + (double) r.getProperty (ids::fineTune, 0.0) / 100.0;
+            parts.push_back (p);
+        }
+        const auto dest = recordingFolder().getNonexistentChildFile (juce::File::createLegalFileName (track[ids::name].toString() + " Consolidated"),
+                                                                      ".wav", false);
+        dest.getParentDirectory().createDirectory();
+        double start = 0.0, length = 0.0;
+        if (const auto error = audioedit::consolidate (engine.getFormatManager(), parts, dest, start, length); error.isNotEmpty())
+        {
+            problem = error;
+            continue;
+        }
+        const auto name = list.getFirst()[ids::name].toString();
+        for (auto r : list)
+            model::deleteRegion (r, &undoManager);
+        auto region = model::addRegion (track, dest, start, length, &undoManager);
+        if (name.isNotEmpty())
+            region.setProperty (ids::name, name, &undoManager);
+        made.add (region[ids::id].toString());
+    }
+    juce::MouseCursor::hideWaitCursor();
+    if (problem.isNotEmpty())
+        showError ("Consolidate", problem);
+    if (! made.isEmpty())
+    {
+        timeline.selectRegions (made);
+        timeline.changed();
+        statusLabel.setText ("Consolidated into " + juce::String (made.size()) + (made.size() == 1 ? " region" : " regions") + " (one new audio file each)",
+                             juce::dontSendNotification);
+    }
+}
+
+void MainComponent::alignAudioToGuide()
+{
+    // The guide: the selected audio region on the highest track (the earliest, if several); the others line up with it.
+    juce::Array<juce::ValueTree> audio;
+    for (const auto& r : timeline.selectedRegionTrees())
+        if (! model::isMidiRegion (r))
+            audio.add (r);
+    if (audio.size() < 2)
+    {
+        showError ("Align Audio", "Select the guide (on the higher track) and the regions to line up with it: two audio regions or more.");
+        return;
+    }
+    juce::ValueTree guide;
+    for (const auto& r : audio)
+    {
+        const auto ti = project.indexOf (r.getParent()), gi = guide.isValid() ? project.indexOf (guide.getParent()) : 1 << 30;
+        if (ti < gi || (ti == gi && (double) r[ids::start] < (double) guide[ids::start]))
+            guide = r;
+    }
+    juce::Array<juce::ValueTree> dubs;
+    for (const auto& r : audio)
+        if (r.getParent() != guide.getParent())
+            dubs.add (r);
+    if (dubs.isEmpty())
+    {
+        showError ("Align Audio", "The regions to line up must be on other tracks than the guide.");
+        return;
+    }
+    for (const auto& r : dubs)
+        if (model::numTakes (r) > 0)
+        {
+            showError ("Align Audio", "A take folder is selected. Flatten its comp first (or choose one take).");
+            return;
+        }
+
+    auto* window = new juce::AlertWindow ("Align Audio to Guide",
+                                          "Lines the timing of " + juce::String (dubs.size()) + (dubs.size() == 1 ? " region" : " regions")
+                                              + " up with the guide \"" + guide[ids::name].toString() + "\" (on " + guide.getParent()[ids::name].toString()
+                                              + "), as VocAlign does. The audio stretches; its pitch stays.",
+                                          juce::MessageBoxIconType::NoIcon);
+    window->addComboBox ("strength", { "Strength: 100% (tight)", "Strength: 75%", "Strength: 50% (looser)", "Strength: 25%" }, {});
+    window->addComboBox ("range", { "Moves up to 0.25 s", "Moves up to 0.5 s", "Moves up to 1 s" }, {});
+    window->getComboBoxComponent ("range")->setSelectedItemIndex (1, juce::dontSendNotification);
+    window->addButton ("Align", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->enterModalState (true, juce::ModalCallbackFunction::create (
+        [safe = juce::Component::SafePointer<MainComponent> (this), window, guide, dubs] (int result)
+    {
+        const double strengths[] { 1.0, 0.75, 0.5, 0.25 }, ranges[] { 0.25, 0.5, 1.0 };
+        const auto strength = strengths[juce::jlimit (0, 3, window->getComboBoxComponent ("strength")->getSelectedItemIndex())];
+        const auto range = ranges[juce::jlimit (0, 2, window->getComboBoxComponent ("range")->getSelectedItemIndex())];
+        if (result != 1 || safe == nullptr)
+            return;
+        auto& self = *safe;
+        auto& formats = self.engine.getFormatManager();
+        juce::MouseCursor::showWaitCursor();
+        double guideRate = 0.0;
+        const auto guideAudio = audioedit::readRegion (formats, juce::File (guide[ids::file].toString()), guide[ids::offset], guide[ids::length], guideRate);
+        self.undoManager.beginNewTransaction ("Align Audio to Guide");
+        int done = 0;
+        for (auto dub : dubs)
+        {
+            double dubRate = 0.0;
+            const juce::File source (dub[ids::file].toString());
+            const auto dubAudio = audioedit::readRegion (formats, source, dub[ids::offset], dub[ids::length], dubRate);
+            audioedit::Request request { audioedit::Operation::flexWarp };
+            request.anchors = audioedit::alignToGuide (guideAudio, guideRate, dubAudio, dubRate,
+                                                       (double) dub[ids::start] - (double) guide[ids::start], strength, range);
+            if (request.anchors.empty())
+                continue;
+            const auto dest = self.recordingFolder().getNonexistentChildFile (source.getFileNameWithoutExtension() + " Aligned", ".wav", false);
+            dest.getParentDirectory().createDirectory();
+            double newLength = 0.0;
+            if (audioedit::processFile (formats, source, dub[ids::offset], dub[ids::length], request, dest, newLength).isNotEmpty())
+                continue;
+            dub.setProperty (ids::file, dest.getFullPathName(), &self.undoManager);
+            dub.setProperty (ids::offset, 0.0, &self.undoManager);
+            dub.setProperty (ids::length, newLength, &self.undoManager);
+            ++done;
+        }
+        juce::MouseCursor::hideWaitCursor();
+        self.statusLabel.setText (done > 0 ? "Aligned " + juce::String (done) + (done == 1 ? " region" : " regions") + " to " + guide[ids::name].toString()
+                                           : juce::String ("Nothing to align: the regions don't overlap the guide"),
+                                  juce::dontSendNotification);
+    }), true);
 }
 
 void MainComponent::muteSelectedRegions()

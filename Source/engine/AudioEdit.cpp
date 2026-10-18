@@ -1,4 +1,5 @@
 #include "AudioEdit.h"
+#include "../model/Project.h"
 
 namespace riff::audioedit
 {
@@ -465,6 +466,233 @@ juce::String processFile (juce::AudioFormatManager& formats, const juce::File& s
 
     newLength = audio.getNumSamples() / rate;
     return {};
+}
+
+juce::String consolidate (juce::AudioFormatManager& formats, const std::vector<ConsolidatePart>& parts, const juce::File& dest,
+                          double& start, double& length)
+{
+    if (parts.empty())
+        return "Nothing to consolidate";
+    start = std::numeric_limits<double>::max();
+    double end = 0.0, rate = 0.0;
+    for (const auto& p : parts)
+    {
+        start = juce::jmin (start, p.start);
+        end = juce::jmax (end, p.start + p.length);
+        if (rate <= 0.0)
+            if (std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (p.file)); reader != nullptr)
+                rate = reader->sampleRate;
+    }
+    if (rate <= 0.0)
+        return "The regions' audio files couldn't be read";
+    length = end - start;
+    juce::AudioBuffer<float> mix (2, juce::jmax (1, (int) std::ceil (length * rate)));
+    mix.clear();
+
+    for (const auto& p : parts)
+    {
+        double fileRate = 0.0;
+        auto audio = readRegion (formats, p.file, p.offset, p.length, fileRate);
+        if (fileRate <= 0.0 || audio.getNumSamples() < 2)
+            continue;
+        if (std::abs (p.semitones) > 1.0e-3)
+            audio = pitchShift (audio, p.semitones, fileRate);
+
+        // At the mix's rate
+        if (std::abs (fileRate - rate) > 0.5)
+        {
+            const auto ratio = fileRate / rate;
+            juce::AudioBuffer<float> converted (audio.getNumChannels(), (int) std::floor (audio.getNumSamples() / ratio));
+            for (int c = 0; c < audio.getNumChannels(); ++c)
+            {
+                juce::LagrangeInterpolator interpolator;
+                interpolator.process (ratio, audio.getReadPointer (c), converted.getWritePointer (c), converted.getNumSamples());
+            }
+            audio = std::move (converted);
+        }
+
+        const auto at = (int) std::llround ((p.start - start) * rate);
+        const auto n = juce::jmin (audio.getNumSamples(), (int) std::llround (p.length * rate), mix.getNumSamples() - at);
+        const auto fadeInSamples = p.fadeIn * rate, fadeOutSamples = p.fadeOut * rate;
+        for (int i = 0; i < n; ++i)
+        {
+            auto g = (double) p.gain;
+            if (i < fadeInSamples)
+                g *= model::fadeGain (i / fadeInSamples, p.fadeInCurve);
+            if (const auto fromEnd = n - i; fromEnd <= fadeOutSamples)
+                g *= model::fadeGain (fromEnd / fadeOutSamples, p.fadeOutCurve);
+            for (int c = 0; c < 2; ++c)
+                mix.getWritePointer (c)[at + i] += (float) g * audio.getReadPointer (juce::jmin (c, audio.getNumChannels() - 1))[i];
+        }
+    }
+
+    dest.deleteFile();
+    std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (dest);
+    juce::WavAudioFormat wav;
+    auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (rate).withNumChannels (2).withBitsPerSample (24));
+    if (writer == nullptr)
+        return "Couldn't write " + dest.getFullPathName();
+    writer->writeFromAudioSampleBuffer (mix, 0, mix.getNumSamples());
+    return {};
+}
+
+namespace
+{
+    /** Loudness in 20 bands (log), every `hop` seconds: what the alignment compares. */
+    std::vector<std::array<float, 20>> bandFrames (const juce::AudioBuffer<float>& audio, double rate, double hop)
+    {
+        constexpr int order = 10, size = 1 << order;
+        juce::dsp::FFT fft (order);
+        std::vector<float> window ((size_t) size), data ((size_t) size * 2);
+        for (int i = 0; i < size; ++i)
+            window[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) (size - 1));
+
+        // Band edges, 80 Hz to 9 kHz, spaced evenly in pitch
+        std::array<int, 21> edges {};
+        for (int b = 0; b <= 20; ++b)
+            edges[(size_t) b] = juce::jlimit (1, size / 2 - 1, (int) std::lround (80.0 * std::pow (9000.0 / 80.0, b / 20.0) * size / rate));
+
+        const auto step = juce::jmax (1, (int) std::lround (hop * rate));
+        std::vector<std::array<float, 20>> frames;
+        for (int start = -size / 2; start < audio.getNumSamples() - size / 2; start += step)
+        {
+            std::fill (data.begin(), data.end(), 0.0f);
+            for (int i = 0; i < size; ++i)
+            {
+                const auto at = start + i;
+                if (at < 0 || at >= audio.getNumSamples())
+                    continue;
+                float v = 0.0f;
+                for (int c = 0; c < audio.getNumChannels(); ++c)
+                    v += audio.getSample (c, at);
+                data[(size_t) i] = v * window[(size_t) i];
+            }
+            fft.performFrequencyOnlyForwardTransform (data.data());
+            std::array<float, 20> f {};
+            for (int b = 0; b < 20; ++b)
+            {
+                double e = 0.0;
+                for (int k = edges[(size_t) b]; k <= juce::jmax (edges[(size_t) b], edges[(size_t) b + 1] - 1); ++k)
+                    e += (double) data[(size_t) k] * data[(size_t) k];
+                f[(size_t) b] = (float) std::log10 (1.0e-7 + e);
+            }
+            frames.push_back (f);
+        }
+        return frames;
+    }
+}
+
+std::vector<std::pair<double, double>> alignToGuide (const juce::AudioBuffer<float>& guide, double guideRate,
+                                                     const juce::AudioBuffer<float>& dub, double dubRate,
+                                                     double dubOffset, double strength, double maxShift)
+{
+    constexpr double hop = 0.01;
+    const auto g = bandFrames (guide, guideRate, hop);
+    const auto d = bandFrames (dub, dubRate, hop);
+    if (g.size() < 4 || d.size() < 4)
+        return {};
+
+    // Each signal's frames less its own average loudness (a quieter dub still matches)
+    const auto centred = [] (std::vector<std::array<float, 20>> frames)
+    {
+        std::array<double, 20> mean {};
+        for (const auto& f : frames)
+            for (size_t b = 0; b < 20; ++b)
+                mean[b] += f[b];
+        for (auto& m : mean)
+            m /= (double) frames.size();
+        for (auto& f : frames)
+            for (size_t b = 0; b < 20; ++b)
+                f[b] -= (float) mean[b];
+        return frames;
+    };
+    const auto G = centred (g), D = centred (d);
+    const auto cost = [&] (int gi, int di)
+    {
+        double c = 0.0;
+        for (size_t b = 0; b < 20; ++b)
+        {
+            const auto diff = (double) G[(size_t) gi][b] - D[(size_t) di][b];
+            c += diff * diff;
+        }
+        return std::sqrt (c);
+    };
+
+    // Dynamic time warping in a band: dub frame di may meet guide frames within maxShift of where it is now
+    const int band = juce::jmax (2, (int) std::lround (maxShift / hop));
+    const int offsetFrames = (int) std::lround (dubOffset / hop);
+    const int nd = (int) D.size(), ng = (int) G.size();
+    const auto lo = [&] (int di) { return juce::jmax (0, di + offsetFrames - band); };
+    const auto hi = [&] (int di) { return juce::jmin (ng - 1, di + offsetFrames + band); };
+    const auto width = 2 * band + 1;
+    constexpr double inf = 1.0e30;
+    std::vector<double> acc ((size_t) nd * (size_t) width, inf);
+    std::vector<std::int8_t> from ((size_t) nd * (size_t) width, -1);
+    const auto at = [&] (int di, int gi) -> size_t { return (size_t) di * (size_t) width + (size_t) (gi - (di + offsetFrames - band)); };
+    const auto inBand = [&] (int di, int gi) { return di >= 0 && di < nd && gi >= lo (di) && gi <= hi (di); };
+
+    for (int di = 0; di < nd; ++di)
+        for (int gi = lo (di); gi <= hi (di); ++gi)
+        {
+            const auto c = cost (gi, di);
+            double best = (di == 0) ? 0.0 : inf;
+            std::int8_t step = -1;
+            if (di > 0 && gi > 0 && inBand (di - 1, gi - 1) && acc[at (di - 1, gi - 1)] < best)      { best = acc[at (di - 1, gi - 1)]; step = 0; }
+            if (di > 0 && inBand (di - 1, gi) && acc[at (di - 1, gi)] + 0.3 * c < best)               { best = acc[at (di - 1, gi)] + 0.3 * c; step = 1; }
+            if (gi > 0 && inBand (di, gi - 1) && acc[at (di, gi - 1)] + 0.3 * c < best)               { best = acc[at (di, gi - 1)] + 0.3 * c; step = 2; }
+            if (best >= inf)
+                continue;
+            acc[at (di, gi)] = best + c;
+            from[at (di, gi)] = step;
+        }
+
+    // The best end in the last dub frame, then back along the path: the guide frame each dub frame matched
+    int gi = -1;
+    double bestEnd = inf;
+    for (int g2 = lo (nd - 1); g2 <= hi (nd - 1); ++g2)
+        if (acc[at (nd - 1, g2)] < bestEnd)
+        {
+            bestEnd = acc[at (nd - 1, g2)];
+            gi = g2;
+        }
+    if (gi < 0)
+        return {};
+    std::vector<double> matched ((size_t) nd, -1.0);
+    for (int di = nd - 1; di >= 0 && gi >= 0;)
+    {
+        matched[(size_t) di] = matched[(size_t) di] < 0.0 ? gi : 0.5 * (matched[(size_t) di] + gi);
+        const auto s = from[at (di, gi)];
+        if (s == 0)      { --di; --gi; }
+        else if (s == 1) { --di; }
+        else if (s == 2) { --gi; }
+        else break;
+    }
+
+    // Smoothed (median of 9), and only forwards: where each dub moment goes, as markers every 50 ms
+    std::vector<double> target ((size_t) nd);
+    for (int di = 0; di < nd; ++di)
+    {
+        std::vector<double> near;
+        for (int k = juce::jmax (0, di - 4); k <= juce::jmin (nd - 1, di + 4); ++k)
+            if (matched[(size_t) k] >= 0.0)
+                near.push_back (matched[(size_t) k] - (k - di));
+        std::nth_element (near.begin(), near.begin() + (long) near.size() / 2, near.end());
+        target[(size_t) di] = near.empty() ? di + offsetFrames : near[near.size() / 2];
+    }
+    const auto dubLength = dub.getNumSamples() / dubRate;
+    std::vector<std::pair<double, double>> markers;
+    double lastTo = 0.0, lastFrom = 0.0;
+    for (int di = 5; di < nd - 5; di += 5)
+    {
+        const auto fromSeconds = di * hop;
+        const auto toSeconds = fromSeconds + strength * ((target[(size_t) di] - offsetFrames) * hop - fromSeconds);
+        if (fromSeconds <= 0.02 || fromSeconds >= dubLength - 0.02 || toSeconds <= lastTo + 0.004 || fromSeconds <= lastFrom + 0.004)
+            continue;
+        markers.push_back ({ fromSeconds, toSeconds });
+        lastTo = toSeconds;
+        lastFrom = fromSeconds;
+    }
+    return markers;
 }
 
 } // namespace riff::audioedit

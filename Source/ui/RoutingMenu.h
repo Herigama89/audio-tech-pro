@@ -119,6 +119,47 @@ inline juce::Array<juce::ValueTree> actingTracks (const juce::ValueTree& project
     return result;
 }
 
+/** Where a track's output goes, as a short label: "St Out", a bus's name, or "Out 3-4". */
+inline juce::String outputLabel (const juce::ValueTree& project, const juce::ValueTree& track)
+{
+    const auto id = track[ids::output].toString();
+    if (const auto [first, count] = model::hardwareOutput (id); first >= 0)
+        return "Out " + juce::String (first + 1) + (count == 2 ? "-" + juce::String (first + 2) : juce::String());
+    if (const auto bus = model::findById (project, id); bus.isValid())
+        return bus[ids::name].toString();
+    return "St Out";
+}
+
+/** The Output menu (the Stereo Out, buses, the interface's other outputs, a new bus), as on the mixer strip. */
+inline void addOutputItems (juce::PopupMenu& menu, juce::ValueTree project, juce::ValueTree track, juce::UndoManager& um)
+{
+    const auto current = track[ids::output].toString();
+    auto set = [t = track, &um] (const juce::String& id) mutable
+    {
+        um.beginNewTransaction ("Output");
+        if (id.isEmpty())
+            t.removeProperty (ids::output, &um);
+        else if (t[ids::id].toString() != id && ! model::outputWouldLoop (t.getParent(), t, id))
+            t.setProperty (ids::output, id, &um);
+    };
+    menu.addSectionHeader ("Output");
+    menu.addItem ("Stereo Out", true, current.isEmpty(), [set]() mutable { set ({}); });
+    for (const auto& bus : project)
+        if (bus.hasType (ids::TRACK) && model::isBusTrack (bus) && bus != track && ! model::outputWouldLoop (project, track, bus[ids::id].toString()))
+            menu.addItem (bus[ids::name].toString(), true, current == bus[ids::id].toString(), [set, id = bus[ids::id].toString()]() mutable { set (id); });
+    addHardwareOutputItems (menu, current, [set] (const juce::String& id) mutable { set (id); });
+    menu.addSeparator();
+    menu.addItem ("New Bus", [project, set, &um]() mutable
+    {
+        int buses = 0;
+        for (const auto& c : project)
+            buses += (c.hasType (ids::TRACK) && model::isBusTrack (c)) ? 1 : 0;
+        um.beginNewTransaction ("Output to a new bus");
+        const auto bus = model::addTrack (project, "Bus " + juce::String (buses + 1), &um, -1, model::busKind);
+        set (bus[ids::id].toString());
+    });
+}
+
 /**
     Output, group, VCA, stack and freeze items for a track, shared by the
     track header's menu and the mixer strip's.

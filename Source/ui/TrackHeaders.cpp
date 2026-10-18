@@ -246,6 +246,7 @@ void TrackHeader::followAutomation (double time)
 
 void TrackHeader::paint (juce::Graphics& g)
 {
+    updateIO();   // (the input or output may have changed)
     const bool selected = timeline.isTrackSelected (track[ids::id].toString());
     auto area = getLocalBounds();
 
@@ -343,6 +344,57 @@ void TrackHeader::paint (juce::Graphics& g)
 void TrackHeader::resized()
 {
     auto area = getLocalBounds().withTrimmedLeft (numberWidth + 6).withTrimmedRight (8).withTrimmedBottom (resizeEdge);
+
+    // The I/O column: input above output, as on a mixer strip
+    const bool withIO = showIO && ! model::isVcaTrack (track) && track.getParent().isValid();
+    for (auto* b : { &ioInput, &ioOutput })
+    {
+        if (b->getParentComponent() == nullptr)
+        {
+            b->setWantsKeyboardFocus (false);
+            b->setColour (juce::TextButton::buttonColourId, theme::stripSlotOn);
+            b->setColour (juce::TextButton::textColourOffId, juce::Colour (0xffbfe0ff));
+            addChildComponent (b);
+        }
+        b->setVisible (withIO);
+    }
+    if (withIO)
+    {
+        if (ioInput.onClick == nullptr)
+        {
+            ioInput.setTooltip ("Input: where this track records from (an interface input, or another track's output)");
+            ioOutput.setTooltip ("Output: where this track plays to (the Stereo Out, a bus, or the interface's other outputs)");
+            ioInput.onClick = [this]
+            {
+                if (isInstrument)
+                {
+                    if (instrumentMenu)
+                        instrumentMenu (track, ioInput);
+                }
+                else if (! model::isBusTrack (track))
+                    showInputMenu();
+            };
+            ioOutput.onClick = [this] { showOutputMenu(); };
+        }
+        auto column = getLocalBounds().removeFromRight (ioWidth + (showInserts ? insertsWidth : 0)).withWidth (ioWidth)
+                          .withTrimmedBottom (resizeEdge).reduced (3, 4);
+        if (column.getHeight() >= 37)
+        {
+            ioInput.setBounds (column.removeFromTop (17));
+            column.removeFromTop (3);
+            ioOutput.setBounds (column.removeFromTop (17));
+        }
+        else
+        {
+            // A short track: side by side
+            auto row = column.removeFromTop (17);
+            ioInput.setBounds (row.removeFromLeft (row.getWidth() / 2 - 1));
+            row.removeFromLeft (2);
+            ioOutput.setBounds (row);
+        }
+        area.removeFromRight (ioWidth - 2);
+        updateIO();
+    }
 
     // The insert column (Pro Tools' Edit window), for tracks that have inserts
     const bool withInserts = showInserts && ! model::isVcaTrack (track) && track.getParent().isValid();
@@ -512,6 +564,33 @@ void TrackHeader::select()
     timeline.changed();
 }
 
+void TrackHeader::updateIO()
+{
+    if (! ioInput.isVisible())
+        return;
+    juce::String in;
+    if (isInstrument)
+        in = track[ids::instrument].toString().isNotEmpty() ? juce::String ("Instrument") : juce::String ("No instrument");
+    else if (model::isBusTrack (track))
+        in = "Bus";
+    else if (const auto source = model::findById (track.getParent(), track[ids::inputTrack].toString()); source.isValid())
+        in = source[ids::name].toString();
+    else
+        in = model::inputName (track, inputNames ? inputNames() : juce::StringArray());
+    if (ioInput.getButtonText() != in)
+        ioInput.setButtonText (in);
+    const auto out = routing::outputLabel (track.getParent(), track);
+    if (ioOutput.getButtonText() != out)
+        ioOutput.setButtonText (out);
+}
+
+void TrackHeader::showOutputMenu()
+{
+    juce::PopupMenu menu;
+    routing::addOutputItems (menu, track.getParent(), track, undoManager);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&ioOutput));
+}
+
 void TrackHeader::showInputMenu()
 {
     const auto names = inputNames ? inputNames() : juce::StringArray();
@@ -548,7 +627,7 @@ void TrackHeader::showInputMenu()
         routing::addTrackInputItems (menu, track.getParent(), track, { track });
     }
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&armButton));
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (ioInput.isVisible() ? static_cast<juce::Component*> (&ioInput) : &armButton));
 }
 
 void TrackHeader::showAutomationMenu()
@@ -926,7 +1005,8 @@ HeaderInserts::HeaderInserts (juce::ValueTree t, juce::UndoManager& um)
     : track (t), mixer (model::mixerOf (t.getParent())), undoManager (um)
 {
     mixer.addListener (this);
-    setTooltip ("Inserts: click an empty slot to add an effect, a plugin to open it. Option-click copies it to the selected tracks; right-click for more.");
+    setTooltip ("Inserts: click an empty slot to add an effect, a plugin to open it. Drag a plugin up or down (or onto another track, "
+                "here or in the mixer) to move it; hold Option to copy. Option-click copies it to the selected tracks; right-click for more.");
 }
 
 HeaderInserts::~HeaderInserts()
@@ -994,6 +1074,68 @@ void HeaderInserts::paint (juce::Graphics& g)
         g.setFont (juce::FontOptions (10.5f, bypassed ? juce::Font::italic : juce::Font::plain));
         g.drawText (name, r.withTrimmedLeft (12.0f).reduced (2.0f, 0.0f), juce::Justification::centredLeft, true);
     }
+}
+
+void HeaderInserts::mouseDrag (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu() || e.getDistanceFromDragStart() < 6)
+        return;
+    const auto index = slotAt (e.getMouseDownY());
+    const auto insert = index >= 0 ? model::insertAtSlot (chain(), index) : juce::ValueTree();
+    if (! insert.isValid())
+        return;
+    if (auto* container = juce::DragAndDropContainer::findParentDragContainerFor (this); container != nullptr && ! container->isDragAndDropActive())
+    {
+        juce::ScaledImage image (createComponentSnapshot (slotBounds (index)));
+        container->startDragging ("insert:" + insert[ids::id].toString(), this, image, true);
+    }
+}
+
+bool HeaderInserts::isInterestedInDragSource (const SourceDetails& details)
+{
+    return details.description.toString().startsWith ("insert:");
+}
+
+void HeaderInserts::itemDragMove (const SourceDetails& details)
+{
+    if (const auto slot = slotAt (details.localPosition.y); slot != dropSlot)
+    {
+        dropSlot = slot;
+        repaint();
+    }
+}
+
+void HeaderInserts::itemDragExit (const SourceDetails&)
+{
+    dropSlot = -1;
+    repaint();
+}
+
+void HeaderInserts::itemDropped (const SourceDetails& details)
+{
+    const auto slot = slotAt (details.localPosition.y);
+    dropSlot = -1;
+    repaint();
+    if (slot < 0 || ! moveInsert)
+        return;
+    const auto id = details.description.toString().fromFirstOccurrenceOf ("insert:", false, false);
+    for (const auto& c : model::mixerOf (track.getParent()))
+        for (const auto& insert : c)
+            if (insert.hasType (ids::INSERT) && insert[ids::id].toString() == id)
+            {
+                moveInsert (insert, track[ids::id].toString(), slot, juce::ModifierKeys::getCurrentModifiers().isAltDown());
+                return;
+            }
+}
+
+void HeaderInserts::paintOverChildren (juce::Graphics& g)
+{
+    if (dropSlot < 0)
+        return;
+    const auto r = slotBounds (dropSlot).toFloat().expanded (0.0f, 1.0f);
+    g.setColour (theme::accent);
+    g.drawRoundedRectangle (r, 2.5f, 2.0f);
+    g.fillRect (r.withHeight (2.0f));   // (it goes in above what's there)
 }
 
 void HeaderInserts::mouseUp (const juce::MouseEvent& e)

@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "../engine/AudioEdit.h"
+#include "PitchEditor.h"
 
 namespace riff
 {
@@ -55,6 +56,8 @@ private:
 
     // Flex Pitch: the notes found in the audio; drag one up or down to move its pitch.
     juce::TextButton flexPitchButton { "Flex Pitch" };
+    std::unique_ptr<PitchEditor> pitchEditor;   // (shown while Flex Pitch is on)
+    void showPitchEditor (bool show);
     std::vector<audioedit::PitchedNote> notes;
     double notesRate = 48000.0;
     int dragNote = -1, dragSemitones = 0;
