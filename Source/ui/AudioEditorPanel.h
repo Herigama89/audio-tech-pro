@@ -58,6 +58,16 @@ private:
     juce::TextButton flexPitchButton { "Flex Pitch" };
     std::unique_ptr<PitchEditor> pitchEditor;   // (shown while Flex Pitch is on)
     void showPitchEditor (bool show);
+public:
+    /** In the main window's editor pane (as Logic's Audio Track Editor): changes heard as the song plays, the playhead shown */
+    AudioFileCache* liveCache = nullptr;
+    std::function<double()> playheadSeconds;
+    std::function<void (double)> setPlayheadSeconds;
+    std::function<bool()> isPlaying;
+    void showFlexPitch (bool show)   { flexPitchButton.setToggleState (show, juce::sendNotificationSync); }
+    bool showsFlexPitch() const      { return flexPitchButton.getToggleState(); }
+    juce::ValueTree getRegion() const { return region; }
+private:
     std::vector<audioedit::PitchedNote> notes;
     double notesRate = 48000.0;
     int dragNote = -1, dragSemitones = 0;

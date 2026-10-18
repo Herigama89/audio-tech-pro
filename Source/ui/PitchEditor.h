@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "../engine/PitchCorrect.h"
+#include "../engine/AudioFileCache.h"
 
 namespace riff
 {
@@ -39,6 +40,15 @@ public:
     /** The song's key, for Correct to Key (pitch classes, C = 0); empty: chromatic. */
     std::function<std::vector<int>()> songScale;
 
+    /** Hearing changes as you make them, as the song plays (as Logic): the player's audio files, where the edited
+        audio goes live (and is written to disk behind the scenes). Without it, each change writes a new file. */
+    void setAudioCache (AudioFileCache* c) { cache = c; }
+
+    /** The song's playhead (seconds), to show it and follow it; clicking the ruler moves it. */
+    std::function<double()> playheadSeconds;
+    std::function<void (double)> setPlayheadSeconds;
+    std::function<bool()> isPlaying;
+
     /** Waits for the analysis (for tests and snapshots). */
     void analyseNow();
     bool isReady() const noexcept { return ready; }
@@ -49,6 +59,20 @@ private:
     void valueTreePropertyChanged (juce::ValueTree& t, const juce::Identifier& p) override;
 
     void load();
+    // Live: the region plays `live` (in memory, the cache's copy of liveFile); changed notes are rendered into it
+    AudioFileCache* cache = nullptr;
+    std::shared_ptr<DecodedAudio> live;
+    juce::File liveFile;
+    std::vector<pitchcorrect::NoteEdit> liveEdits;   // what `live` sounds like now
+    bool liveDirty = false;
+    juce::ThreadPool writer { 1 };
+    std::atomic<int> writeGeneration { 0 };
+    double shownPlayhead = -1.0;
+    bool ensureLive();
+    void applyLive (const std::vector<pitchcorrect::NoteEdit>& target);
+    void writeLiveSoon();
+    std::vector<pitchcorrect::NoteEdit> editsWithDrag() const;
+    juce::Rectangle<int> rulerArea() const;
     std::pair<juce::AudioBuffer<float>, pitchcorrect::Analysis> analyseSource() const;
     void useAnalysis (juce::AudioBuffer<float> audio, pitchcorrect::Analysis result);
     void commit (const juce::String& undoName);

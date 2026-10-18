@@ -192,14 +192,12 @@ Analysis analyse (const juce::AudioBuffer<float>& audio, double sampleRate)
 }
 
 //==============================================================================
-juce::AudioBuffer<float> render (const juce::AudioBuffer<float>& audio, const Analysis& a, const std::vector<NoteEdit>& edits)
+namespace
 {
-    bool anything = false;
-    for (const auto& e : edits)
-        anything = anything || ! e.isNeutral();
-    if (! anything || audio.getNumSamples() < 4)
-        return audio;
-
+/** The result for samples [spanFrom, spanTo) (the grains round them from a little before and after). */
+juce::AudioBuffer<float> synthesise (const juce::AudioBuffer<float>& audio, const Analysis& a, const std::vector<NoteEdit>& edits,
+                                     int spanFrom, int spanTo)
+{
     const int n = audio.getNumSamples();
     const int frames = (int) a.midi.size();
     const auto rate = a.sampleRate;
@@ -246,27 +244,34 @@ juce::AudioBuffer<float> render (const juce::AudioBuffer<float>& audio, const An
         return a.midi[(size_t) f] > 0.0f ? rate / hzOf (a.midi[(size_t) f]) : rate * 0.005;
     };
 
+    // Only round the span: from a few periods before it to a few after
+    const int pad = (int) (rate / 20.0);
+    const int base = juce::jlimit (0, n, spanFrom - pad), end = juce::jlimit (base, n, spanTo + pad);
+    std::vector<float> mono ((size_t) juce::jmax (1, end - base), 0.0f);
+    for (int c = 0; c < audio.getNumChannels(); ++c)
+        juce::FloatVectorOperations::addWithMultiply (mono.data(), audio.getReadPointer (c, base), 1.0f / (float) audio.getNumChannels(), end - base);
+    const auto x = [&mono, base] (int i) { return mono[(size_t) (i - base)]; };
+
     // Pitch marks: one per period on the waveform's peaks where it's pitched, every 5 ms where it isn't
-    const auto x = monoOf (audio);
     std::vector<int> marks;
     bool previousPitched = false;
     for (;;)
     {
         const int last = marks.empty() ? -1 : marks.back();
-        const int probe = last < 0 ? 0 : last + juce::jmax (8, (int) (previousPitched ? periodAt (last) : rate * 0.005));
-        if (probe >= n)
+        const int probe = last < 0 ? base : last + juce::jmax (8, (int) (previousPitched ? periodAt (last) : rate * 0.005));
+        if (probe >= end)
             break;
         int next = probe;
         if (pitchedAt (probe))
         {
             const auto period = periodAt (probe);
-            const int from = previousPitched ? last + (int) (0.8 * period) : juce::jmax (0, last + 1);
-            const int to = juce::jmin (n - 1, previousPitched ? last + (int) (1.2 * period) : from + (int) period);
+            const int from = previousPitched ? last + (int) (0.8 * period) : juce::jmax (base, last + 1);
+            const int to = juce::jmin (end - 1, previousPitched ? last + (int) (1.2 * period) : from + (int) period);
             if (from > to)
                 break;
             next = from;
             for (int s2 = from; s2 <= to; ++s2)
-                if (x[(size_t) s2] > x[(size_t) next])
+                if (x (s2) > x (next))
                     next = s2;
             previousPitched = true;
         }
@@ -274,21 +279,26 @@ juce::AudioBuffer<float> render (const juce::AudioBuffer<float>& audio, const An
             previousPitched = false;
         if (next <= last)
             next = last + 8;
-        if (next >= n)
+        if (next >= end)
             break;
         marks.push_back (next);
     }
+    const int channels = audio.getNumChannels();
+    juce::AudioBuffer<float> span (channels, juce::jmax (1, spanTo - spanFrom));
     if (marks.size() < 3)
-        return audio;
+    {
+        for (int c = 0; c < channels; ++c)
+            span.copyFrom (c, 0, audio, c, spanFrom, spanTo - spanFrom);
+        return span;
+    }
 
     // Synthesis: a grain (two periods, Hann) from the nearest analysis mark, placed every period / ratio
-    const int channels = audio.getNumChannels();
-    juce::AudioBuffer<float> out (channels, n);
+    juce::AudioBuffer<float> out (channels, end - base);
     out.clear();
-    std::vector<float> weight ((size_t) n, 0.0f);
+    std::vector<float> weight ((size_t) (end - base), 0.0f);
     double ts = marks.front();
     size_t k = 0;
-    while (ts < n)
+    while (ts < end)
     {
         while (k + 1 < marks.size() && std::abs (marks[k + 1] - ts) < std::abs (marks[k] - ts))
             ++k;
@@ -302,22 +312,83 @@ juce::AudioBuffer<float> render (const juce::AudioBuffer<float>& audio, const An
         for (int j = -half; j <= half; ++j)
         {
             const auto src = a0 + j, dst = centre + j;
-            if (src < 0 || src >= n || dst < 0 || dst >= n)
+            if (src < 0 || src >= n || dst < base || dst >= end)
                 continue;
             const auto w = 0.5f + 0.5f * std::cos (juce::MathConstants<float>::pi * (float) j / (float) half);
             for (int c = 0; c < channels; ++c)
-                out.getWritePointer (c)[dst] += audio.getReadPointer (c)[src] * w * g;
-            weight[(size_t) dst] += w;
+                out.getWritePointer (c)[dst - base] += audio.getReadPointer (c)[src] * w * g;
+            weight[(size_t) (dst - base)] += w;
         }
         ts += juce::jmax (4.0, period / ratio);
     }
     for (int c = 0; c < channels; ++c)
     {
-        auto* o = out.getWritePointer (c);
-        for (int i = 0; i < n; ++i)
-            o[i] /= juce::jmax (0.35f, weight[(size_t) i]);
+        const auto* o = out.getReadPointer (c);
+        auto* d = span.getWritePointer (c);
+        for (int i = spanFrom; i < spanTo; ++i)
+            d[i - spanFrom] = o[i - base] / juce::jmax (0.35f, weight[(size_t) (i - base)]);
     }
-    return out;
+    return span;
+}
+}
+
+juce::AudioBuffer<float> render (const juce::AudioBuffer<float>& audio, const Analysis& a, const std::vector<NoteEdit>& edits)
+{
+    bool anything = false;
+    for (const auto& e : edits)
+        anything = anything || ! e.isNeutral();
+    if (! anything || audio.getNumSamples() < 4)
+        return audio;
+    return synthesise (audio, a, edits, 0, audio.getNumSamples());
+}
+
+std::pair<int, int> noteSpan (const Analysis& a, int index)
+{
+    if (! juce::isPositiveAndBelow (index, (int) a.notes.size()))
+        return { 0, 0 };
+    const auto& note = a.notes[(size_t) index];
+    const auto margin = (int) (a.sampleRate * 0.03);   // (the shift eases in and out over a few frames)
+    return { juce::jmax (0, note.startFrame * a.hop - margin), juce::jmin (a.numSamples, note.endFrame * a.hop + margin) };
+}
+
+void renderInto (juce::AudioBuffer<float>& dest, const juce::AudioBuffer<float>& audio, const Analysis& a,
+                 const std::vector<NoteEdit>& edits, int from, int to)
+{
+    from = juce::jlimit (0, audio.getNumSamples(), from);
+    to = juce::jlimit (from, juce::jmin (audio.getNumSamples(), dest.getNumSamples()), to);
+    if (to - from < 2)
+        return;
+
+    // Nothing changed round here: the recording as it is
+    bool anything = false;
+    for (size_t i = 0; i < a.notes.size() && i < edits.size(); ++i)
+        if (! edits[i].isNeutral())
+        {
+            const auto [s0, s1] = noteSpan (a, (int) i);
+            anything = anything || (s1 > from && s0 < to);
+        }
+    juce::AudioBuffer<float> span;
+    if (anything)
+        span = synthesise (audio, a, edits, from, to);
+    else
+    {
+        span.setSize (audio.getNumChannels(), to - from);
+        for (int c = 0; c < audio.getNumChannels(); ++c)
+            span.copyFrom (c, 0, audio, c, from, to - from);
+    }
+
+    // In, with a short crossfade at each end into what's there
+    const auto fade = juce::jmin (240, (to - from) / 4);
+    for (int c = 0; c < dest.getNumChannels(); ++c)
+    {
+        auto* d = dest.getWritePointer (c);
+        const auto* s2 = span.getReadPointer (juce::jmin (c, span.getNumChannels() - 1));
+        for (int i = 0; i < to - from; ++i)
+        {
+            const auto w = i < fade ? (float) i / (float) fade : (i >= to - from - fade ? (float) (to - from - 1 - i) / (float) fade : 1.0f);
+            d[from + i] = d[from + i] * (1.0f - w) + s2[i] * w;
+        }
+    }
 }
 
 //==============================================================================

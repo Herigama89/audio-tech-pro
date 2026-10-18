@@ -77,6 +77,10 @@ public:
     /** Length of the file in seconds (reads only the header); 0 if unreadable. */
     double getLengthSeconds (const juce::File& file);
 
+    /** Audio made in memory for a file (the pitch editor's live render): it plays at once, and whoever made it may
+        change its samples as it plays (same length), to be heard straight away. Tells the listeners. */
+    void put (const juce::File& file, SharedAudio audio);
+
     /** Forgets a file (so it's read again next time), e.g. after it was re-recorded. */
     void forget (const juce::File& file);
 
@@ -99,6 +103,7 @@ private:
     juce::AudioFormatManager& formatManager;
     std::map<Key, SharedAudio> entries;
     std::set<Key> failed;
+    std::set<Key> provided;   // made in memory (put): a slower read from disk doesn't replace them
     std::map<juce::String, double> lengths;
 
     // Shared with the worker

@@ -288,6 +288,22 @@ TEST_CASE ("Pitch editor: notes found, moved and straightened, length kept", "[a
     CHECK_THAT (again.notes[0].centre, WithinAbs (59.0, 0.3));
     CHECK_THAT (again.notes[1].centre, WithinAbs (60.0, 0.25));
 
+    // Live: only the moved note rendered into the playing audio gives the same result as rendering it all
+    {
+        juce::AudioBuffer<float> live (voice);
+        const auto [from, to] = pitchcorrect::noteSpan (analysis, 0);
+        pitchcorrect::renderInto (live, voice, analysis, edits, from, to);
+        double diff = 0.0, energy = 0.0;
+        for (int i = from + 2000; i < to - 2000; ++i)
+        {
+            diff += std::pow (live.getSample (0, i) - moved.getSample (0, i), 2.0);
+            energy += std::pow (moved.getSample (0, i), 2.0);
+        }
+        CHECK (diff < energy * 0.02);
+        // the other note untouched (the recording as it was)
+        CHECK (live.getSample (0, (int) (1.2 * rate)) == voice.getSample (0, (int) (1.2 * rate)));
+    }
+
     // Straightened: the vibrato's swing much smaller
     const auto swing = [] (const pitchcorrect::Analysis& a, const pitchcorrect::Note& n)
     {

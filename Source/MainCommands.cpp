@@ -1339,14 +1339,24 @@ void MainComponent::setLocatorsBySelection()
 
 void MainComponent::togglePianoRoll()
 {
+    if (audioInPane())
+    {
+        closeAudioEditor();
+        return;
+    }
     if (pianoRoll.isVisible())
     {
         closePianoRoll();
         return;
     }
 
-    // The selected MIDI region, or the first one on the selected track.
+    // The selected MIDI region, or the first one on the selected track (an audio region: its editor, with Flex Pitch).
     auto region = model::findById (project, timeline.selectedRegionId);
+    if (region.isValid() && ! model::isMidiRegion (region) && region.hasType (ids::REGION))
+    {
+        openAudioEditor (region);
+        return;
+    }
 
     if (! region.isValid() || ! model::isMidiRegion (region))
     {

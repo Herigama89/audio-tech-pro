@@ -47,6 +47,14 @@ namespace riff::pitchcorrect
     /** The audio with the notes moved (one edit per note, in the analysis' order). */
     juce::AudioBuffer<float> render (const juce::AudioBuffer<float>& audio, const Analysis& analysis, const std::vector<NoteEdit>& edits);
 
+    /** The samples a change to one note touches (the note, with a little either side). */
+    std::pair<int, int> noteSpan (const Analysis& analysis, int noteIndex);
+
+    /** Renders samples [from, to) of the result into `dest` (as long as the audio; its channels from the audio's),
+        crossfading into what's there at the ends: for hearing changes to a few notes straight away. */
+    void renderInto (juce::AudioBuffer<float>& dest, const juce::AudioBuffer<float>& audio, const Analysis& analysis,
+                     const std::vector<NoteEdit>& edits, int from, int to);
+
     /** The edits as text (kept on the region) and back; the list is sized to `numNotes`. */
     juce::String toString (const std::vector<NoteEdit>& edits);
     std::vector<NoteEdit> fromString (const juce::String& text, size_t numNotes);

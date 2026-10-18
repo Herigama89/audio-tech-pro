@@ -161,6 +161,8 @@ void AudioFileCache::collectFinished()
 
     for (auto& r : done)
     {
+        if (provided.count (r.key) > 0)
+            continue;   // (made in memory meanwhile: that one stays)
         if (r.audio != nullptr)
         {
             entries[r.key] = r.audio;
@@ -192,12 +194,29 @@ double AudioFileCache::getLengthSeconds (const juce::File& file)
     return seconds;
 }
 
+void AudioFileCache::put (const juce::File& file, SharedAudio audio)
+{
+    const auto key = file.getFullPathName();
+    {
+        const juce::ScopedLock sl (lock);
+        pending.erase (key);
+        queue.erase (std::remove (queue.begin(), queue.end(), key), queue.end());
+    }
+    failed.erase (key);
+    provided.insert (key);
+    if (audio != nullptr)
+        lengths[key] = (double) audio->numFrames() / juce::jmax (1.0, audio->sampleRate);
+    entries[key] = std::move (audio);
+    sendChangeMessage();
+}
+
 void AudioFileCache::forget (const juce::File& file)
 {
     const auto key = file.getFullPathName();
     entries.erase (key);
     failed.erase (key);
     lengths.erase (key);
+    provided.erase (key);
 }
 
 void DecodedAudio::readStereo (juce::int64 start, int num, float* left, float* right) const noexcept

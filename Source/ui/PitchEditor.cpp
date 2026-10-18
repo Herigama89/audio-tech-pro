@@ -69,10 +69,13 @@ PitchEditor::PitchEditor (juce::ValueTree r, juce::UndoManager& um, juce::AudioF
 
     region.addListener (this);
     load();
+    startTimerHz (30);
 }
 
 PitchEditor::~PitchEditor()
 {
+    stopTimer();
+    writer.removeAllJobs (false, 20000);   // (the last version finishes writing)
     region.removeListener (this);
     if (worker != nullptr)
         worker->stopThread (4000);
@@ -147,11 +150,21 @@ void PitchEditor::useAnalysis (juce::AudioBuffer<float> audio, pitchcorrect::Ana
     }
     if (hi < lo)
         lo = 55.0, hi = 67.0;
-    lowMidi = std::floor (lo) - 6.0;
-    highMidi = std::ceil (hi) + 6.0;
+    // The notes' range with a little room (at least an octave), so the rows are big enough to work on
+    lowMidi = std::floor (lo) - 2.0;
+    highMidi = std::ceil (hi) + 2.0;
+    if (highMidi - lowMidi < 13.0)
+    {
+        const auto middle = 0.5 * (lowMidi + highMidi);
+        lowMidi = std::floor (middle - 6.5);
+        highMidi = lowMidi + 13.0;
+    }
     ready = true;
+    if (cache != nullptr && region[pitchSource].toString().isNotEmpty())
+        ensureLive();   // (edited before: changes are heard at once from here)
     status.setText (juce::String ((int) analysis.notes.size()) + " notes. Drag one up or down (Option: by cents); "
-                    "double-click to put it on the nearest semitone.", juce::dontSendNotification);
+                    "double-click: nearest semitone. Wheel: up/down, Option-wheel: row size, Cmd-wheel: zoom. Click the ruler to move the playhead.",
+                    juce::dontSendNotification);
     repaint();
 }
 
@@ -175,6 +188,11 @@ void PitchEditor::valueTreePropertyChanged (juce::ValueTree& t, const juce::Iden
         // Undo or redo: the edits as they were
         lastCommitted = region[pitchEdits].toString();
         edits = pitchcorrect::fromString (lastCommitted, analysis.notes.size());
+        if (cache != nullptr && ensureLive())
+        {
+            applyLive (edits);
+            writeLiveSoon();
+        }
         repaint();
     }
     else if ((p == ids::length || p == ids::offset) && ready && std::abs ((double) region[ids::length] - sourceLength) > 1.0e-6)
@@ -202,6 +220,19 @@ void PitchEditor::commit (const juce::String& undoName)
         repaint();
         return;
     }
+
+    if (cache != nullptr && ensureLive())
+    {
+        // Heard at once: the changed notes rendered into the playing audio; the file follows behind the scenes
+        applyLive (edits);
+        writeLiveSoon();
+        lastCommitted = text;
+        undoManager.beginNewTransaction ("Pitch: " + undoName);
+        region.setProperty (pitchEdits, text, &undoManager);
+        repaint();
+        return;
+    }
+
     juce::MouseCursor::showWaitCursor();
     const auto rendered = pitchcorrect::render (source, analysis, edits);
     editsFolder.createDirectory();
@@ -210,9 +241,9 @@ void PitchEditor::commit (const juce::String& undoName)
     {
         std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (dest);
         juce::WavAudioFormat wav;
-        if (auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (analysis.sampleRate)
-                                                           .withNumChannels (rendered.getNumChannels()).withBitsPerSample (24)))
-            written = writer->writeFromAudioSampleBuffer (rendered, 0, rendered.getNumSamples());
+        if (auto writer2 = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (analysis.sampleRate)
+                                                            .withNumChannels (rendered.getNumChannels()).withBitsPerSample (24)))
+            written = writer2->writeFromAudioSampleBuffer (rendered, 0, rendered.getNumSamples());
     }
     juce::MouseCursor::hideWaitCursor();
     if (! written)
@@ -233,12 +264,139 @@ void PitchEditor::commit (const juce::String& undoName)
     repaint();
 }
 
-void PitchEditor::timerCallback() {}
+bool PitchEditor::ensureLive()
+{
+    if (cache == nullptr || ! ready)
+        return false;
+    if (live != nullptr && juce::File (region[ids::file].toString()) == liveFile)
+        return true;
+
+    // The region plays the edited audio from here on: made in memory now (as the edits are), written behind the scenes
+    editsFolder.createDirectory();
+    liveFile = editsFolder.getChildFile (juce::File::createLegalFileName (sourceFile.getFileNameWithoutExtension() + " Pitch "
+                                                                          + region[ids::id].toString().substring (0, 8)) + ".wav");
+    if (const juce::File playing (region[ids::file].toString()); region[pitchSource].toString().isNotEmpty() && playing != sourceFile)
+        liveFile = playing;   // (edited before: the same file again)
+    auto made = std::make_shared<DecodedAudio>();
+    made->sampleRate = analysis.sampleRate;
+    const auto rendered = pitchcorrect::render (source, analysis, liveEdits = pitchcorrect::fromString (lastCommitted, analysis.notes.size()));
+    made->buffer.setSize (2, rendered.getNumSamples());
+    for (int c = 0; c < 2; ++c)
+        made->buffer.copyFrom (c, 0, rendered, juce::jmin (c, rendered.getNumChannels() - 1), 0, rendered.getNumSamples());
+    live = made;
+    cache->put (liveFile, live);
+
+    // (not an undo step of its own: the region keeps playing this file, Undo takes back the edits in it)
+    region.setProperty (pitchSource, sourceFile.getFullPathName(), nullptr);
+    region.setProperty (pitchSourceOffset, sourceOffset, nullptr);
+    region.setProperty (pitchSourceLength, sourceLength, nullptr);
+    region.setProperty (ids::file, liveFile.getFullPathName(), nullptr);
+    region.setProperty (ids::offset, 0.0, nullptr);
+    region.setProperty (ids::length, sourceLength, nullptr);
+    writeLiveSoon();
+    return true;
+}
+
+void PitchEditor::applyLive (const std::vector<pitchcorrect::NoteEdit>& target)
+{
+    if (live == nullptr)
+        return;
+    liveEdits.resize (analysis.notes.size());
+    int from = std::numeric_limits<int>::max(), to = 0;
+    for (size_t i = 0; i < analysis.notes.size() && i < target.size(); ++i)
+        if (! (target[i] == liveEdits[i]))
+        {
+            const auto [s0, s1] = pitchcorrect::noteSpan (analysis, (int) i);
+            from = juce::jmin (from, s0);
+            to = juce::jmax (to, s1);
+        }
+    if (to <= from)
+        return;
+    // (written into the samples the player is reading: heard on its next pass over them, which may be at once)
+    pitchcorrect::renderInto (live->buffer, source, analysis, target, from, to);
+    liveEdits = target;
+}
+
+void PitchEditor::writeLiveSoon()
+{
+    if (live == nullptr)
+        return;
+    // The newest version to disk (to a temporary file, then into place), so the project keeps it
+    const auto generation = ++writeGeneration;
+    auto copy = std::make_shared<juce::AudioBuffer<float>> (live->buffer);
+    const auto file = liveFile;
+    const auto rate = analysis.sampleRate;
+    writer.addJob ([this, generation, copy, file, rate]
+    {
+        if (generation != writeGeneration.load())
+            return;   // (a newer one is coming)
+        const auto temp = file.getSiblingFile (file.getFileNameWithoutExtension() + " (writing).wav");
+        temp.deleteFile();
+        {
+            std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (temp);
+            juce::WavAudioFormat wav;
+            if (auto w = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (rate).withNumChannels (2).withBitsPerSample (24)))
+                w->writeFromAudioSampleBuffer (*copy, 0, copy->getNumSamples());
+        }
+        temp.moveFileTo (file);
+    });
+}
+
+std::vector<pitchcorrect::NoteEdit> PitchEditor::editsWithDrag() const
+{
+    auto result = edits;
+    if (dragNote >= 0)
+        for (const auto i : selected)
+            if (juce::isPositiveAndBelow (i, (int) result.size()))
+                result[(size_t) i].shift += dragShift;
+    return result;
+}
+
+void PitchEditor::timerCallback()
+{
+    // While dragging: the notes heard where they're being moved to
+    if (liveDirty && cache != nullptr && ready)
+    {
+        liveDirty = false;
+        if (ensureLive())
+            applyLive (editsWithDrag());
+    }
+
+    // The playhead
+    if (playheadSeconds && ready)
+    {
+        const auto t = playheadSeconds() - (double) region[ids::start];
+        if (std::abs (t - shownPlayhead) > 1.0e-3)
+        {
+            const auto oldX = timeToX (shownPlayhead), newX = timeToX (t);
+            shownPlayhead = t;
+            // Catch: when zoomed in, the view follows it while playing
+            const auto visible = sourceLength / zoom;
+            if (isPlaying && isPlaying() && zoom > 1.0 && (t < scroll || t > scroll + visible * 0.95) && t >= 0.0 && t <= sourceLength)
+            {
+                scroll = juce::jlimit (0.0, juce::jmax (0.0, sourceLength - visible), t - visible * 0.05);
+                repaint();
+            }
+            else
+            {
+                repaint (juce::Rectangle<int> ((int) oldX - 2, 0, 5, getHeight()));
+                repaint (juce::Rectangle<int> ((int) newX - 2, 0, 5, getHeight()));
+            }
+        }
+    }
+}
+
+
 
 //==============================================================================
+juce::Rectangle<int> PitchEditor::rulerArea() const
+{
+    return getLocalBounds().withTrimmedTop (toolbarHeight).withTrimmedLeft (keyboardWidth).withHeight (16);
+}
+
 juce::Rectangle<int> PitchEditor::rollArea() const
 {
-    return getLocalBounds().withTrimmedTop (toolbarHeight).withTrimmedLeft (keyboardWidth).withTrimmedBottom (18);
+    return getLocalBounds().withTrimmedTop (toolbarHeight + 16).withTrimmedLeft (keyboardWidth).withTrimmedBottom (18);
 }
 
 float PitchEditor::timeToX (double seconds) const
@@ -345,6 +503,35 @@ void PitchEditor::paint (juce::Graphics& g)
         }
     }
 
+    // The ruler: the song's bars over the region
+    {
+        const auto ruler = rulerArea();
+        g.setColour (theme::ruler);
+        g.fillRect (ruler);
+        const auto project = region.getParent().getParent();
+        if (project.isValid() && sourceLength > 0.0)
+        {
+            const auto map = model::tempoMapOf (project);
+            const double start = region[ids::start];
+            const auto b0 = map.beatAt (start + xToTime ((float) area.getX())), b1 = map.beatAt (start + xToTime ((float) area.getRight()));
+            const auto pixelsPerBeat = (double) area.getWidth() / juce::jmax (1.0e-3, b1 - b0);
+            const auto step = pixelsPerBeat > 24.0 ? 1.0 : pixelsPerBeat > 6.0 ? 4.0 : 16.0;
+            g.setFont (juce::FontOptions (10.0f));
+            for (auto b = std::ceil (b0 / step) * step; b <= b1; b += step)
+            {
+                const auto x = timeToX (map.secondsAt (b) - start);
+                const auto [bar, beat] = map.barAndBeat (b);
+                const bool isBar = beat < 1.0e-6;
+                g.setColour (theme::text.withAlpha (isBar ? 0.7f : 0.35f));
+                g.fillRect (x, (float) ruler.getBottom() - (isBar ? 10.0f : 5.0f), 1.0f, isBar ? 10.0f : 5.0f);
+                if (isBar)
+                    g.drawText (juce::String (bar + 1), juce::Rectangle<float> (x + 3.0f, (float) ruler.getY(), 30.0f, 11.0f), juce::Justification::left, false);
+            }
+        }
+        g.setColour (juce::Colours::black.withAlpha (0.5f));
+        g.fillRect (ruler.withTop (ruler.getBottom() - 1));
+    }
+
     if (! ready)
     {
         g.setColour (theme::dimText);
@@ -413,6 +600,14 @@ void PitchEditor::paint (juce::Graphics& g)
                     juce::Justification::centredLeft, false);
     }
 
+    // The playhead
+    if (shownPlayhead >= 0.0 && shownPlayhead <= sourceLength)
+    {
+        const auto x = timeToX (shownPlayhead);
+        g.setColour (juce::Colours::white.withAlpha (0.9f));
+        g.fillRect (x, (float) rulerArea().getY(), 1.0f, (float) (area.getBottom() - rulerArea().getY()));
+    }
+
     if (rubberBanding && ! rubberBand.isEmpty())
     {
         g.setColour (theme::accent.withAlpha (0.15f));
@@ -441,6 +636,13 @@ void PitchEditor::resized()
 void PitchEditor::mouseDown (const juce::MouseEvent& e)
 {
     grabKeyboardFocus();
+    if (rulerArea().contains (e.getPosition()))
+    {
+        // The ruler: the playhead here (as in Logic)
+        if (setPlayheadSeconds)
+            setPlayheadSeconds ((double) region[ids::start] + juce::jlimit (0.0, sourceLength, xToTime ((float) e.x)));
+        return;
+    }
     if (! ready || ! rollArea().contains (e.getPosition()))
         return;
     const auto note = noteAt (e.position);
@@ -496,6 +698,7 @@ void PitchEditor::mouseDrag (const juce::MouseEvent& e)
     const auto from = n.centre + edits[(size_t) dragNote].shift;
     dragShift = e.mods.isAltDown() ? std::round (semitones * 100.0) / 100.0
                                    : std::round (from + semitones) - from;
+    liveDirty = true;   // (heard where it's going, on the next tick)
     repaint();
 }
 
@@ -547,12 +750,22 @@ void PitchEditor::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWh
         const auto delta = (std::abs (wheel.deltaX) > std::abs (wheel.deltaY) ? -wheel.deltaX : -wheel.deltaY) * visible * 0.3;
         scroll = juce::jlimit (0.0, juce::jmax (0.0, sourceLength - visible), scroll + delta);
     }
+    else if (e.mods.isAltDown())
+    {
+        // Taller or shorter rows, round the pitch under the mouse
+        const auto anchor = yToMidi (e.position.y);
+        const auto span = juce::jlimit (8.0, 60.0, (highMidi - lowMidi) * (wheel.deltaY > 0 ? 0.85 : 1.18));
+        const auto t = (anchor - lowMidi) / (highMidi - lowMidi);
+        lowMidi = juce::jlimit (0.0, 127.0 - span, anchor - t * span);
+        highMidi = lowMidi + span;
+    }
     else
     {
+        // Up and down through the notes
         const auto step = (wheel.deltaY > 0 ? 1.0 : -1.0);
-        lowMidi = juce::jlimit (12.0, 110.0, lowMidi + step);
-        highMidi = lowMidi + juce::jmax (12.0, highMidi - lowMidi + 0.0);
-        highMidi = juce::jmin (127.0, highMidi);
+        const auto span = highMidi - lowMidi;
+        lowMidi = juce::jlimit (0.0, 127.0 - span, lowMidi + step);
+        highMidi = lowMidi + span;
     }
     repaint();
 }

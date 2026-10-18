@@ -487,7 +487,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     timeline.addChangeListener (this);
 
     addChildComponent (paneDivider);
-    paneDivider.onStart = [this] { paneHeightAtDragStart = editorInPane() ? pianoRoll.getHeight() : mixer.getHeight(); };
+    paneDivider.onStart = [this] { paneHeightAtDragStart = editorInPane() ? paneEditor().getHeight() : mixer.getHeight(); };
     paneDivider.onDrag = [this] (int dy)
     {
         (editorInPane() ? editorPaneHeight : mixerPaneHeight) = juce::jmax (150, paneHeightAtDragStart - dy);
@@ -655,6 +655,12 @@ MainComponent::MainComponent (bool openAudioDevice)
     };
     canvas.onOpenAudioEditor = [this] (juce::ValueTree region)
     {
+        // In the editor pane under the tracks, as Logic's Audio Track Editor (Option: in a window of its own)
+        if (! juce::ModifierKeys::getCurrentModifiers().isAltDown())
+        {
+            openAudioEditor (region);
+            return;
+        }
         const auto id = "audio:" + region[ids::id].toString();
         if (auto it = editorWindows.find (id); it != editorWindows.end())
         {
@@ -1120,7 +1126,7 @@ void MainComponent::resized()
     if (editorInPane())
     {
         const auto h = editorPaneHeight > 0 ? editorPaneHeight : juce::jlimit (200, 360, getHeight() / 3);
-        pianoRoll.setBounds (area.removeFromBottom (juce::jlimit (150, juce::jmax (150, area.getHeight() - 120), h)));
+        paneEditor().setBounds (area.removeFromBottom (juce::jlimit (150, juce::jmax (150, area.getHeight() - 120), h)));
         paneDivider.setBounds (area.removeFromBottom (6));
     }
     else if (mixerInPane())
@@ -1228,6 +1234,7 @@ void MainComponent::setProject (juce::ValueTree newProject, const juce::File& fi
         finishRecording();
 
     closePianoRoll();
+    closeAudioEditor();
     editorWindows.clear();
     if (notepadPanel != nullptr)
         notepadPanel->setProject (newProject);
@@ -2640,8 +2647,49 @@ void MainComponent::updateLiveMidiTrack()
     player.setLiveMidiTrack (target);
 }
 
+void MainComponent::openAudioEditor (juce::ValueTree region)
+{
+    timeline.selectedRegionId = region[ids::id].toString();
+    timeline.selectedTrackId = region.getParent()[ids::id].toString();
+    timeline.changed();
+
+    const bool flexPitch = audioPane != nullptr ? audioPane->showsFlexPitch() : lastAudioPaneFlexPitch;
+    if (audioPane != nullptr && audioPane->getRegion() == region && audioPane->isVisible())
+        return;
+    if (editorWindow == nullptr && pianoRoll.isVisible())
+    {
+        pianoRoll.setRegion ({});
+        pianoRoll.setVisible (false);
+    }
+    if (mixerWindow == nullptr)
+        mixer.setVisible (false);
+
+    audioPane = std::make_unique<AudioEditorPanel> (region, undoManager, engine.getFormatManager(), recordingFolder().getChildFile ("Edits"));
+    audioPane->liveCache = &fileCache;
+    audioPane->playheadSeconds = [this] { return engine.getPlayheadSeconds(); };
+    audioPane->setPlayheadSeconds = [this] (double t) { engine.setPlayheadSeconds (juce::jmax (0.0, t)); };
+    audioPane->isPlaying = [this] { return engine.isPlaying(); };
+    addAndMakeVisible (*audioPane);
+    if (flexPitch)
+        audioPane->showFlexPitch (true);
+    resized();
+    commandManager.commandStatusChanged();
+}
+
+void MainComponent::closeAudioEditor()
+{
+    if (audioPane == nullptr)
+        return;
+    lastAudioPaneFlexPitch = audioPane->showsFlexPitch();
+    audioPane.reset();
+    resized();
+    canvas.grabKeyboardFocus();
+    commandManager.commandStatusChanged();
+}
+
 void MainComponent::openPianoRoll (juce::ValueTree region)
 {
+    closeAudioEditor();
     timeline.selectedRegionId = region[ids::id].toString();
     timeline.selectedTrackId = region.getParent()[ids::id].toString();
     timeline.changed();
@@ -2852,6 +2900,7 @@ void MainComponent::showMixer()
     }
     if (editorWindow == nullptr)
         closePianoRoll();
+    closeAudioEditor();
     mixer.setVisible (true);
     resized();
     commandManager.commandStatusChanged();

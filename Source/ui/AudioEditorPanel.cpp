@@ -198,6 +198,10 @@ void AudioEditorPanel::showPitchEditor (bool show)
     if (show && pitchEditor == nullptr)
     {
         pitchEditor = std::make_unique<PitchEditor> (region, undoManager, formats, editsFolder);
+        pitchEditor->setAudioCache (liveCache);
+        pitchEditor->playheadSeconds = playheadSeconds;
+        pitchEditor->setPlayheadSeconds = setPlayheadSeconds;
+        pitchEditor->isPlaying = isPlaying;
         pitchEditor->songScale = [r = region]
         {
             // The song's key where the region starts
@@ -413,13 +417,16 @@ void AudioEditorPanel::paint (juce::Graphics& g)
 
 void AudioEditorPanel::resized()
 {
-    auto r = getLocalBounds().reduced (10);
-    auto bottom = r.removeFromBottom (60);
-    info.setBounds (bottom.removeFromBottom (24));
+    const bool pitch = pitchEditor != nullptr && pitchEditor->isVisible();
+    auto r = getLocalBounds().reduced (pitch ? 4 : 10);
+    auto bottom = r.removeFromBottom (pitch ? 32 : 60);
+    info.setVisible (! pitch);   // (the pitch editor has its own hints: its notes get the room)
+    if (! pitch)
+        info.setBounds (bottom.removeFromBottom (24));
     auto row = bottom.removeFromTop (30);
     flexPitchButton.setBounds (row.removeFromRight (90).reduced (2, 0));
-    if (pitchEditor != nullptr)
-        pitchEditor->setBounds (waveArea());
+    if (pitch)
+        pitchEditor->setBounds (r.withTrimmedBottom (2));
     flexTimeButton.setBounds (row.removeFromRight (90).reduced (2, 0));
     const auto w = row.getWidth() / juce::jmax (1, buttons.size());
     for (auto* b : buttons)

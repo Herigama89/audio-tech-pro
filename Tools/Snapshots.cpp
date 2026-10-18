@@ -290,6 +290,25 @@ public:
                 }
                 pump (main, 50);
                 save (pitch, "pitch-editor.png");
+
+                // Docked under the tracks (Logic's Audio Track Editor), the transport above, a change made live
+                main.openAudioEditor (take);
+                main.audioPane->showFlexPitch (true);
+                if (auto* docked = main.audioPane->pitchEditor.get())
+                {
+                    docked->analyseNow();
+                    if (docked->analysis.notes.size() >= 4)
+                    {
+                        docked->edits[3].shift = -1.0;
+                        docked->commit ("Snapshot live");
+                        std::cout << "live pitch file: " << juce::File (take[ids::file].toString()).getFileName()
+                                  << " in memory: " << (int) (docked->live != nullptr) << std::endl;
+                    }
+                }
+                main.engine.setPlayheadSeconds (1.5);
+                pump (main, 120);
+                save (main, "pitch-editor-docked.png");
+                main.closeAudioEditor();
                 main.project.removeChild (vocal, nullptr);
             }
 

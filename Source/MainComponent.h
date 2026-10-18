@@ -12,6 +12,7 @@
 #include "ui/ArrangeCanvas.h"
 #include "ui/LevelMeter.h"
 #include "ui/PianoRoll.h"
+#include "ui/AudioEditorPanel.h"
 #include "ui/InstrumentWindows.h"
 #include "ui/Mixer.h"
 #include "ui/Inspector.h"
@@ -405,6 +406,12 @@ private:
     juce::ScrollBar hScroll { false }, vScroll { true };
     LevelMeter inputMeter { "IN" }, outputMeter { "OUT" };
     PianoRoll pianoRoll { undoManager, engine };
+    std::unique_ptr<AudioEditorPanel> audioPane;   // an audio region in the editor pane (Logic's Audio Track Editor, with Flex Pitch)
+    void openAudioEditor (juce::ValueTree region);
+    void closeAudioEditor();
+    bool lastAudioPaneFlexPitch = true;   // (the pane opens as it was left: Flex Pitch on or off)
+    bool audioInPane() const { return audioPane != nullptr && audioPane->isVisible(); }
+    juce::Component& paneEditor() { return audioInPane() ? static_cast<juce::Component&> (*audioPane) : pianoRoll; }
     MixerPanel mixer { undoManager, engine, player, effectRack };
 
     /** The mixer or the editor in a window of its own (Logic's Mixer and Piano Roll windows): resizable, anywhere. */
@@ -420,7 +427,7 @@ private:
     void openEditorWindow();
     void dockEditor();
     bool mixerInPane() const   { return mixer.isVisible() && mixerWindow == nullptr; }
-    bool editorInPane() const  { return pianoRoll.isVisible() && editorWindow == nullptr; }
+    bool editorInPane() const  { return (pianoRoll.isVisible() && editorWindow == nullptr) || audioInPane(); }
 
     /** The bar between the tracks and the editor or mixer below: drag it to resize them. */
     struct PaneDivider final : juce::Component
