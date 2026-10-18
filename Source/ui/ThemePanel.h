@@ -79,6 +79,7 @@ private:
 
     // The fader caps, knobs, channel keys and bus compressor meter, whatever the skin
     juce::ComboBox faderBox, knobBox, buttonBox, meterBox;
+    juce::ToggleButton stripVuButton { "VU meters on the mixer strips" };
 
     // Your presets, kept in the settings file
     juce::PropertiesFile* store = nullptr;

@@ -172,6 +172,10 @@ juce_add_binary_data(AudioTechProData
                 Resources/skin/looks/look_btn_round.png
                 Resources/skin/looks/look_vu_black.png
                 Resources/skin/looks/look_vu_cream.png
+                Resources/skin/looks/look_vu_amber.png
+                Resources/skin/looks/look_cap_dark.png
+                Resources/skin/looks/look_knob_dark.png
+                Resources/skin/looks/look_btn_dark.png
                 Resources/skin/white/white_fader_cap.png
                 Resources/skin/white/white_fader_cap_black.png
                 Resources/skin/white/white_fader_rail.png

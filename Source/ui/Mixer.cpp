@@ -2,6 +2,7 @@
 #include "InsertBar.h"
 #include "Skin.h"
 #include "RoutingMenu.h"
+#include "Looks.h"
 #include "ControlMenu.h"
 #include "Theme.h"
 #include "../model/Project.h"
@@ -1365,7 +1366,8 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
 juce::Rectangle<int> ChannelStrip::faderArea() const
 {
     // Below the sends, above the level display and the name plate.
-    const auto top = topSection() + 6 + 2 * ioRow + insertRows() * insertRowHeight + 6 + sendRows() * sendRowHeight + ioRow + 4 + automationRow;
+    const auto top = topSection() + 6 + 2 * ioRow + insertRows() * insertRowHeight + 6 + sendRows() * sendRowHeight + ioRow + 4 + automationRow
+                   + (theme::stripVu() && ! isVca() ? vuBand : 0);
     return { 0, top, getWidth(), getHeight() - nameHeight - 22 - top };
 }
 
@@ -1418,6 +1420,10 @@ void ChannelStrip::paint (juce::Graphics& g)
         g.setColour (model::trackColour (track).withAlpha (theme::trackColouring() == 2 ? 0.42f : 0.2f));
         g.fillRect (bounds.withTrimmedRight (1));
     }
+
+    // Themes > Strip VU meters: the amber VU at the top
+    if (! vuArea.isEmpty())
+        looks::drawLevelVu (g, vuArea.toFloat(), vuNeedle);
 
     // Without the console section: the channel number, and the pan value beside its knob.
     if (! console)
@@ -1760,6 +1766,12 @@ void ChannelStrip::resized()
     }
 
     auto area = getLocalBounds().reduced (3, 0).withTrimmedTop (topSection() + 4);
+    vuArea = {};
+    if (theme::stripVu() && ! isVca())
+    {
+        vuArea = area.removeFromTop (vuBand - 4).reduced (0, 1);
+        area.removeFromTop (4);
+    }
 
     settingSlot.setBounds (area.removeFromTop (15));
     area.removeFromTop (2);

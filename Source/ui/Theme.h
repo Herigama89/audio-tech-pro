@@ -138,6 +138,8 @@ namespace riff::theme
         int trackColouring = 0;
         // The grid: 0 lines, 1 shaded bars, 2 bars only, 3 dotted, 4 shaded beats (FL Studio), 5 none.
         int gridStyle = 0;
+        // A VU meter at the top of each mixer strip (the Dark VU theme's amber meter)
+        bool stripVu = false;
 
         // The edit windows (tracks area and editors): your own colours (ARGB), 0: the skin's.
         juce::uint32 editBack = 0, gridBarColour = 0, gridBeatColour = 0, rollBack = 0;
@@ -179,6 +181,8 @@ namespace riff::theme
 
     /** Themes > Tracks: how much of a track's header (and mixer strip) takes the track's colour. 0 tab, 1 tinted, 2 filled */
     int trackColouring();
+    /** Themes > Strip VU meters: an amber VU meter at the top of each mixer strip */
+    bool stripVu();
     /** A track's header or strip face in its colour (as Themes > Tracks says), and ink that reads on it */
     juce::Colour trackFace (juce::Colour face, juce::Colour trackColour);
     juce::Colour inkOn (juce::Colour face, juce::Colour normalInk);

@@ -118,6 +118,13 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
         changed();
     };
     addAndMakeVisible (meterBox);
+    stripVuButton.setTooltip ("An amber VU meter at the top of each mixer strip (0 VU at -18 dBFS), as in the Dark VU theme");
+    stripVuButton.onClick = [this]
+    {
+        settings.stripVu = stripVuButton.getToggleState();
+        changed();
+    };
+    addAndMakeVisible (stripVuButton);
 
     const auto percent = [] (double v) { return (v > 0.005 ? "+" : "") + juce::String (juce::roundToInt (v * 100.0)) + "%"; };
     addRow ("Hue", -180.0, 180.0, 1.0, [] (const theme::Settings& s) { return (double) s.hue; },
@@ -156,6 +163,23 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
         { "Xenon",         { theme::Skin::xenon, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f } },
         { "Pro Tools",     { theme::Skin::protools, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f } },
         { "Ableton",       { theme::Skin::ableton, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f } },
+        { "Dark VU",       [] {
+              // From your mixer picture: dark grey strips, its fader caps, knobs, square keys, green meters and amber VUs
+              theme::Settings s;
+              s.skin = theme::Skin::flat;
+              s.saturation = 0.15f;
+              s.lightness = -0.12f;
+              s.accentHue = 157.0f;
+              s.meterLow = 0xff2bc98fu;
+              s.meterMid = 0xffd8c24au;
+              s.meterPeak = 0xffe0473au;
+              s.faderStyle = 8;
+              s.knobStyle = 7;
+              s.buttonStyle = 4;
+              s.meterStyle = 3;
+              s.stripVu = true;
+              return s;
+          }() },
     };
     for (const auto& p : list)
     {
@@ -339,7 +363,7 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
     }
 
     refreshControls();
-    setSize (460, 120 + (int) rows.size() * 34 + 110 + 40 + 68 + 34 + 30 + 34 + 34 + 34 + 34 - 20 + 34 + 68 + (store != nullptr ? 36 : 0));
+    setSize (460, 120 + (int) rows.size() * 34 + 110 + 40 + 68 + 34 + 30 + 34 + 34 + 34 + 34 - 20 + 34 + 68 + 32 + (store != nullptr ? 36 : 0));
 }
 
 void ThemePanel::chooseMeterColour (int which)
@@ -494,6 +518,7 @@ void ThemePanel::refreshControls()
     knobBox.setSelectedItemIndex (settings.knobStyle + 1, juce::dontSendNotification);
     buttonBox.setSelectedItemIndex (settings.buttonStyle + 1, juce::dontSendNotification);
     meterBox.setSelectedItemIndex (settings.meterStyle + 1, juce::dontSendNotification);
+    stripVuButton.setToggleState (settings.stripVu, juce::dontSendNotification);
     refreshReaperThemes();
     waveModeBox.setSelectedItemIndex (settings.waveMode + 1, juce::dontSendNotification);
     regionBox.setSelectedItemIndex (settings.glassRegions + 1, juce::dontSendNotification);
@@ -531,6 +556,7 @@ void ThemePanel::editScope (int scope)
     else
         settings = whole;
     sameButton.setVisible (scope != 0);
+    stripVuButton.setVisible (scope == 0);
     for (auto* box : { &faderBox, &knobBox, &buttonBox, &meterBox })
         box->setVisible (scope == 0);   // (faders, knobs, keys and the meter are the mixer's)
     refreshControls();
@@ -712,6 +738,8 @@ void ThemePanel::resized()
     y += 32;
     buttonBox.setBounds (112, y, half, 26);
     meterBox.setBounds (112 + half + 4, y, half, 26);
+    y += 32;
+    stripVuButton.setBounds (110, y, getWidth() - 126, 24);
 
     if (store != nullptr)
     {

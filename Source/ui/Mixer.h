@@ -31,7 +31,23 @@ public:
     ChannelStrip (MixerPanel& owner, juce::ValueTree project, juce::ValueTree track);
 
     void refresh();
-    void pushLevels (float left, float right) { meter.push (left, right); }
+    void pushLevels (float left, float right)
+    {
+        meter.push (left, right);
+        if (! vuArea.isEmpty())
+        {
+            // The VU: 0 VU at -18 dBFS, with a needle's sluggish rise and fall
+            const auto vu = juce::jlimit (-22.0f, 4.0f, juce::Decibels::gainToDecibels (juce::jmax (left, right), -100.0f) + 18.0f);
+            const auto next = vuNeedle + (vu - vuNeedle) * (vu > vuNeedle ? 0.28f : 0.12f);
+            if (std::abs (next - vuNeedle) > 0.02f)
+            {
+                vuNeedle = next;
+                repaint (vuArea);
+            }
+        }
+    }
+    juce::Rectangle<int> vuArea;   // (empty when the strips have no VU)
+    float vuNeedle = -22.0f;
 
     /** The channel's gain reduction (its dynamics and compressors), shown on an amber LED column by the meter. */
     void pushGainReduction (float db);
@@ -72,10 +88,11 @@ public:
     static constexpr int nameHeight = 26;
     static constexpr int automationRow = 18;
     static constexpr int ioRow = 17;   // the Input slot (above the inserts) and the Output slot (below the sends)
-    static constexpr int minimumHeightFor (bool console, int inserts, int sends)
+    static constexpr int vuBand = 38;   // Themes > Strip VU meters: the amber VU at the top of each strip
+    static int minimumHeightFor (bool console, int inserts, int sends)
     {
         return (console ? topHeight : compactTopHeight) + 6 + 2 * ioRow + inserts * insertRowHeight + 6 + sends * sendRowHeight
-             + ioRow + automationRow + 100 + 20 + nameHeight;
+             + ioRow + automationRow + 100 + 20 + nameHeight + (theme::stripVu() ? vuBand : 0);
     }
 
     /** Without the console section (EQ and Dynamics hidden, as in Logic): number, EQ/DYN tags, pan, mute and solo. */

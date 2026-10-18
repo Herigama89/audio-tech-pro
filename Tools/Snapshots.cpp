@@ -935,6 +935,39 @@ public:
                 main.applyTheme ({});
             }
             {
+                // The Dark VU theme (from the mixer picture): its caps, knobs, keys, green meters and a VU on each strip
+                theme::Settings dark;
+                dark.skin = theme::Skin::flat;
+                dark.saturation = 0.15f;
+                dark.lightness = -0.12f;
+                dark.accentHue = 157.0f;
+                dark.meterLow = 0xff2bc98fu;
+                dark.meterMid = 0xffd8c24au;
+                dark.meterPeak = 0xffe0473au;
+                dark.faderStyle = 8;
+                dark.knobStyle = 7;
+                dark.buttonStyle = 4;
+                dark.meterStyle = 3;
+                dark.stripVu = true;
+                main.applyTheme (dark);
+                main.showMixer();
+                main.mixer.relayoutStrips();
+                for (int i = 0; i < 12; ++i)
+                {
+                    for (auto* strip : main.mixer.strips)
+                        strip->pushLevels (0.12f + 0.02f * (float) (i % 3), 0.1f);
+                    pump (main, 30);
+                }
+                save (main, "dark-vu-mixer.png");
+                main.mixer.getConsolePanel().showFaceForTesting = true;
+                main.mixer.getConsolePanel().setBounds (0, 0, 600, 300);
+                save (main.mixer.getConsolePanel(), "dark-vu-buscomp.png");
+                main.mixer.getConsolePanel().showFaceForTesting = false;
+                main.closeMixer();
+                main.applyTheme ({});
+                main.mixer.relayoutStrips();
+            }
+            {
                 // Tracks filled with their colours, shaded bars, your own text colour; then tinted with a dotted grid
                 theme::Settings filled;
                 filled.trackColouring = 2;

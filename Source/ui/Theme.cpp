@@ -516,6 +516,7 @@ void applyColours (const Settings& s)
 const Settings& current() { return settingsNow(); }
 
 int trackColouring() { return settingsNow().trackColouring; }
+bool stripVu() { return settingsNow().stripVu; }
 
 juce::Colour trackFace (juce::Colour face, juce::Colour trackColour)
 {
@@ -637,7 +638,7 @@ juce::String Settings::toString() const
                                juce::URL::addEscapeChars (editorTheme, false),
                                juce::URL::addEscapeChars (toolbarTheme, false), juce::URL::addEscapeChars (meterTheme, false),
                                juce::String::toHexString ((int) textColour), juce::String::toHexString ((int) stripTextColour),
-                               juce::String (trackColouring), juce::String (gridStyle) }.joinIntoString (";");
+                               juce::String (trackColouring), juce::String (gridStyle), juce::String (stripVu ? 1 : 0) }.joinIntoString (";");
 }
 
 Settings Settings::fromString (const juce::String& text)
@@ -676,7 +677,7 @@ Settings Settings::fromString (const juce::String& text)
     if (v.size() >= 20)
     {
         s.themePack = juce::URL::removeEscapeChars (v[18]);
-        s.faderStyle = juce::jlimit (-1, 7, v[19].getIntValue());
+        s.faderStyle = juce::jlimit (-1, 8, v[19].getIntValue());
     }
     if (v.size() >= 24)
     {
@@ -687,9 +688,9 @@ Settings Settings::fromString (const juce::String& text)
     }
     if (v.size() >= 27)
     {
-        s.knobStyle = juce::jlimit (-1, 6, v[24].getIntValue());
-        s.buttonStyle = juce::jlimit (-1, 3, v[25].getIntValue());
-        s.meterStyle = juce::jlimit (-1, 2, v[26].getIntValue());
+        s.knobStyle = juce::jlimit (-1, 7, v[24].getIntValue());
+        s.buttonStyle = juce::jlimit (-1, 4, v[25].getIntValue());
+        s.meterStyle = juce::jlimit (-1, 3, v[26].getIntValue());
     }
     if (v.size() >= 28)
         s.editorTheme = juce::URL::removeEscapeChars (v[27]);
@@ -705,6 +706,8 @@ Settings Settings::fromString (const juce::String& text)
         s.trackColouring = juce::jlimit (0, 2, v[32].getIntValue());
         s.gridStyle = juce::jlimit (0, 5, v[33].getIntValue());
     }
+    if (v.size() >= 35)
+        s.stripVu = v[34].getIntValue() != 0;
     return s;
 }
 

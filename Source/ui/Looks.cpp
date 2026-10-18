@@ -24,6 +24,10 @@ namespace
     RIFF_LOOK_IMAGE (buttonRound,   look_btn_round_png)
     RIFF_LOOK_IMAGE (meterBlack,    look_vu_black_png)
     RIFF_LOOK_IMAGE (meterCream,    look_vu_cream_png)
+    RIFF_LOOK_IMAGE (meterAmber,    look_vu_amber_png)   // the Dark VU theme's pieces
+    RIFF_LOOK_IMAGE (capDark,       look_cap_dark_png)
+    RIFF_LOOK_IMAGE (knobDark,      look_knob_dark_png)
+    RIFF_LOOK_IMAGE (buttonDark,    look_btn_dark_png)
     #undef RIFF_LOOK_IMAGE
 
     juce::Image capFor (int style)
@@ -34,6 +38,7 @@ namespace
             case 5: return capBlack();
             case 6: return capBlackRed();
             case 7: return capSilver();
+            case 8: return capDark();
             default: return {};
         }
     }
@@ -46,6 +51,7 @@ namespace
             case 2: return knobBlackGold();
             case 3: return knobYellow();
             case 4: return knobRed();
+            case 7: return knobDark();
             default: return {};
         }
     }
@@ -54,7 +60,7 @@ namespace
     juce::Image keyIn (int style, bool on, juce::Colour colour)
     {
         static std::map<juce::String, juce::Image> cache;
-        const auto source = style == 1 ? buttonWhite() : style == 2 ? buttonGrey() : buttonRound();
+        const auto source = style == 1 ? buttonWhite() : style == 2 ? buttonGrey() : style == 4 ? buttonDark() : buttonRound();
         const auto key = juce::String (style) + (on ? colour.toString() : juce::String ("off"));
         if (auto it = cache.find (key); it != cache.end())
             return it->second;
@@ -69,7 +75,14 @@ namespace
                     const auto p = data.getPixelColour (x, y);
                     const auto l = p.getPerceivedBrightness();
                     juce::Colour c;
-                    if (style == 2)
+                    if (style == 4)
+                    {
+                        // The dark key: lit, its face fills with the colour (a little shaded, as the picture's FX key)
+                        c = on && p.getAlpha() > 200 && l > 0.07f
+                                ? p.interpolatedWith (colour.withMultipliedBrightness (0.62f + 0.9f * l), 0.82f)
+                                : p;
+                    }
+                    else if (style == 2)
                     {
                         // A grey cap: unlit as photographed; lit, its face takes the colour.
                         c = on ? p.interpolatedWith (colour.withBrightness (juce::jmin (1.0f, colour.getBrightness() * (0.55f + 0.6f * l))),
@@ -119,7 +132,24 @@ namespace
                                        { { 0.0f, deg (16.7f) }, { 1.0f, deg (10.9f) }, { 3.0f, deg (0.0f) }, { 5.0f, deg (-9.96f) },
                                          { 7.0f, deg (-18.85f) }, { 10.0f, deg (-24.3f) }, { 20.0f, deg (-32.6f) } },
                                        juce::Colour (0xff1b1a18) };
-        return style == 1 ? &black : style == 2 ? &cream : nullptr;
+        // The Dark VU theme's amber meter, read as reduction: 0 at its "0" (where the red starts), 20 at the far left.
+        static const MeterFace amber { meterAmber(), { 82.3f, 103.0f }, 88.0f, { 3.0f, 3.0f, 161.0f, 73.0f },
+                                       { { 0.0f, deg (15.5f) }, { 1.0f, deg (8.0f) }, { 2.0f, deg (1.5f) }, { 3.0f, deg (-5.5f) },
+                                         { 5.0f, deg (-15.5f) }, { 7.0f, deg (-23.0f) }, { 10.0f, deg (-32.0f) }, { 20.0f, deg (-45.5f) } },
+                                       juce::Colour (0xffeadfc4) };
+        return style == 1 ? &black : style == 2 ? &cream : style == 3 ? &amber : nullptr;
+    }
+
+    /** The same amber meter as a VU (its marks: -20, -10, -7, -5, -3, -2, -1, 0, +1, +2, +3) */
+    const MeterFace& levelVu()
+    {
+        auto deg = [] (float d) { return juce::degreesToRadians (d); };
+        static const MeterFace vu { meterAmber(), { 82.3f, 103.0f }, 88.0f, { 3.0f, 3.0f, 161.0f, 73.0f },
+                                    { { -20.0f, deg (-45.5f) }, { -10.0f, deg (-32.0f) }, { -7.0f, deg (-23.0f) }, { -5.0f, deg (-15.5f) },
+                                      { -3.0f, deg (-5.5f) }, { -2.0f, deg (1.5f) }, { -1.0f, deg (8.0f) }, { 0.0f, deg (15.5f) },
+                                      { 1.0f, deg (25.0f) }, { 2.0f, deg (34.5f) }, { 3.0f, deg (46.5f) } },
+                                    juce::Colour (0xffeadfc4) };
+        return vu;
     }
 
     float meterAngle (const MeterFace& m, float db)
@@ -139,23 +169,23 @@ namespace
 juce::StringArray faderNames()
 {
     return { "Skin's own", "Classic", "Studio White (photo cap)", "Xenon (glass cap)", "REAPER theme's",
-             "Black (photo)", "Black long-throw", "Black, red line", "Silver console" };
+             "Black (photo)", "Black long-throw", "Black, red line", "Silver console", "Dark VU (picture)" };
 }
 
 juce::StringArray knobNames()
 {
     return { "Skin's own", "Classic", "Black, white line", "Black, yellow pointer", "Yellow cap", "Red",
-             "Studio White (LED ring)", "Xenon (glass)" };
+             "Studio White (LED ring)", "Xenon (glass)", "Dark VU (picture)" };
 }
 
 juce::StringArray buttonNames()
 {
-    return { "Skin's own", "Classic", "Square backlit", "Square grey", "Round lamp" };
+    return { "Skin's own", "Classic", "Square backlit", "Square grey", "Round lamp", "Dark square (picture)" };
 }
 
 juce::StringArray meterNames()
 {
-    return { "Skin's own", "Classic", "Black compression meter", "Cream VU" };
+    return { "Skin's own", "Classic", "Black compression meter", "Cream VU", "Amber VU (picture)" };
 }
 
 float capWidthForHeight (float height)
@@ -247,7 +277,7 @@ bool drawKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion,
 bool drawButton (juce::Graphics& g, juce::Rectangle<float> area, bool on, juce::Colour onColour, bool over, bool down)
 {
     const auto style = theme::buttonStyle();
-    if (style < 1 || style > 3 || area.isEmpty())
+    if (style < 1 || style > 4 || area.isEmpty())
         return false;
 
     const auto image = keyIn (style, on, onColour);
@@ -290,17 +320,35 @@ juce::Colour buttonTextColour (bool on, juce::Colour onColour)
     return juce::Colour (0xffd9dcdf);
 }
 
+static bool drawFace (juce::Graphics& g, juce::Rectangle<float> area, const MeterFace& face, float value, bool keepProportion);
+
 bool drawMeter (juce::Graphics& g, juce::Rectangle<float> area, float reductionDb)
 {
     const auto* m = meterFor (theme::meterStyle());
     if (m == nullptr || ! m->image.isValid())
         return false;
+    return drawFace (g, area, *m, reductionDb, true);
+}
 
-    // The photo, kept in proportion, centred in the area.
+bool drawLevelVu (juce::Graphics& g, juce::Rectangle<float> area, float vu, bool stretch)
+{
+    return drawFace (g, area, levelVu(), vu, ! stretch);
+}
+
+static bool drawFace (juce::Graphics& g, juce::Rectangle<float> area, const MeterFace& face, float value, bool keepProportion)
+{
+    const auto* m = &face;
+    const auto reductionDb = value;
+    if (! m->image.isValid())
+        return false;
+
+    // The photo, kept in proportion, centred in the area (or filling it: a strip's VU is as wide as the strip).
     const auto iw = (float) m->image.getWidth(), ih = (float) m->image.getHeight();
-    const auto scale = juce::jmin (area.getWidth() / iw, area.getHeight() / ih);
-    const auto placed = juce::Rectangle<float> (iw * scale, ih * scale).withCentre (area.getCentre());
-    const auto toArea = [placed, scale] (juce::Point<float> p) { return placed.getPosition() + p * scale; };
+    const auto sx = keepProportion ? juce::jmin (area.getWidth() / iw, area.getHeight() / ih) : area.getWidth() / iw;
+    const auto sy = keepProportion ? sx : area.getHeight() / ih;
+    const auto scale = juce::jmin (sx, sy);
+    const auto placed = keepProportion ? juce::Rectangle<float> (iw * sx, ih * sy).withCentre (area.getCentre()) : area;
+    const auto toArea = [placed, sx, sy] (juce::Point<float> p) { return placed.getPosition() + juce::Point<float> (p.x * sx, p.y * sy); };
 
     juce::Graphics::ScopedSaveState state (g);
     g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
@@ -312,8 +360,7 @@ bool drawMeter (juce::Graphics& g, juce::Rectangle<float> area, float reductionD
     g.reduceClipRegion (window.toNearestInt());
     const auto pivot = toArea (m->pivot);
     const auto a = meterAngle (*m, reductionDb);
-    const auto length = m->length * scale;
-    const auto tip = juce::Point<float> (pivot.x + length * std::sin (a), pivot.y - length * std::cos (a));
+    const auto tip = toArea ({ m->pivot.x + m->length * std::sin (a), m->pivot.y - m->length * std::cos (a) });
     const auto width = juce::jmax (1.0f, 2.2f * scale * 2.0f);
     g.setColour (juce::Colours::black.withAlpha (0.25f));
     g.drawLine (juce::Line<float> (pivot.translated (3.0f * scale * 2.0f, 2.0f * scale * 2.0f), tip.translated (3.0f * scale * 2.0f, 2.0f * scale * 2.0f)), width);

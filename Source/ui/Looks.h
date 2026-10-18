@@ -41,4 +41,8 @@ namespace riff::looks
 
     /** The bus compressor's meter of the chosen kind (meterStyle 1..2), its needle at `reductionDb`. False: the skin's own. */
     bool drawMeter (juce::Graphics& g, juce::Rectangle<float> area, float reductionDb);
+
+    /** The Dark VU theme's amber VU meter showing a level in VU (0 VU = -18 dBFS; -20..+3), for the strips' VU meters.
+        `stretch`: fills the area (as wide as a strip), else kept in proportion. */
+    bool drawLevelVu (juce::Graphics& g, juce::Rectangle<float> area, float vu, bool stretch = true);
 }
