@@ -4,6 +4,7 @@
 #include "ui/Theme.h"
 #include "ui/StartupSplash.h"
 #include "AppInfo.h"
+#include "engine/PluginScanChild.h"
 #include <BinaryData.h>
 
 class RiffApplication final : public juce::JUCEApplication
@@ -11,10 +12,21 @@ class RiffApplication final : public juce::JUCEApplication
 public:
     const juce::String getApplicationName() override    { return JUCE_APPLICATION_NAME_STRING; }
     const juce::String getApplicationVersion() override { return JUCE_APPLICATION_VERSION_STRING; }
-    bool moreThanOneInstanceAllowed() override          { return false; }
+    bool moreThanOneInstanceAllowed() override          { return riff::pluginscan::isScanChild (getCommandLineParameterArray()); }
 
     void initialise (const juce::String&) override
     {
+        // Started by the app to check one plugin (so a plugin that crashes takes down only this copy)
+        if (const auto args = getCommandLineParameterArray(); riff::pluginscan::isScanChild (args))
+        {
+           #if JUCE_MAC
+            juce::Process::setDockIconVisible (false);
+           #endif
+            setApplicationReturnValue (riff::pluginscan::runScanChild (args));
+            quit();
+            return;
+        }
+
         // The skin and colours chosen in View > Theme, before anything is built in them.
         {
             juce::PropertiesFile::Options options;

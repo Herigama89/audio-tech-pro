@@ -58,6 +58,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/ptformat)
 set_source_files_properties(ThirdParty/ptformat/ptformat.cc PROPERTIES COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/w;/UDEBUG,-w;-UDEBUG>")
 
 set(RIFF_CORE_SOURCES
+    Source/engine/PluginScanChild.cpp
     Source/import/ProjectImport.cpp
     Source/import/ReadAbleton.cpp
     Source/import/ReadDawProject.cpp

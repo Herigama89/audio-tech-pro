@@ -2,6 +2,7 @@
 #include "../model/Project.h"
 #include "BuiltInInstruments.h"
 #include "ClapFormat.h"
+#include "PluginScanChild.h"
 
 namespace riff
 {
@@ -11,6 +12,7 @@ InstrumentRack::InstrumentRack()
     juce::addDefaultFormatsToManager (formatManager); // VST3, plus Audio Units on macOS
     formatManager.addFormat (std::make_unique<ClapPluginFormat>());
     sampleFormats.registerBasicFormats();
+    knownPlugins.setCustomScanner (std::make_unique<pluginscan::OutOfProcessScanner>());   // (a crashing plugin can't take the app down)
 }
 
 BuiltInSynth::Settings InstrumentRack::synthSettingsFrom (const juce::ValueTree& track)
