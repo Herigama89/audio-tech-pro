@@ -1,0 +1,28 @@
+#!/bin/sh
+# Audio Tech Pro uninstaller: runs (as the administrator) when "Uninstall Audio Tech Pro.pkg" is opened.
+# Removes the app, its settings, autosaves and themes. Your music is kept: projects, recordings,
+# patches and templates (Music > Audio Tech Pro) and screen recordings (Movies > Audio Tech Pro).
+
+# Quit the app if it's open
+pkill -x "Audio Tech Pro" 2>/dev/null
+sleep 1
+
+# The app
+rm -rf "/Applications/Audio Tech Pro.app"
+
+# Settings, autosaves and themes, for every user on this Mac
+for home in /Users/*; do
+    [ -d "$home/Library" ] || continue
+    rm -f  "$home/Library/Application Support/Audio Tech Pro.settings" \
+           "$home/Library/Application Support/Riff.settings"
+    rm -rf "$home/Library/Application Support/Audio Tech Pro" \
+           "$home/Library/Audio Tech Pro" \
+           "$home/Library/Caches/com.audiotechpro.app" \
+           "$home/Library/Saved Application State/com.audiotechpro.app.savedState"
+    rm -f  "$home/Library/Preferences/com.audiotechpro.app.plist"
+done
+
+# macOS's record that it was installed (and this uninstaller's own)
+pkgutil --forget com.audiotechpro.app.pkg >/dev/null 2>&1
+pkgutil --forget com.audiotechpro.uninstall.pkg >/dev/null 2>&1
+exit 0

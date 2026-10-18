@@ -62,3 +62,6 @@ productbuild --distribution "$WORK/distribution.xml" --resources "$WORK/resource
 rm -rf "$WORK"
 echo ""
 echo "Made: $OUT"
+
+# And the uninstaller beside it
+sh scripts/make-mac-uninstaller.sh
