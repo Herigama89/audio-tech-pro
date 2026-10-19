@@ -47,7 +47,11 @@ TEST_CASE ("CLAP plugins are found in a .clap file", "[clap]")
 
     // The folder scan finds it too.
     const auto folder = juce::File (TEST_CLAP_PATH).getParentDirectory();
-    CHECK (format.searchPathsForPlugins (juce::FileSearchPath (folder.getFullPathName()), false).contains (TEST_CLAP_PATH));
+    // (compared as files: the build gives the path with forward slashes, Windows lists it with backslashes)
+    bool listed = false;
+    for (const auto& path : format.searchPathsForPlugins (juce::FileSearchPath (folder.getFullPathName()), false))
+        listed = listed || juce::File (path) == juce::File (TEST_CLAP_PATH);
+    CHECK (listed);
 
     // And the app's plugin list knows the format.
     InstrumentRack rack;

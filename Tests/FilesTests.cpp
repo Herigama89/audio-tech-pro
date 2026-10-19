@@ -18,7 +18,7 @@ namespace
 TEST_CASE ("Autosave places", "[files]")
 {
     const auto project = juce::File ("/Users/me/Music/Song/Song.atp");
-    CHECK (model::files::autosaveFileFor (project, "Song", "abc").getFullPathName() == "/Users/me/Music/Song/Autosave/Song.atp");
+    CHECK (model::files::autosaveFileFor (project, "Song", "abc") == project.getParentDirectory().getChildFile ("Autosave").getChildFile ("Song.atp"));
     const auto untitled = model::files::autosaveFileFor ({}, "Untitled", "abc");
     CHECK (untitled.getParentDirectory() == model::files::untitledAutosaveFolder());
     CHECK (untitled.getFileName() == "Untitled abc.atp");
