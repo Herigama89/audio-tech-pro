@@ -57,8 +57,18 @@ jobs:
       - name: Build
         run: cmake --build build-windows --config Release --parallel
       - name: Test
-        run: build-windows\AudioTechProTests_artefacts\Release\AudioTechProTests.exe
-        shell: cmd
+        # (failures are listed in one annotation on the run's page, so they can be read without the log)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $out = & build-windows\AudioTechProTests_artefacts\Release\AudioTechProTests.exe --reporter compact 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          $out | Write-Output
+          if ($code -ne 0) {
+            $failed = ($out -split "`r?`n" | Where-Object { $_ -match 'failed|FAILED|error' } | Select-Object -First 120) -join '%0A'
+            Write-Output "::error title=Windows test failures::$failed"
+            exit $code
+          }
       - name: Installer (Setup.exe)
         shell: pwsh
         run: |
