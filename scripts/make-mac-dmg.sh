@@ -13,7 +13,7 @@ APP="build-universal/AudioTechPro_artefacts/Release/${NAME}.app"
 
 # 1. The app, for both kinds of Mac (built again so it's up to date: quick when nothing changed)
 cmake -B build-universal -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DRIFF_BUILD_TESTS=OFF
+      -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DRIFF_BUILD_TESTS="${RIFF_BUILD_TESTS:-OFF}"
 cmake --build build-universal --config Release -j "$(sysctl -n hw.ncpu)"
 codesign --force --deep --sign - "$APP"
 
@@ -29,7 +29,7 @@ hdiutil create -volname "${NAME} ${VERSION}" -srcfolder "$WORK/stage" -fs HFS+ -
 # 3. The window as Logic's: big icons, the app on the left, Applications on the right
 DEVICE=$(hdiutil attach -readwrite -noverify -noautoopen "$WORK/rw.dmg" | awk '/Apple_HFS/ {print $1}')
 sleep 2
-osascript <<APPLESCRIPT || echo "(window layout skipped)"
+cat > "$WORK/layout.applescript" <<APPLESCRIPT
 tell application "Finder"
     tell disk "${NAME} ${VERSION}"
         open
@@ -48,6 +48,13 @@ tell application "Finder"
     end tell
 end tell
 APPLESCRIPT
+# (given a minute at most: on a computer with no one logged in, Finder may not answer)
+osascript "$WORK/layout.applescript" &
+LAYOUT=$!
+( sleep 60; kill $LAYOUT 2>/dev/null ) &
+WATCH=$!
+wait $LAYOUT || echo "(window layout skipped)"
+kill $WATCH 2>/dev/null || true
 sync
 hdiutil detach "$DEVICE" -quiet || hdiutil detach "$DEVICE" -force -quiet
 

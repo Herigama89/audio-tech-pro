@@ -81,7 +81,20 @@ On Windows the app uses WASAPI and DirectSound devices (choose the interface in 
 
 ### Both at once, on GitHub
 
-Put the `riff` folder in a GitHub repository and push: `.github/workflows/build.yml` builds and tests the universal Mac app and the Windows app on GitHub's machines, and attaches both to the run (Actions tab > the run > Artifacts).
+Put the `riff` folder in a GitHub repository and push: `.github/workflows/build.yml` builds and tests
+the app on GitHub's machines and makes the installers:
+
+- Mac: `Audio Tech Pro <version>.dmg`, `Audio Tech Pro <version>.pkg`, `Uninstall Audio Tech Pro.pkg`
+- Windows: `Audio Tech Pro <version> Setup.exe`
+
+They're attached to each run (Actions tab > the run > Artifacts). Push a tag like `v0.73.0` and they also
+go on the repository's Releases page.
+
+### Installers on your own computer
+
+- Mac: `sh scripts/make-mac-dmg.sh` (drag-to-Applications disk image), `sh scripts/make-mac-pkg.sh`
+  (installer and uninstaller), `sh scripts/make-mac-uninstaller.sh` (just the uninstaller)
+- Windows: `scripts\make-windows-installer.bat` (needs Inno Setup 6 as well)
 
 ### Linux (Debian/Ubuntu)
 

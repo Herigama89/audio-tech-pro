@@ -13,7 +13,7 @@ WORK="build-pkg"
 
 # 1. The app, for both kinds of Mac, in Release
 cmake -B build-universal -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DRIFF_BUILD_TESTS=OFF
+      -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DRIFF_BUILD_TESTS="${RIFF_BUILD_TESTS:-OFF}"
 cmake --build build-universal --config Release -j "$(sysctl -n hw.ncpu)"
 APP="build-universal/AudioTechPro_artefacts/Release/Audio Tech Pro.app"
 lipo -info "$APP/Contents/MacOS/Audio Tech Pro"
