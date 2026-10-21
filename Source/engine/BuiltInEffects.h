@@ -93,7 +93,7 @@ public:
     /** What its window's meter shows (a compressor's gain reduction in dB, a pitch correction's cents). */
     virtual float displayValue() const noexcept { return 0.0f; }
 
-    static constexpr int maxParams = 48;
+    static constexpr int maxParams = 64;
 
     //==============================================================================
     // The analyzer's feed: while a window shows the spectrum, the last few thousand output samples (mono)

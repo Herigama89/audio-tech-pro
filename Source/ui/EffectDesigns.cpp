@@ -292,22 +292,52 @@ namespace
     //==============================================================================
     // Studio Reverb (as ChromaVerb): a dark screen with the space's colour cloud, a light panel of knobs
     //==============================================================================
+    /** The reverb's damping as a decay ratio at a frequency (1: the Decay time; under 1 dies sooner). */
+    double reverbRatioAt (const EffectInfo& info, const float* v, double f)
+    {
+        Biquad b[4];
+        const auto rate = 48000.0;
+        const auto part = [&] (const char* id, float fallback) { return valueOf (info, v, id, fallback); };
+        const auto unit = [] (double r) { return 1.0 - 1.0 / juce::jlimit (0.1, 4.0, r); };
+        b[0].setLowShelf (rate, part ("dLsFreq", 200.0f), unit (part ("dLsRatio", 1.0f)), 0.7);
+        b[1].setPeak (rate, part ("dP1Freq", 600.0f), unit (part ("dP1Ratio", 1.0f)), part ("dP1Q", 0.7f));
+        b[2].setPeak (rate, part ("dP2Freq", 3000.0f), unit (part ("dP2Ratio", 1.0f)), part ("dP2Q", 0.7f));
+        b[3].setHighShelf (rate, part ("dHsFreq", 6000.0f), unit (part ("dHsRatio", 1.0f)), 0.7);
+        double sum = 0.0;
+        for (auto& q : b) sum += q.magnitudeDb (f, rate);
+        return juce::jlimit (0.1, 1.9, 1.0 / std::max (0.05, 1.0 - sum));
+    }
+
+    /** The reverb's output EQ in dB at a frequency. */
+    double reverbEqAt (const EffectInfo& info, const float* v, double f)
+    {
+        const auto rate = 48000.0;
+        const auto part = [&] (const char* id, float fallback) { return valueOf (info, v, id, fallback); };
+        const auto on = [&] (const char* id) { return part (id, 1.0f) > 0.5f; };
+        Biquad b[6];
+        if (on ("eqHpOn")) b[0].setHighPass (rate, std::max (20.0f, part ("lowCut", 20.0f)), 0.707); else b[0].setIdentity();
+        if (on ("eqLsOn")) b[1].setLowShelf (rate, part ("eqLsFreq", 150.0f), part ("eqLsGain", 0.0f)); else b[1].setIdentity();
+        if (on ("eqP1On")) b[2].setPeak (rate, part ("eqP1Freq", 500.0f), part ("eqP1Gain", 0.0f), part ("eqP1Q", 1.0f)); else b[2].setIdentity();
+        if (on ("eqP2On")) b[3].setPeak (rate, part ("eqP2Freq", 3000.0f), part ("eqP2Gain", 0.0f), part ("eqP2Q", 1.0f)); else b[3].setIdentity();
+        if (on ("eqHsOn")) b[4].setHighShelf (rate, part ("eqHsFreq", 8000.0f), part ("eqHsGain", 0.0f)); else b[4].setIdentity();
+        if (on ("eqLpOn")) b[5].setLowPass (rate, part ("highCut", 20000.0f), 0.707); else b[5].setIdentity();
+        double sum = 0.0;
+        for (auto& q : b) sum += q.magnitudeDb (f, rate);
+        return sum;
+    }
+
+    const juce::Colour reverbEqColours[] { juce::Colour (0xffff5c5c), juce::Colour (0xffff9a3c), juce::Colour (0xff3ddc6a),
+                                           juce::Colour (0xff4f9bff), juce::Colour (0xffb07bff), juce::Colour (0xffff7ad0) };
+
     void paintStudioReverb (juce::Graphics& g, R bounds, const EffectInfo& info, const float* v, float)
     {
-        const R screen (0, 0, bounds.getWidth(), 400);
+        const bool details = valueOf (info, v, "view") > 0.5f;
+        const R screen (0, 0, bounds.getWidth(), 420);
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xff26282c), 0.0f, 0.0f, juce::Colour (0xff17181b), 0.0f, (float) screen.getBottom(), false));
         g.fillRect (screen);
-        const RF plot (60.0f, 80.0f, (float) bounds.getWidth() - 120.0f, 270.0f);
-        g.setFont (juce::FontOptions (11.0f));
-        for (int k = 1; k <= 10; ++k)
-        {
-            const auto y = plot.getBottom() - plot.getHeight() * (float) k / 10.0f;
-            g.setColour (juce::Colours::white.withAlpha (0.05f));
-            g.fillRect (plot.getX(), y, plot.getWidth(), 1.0f);
-            g.setColour (juce::Colours::white.withAlpha (0.3f));
-            g.drawText (juce::String (k * 10) + "%", RF (plot.getX() - 46.0f, y - 7.0f, 40.0f, 14.0f), juce::Justification::right, false);
-        }
+        const RF plot (60.0f, 66.0f, (float) bounds.getWidth() - 120.0f, 236.0f);
         const auto xOf = [plot] (double f) { return plot.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * plot.getWidth(); };
+        g.setFont (juce::FontOptions (11.0f));
         for (const auto f : { 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0 })
         {
             g.setColour (juce::Colours::white.withAlpha (0.05f));
@@ -316,52 +346,80 @@ namespace
             g.drawText (f >= 1000.0 ? juce::String ((int) (f / 1000.0)) + "k" : juce::String ((int) f), RF (xOf (f) - 18.0f, plot.getBottom() + 4.0f, 36.0f, 14.0f),
                         juce::Justification::centred, false);
         }
+        g.setColour (juce::Colours::white.withAlpha (0.12f));
+        g.fillRect (plot.getX(), plot.getCentreY(), plot.getWidth(), 1.0f);
 
-        // The cloud: how long each frequency rings, as coloured points (bass red, highs violet)
-        const auto decay = juce::jlimit (0.1f, 20.0f, valueOf (info, v, "decay", 2.0f));
-        const auto damping = valueOf (info, v, "damping", 40.0f) * 0.01f;
-        const auto lowCut = valueOf (info, v, "lowCut", 100.0f), highCut = valueOf (info, v, "highCut", 9000.0f);
-        const auto size = valueOf (info, v, "size", 50.0f) * 0.01f;
-        juce::Random random (42);
-        const auto height = [&] (double f)
+        if (! details)
         {
-            auto h = 0.35f + 0.45f * std::min (1.0f, std::log (1.0f + decay) / std::log (21.0f)) + 0.15f * size;
-            h *= 1.0f - damping * 0.7f * (float) juce::jlimit (0.0, 1.0, std::log (f / 1000.0) / std::log (20.0));
-            if (f < lowCut) h *= (float) std::pow (f / lowCut, 1.5);
-            if (f > highCut) h *= (float) std::pow (highCut / f, 1.5);
-            return juce::jlimit (0.02f, 0.95f, h);
-        };
-        for (int i = 0; i < 7000; ++i)
-        {
-            const auto t = random.nextFloat();
-            const auto f = 20.0 * std::pow (1000.0, (double) t);
-            const auto top = height (f);
-            const auto y = std::pow (random.nextFloat(), 0.8f) * top;
-            const auto colour = juce::Colour::fromHSV (juce::jmap (t, 0.0f, 0.82f), 0.85f, 1.0f, 0.75f * (1.0f - y / std::max (0.05f, top)) + 0.2f);
-            g.setColour (colour);
-            g.fillEllipse (plot.getX() + t * plot.getWidth(), plot.getBottom() - y * plot.getHeight(), 2.0f, 2.0f);
+            // The cloud: how long each frequency rings (its decay ratio), as coloured points, bass red to highs violet
+            const auto decay = juce::jlimit (0.1f, 20.0f, valueOf (info, v, "decay", 2.0f));
+            const auto size = valueOf (info, v, "size", 50.0f) * 0.01f;
+            const auto level = 0.3f + 0.35f * std::min (1.0f, std::log (1.0f + decay) / std::log (21.0f)) + 0.1f * size;
+            juce::Random random (42);
+            for (int i = 0; i < 6000; ++i)
+            {
+                const auto t = random.nextFloat();
+                const auto f = 20.0 * std::pow (1000.0, (double) t);
+                const auto top = juce::jlimit (0.03f, 0.95f, level * (float) reverbRatioAt (info, v, f) * 0.8f);
+                const auto y = std::pow (random.nextFloat(), 0.8f) * top;
+                g.setColour (juce::Colour::fromHSV (juce::jmap (t, 0.0f, 0.82f), 0.85f, 1.0f, 0.7f * (1.0f - y / top) + 0.15f));
+                g.fillEllipse (plot.getX() + t * plot.getWidth(), plot.getBottom() - y * plot.getHeight(), 2.0f, 2.0f);
+            }
+            // The damping EQ: ratio up the side (1.0 in the middle), its four points
+            const auto yOfRatio = [plot] (double r) { return plot.getBottom() - (float) ((r - 0.1) / 1.8) * plot.getHeight(); };
+            juce::Path curve;
+            for (int x = 0; x <= (int) plot.getWidth(); x += 3)
+            {
+                const auto f = 20.0 * std::pow (1000.0, x / (double) plot.getWidth());
+                const auto y = yOfRatio (reverbRatioAt (info, v, f));
+                if (x == 0) curve.startNewSubPath (plot.getX(), y); else curve.lineTo (plot.getX() + (float) x, y);
+            }
+            g.setColour (juce::Colour (0xffff6a3d));
+            g.strokePath (curve, juce::PathStrokeType (2.2f));
+            const char* bands[][2] { { "dLsFreq", "dLsRatio" }, { "dP1Freq", "dP1Ratio" }, { "dP2Freq", "dP2Ratio" }, { "dHsFreq", "dHsRatio" } };
+            for (const auto& b : bands)
+            {
+                const auto x = xOf (valueOf (info, v, b[0], 1000.0f)), y = yOfRatio (valueOf (info, v, b[1], 1.0f));
+                g.setColour (juce::Colour (0xffff6a3d));
+                g.fillEllipse (x - 6.0f, y - 6.0f, 12.0f, 12.0f);
+                g.setColour (juce::Colours::black.withAlpha (0.6f));
+                g.drawEllipse (x - 6.0f, y - 6.0f, 12.0f, 12.0f, 1.0f);
+            }
+            title (g, R ((int) plot.getX(), 316, 220, 18), "DAMPING EQ", juce::Colours::white.withAlpha (0.45f), 12.0f, juce::Justification::centredLeft);
         }
-        // The damping curve in orange
-        juce::Path curve;
-        for (int x = 0; x <= (int) plot.getWidth(); x += 3)
+        else
         {
-            const auto f = 20.0 * std::pow (1000.0, x / (double) plot.getWidth());
-            const auto y = plot.getBottom() - height (f) * plot.getHeight() - 8.0f;
-            if (x == 0) curve.startNewSubPath (plot.getX(), y); else curve.lineTo (plot.getX() + (float) x, y);
+            // The output EQ: dB up the side, each band's point in its colour
+            const auto eqOn = valueOf (info, v, "eqOn") > 0.5f;
+            const auto yOfDb = [plot] (double db) { return plot.getCentreY() - (float) (db / 24.0) * plot.getHeight() * 0.5f; };
+            juce::Path curve;
+            for (int x = 0; x <= (int) plot.getWidth(); x += 2)
+            {
+                const auto f = 20.0 * std::pow (1000.0, x / (double) plot.getWidth());
+                const auto y = juce::jlimit (plot.getY(), plot.getBottom(), yOfDb (reverbEqAt (info, v, f)));
+                if (x == 0) curve.startNewSubPath (plot.getX(), y); else curve.lineTo (plot.getX() + (float) x, y);
+            }
+            g.setColour (juce::Colour (0xffe4eef8).withAlpha (eqOn ? 1.0f : 0.3f));
+            g.strokePath (curve, juce::PathStrokeType (1.8f));
+            const struct { const char* freq; const char* gain; const char* on; } bands[] {
+                { "lowCut", nullptr, "eqHpOn" }, { "eqLsFreq", "eqLsGain", "eqLsOn" }, { "eqP1Freq", "eqP1Gain", "eqP1On" },
+                { "eqP2Freq", "eqP2Gain", "eqP2On" }, { "eqHsFreq", "eqHsGain", "eqHsOn" }, { "highCut", nullptr, "eqLpOn" } };
+            for (size_t k = 0; k < 6; ++k)
+            {
+                const auto on = eqOn && valueOf (info, v, bands[k].on, 1.0f) > 0.5f;
+                const auto x = xOf (juce::jlimit (20.0f, 20000.0f, valueOf (info, v, bands[k].freq, 1000.0f)));
+                const auto y = bands[k].gain != nullptr ? yOfDb (valueOf (info, v, bands[k].gain)) : plot.getCentreY();
+                g.setColour (reverbEqColours[k].withAlpha (on ? 1.0f : 0.35f));
+                g.fillEllipse (x - 6.0f, y - 6.0f, 12.0f, 12.0f);
+            }
         }
-        g.setColour (juce::Colour (0xffff6a3d));
-        g.strokePath (curve, juce::PathStrokeType (2.5f));
 
         // The light panel below
-        const R panel (0, 400, bounds.getWidth(), bounds.getHeight() - 400);
+        const R panel (0, 420, bounds.getWidth(), bounds.getHeight() - 420);
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xffe1e1e1), 0.0f, (float) panel.getY(), juce::Colour (0xffcfcfcf), 0.0f, (float) panel.getBottom(), false));
         g.fillRect (panel);
         g.setColour (juce::Colours::black.withAlpha (0.12f));
-        for (const auto x : { 470, 690, 860 })
-            g.fillRect (x, panel.getY() + 22, 1, panel.getHeight() - 44);
-        // The space's name box
-        g.setColour (juce::Colour (0xff3b2722));
-        g.fillRoundedRectangle (RF ((float) bounds.getCentreX() - 115.0f, 14.0f, 230.0f, 44.0f), 4.0f);
+        g.fillRect (835, panel.getY() + 22, 1, panel.getHeight() - 44);
     }
 
     //==============================================================================
@@ -1282,10 +1340,8 @@ namespace
             c.controls.push_back ({ "hq", Kind::toggle, R (410, 446, 60, 30), "=HQ" });
             c.controls.push_back ({ "processing", Kind::dropdown, R (840, 446, 150, 30), "-" });
             // The curve's points: drag them
-            c.graphArea = R (40, 48, screenW, 262);
-            c.graphDb = 24.0;
-            c.graph = { { "hpFreq", {}, "hpQ", "on1" }, { "lsFreq", "lsGain", "lsQ", "on2" }, { "p1Freq", "p1Gain", "p1Q", "on3" }, { "p2Freq", "p2Gain", "p2Q", "on4" },
-                        { "p3Freq", "p3Gain", "p3Q", "on5" }, { "p4Freq", "p4Gain", "p4Q", "on6" }, { "hsFreq", "hsGain", "hsQ", "on7" }, { "lpFreq", {}, "lpQ", "on8" } };
+            c.graphs.push_back ({ R (40, 48, screenW, 262), { { "hpFreq", {}, "hpQ", "on1" }, { "lsFreq", "lsGain", "lsQ", "on2" }, { "p1Freq", "p1Gain", "p1Q", "on3" }, { "p2Freq", "p2Gain", "p2Q", "on4" },
+                        { "p3Freq", "p3Gain", "p3Q", "on5" }, { "p4Freq", "p4Gain", "p4Q", "on6" }, { "hsFreq", "hsGain", "hsQ", "on7" }, { "lpFreq", {}, "lpQ", "on8" } } });
             c.analyzer = true;
             d["channelEq"] = c;
             d["linearEq"] = c;
@@ -1322,24 +1378,64 @@ namespace
         }
         {
             Design c;
-            c.width = 1000; c.height = 680;
+            c.width = 1000; c.height = 720;
             c.knobs = KnobStyle::light;
             c.label = juce::Colour (0xff3b3b3b); c.value = juce::Colour (0xffff6a3d); c.accent = juce::Colour (0xffff6a3d); c.track = juce::Colour (0xffa9a9a9);
             c.paint = paintStudioReverb;
+            c.pageParam = "view";
+            const auto white = juce::Colours::white.withAlpha (0.6f), orange = juce::Colour (0xffff6a3d);
             c.controls = {
-                { "space", Kind::dropdown, R (385, 16, 230, 40), "-" },
-                { "freeze", Kind::toggle, R (880, 40, 90, 30), "Freeze", juce::Colours::white.withAlpha (0.55f) },
-                { "size", Kind::knob, R (30, 420, 120, 140), "Size" },
-                { "diffusion", Kind::knob, R (170, 420, 120, 140), "Density" },
-                { "damping", Kind::knob, R (310, 420, 120, 140), "Damping" },
-                { "predelay", Kind::knob, R (40, 570, 100, 100), "Predelay" },
-                { "lowCut", Kind::knob, R (180, 570, 100, 100), "Low Cut" },
-                { "highCut", Kind::knob, R (320, 570, 100, 100), "High Cut" },
-                { "decay", Kind::knob, R (505, 420, 150, 190), "Decay" },
-                { "mod", Kind::knob, R (715, 420, 120, 140), "Modulation" },
-                { "width", Kind::knob, R (715, 560, 120, 110), "Width" },
-                { "mix", Kind::fader, R (895, 420, 70, 240), "Mix" },
+                { "space", Kind::dropdown, R (30, 14, 250, 36), "-" },
+                { "view", Kind::segmented, R (820, 16, 150, 30), "-" },
+                { "dry", Kind::fader, R (855, 450, 50, 240), "Dry" },
+                { "mix", Kind::fader, R (925, 450, 50, 240), "Wet" },
+                // Main: the damping EQ's values under the display, the main knobs below
+                { "dLsFreq", Kind::field, R (60, 340, 200, 24), "-", orange, 1 },  { "dLsRatio", Kind::field, R (60, 366, 200, 24), "-", orange, 1 },
+                { "dP1Freq", Kind::field, R (280, 340, 200, 24), "-", orange, 1 }, { "dP1Ratio", Kind::field, R (280, 366, 200, 24), "-", orange, 1 },
+                { "dP1Q", Kind::field, R (280, 392, 200, 24), "-", orange, 1 },
+                { "dP2Freq", Kind::field, R (500, 340, 200, 24), "-", orange, 1 }, { "dP2Ratio", Kind::field, R (500, 366, 200, 24), "-", orange, 1 },
+                { "dP2Q", Kind::field, R (500, 392, 200, 24), "-", orange, 1 },
+                { "dHsFreq", Kind::field, R (720, 340, 200, 24), "-", orange, 1 }, { "dHsRatio", Kind::field, R (720, 366, 200, 24), "-", orange, 1 },
+                { "attack", Kind::knob, R (25, 460, 110, 130), "Attack", {}, 1 },
+                { "size", Kind::knob, R (140, 460, 110, 130), "Size", {}, 1 },
+                { "diffusion", Kind::knob, R (255, 460, 110, 130), "Density", {}, 1 },
+                { "predelay", Kind::knob, R (380, 460, 110, 130), "Predelay", {}, 1 },
+                { "predelaySync", Kind::toggle, R (390, 610, 90, 28), "=SYNC", {}, 1 },
+                { "predelayNote", Kind::dropdown, R (385, 660, 100, 28), "-", {}, 1 },
+                { "decay", Kind::knob, R (520, 450, 150, 180), "Decay", {}, 1 },
+                { "decaySync", Kind::toggle, R (550, 640, 90, 28), "=SYNC", {}, 1 },
+                { "decayNote", Kind::dropdown, R (545, 676, 100, 28), "-", {}, 1 },
+                { "distance", Kind::knob, R (700, 460, 110, 130), "Distance", {}, 1 },
+                { "freeze", Kind::toggle, R (710, 620, 90, 30), "=FREEZE", {}, 1 },
+                // Details: the output EQ's bands under the display, the finer controls below
+                { "eqOn", Kind::toggle, R (850, 316, 120, 24), "=OUTPUT EQ", {}, 2 },
+                { "quality", Kind::segmented, R (30, 470, 240, 30), "Quality", {}, 2 },
+                { "modSource", Kind::segmented, R (300, 470, 240, 30), "Mod Source", {}, 2 },
+                { "monoMaker", Kind::toggle, R (580, 470, 130, 30), "=MONO MAKER", {}, 2 },
+                { "modSpeed", Kind::knob, R (20, 550, 110, 130), "Mod Speed", {}, 2 },
+                { "mod", Kind::knob, R (155, 550, 110, 130), "Mod Depth", {}, 2 },
+                { "smoothing", Kind::knob, R (290, 550, 110, 130), "Smoothing", {}, 2 },
+                { "earlyLate", Kind::knob, R (425, 550, 110, 130), "Early/Late Mix", {}, 2 },
+                { "width", Kind::knob, R (560, 550, 110, 130), "Width", {}, 2 },
+                { "monoFreq", Kind::knob, R (695, 550, 110, 130), "Mono Maker", {}, 2 },
             };
+            // (the output EQ's six columns: on/off, frequency, gain, Q)
+            const std::vector<std::vector<const char*>> eqBands {
+                { "eqHpOn", "lowCut" }, { "eqLsOn", "eqLsFreq", "eqLsGain" }, { "eqP1On", "eqP1Freq", "eqP1Gain", "eqP1Q" },
+                { "eqP2On", "eqP2Freq", "eqP2Gain", "eqP2Q" }, { "eqHsOn", "eqHsFreq", "eqHsGain" }, { "eqLpOn", "highCut" } };
+            const char* eqNames[] { "=LOW CUT", "=LOW SHELF", "=LOW MID", "=HIGH MID", "=HIGH SHELF", "=HIGH CUT" };
+            for (int b = 0; b < 6; ++b)
+            {
+                const auto x = 60 + b * 132;
+                c.controls.push_back ({ eqBands[(size_t) b][0], Kind::toggle, R (x + 10, 316, 110, 22), eqNames[b], {}, 2 });
+                for (size_t row = 1; row < eqBands[(size_t) b].size(); ++row)
+                    c.controls.push_back ({ eqBands[(size_t) b][row], Kind::field, R (x, 342 + (int) (row - 1) * 24, 130, 22), "-", reverbEqColours[b], 2 });
+            }
+            c.graphs.push_back ({ R (60, 66, 880, 236), { { "dLsFreq", "dLsRatio", {}, {} }, { "dP1Freq", "dP1Ratio", "dP1Q", {} },
+                                                          { "dP2Freq", "dP2Ratio", "dP2Q", {} }, { "dHsFreq", "dHsRatio", {}, {} } }, 1 });
+            c.graphs.push_back ({ R (60, 66, 880, 236), { { "lowCut", {}, {}, "eqHpOn" }, { "eqLsFreq", "eqLsGain", {}, "eqLsOn" },
+                                                          { "eqP1Freq", "eqP1Gain", "eqP1Q", "eqP1On" }, { "eqP2Freq", "eqP2Gain", "eqP2Q", "eqP2On" },
+                                                          { "eqHsFreq", "eqHsGain", {}, "eqHsOn" }, { "highCut", {}, {}, "eqLpOn" } }, 2 });
             d["studioReverb"] = c;
         }
         {

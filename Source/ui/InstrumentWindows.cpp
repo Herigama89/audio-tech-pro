@@ -404,19 +404,31 @@ void EffectPanel::buildDesign (const EffectInfo& info)
         placedControls.push_back (placed);
     }
 
-    if (! design->graph.empty() && ! design->graphArea.isEmpty())
+    for (const auto& graph : design->graphs)
     {
         /** Drags the curve's points: frequency across, gain up and down, the wheel for Q, double-click for on/off. */
         struct GraphEditor final : public juce::Component
         {
-            GraphEditor (const effectdesign::Design& d, std::function<float (const juce::String&)> get,
+            GraphEditor (const effectdesign::Design::Graph& g, std::function<float (const juce::String&)> get,
                          std::function<void (const juce::String&, float, bool)> put, const EffectInfo& fx)
-                : design (d), current (std::move (get)), set (std::move (put)), info (fx) {}
+                : graph (g), current (std::move (get)), set (std::move (put)), info (fx) {}
 
             float xOf (double f) const { return (float) (std::log (f / 20.0) / std::log (1000.0)) * (float) getWidth(); }
             double freqAt (float x) const { return juce::jlimit (10.0, 20000.0, 20.0 * std::pow (1000.0, (double) x / getWidth())); }
-            float yOf (double db) const { return (float) getHeight() * 0.5f - (float) (db / design.graphDb) * (float) getHeight() * 0.5f; }
-            double dbAt (float y) const { return ((double) getHeight() * 0.5 - y) / (getHeight() * 0.5) * design.graphDb; }
+            // (up the side: the parameter's range, its middle at the middle)
+            float yOf (const juce::String& id, double value) const
+            {
+                const auto* p = paramOf (id);
+                if (p == nullptr) return (float) getHeight() * 0.5f;
+                const auto t = (value - p->min) / std::max (1.0e-6, (double) (p->max - p->min));
+                return (float) ((1.0 - t) * getHeight());
+            }
+            double valueAt (const juce::String& id, float y) const
+            {
+                const auto* p = paramOf (id);
+                if (p == nullptr) return 0.0;
+                return p->min + (1.0 - juce::jlimit (0.0, 1.0, (double) y / getHeight())) * (p->max - p->min);
+            }
 
             const ParamInfo* paramOf (const juce::String& id) const
             {
@@ -428,10 +440,10 @@ void EffectPanel::buildDesign (const EffectInfo& info)
             {
                 int best = -1;
                 float bestDistance = 16.0f;
-                for (size_t k = 0; k < design.graph.size(); ++k)
+                for (size_t k = 0; k < graph.handles.size(); ++k)
                 {
-                    const auto& h = design.graph[k];
-                    const juce::Point<float> p (xOf (current (h.freq)), h.gain.isEmpty() ? yOf (0.0) : yOf (current (h.gain)));
+                    const auto& h = graph.handles[k];
+                    const juce::Point<float> p (xOf (current (h.freq)), h.gain.isEmpty() ? (float) getHeight() * 0.5f : yOf (h.gain, current (h.gain)));
                     if (p.getDistanceFrom (at) < bestDistance) { bestDistance = p.getDistanceFrom (at); best = (int) k; }
                 }
                 return best;
@@ -440,7 +452,7 @@ void EffectPanel::buildDesign (const EffectInfo& info)
             void mouseDrag (const juce::MouseEvent& e) override
             {
                 if (dragging < 0) return;
-                const auto& h = design.graph[(size_t) dragging];
+                const auto& h = graph.handles[(size_t) dragging];
                 const auto clampTo = [this] (const juce::String& id, double value)
                 {
                     const auto* p = paramOf (id);
@@ -448,20 +460,20 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                 };
                 set (h.freq, clampTo (h.freq, freqAt (e.position.x)), ! started);
                 if (h.gain.isNotEmpty())
-                    set (h.gain, clampTo (h.gain, std::round (dbAt (e.position.y) * 10.0) / 10.0), false);
+                    set (h.gain, clampTo (h.gain, std::round (valueAt (h.gain, e.position.y) * 100.0) / 100.0), false);
                 started = true;
             }
             void mouseDoubleClick (const juce::MouseEvent& e) override
             {
                 const auto k = handleAt (e.position);
-                if (k >= 0 && design.graph[(size_t) k].on.isNotEmpty())
-                    set (design.graph[(size_t) k].on, current (design.graph[(size_t) k].on) > 0.5f ? 0.0f : 1.0f, true);
+                if (k >= 0 && graph.handles[(size_t) k].on.isNotEmpty())
+                    set (graph.handles[(size_t) k].on, current (graph.handles[(size_t) k].on) > 0.5f ? 0.0f : 1.0f, true);
             }
             void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
             {
                 const auto k = handleAt (e.position);
-                if (k < 0 || design.graph[(size_t) k].q.isEmpty()) return;
-                const auto& id = design.graph[(size_t) k].q;
+                if (k < 0 || graph.handles[(size_t) k].q.isEmpty()) return;
+                const auto& id = graph.handles[(size_t) k].q;
                 const auto* p = paramOf (id);
                 const auto q = current (id) * std::pow (1.15f, wheel.deltaY * 4.0f);
                 set (id, p != nullptr ? juce::jlimit (p->min, p->max, q) : q, true);
@@ -471,14 +483,14 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                 setMouseCursor (handleAt (e.position) >= 0 ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor);
             }
 
-            const effectdesign::Design& design;
+            const effectdesign::Design::Graph& graph;
             std::function<float (const juce::String&)> current;
             std::function<void (const juce::String&, float, bool)> set;
             const EffectInfo& info;
             int dragging = -1;
             bool started = false;
         };
-        auto editor = std::make_unique<GraphEditor> (*design, current, [this, paramOf] (const juce::String& id, float value, bool newGesture)
+        auto editor = std::make_unique<GraphEditor> (graph, current, [this, paramOf] (const juce::String& id, float value, bool newGesture)
         {
             if (newGesture)
             {
@@ -487,9 +499,10 @@ void EffectPanel::buildDesign (const EffectInfo& info)
             }
             insert.setProperty (juce::Identifier (id), value, &undoManager);
         }, info);
-        editor->setBounds (design->graphArea);
+        editor->setBounds (graph.area);
         addAndMakeVisible (*editor);
-        graphEditor = std::move (editor);
+        graphPages.push_back (graph.page);
+        graphEditors.add (editor.release());
     }
 }
 
@@ -585,6 +598,23 @@ void EffectPanel::refresh()
         k->slider.updateText();
     for (auto& r : refreshers)
         r();
+    if (design != nullptr && design->pageParam.isNotEmpty() && info != nullptr)
+    {
+        // A face with pages: only the chosen page's controls (and those on every page)
+        float page = 0.0f;
+        for (const auto& p : info->params)
+            if (p.id == design->pageParam)
+                page = (float) (double) insert.getProperty (juce::Identifier (p.id), p.defaultValue);
+        const auto shown = juce::roundToInt (page) + 1;
+        for (auto& placed : placedControls)
+        {
+            const auto visible = placed.control.page == 0 || placed.control.page == shown;
+            if (placed.component != nullptr) placed.component->setVisible (visible);
+            if (placed.label != nullptr) placed.label->setVisible (visible);
+        }
+        for (int k = 0; k < graphEditors.size(); ++k)
+            graphEditors[k]->setVisible (graphPages[(size_t) k] == 0 || graphPages[(size_t) k] == shown);
+    }
     if (design != nullptr && design->enabled != nullptr && info != nullptr)
     {
         std::array<float, BuiltInEffect::maxParams> v {};

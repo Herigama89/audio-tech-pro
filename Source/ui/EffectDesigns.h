@@ -42,6 +42,7 @@ namespace riff::effectdesign
         juce::Rectangle<int> bounds;
         juce::String label {};                  // (empty: the parameter's name; "-" for none; a toggle's "=TEXT": its caption)
         juce::Colour colour {};                 // (fields: the band's colour)
+        int page = 0;                           // (0: always shown; otherwise only on that page of the face)
     };
 
     enum class KnobStyle { silver, dark, light, black, white, chrome };
@@ -57,9 +58,15 @@ namespace riff::effectdesign
         bool lcdValues = false;                 // values in small dark windows under the knobs (older hardware-style faces)
         bool live = false;                      // a meter that follows the sound (gain reduction, correction)
         bool analyzer = false;                  // a live spectrum of the output behind the curve (as Logic's EQs)
-        juce::Rectangle<int> graphArea;         // the curve display the handles live in (20 Hz to 20 kHz across)
-        double graphDb = 24.0;                  // (its range up and down from the middle)
-        std::vector<GraphHandle> graph;
+        /** Curve displays with points to drag: 20 Hz to 20 kHz across, each point's value over its parameter's range up the side. */
+        struct Graph
+        {
+            juce::Rectangle<int> area;
+            std::vector<GraphHandle> handles;
+            int page = 0;
+        };
+        std::vector<Graph> graphs;
+        juce::String pageParam;                 // (a face with pages: the parameter choosing which one shows, page = its value + 1)
         /** Whether a control applies with the current settings (e.g. a compressor circuit without a Knee); greyed out if not. */
         std::function<bool (const juce::String& id, const EffectInfo&, const float* values)> enabled;
         /** Draws the face behind the controls: panels, titles, screens, meters. */

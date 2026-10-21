@@ -13,7 +13,43 @@ namespace
     using namespace riff::dsp;
 
     //==============================================================================
-    /** Eight delay lines mixed through a Hadamard matrix: dense, smooth, colourless tails. */
+    /**
+        Studio Reverb (as Logic's ChromaVerb): fourteen room types, each its own size, density, colour and
+        attack behaviour, over an eight-line feedback delay network with early reflections.
+          Main:     Attack, Size, Density, Predelay (or synced), Decay (or synced), Freeze, Distance, Dry, Wet
+          Damping:  four bands (low shelf, two bells, high shelf) setting each band's decay as a ratio
+          Details:  Quality, modulation speed/depth/source/smoothing, early/late mix, width, Mono Maker
+          Output:   a six-band EQ on the reverb (cut, shelf, two bells, shelf, cut)
+    */
+    namespace chroma
+    {
+        enum Index { roomType, size, decay, predelay, lowCut, highCut, density, mod, width, mix, freeze,
+                     attack, distance, dry, predelaySync, predelayNote, decaySync, decayNote,
+                     dLsFreq, dLsRatio, dP1Freq, dP1Ratio, dP1Q, dP2Freq, dP2Ratio, dP2Q, dHsFreq, dHsRatio,
+                     quality, modSpeed, modSource, smoothing, earlyLate, monoMaker, monoFreq,
+                     eqOn, eqHpOn, eqLsOn, eqLsFreq, eqLsGain, eqP1On, eqP1Freq, eqP1Gain, eqP1Q, eqP2On, eqP2Freq, eqP2Gain, eqP2Q,
+                     eqHsOn, eqHsFreq, eqHsGain, eqLpOn, view, count };
+
+        /** Each room's character: line lengths, diffusion, early pattern, damping, and whether Attack swells the level or the density. */
+        struct Room { float scale, diffusion, early, damp, modAmount; bool volumeAttack; };
+        const Room rooms[] {
+            { 0.55f, 0.70f, 0.9f, 0.30f, 0.20f, false },   // Room
+            { 0.65f, 0.78f, 1.0f, 0.20f, 0.15f, false },   // Chamber
+            { 1.60f, 0.62f, 0.6f, 0.45f, 0.30f, false },   // Concert Hall
+            { 1.10f, 0.55f, 0.7f, 0.35f, 0.20f, true  },   // Theater
+            { 1.30f, 0.40f, 0.4f, 0.20f, 0.50f, false },   // Synth Hall
+            { 0.95f, 0.66f, 0.5f, 0.10f, 0.70f, false },   // Digital
+            { 0.60f, 0.50f, 0.6f, 0.65f, 0.15f, false },   // Dark Room
+            { 0.45f, 0.80f, 1.0f, 0.30f, 0.15f, true  },   // Dense Room
+            { 0.95f, 0.75f, 0.5f, 0.25f, 0.35f, true  },   // Smooth Space
+            { 1.20f, 0.72f, 0.6f, 0.30f, 0.30f, false },   // Vocal Hall
+            { 1.25f, 0.45f, 0.9f, 0.10f, 0.20f, true  },   // Reflective Hall
+            { 1.70f, 0.40f, 0.3f, 0.15f, 0.40f, true  },   // Airy
+            { 0.90f, 0.60f, 0.8f, 0.20f, 0.90f, true  },   // FX - Strange Room
+            { 1.50f, 0.68f, 0.4f, 0.20f, 0.60f, false },   // FX - Bloomy
+        };
+    }
+
     class StudioReverb final : public BuiltInEffect
     {
     public:
@@ -23,77 +59,246 @@ namespace
         {
             sampleRate = preparedRate = rate;
             const auto scale = rate / 44100.0;
-            predelay.prepare ((int) (0.26 * rate));
-            for (auto& d : diffL) d.line.prepare ((int) (400 * scale * 1.6) + 4);
-            for (auto& d : diffR) d.line.prepare ((int) (400 * scale * 1.6) + 4);
+            predelayLine.prepare ((int) (2.3 * rate));
+            attackLine.prepare ((int) (0.45 * rate));
+            for (auto& d : diffL) d.line.prepare ((int) (400 * scale * 2.2) + 4);
+            for (auto& d : diffR) d.line.prepare ((int) (400 * scale * 2.2) + 4);
             for (auto& l : lines)
-                l.prepare ((int) (2111 * 2.3 * 1.6 * scale) + 64);
-            for (auto* f : { &lowCutL, &lowCutR, &highCutL, &highCutR }) f->reset();
+                l.prepare ((int) (2111 * 2.3 * 1.8 * scale) + 64);
+            for (auto* f : { &lowCutL, &lowCutR, &highCutL, &highCutR, &monoSplit, &modSmooth, &modNoise }) f->reset();
+            for (auto& bank : damping) for (auto& f : bank) f.reset();
+            for (auto& f : outEq) f.reset();
             state.fill (0.0f);
+            lastKey = -1.0f;
+            randomTarget = randomValue = 0.0f;
+            randomCounter = 0;
         }
 
         void process (float* l, float* r, int n) noexcept override
         {
-            static const float spaces[] { 0.45f, 0.6f, 0.8f, 1.2f, 1.6f, 2.2f };
+            using namespace chroma;
             static const float base[] { 1009, 1123, 1289, 1447, 1597, 1741, 1913, 2111 };
-            static const float diffBase[] { 142, 107, 379, 277 };
+            static const float diffBase[] { 142, 107, 379, 277, 211, 163 };
+            static const float earlyTimes[] { 0.0043f, 0.0071f, 0.0109f, 0.0137f, 0.0181f, 0.0223f, 0.0269f, 0.0311f };
+            const auto& room = rooms[juce::jlimit (0, 13, choice (roomType))];
             const auto scale = (float) (sampleRate / 44100.0);
-            const auto spaceScale = spaces[juce::jlimit (0, 5, choice (0))] * (0.5f + value (1) * 0.01f);
-            const auto decay = std::max (0.1f, value (2));
-            const auto pre = std::max (1.0f, value (3) * 0.001f * (float) sampleRate);
-            const auto damping = value (4) * 0.01f;
-            for (auto* f : { &lowCutL, &lowCutR }) f->setLowPass (value (5), sampleRate);
-            for (auto* f : { &highCutL, &highCutR }) f->setLowPass (value (6), sampleRate);
-            const auto diffusion = value (7) * 0.01f * 0.72f;
-            const auto modDepth = value (8) * 0.01f * 12.0f * scale;
-            const auto width = value (9) * 0.01f;
-            const auto mix = value (10) * 0.01f;
-            const bool freeze = choice (11) == 1;
+            const auto spaceScale = room.scale * (0.45f + value (size) * 0.011f);
+            const auto tempo = bpm.load (std::memory_order_relaxed);
+            auto decaySeconds = std::max (0.1f, value (decay));
+            if (choice (decaySync) == 1)
+                decaySeconds = (float) std::max (0.1, noteSeconds (choice (decayNote), tempo));
+            const auto preSeconds = choice (predelaySync) == 1 ? (float) noteSeconds (choice (predelayNote), tempo) : value (predelay) * 0.001f;
+            const auto pre = juce::jlimit (1.0f, (float) (2.0 * sampleRate), preSeconds * (float) sampleRate);
+            const auto quality = juce::jlimit (0, 2, choice (chroma::quality));
+            const auto densityAmount = value (density) * 0.01f;
+            const auto diffusion = juce::jlimit (0.1f, 0.78f, room.diffusion * (0.55f + densityAmount * 0.6f));
+            const auto stages = quality == 2 ? 6 : 4;
+            const auto modDepth = value (mod) * 0.01f * 14.0f * scale * (0.4f + room.modAmount);
+            const auto modRate = value (modSpeed);
+            const auto source = choice (modSource);
+            modSmooth.setLowPass (juce::jmap (value (smoothing) * 0.01f, 40.0f, 0.5f), sampleRate);
+            modNoise.setLowPass (6.0, sampleRate);
+            const auto widthAmount = value (width) * 0.01f;
+            const auto dryGain = value (dry) * 0.01f, wetGain = value (mix) * 0.01f;
+            const bool frozen = choice (freeze) == 1;
+            const auto distanceAmount = value (distance) * 0.01f;
+            // (further away: fewer early reflections, more tail, duller)
+            const auto earlyMix = value (earlyLate) * 0.01f;
+            const auto earlyGain = room.early * (1.0f - distanceAmount * 0.8f) * (1.0f - earlyMix) * 2.0f;
+            const auto lateGain = (0.5f + distanceAmount * 0.5f) * (0.2f + earlyMix * 1.6f);
+            // (a gentle DC block, and the air's dulling with distance; the cuts themselves are the output EQ's)
+            for (auto* f : { &lowCutL, &lowCutR }) f->setLowPass (12.0, sampleRate);
+            for (auto* f : { &highCutL, &highCutR }) f->setLowPass (20000.0f * (1.0f - distanceAmount * 0.7f), sampleRate);
+            const bool mono = choice (monoMaker) == 1;
+            monoSplit.setLowPass (value (monoFreq), sampleRate);
+            const auto attackSamples = value (attack) * 0.01f * 0.4f * (float) sampleRate;
 
             std::array<float, 8> lengths, gains;
             for (size_t i = 0; i < 8; ++i)
             {
                 lengths[i] = base[i] * scale * spaceScale;
-                gains[i] = freeze ? 1.0f : (float) std::pow (10.0, -3.0 * lengths[i] / (decay * sampleRate));
+                gains[i] = frozen ? 1.0f : (float) std::pow (10.0, -3.0 * lengths[i] / (decaySeconds * sampleRate));
             }
+            updateFilters (lengths, decaySeconds, frozen);
 
             for (int i = 0; i < n; ++i)
             {
-                // Pre-delay, then four diffusers to smear the attack
-                const auto in = freeze ? 0.0f : 0.5f * (l[i] + r[i]);
-                predelay.push (in);
-                auto x = predelay.read (pre);
-                auto xl = x, xr = x * 0.97f + (l[i] - r[i]) * 0.15f;
-                for (size_t d = 0; d < 4; ++d)
+                const auto inMono = frozen ? 0.0f : 0.5f * (l[i] + r[i]);
+                const auto inSide = frozen ? 0.0f : 0.5f * (l[i] - r[i]);
+                predelayLine.push (inMono);
+                auto x = predelayLine.read (pre);
+
+                // Early reflections: taps off the pre-delay, spread left and right
+                float el = 0.0f, er = 0.0f;
+                for (int k = 0; k < 8; ++k)
                 {
-                    xl = diffL[d].process (xl, diffBase[d] * scale * (0.6f + spaceScale * 0.4f), diffusion);
-                    xr = diffR[d].process (xr, diffBase[d] * scale * (0.6f + spaceScale * 0.4f) * 1.07f, diffusion);
+                    const auto tap = predelayLine.read (pre + earlyTimes[k] * spaceScale * (float) sampleRate);
+                    const auto g = 0.5f / (1.0f + (float) k * 0.35f);
+                    (k % 2 == 0 ? el : er) += tap * g;
                 }
 
-                // The network: read each line (two of them wobbling a little), mix, damp, feed back
+                // Attack: the level (or the density) swells in over the attack time
+                attackLine.push (x);
+                if (attackSamples > 1.0f)
+                {
+                    float swell = 0.0f;
+                    for (int k = 0; k < 6; ++k)
+                        swell += attackLine.read (1.0f + attackSamples * (float) k / 5.0f) * (room.volumeAttack ? (float) (k + 1) / 21.0f : 1.0f / 6.0f);
+                    x = room.volumeAttack ? swell * 1.6f : x * 0.4f + swell * 0.6f;
+                }
+
+                auto xl = x, xr = x * 0.97f + inSide * 0.15f;
+                const auto spread = scale * (0.6f + spaceScale * 0.4f);
+                for (int d = 0; d < stages; ++d)
+                {
+                    xl = diffL[(size_t) d].process (xl, diffBase[d] * spread, diffusion);
+                    xr = diffR[(size_t) d].process (xr, diffBase[d] * spread * 1.07f, diffusion);
+                }
+
+                // Modulation: sine, random (smoothed steps) or noise
+                float m;
+                if (source == 0) m = lfo.next (modRate, sampleRate);
+                else if (source == 1)
+                {
+                    if (--randomCounter <= 0)
+                    {
+                        randomCounter = std::max (1, (int) (sampleRate / std::max (0.05f, modRate)));
+                        randomTarget = noise.next();
+                    }
+                    m = modSmooth.lowPass (randomTarget);
+                }
+                else m = juce::jlimit (-1.0f, 1.0f, modNoise.lowPass (noise.next()) * 6.0f);
+                if (source != 1)
+                    m = std::tanh (m * (1.0f + value (smoothing) * 0.03f)) / std::tanh (1.0f + value (smoothing) * 0.03f);
+                if (quality == 0)
+                    m += noise.next() * 0.15f;   // (Low: grainy, noisy modulation)
+                m *= modDepth;
+
                 std::array<float, 8> out;
-                const auto m = lfo.next (0.37, sampleRate) * modDepth;
                 for (size_t k = 0; k < 8; ++k)
-                    out[k] = lines[k].read (lengths[k] + (k == 0 ? m : k == 5 ? -m : 0.0f));
+                    out[k] = lines[k].read (lengths[k] + (k == 0 ? m : k == 5 ? -m : k == 3 ? m * 0.5f : 0.0f));
                 auto mixed = out;
                 hadamard (mixed);
                 for (size_t k = 0; k < 8; ++k)
                 {
                     auto v = mixed[k] * gains[k];
-                    state[k] = v + damping * 0.8f * (state[k] - v);   // (highs die away sooner)
-                    lines[k].push (state[k] + (k < 4 ? xl : xr) * 0.35f);
+                    // The damping EQ: each band dies away at its own ratio of the decay
+                    if (! frozen)
+                    {
+                        for (auto& f : damping[k])
+                            v = f.process (v, 0);
+                        state[k] = v + room.damp * 0.5f * (state[k] - v);
+                        v = state[k];
+                    }
+                    lines[k].push (v + (k < 4 ? xl : xr) * 0.35f);
                 }
-                auto wl = out[0] - out[2] + out[4] - out[6];
-                auto wr = out[1] - out[3] + out[5] - out[7];
-                wl = highCutL.lowPass (lowCutL.highPass (wl)) * 0.5f;
-                wr = highCutR.lowPass (lowCutR.highPass (wr)) * 0.5f;
-                const auto mid = 0.5f * (wl + wr), side = 0.5f * (wl - wr) * width;
-                l[i] = l[i] * (1.0f - mix) + (mid + side) * mix;
-                r[i] = r[i] * (1.0f - mix) + (mid - side) * mix;
+                auto wl = (out[0] - out[2] + out[4] - out[6]) * 0.5f * lateGain + el * earlyGain;
+                auto wr = (out[1] - out[3] + out[5] - out[7]) * 0.5f * lateGain + er * earlyGain;
+                wl = highCutL.lowPass (lowCutL.highPass (wl));
+                wr = highCutR.lowPass (lowCutR.highPass (wr));
+                if (choice (eqOn) == 1)
+                    for (size_t f = 0; f < outEq.size(); ++f)
+                    {
+                        wl = outEq[f].process (wl, 0);
+                        wr = outEq[f].process (wr, 1);
+                    }
+                auto mid = 0.5f * (wl + wr), side = 0.5f * (wl - wr) * widthAmount;
+                if (mono)
+                    side -= monoSplit.lowPass (side);   // (Mono Maker: no stereo below its frequency)
+                l[i] = l[i] * dryGain + (mid + side) * wetGain;
+                r[i] = r[i] * dryGain + (mid - side) * wetGain;
             }
         }
 
+        /** The output EQ's curve (for the details view). */
+        static double outputResponse (const float* v, double freq, double rate)
+        {
+            std::array<Biquad, 6> f;
+            designOutputEq (v, rate, f);
+            double db = 0.0;
+            for (const auto& b : f) db += b.magnitudeDb (freq, rate);
+            return db;
+        }
+
+        /** The damping EQ's curve: each frequency's decay ratio, drawn as dB (1.0 at the middle). */
+        static double dampingResponse (const float* v, double freq, double rate)
+        {
+            using namespace chroma;
+            std::array<Biquad, 4> f;
+            designDamping (v, rate, f, -1.0);
+            double db = 0.0;
+            for (const auto& b : f) db += b.magnitudeDb (freq, rate);
+            return db;
+        }
+
     private:
+        static void designOutputEq (const float* v, double rate, std::array<Biquad, 6>& f)
+        {
+            using namespace chroma;
+            const auto on = [v] (int i) { return juce::roundToInt (v[i]) == 1; };
+            if (on (eqHpOn)) f[0].setHighPass (rate, v[lowCut] > 10.0f ? v[lowCut] : 20.0, 0.707); else f[0].setIdentity();
+            if (on (eqLsOn)) f[1].setLowShelf (rate, v[eqLsFreq], v[eqLsGain]); else f[1].setIdentity();
+            if (on (eqP1On)) f[2].setPeak (rate, v[eqP1Freq], v[eqP1Gain], v[eqP1Q]); else f[2].setIdentity();
+            if (on (eqP2On)) f[3].setPeak (rate, v[eqP2Freq], v[eqP2Gain], v[eqP2Q]); else f[3].setIdentity();
+            if (on (eqHsOn)) f[4].setHighShelf (rate, v[eqHsFreq], v[eqHsGain]); else f[4].setIdentity();
+            if (on (eqLpOn)) f[5].setLowPass (rate, v[highCut], 0.707); else f[5].setIdentity();
+        }
+
+        /** A ratio as the gain change per pass (or, for drawing, per "unit" pass: dB of a 1 s decay heard over 1/60 s). */
+        static double ratioDb (double ratio, double perPassDb)
+        {
+            // (a band at ratio r decays in r times the time: its loss per pass is 1/r of the middle's,
+            //  so the filter adds the difference on top of the line's own loss)
+            return perPassDb * (1.0 / juce::jlimit (0.1, 4.0, ratio) - 1.0);
+        }
+
+        static void designDamping (const float* v, double rate, std::array<Biquad, 4>& f, double perPassDb)
+        {
+            using namespace chroma;
+            f[0].setLowShelf (rate, v[dLsFreq], ratioDb (v[dLsRatio], perPassDb), 0.7);
+            f[1].setPeak (rate, v[dP1Freq], ratioDb (v[dP1Ratio], perPassDb), v[dP1Q]);
+            f[2].setPeak (rate, v[dP2Freq], ratioDb (v[dP2Ratio], perPassDb), v[dP2Q]);
+            f[3].setHighShelf (rate, v[dHsFreq], ratioDb (v[dHsRatio], perPassDb), 0.7);
+        }
+
+        void updateFilters (const std::array<float, 8>& lengths, float decaySeconds, bool frozen)
+        {
+            using namespace chroma;
+            std::array<float, maxParams> v;
+            for (size_t i = 0; i < v.size(); ++i)
+                v[i] = values[i].load (std::memory_order_relaxed);
+            float key = decaySeconds * 13.0f + lengths[0] + (frozen ? 1.0e6f : 0.0f);
+            for (int i = dLsFreq; i <= dHsRatio; ++i) key += v[(size_t) i] * (float) (i + 1) * 0.37f;
+            for (int i = eqOn; i <= eqLpOn; ++i) key += v[(size_t) i] * (float) (i + 1) * 0.11f;
+            key += v[lowCut] * 0.013f + v[highCut] * 0.0017f;
+            if (key == lastKey)
+                return;
+            lastKey = key;
+            for (size_t k = 0; k < 8; ++k)
+            {
+                // The loss each pass through line k (dB) - the bands scale it by their ratios
+                const auto perPass = -60.0 * lengths[k] / (decaySeconds * sampleRate);
+                std::array<Biquad, 4> fresh;
+                designDamping (v.data(), sampleRate, fresh, perPass);
+                for (size_t b = 0; b < 4; ++b)
+                {
+                    const auto z1 = damping[k][b].z1, z2 = damping[k][b].z2;
+                    damping[k][b] = fresh[b];
+                    damping[k][b].z1 = z1;
+                    damping[k][b].z2 = z2;
+                }
+            }
+            std::array<Biquad, 6> eq;
+            designOutputEq (v.data(), sampleRate, eq);
+            for (size_t b = 0; b < 6; ++b)
+            {
+                const auto z1 = outEq[b].z1, z2 = outEq[b].z2;
+                outEq[b] = eq[b];
+                outEq[b].z1 = z1;
+                outEq[b].z2 = z2;
+            }
+        }
+
         static void hadamard (std::array<float, 8>& v) noexcept
         {
             for (size_t h = 1; h < 8; h <<= 1)
@@ -108,12 +313,17 @@ namespace
                 x *= 0.35355339f;   // 1/sqrt(8): energy kept
         }
 
-        DelayLine predelay;
-        std::array<DiffusionAllPass, 4> diffL, diffR;
+        DelayLine predelayLine, attackLine;
+        std::array<DiffusionAllPass, 6> diffL, diffR;
         std::array<DelayLine, 8> lines;
         std::array<float, 8> state {};
-        OnePole lowCutL, lowCutR, highCutL, highCutR;
+        std::array<std::array<Biquad, 4>, 8> damping;
+        std::array<Biquad, 6> outEq;
+        OnePole lowCutL, lowCutR, highCutL, highCutR, monoSplit, modSmooth, modNoise;
         Lfo lfo;
+        Noise noise;
+        float lastKey = -1.0f, randomTarget = 0.0f, randomValue = 0.0f;
+        int randomCounter = 0;
     };
 
     //==============================================================================
@@ -395,21 +605,66 @@ namespace
 
 const std::vector<StockEffect>& stockReverbEffects()
 {
-    const juce::String ms (" ms"), hz (" Hz"), pc (" %"), s (" s");
+    const juce::String ms (" ms"), hz (" Hz"), pc (" %"), s (" s"), dB (" dB");
+    const auto& notes = noteNames();
+    const auto notesMax = (float) notes.size() - 1.0f;
     static const std::vector<StockEffect> effects {
         { { "studioReverb", "Studio Reverb", {
-              { "space", "Space", "", 0.0f, 5.0f, 3.0f, 2.5f, { "Room", "Studio", "Chamber", "Hall", "Large Hall", "Cathedral" } },
+              { "space", "Room Type", "", 0.0f, 13.0f, 9.0f, 6.5f,
+                { "Room", "Chamber", "Concert Hall", "Theater", "Synth Hall", "Digital", "Dark Room", "Dense Room",
+                  "Smooth Space", "Vocal Hall", "Reflective Hall", "Airy", "FX - Strange Room", "FX - Bloomy" } },
               { "size", "Size", pc, 0.0f, 100.0f, 50.0f, 50.0f },
               { "decay", "Decay", s, 0.1f, 20.0f, 2.2f, 2.5f },
-              { "predelay", "Pre-Delay", ms, 0.0f, 250.0f, 15.0f, 30.0f },
-              { "damping", "Damping", pc, 0.0f, 100.0f, 40.0f, 50.0f },
-              { "lowCut", "Low Cut", hz, 10.0f, 1000.0f, 100.0f, 150.0f },
-              { "highCut", "High Cut", hz, 1000.0f, 20000.0f, 9000.0f, 6000.0f },
-              { "diffusion", "Diffusion", pc, 0.0f, 100.0f, 75.0f, 50.0f },
-              { "mod", "Modulation", pc, 0.0f, 100.0f, 30.0f, 50.0f },
-              { "width", "Width", pc, 0.0f, 100.0f, 100.0f, 50.0f },
-              { "mix", "Mix", pc, 0.0f, 100.0f, 25.0f, 50.0f },
-              { "freeze", "Freeze", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } } }, "Reverb" },
+              { "predelay", "Predelay", ms, 0.0f, 2000.0f, 15.0f, 60.0f },
+              { "lowCut", "Low Cut", hz, 10.0f, 1000.0f, 20.0f, 150.0f },
+              { "highCut", "High Cut", hz, 1000.0f, 20000.0f, 20000.0f, 6000.0f },
+              { "diffusion", "Density", pc, 0.0f, 100.0f, 75.0f, 50.0f },
+              { "mod", "Mod Depth", pc, 0.0f, 100.0f, 30.0f, 50.0f },
+              { "width", "Width", pc, 0.0f, 200.0f, 100.0f, 100.0f },
+              { "mix", "Wet", pc, 0.0f, 100.0f, 25.0f, 50.0f },
+              { "freeze", "Freeze", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "attack", "Attack", pc, 0.0f, 100.0f, 10.0f, 50.0f },
+              { "distance", "Distance", pc, 0.0f, 100.0f, 50.0f, 50.0f },
+              { "dry", "Dry", pc, 0.0f, 100.0f, 100.0f, 50.0f },
+              { "predelaySync", "Predelay Sync", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "predelayNote", "Predelay Note", "", 0.0f, notesMax, 3.0f, 7.5f, notes },
+              { "decaySync", "Decay Sync", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "decayNote", "Decay Note", "", 0.0f, notesMax, 12.0f, 7.5f, notes },
+              { "dLsFreq", "Low Freq", hz, 20.0f, 1000.0f, 200.0f, 200.0f },
+              { "dLsRatio", "Low Ratio", "x", 0.1f, 1.9f, 1.0f, 1.0f },
+              { "dP1Freq", "Low Mid Freq", hz, 100.0f, 5000.0f, 600.0f, 800.0f },
+              { "dP1Ratio", "Low Mid Ratio", "x", 0.1f, 1.9f, 1.0f, 1.0f },
+              { "dP1Q", "Low Mid Q", "", 0.1f, 4.0f, 0.7f, 1.0f },
+              { "dP2Freq", "High Mid Freq", hz, 500.0f, 15000.0f, 3000.0f, 3000.0f },
+              { "dP2Ratio", "High Mid Ratio", "x", 0.1f, 1.9f, 1.0f, 1.0f },
+              { "dP2Q", "High Mid Q", "", 0.1f, 4.0f, 0.7f, 1.0f },
+              { "dHsFreq", "High Freq", hz, 1000.0f, 20000.0f, 6000.0f, 6000.0f },
+              { "dHsRatio", "High Ratio", "x", 0.1f, 1.9f, 0.6f, 1.0f },
+              { "quality", "Quality", "", 0.0f, 2.0f, 1.0f, 1.0f, { "Low", "High", "Ultra" } },
+              { "modSpeed", "Mod Speed", hz, 0.05f, 10.0f, 0.4f, 1.0f },
+              { "modSource", "Mod Source", "", 0.0f, 2.0f, 0.0f, 1.0f, { "Sine", "Random", "Noise" } },
+              { "smoothing", "Smoothing", pc, 0.0f, 100.0f, 50.0f, 50.0f },
+              { "earlyLate", "Early/Late Mix", pc, 0.0f, 100.0f, 50.0f, 50.0f },
+              { "monoMaker", "Mono Maker", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "monoFreq", "Mono Maker Freq", hz, 20.0f, 1000.0f, 150.0f, 150.0f },
+              { "eqOn", "Output EQ", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "eqHpOn", "EQ Low Cut", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "eqLsOn", "EQ Low Shelf", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "eqLsFreq", "Low Shelf Freq", hz, 20.0f, 2000.0f, 150.0f, 200.0f },
+              { "eqLsGain", "Low Shelf Gain", dB, -24.0f, 24.0f, 0.0f, 0.0f },
+              { "eqP1On", "EQ Low Mid", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "eqP1Freq", "Low Mid Freq", hz, 50.0f, 10000.0f, 500.0f, 800.0f },
+              { "eqP1Gain", "Low Mid Gain", dB, -24.0f, 24.0f, 0.0f, 0.0f },
+              { "eqP1Q", "Low Mid Q", "", 0.1f, 10.0f, 1.0f, 1.0f },
+              { "eqP2On", "EQ High Mid", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "eqP2Freq", "High Mid Freq", hz, 200.0f, 18000.0f, 3000.0f, 3000.0f },
+              { "eqP2Gain", "High Mid Gain", dB, -24.0f, 24.0f, 0.0f, 0.0f },
+              { "eqP2Q", "High Mid Q", "", 0.1f, 10.0f, 1.0f, 1.0f },
+              { "eqHsOn", "EQ High Shelf", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "eqHsFreq", "High Shelf Freq", hz, 1000.0f, 20000.0f, 8000.0f, 6000.0f },
+              { "eqHsGain", "High Shelf Gain", dB, -24.0f, 24.0f, 0.0f, 0.0f },
+              { "eqLpOn", "EQ High Cut", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "view", "View", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Main", "Details" } } }, "Reverb" },
           make<StudioReverb> },
 
         { { "plateReverb", "Plate Reverb", {

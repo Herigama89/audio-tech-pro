@@ -233,6 +233,35 @@ TEST_CASE ("Studio Compressor: circuits differ, the limiter holds its threshold,
     CHECK (peakOf (nl, 12000) < 0.01f);
 }
 
+TEST_CASE ("Studio Reverb: the damping ratios set how long each band rings; freeze holds", "[stockfx]")
+{
+    const auto tailOf = [] (float highRatio)
+    {
+        auto e = make ("studioReverb");
+        set (*e, "dry", 0.0f);
+        set (*e, "mix", 100.0f);
+        set (*e, "decay", 2.0f);
+        set (*e, "dHsFreq", 3000.0f);
+        set (*e, "dHsRatio", highRatio);
+        auto burst = sine (9000.0, 0.05, 0.5f);
+        burst.resize (72000, 0.0f);
+        const auto [l, r] = run (*e, burst, burst);
+        double energy = 0.0;
+        for (size_t i = 48000; i < 72000; ++i) energy += (double) l[i] * l[i];
+        return energy;
+    };
+    CHECK (tailOf (1.9f) > tailOf (0.2f) * 10.0);
+
+    auto frozen = make ("studioReverb");
+    set (*frozen, "dry", 0.0f);
+    set (*frozen, "mix", 100.0f);
+    run (*frozen, sine (500.0, 0.3, 0.5f), sine (500.0, 0.3, 0.5f));
+    set (*frozen, "freeze", 1.0f);
+    std::vector<float> silence (96000, 0.0f);
+    const auto [fl, fr] = run (*frozen, silence, silence);
+    CHECK (peakOf (fl, 90000) > 0.01f);
+}
+
 TEST_CASE ("Brickwall Limiter never goes over its ceiling, and reports its latency", "[stockfx]")
 {
     auto lim = make ("brickwall");
