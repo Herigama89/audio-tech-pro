@@ -368,6 +368,22 @@ TEST_CASE ("Reverbs ring on after a click; tremolo moves the level; bitcrusher s
         CHECK (tail > 1.0e-4f);   // still sounding 200-500 ms later
         CHECK (tail < 2.0f);
     }
+    // The newer three: a short burst (EnVerb's envelope starts on a new phrase)
+    for (const auto* type : { "platinumVerb", "silverVerb", "enVerb" })
+    {
+        INFO (type);
+        auto rv = make (type);
+        set (*rv, "dry", 0.0f);
+        set (*rv, "wet", 100.0f);
+        auto l = sine (440.0, 0.05, 0.5f);
+        l.resize (48000, 0.0f);
+        const auto [ol, orr] = run (*rv, l, l);
+        float tail = 0.0f;
+        for (size_t i = 12000; i < 24000; ++i)
+            tail = std::max (tail, std::abs (ol[i]) + std::abs (orr[i]));
+        CHECK (tail > 1.0e-4f);
+        CHECK (tail < 2.0f);
+    }
 
     auto trem = make ("tremolo");
     set (*trem, "sync", 0.0f);

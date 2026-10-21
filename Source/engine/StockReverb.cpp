@@ -599,6 +599,326 @@ namespace
         std::array<float, maxParams> built {};
     };
 
+    //==============================================================================
+    /**
+        A general feedback delay network for the simpler reverbs: eight lines through a Hadamard matrix,
+        two-band decay (below and above a crossover), a high cut in the loop, input diffusion and an
+        optional wobble on two lines.
+    */
+    struct Fdn
+    {
+        void prepare (double rate)
+        {
+            sampleRate = rate;
+            const auto scale = rate / 44100.0;
+            for (auto& l : lines) l.prepare ((int) (2111 * 3.2 * scale) + 64);
+            for (auto& d : diffL) d.line.prepare ((int) (400 * scale * 2.5) + 4);
+            for (auto& d : diffR) d.line.prepare ((int) (400 * scale * 2.5) + 4);
+            for (auto& f : split) f.reset();
+            for (auto& f : damp) f.reset();
+        }
+
+        /** size: 0.3 (small) to 3 (huge); density 0..1; decays in seconds; damping (high cut in the loop) in Hz. */
+        void set (float size, float density, float lowDecay, float highDecay, float crossover, float dampHz, float modSamples)
+        {
+            static const float base[] { 1009, 1123, 1289, 1447, 1597, 1741, 1913, 2111 };
+            const auto scale = (float) (sampleRate / 44100.0);
+            for (size_t i = 0; i < 8; ++i)
+            {
+                lengths[i] = base[i] * scale * size;
+                lowGain[i] = (float) std::pow (10.0, -3.0 * lengths[i] / (std::max (0.05f, lowDecay) * sampleRate));
+                highGain[i] = (float) std::pow (10.0, -3.0 * lengths[i] / (std::max (0.05f, highDecay) * sampleRate));
+                split[i].setLowPass (crossover, sampleRate);
+                damp[i].setLowPass (dampHz, sampleRate);
+            }
+            diffusion = juce::jlimit (0.0f, 0.75f, density * 0.75f);
+            diffScale = scale * (0.5f + size * 0.5f);
+            wobble = modSamples;
+        }
+
+        void process (float inL, float inR, float& outL, float& outR, float mod = 0.0f) noexcept
+        {
+            static const float diffBase[] { 142, 107, 379, 277 };
+            auto xl = inL, xr = inR;
+            for (size_t d = 0; d < 4; ++d)
+            {
+                xl = diffL[d].process (xl, diffBase[d] * diffScale, diffusion);
+                xr = diffR[d].process (xr, diffBase[d] * diffScale * 1.07f, diffusion);
+            }
+            std::array<float, 8> out;
+            for (size_t k = 0; k < 8; ++k)
+                out[k] = lines[k].read (lengths[k] + (k == 1 ? mod * wobble : k == 6 ? -mod * wobble : 0.0f));
+            auto mixed = out;
+            for (size_t h = 1; h < 8; h <<= 1)
+                for (size_t i = 0; i < 8; i += h << 1)
+                    for (size_t j = i; j < i + h; ++j)
+                    {
+                        const auto a = mixed[j], b = mixed[j + h];
+                        mixed[j] = a + b;
+                        mixed[j + h] = a - b;
+                    }
+            for (size_t k = 0; k < 8; ++k)
+            {
+                const auto v = mixed[k] * 0.35355339f;
+                const auto low = split[k].lowPass (v);
+                const auto shaped = low * lowGain[k] + (v - low) * highGain[k];
+                lines[k].push (damp[k].lowPass (shaped) + (k < 4 ? xl : xr) * 0.35f);
+            }
+            outL = (out[0] - out[2] + out[4] - out[6]) * 0.5f;
+            outR = (out[1] - out[3] + out[5] - out[7]) * 0.5f;
+        }
+
+        double sampleRate = 44100.0;
+        std::array<DelayLine, 8> lines;
+        std::array<DiffusionAllPass, 4> diffL, diffR;
+        std::array<OnePole, 8> split, damp;
+        std::array<float, 8> lengths {}, lowGain {}, highGain {};
+        float diffusion = 0.5f, diffScale = 1.0f, wobble = 0.0f;
+    };
+
+    /** Width of a stereo pair: 0 mono, 100 as is, 200 extra wide. */
+    inline void spreadPair (float& l, float& r, float amount) noexcept
+    {
+        const auto mid = 0.5f * (l + r), side = 0.5f * (l - r) * amount;
+        l = mid + side;
+        r = mid - side;
+    }
+
+    //==============================================================================
+    /**
+        PlatinumVerb (as Logic's): early reflections from a room of 3 to 7 corners, its size, the stereo
+        base of the two microphones and an ER scale; then the tail - initial delay, spread, two bands
+        (crossover, low ratio, low level), high cut, density, diffusion, reverb time - and the balance.
+    */
+    class PlatinumVerb final : public BuiltInEffect
+    {
+    public:
+        using BuiltInEffect::BuiltInEffect;
+        enum Index { iPredelay, iShape, iRoomSize, iStereoBase, iErScale, iInitial, iSpread, iCrossover, iLowRatio, iLowLevel,
+                     iHighCut, iDensity, iDiffusion, iTime, iBalance, iDry, iWet };
+
+        void prepare (double rate, int) override
+        {
+            sampleRate = preparedRate = rate;
+            pre.prepare ((int) (0.25 * rate) + (int) (0.6 * rate));
+            fdn.prepare (rate);
+            lowSplitL.reset(); lowSplitR.reset(); highCutL.reset(); highCutR.reset();
+        }
+
+        void process (float* l, float* r, int n) noexcept override
+        {
+            const auto preS = value (iPredelay) * 0.001f * (float) sampleRate;
+            const auto corners = juce::jlimit (3, 7, choice (iShape) + 3);
+            const auto roomM = value (iRoomSize), baseM = value (iStereoBase), erScale = value (iErScale) * 0.01f;
+            const auto initialS = value (iInitial) * 0.001f * (float) sampleRate;
+            const auto time = value (iTime);
+            const auto lowRatio = value (iLowRatio) * 0.01f;
+            fdn.set (juce::jlimit (0.3f, 3.0f, roomM / 20.0f + 0.5f), value (iDensity) * 0.01f, time * lowRatio, time,
+                     value (iCrossover), 20000.0f, 6.0f);
+            fdn.diffusion = juce::jlimit (0.0f, 0.75f, value (iDiffusion) * 0.0075f);
+            for (auto* f : { &lowSplitL, &lowSplitR }) f->setLowPass (value (iCrossover), sampleRate);
+            for (auto* f : { &highCutL, &highCutR }) f->setLowPass (value (iHighCut), sampleRate);
+            const auto lowLevel = dbToGain (value (iLowLevel));
+            const auto spread = value (iSpread) * 0.01f;
+            const auto balance = value (iBalance) * 0.01f;   // (-100 early only .. +100 reverb only)
+            const auto erGain = std::min (1.0f, 1.0f - balance), revGain = std::min (1.0f, 1.0f + balance);
+            const auto dry = value (iDry) * 0.01f, wet = value (iWet) * 0.01f;
+            // The reflections: one per wall of the polygon, at its distance (sound at 343 m/s), the two mics apart
+            std::array<float, 14> tapTime {}, tapGainL {}, tapGainR {};
+            for (int k = 0; k < corners * 2; ++k)
+            {
+                const auto angle = juce::MathConstants<float>::twoPi * (float) k / (float) (corners * 2);
+                const auto distance = roomM * (0.5f + 0.5f * (float) ((k * 7) % corners) / (float) corners) * erScale + 0.3f;
+                const auto offset = baseM * 0.5f * std::sin (angle);
+                tapTime[(size_t) k] = (distance + offset) / 343.0f * (float) sampleRate;
+                const auto g = 0.7f / (1.0f + distance * 0.15f);
+                tapGainL[(size_t) k] = g * (0.5f + 0.5f * std::cos (angle));
+                tapGainR[(size_t) k] = g * (0.5f - 0.5f * std::cos (angle));
+            }
+
+            for (int i = 0; i < n; ++i)
+            {
+                const auto in = 0.5f * (l[i] + r[i]);
+                pre.push (in);
+                float el = 0.0f, er = 0.0f;
+                for (int k = 0; k < corners * 2; ++k)
+                {
+                    const auto x = pre.read (preS + 1.0f + tapTime[(size_t) k]);
+                    el += x * tapGainL[(size_t) k];
+                    er += x * tapGainR[(size_t) k];
+                }
+                const auto tailIn = pre.read (preS + initialS + 1.0f);
+                float tl, tr;
+                fdn.process (tailIn + el * 0.3f, tailIn + er * 0.3f, tl, tr, lfo.next (0.3, sampleRate));
+                // (the low band's level, then the high cut)
+                const auto lowL = lowSplitL.lowPass (tl), lowR = lowSplitR.lowPass (tr);
+                tl = highCutL.lowPass (tl - lowL + lowL * lowLevel);
+                tr = highCutR.lowPass (tr - lowR + lowR * lowLevel);
+                spreadPair (tl, tr, spread);
+                const auto wl = el * erGain * 0.6f + tl * revGain, wr = er * erGain * 0.6f + tr * revGain;
+                l[i] = l[i] * dry + wl * wet;
+                r[i] = r[i] * dry + wr * wet;
+            }
+        }
+
+    private:
+        DelayLine pre;
+        Fdn fdn;
+        OnePole lowSplitL, lowSplitR, highCutL, highCutR;
+        Lfo lfo;
+    };
+
+    //==============================================================================
+    /**
+        EnVerb (as Logic's): a reverb shaped by an envelope - attack, decay to the sustain level, hold, then
+        release - started by each new phrase; the dry signal can be delayed; density, spread, high cut,
+        a crossover with the low band's level, dry and wet.
+    */
+    class EnVerb final : public BuiltInEffect
+    {
+    public:
+        using BuiltInEffect::BuiltInEffect;
+        enum Index { iAttack, iDecay, iSustain, iHold, iRelease, iDryDelay, iDensity, iSpread, iHighCut, iCrossover, iLowLevel, iDry, iWet };
+
+        void prepare (double rate, int) override
+        {
+            sampleRate = preparedRate = rate;
+            dryL.prepare ((int) (0.5 * rate) + 8);
+            dryR.prepare ((int) (0.5 * rate) + 8);
+            fdn.prepare (rate);
+            stage = Stage::idle;
+            env = level = 0.0f;
+            for (auto* f : { &splitL, &splitR, &highCutL, &highCutR }) f->reset();
+        }
+
+        void process (float* l, float* r, int n) noexcept override
+        {
+            const auto rate = (float) sampleRate;
+            const auto attack = std::max (1.0f, value (iAttack) * 0.001f * rate);
+            const auto decay = std::max (1.0f, value (iDecay) * 0.001f * rate);
+            const auto sustain = value (iSustain) * 0.01f;
+            const auto hold = value (iHold) * 0.001f * rate;
+            const auto release = std::max (1.0f, value (iRelease) * rate);
+            const auto dryDelay = value (iDryDelay) * 0.001f * rate;
+            // (a long, even tail underneath: the envelope does the shaping)
+            fdn.set (1.4f, value (iDensity) * 0.01f, 30.0f, 30.0f, value (iCrossover), 16000.0f, 4.0f);
+            for (auto* f : { &splitL, &splitR }) f->setLowPass (value (iCrossover), sampleRate);
+            for (auto* f : { &highCutL, &highCutR }) f->setLowPass (value (iHighCut), sampleRate);
+            const auto lowLevel = dbToGain (value (iLowLevel));
+            const auto spread = value (iSpread) * 0.01f;
+            const auto dry = value (iDry) * 0.01f, wet = value (iWet) * 0.01f;
+            const auto follow = coeffMs (5.0, sampleRate), slow = coeffMs (300.0, sampleRate);
+
+            for (int i = 0; i < n; ++i)
+            {
+                const auto in = 0.5f * (l[i] + r[i]);
+                // A new phrase (the level jumps well above its recent average) starts the envelope again
+                const auto a = std::abs (in);
+                level = a + follow * (level - a);
+                average = level + slow * (average - level);
+                if (level > 0.02f && level > average * 2.5f && stage != Stage::attack)
+                {
+                    stage = Stage::attack;
+                    counter = 0.0f;
+                }
+                switch (stage)
+                {
+                    case Stage::attack:  env += 1.0f / attack; if (env >= 1.0f) { env = 1.0f; stage = Stage::decay; } break;
+                    case Stage::decay:   env -= (1.0f - sustain) / decay; if (env <= sustain) { env = sustain; stage = Stage::hold; counter = 0.0f; } break;
+                    case Stage::hold:    if ((counter += 1.0f) >= hold) stage = Stage::release; break;
+                    case Stage::release: env -= sustain / release + 1.0e-7f; if (env <= 0.0f) { env = 0.0f; stage = Stage::idle; } break;
+                    case Stage::idle:    break;
+                }
+                float tl, tr;
+                fdn.process (in, in, tl, tr, lfo.next (0.25, sampleRate));
+                const auto lowL = splitL.lowPass (tl), lowR = splitR.lowPass (tr);
+                tl = highCutL.lowPass (tl - lowL + lowL * lowLevel) * env;
+                tr = highCutR.lowPass (tr - lowR + lowR * lowLevel) * env;
+                spreadPair (tl, tr, spread);
+                dryL.push (l[i]);
+                dryR.push (r[i]);
+                const auto dl = dryDelay >= 1.0f ? dryL.read (dryDelay) : l[i], dr = dryDelay >= 1.0f ? dryR.read (dryDelay) : r[i];
+                l[i] = dl * dry + tl * wet;
+                r[i] = dr * dry + tr * wet;
+            }
+        }
+
+    private:
+        enum class Stage { idle, attack, decay, hold, release };
+        Stage stage = Stage::idle;
+        float env = 0.0f, level = 0.0f, average = 0.0f, counter = 0.0f;
+        DelayLine dryL, dryR;
+        Fdn fdn;
+        OnePole splitL, splitR, highCutL, highCutR;
+        Lfo lfo;
+    };
+
+    //==============================================================================
+    /**
+        SilverVerb (as Logic's): predelay, reflectivity, size, density/time, low and high cut, and an LFO
+        (on/off, rate, left-right phase, intensity) that wobbles the tail; dry and wet.
+    */
+    class SilverVerb final : public BuiltInEffect
+    {
+    public:
+        using BuiltInEffect::BuiltInEffect;
+        enum Index { iPredelay, iReflectivity, iSize, iDensityTime, iLowCut, iHighCut, iModOn, iRate, iPhase, iIntensity, iDry, iWet };
+
+        void prepare (double rate, int) override
+        {
+            sampleRate = preparedRate = rate;
+            pre.prepare ((int) (0.21 * rate) + 8);
+            fdn.prepare (rate);
+            modL.prepare ((int) (0.03 * rate));
+            modR.prepare ((int) (0.03 * rate));
+            for (auto* f : { &lowCutL, &lowCutR, &highCutL, &highCutR }) f->reset();
+        }
+
+        void process (float* l, float* r, int n) noexcept override
+        {
+            const auto preS = std::max (1.0f, value (iPredelay) * 0.001f * (float) sampleRate);
+            const auto reflect = value (iReflectivity) * 0.01f;
+            const auto size = 0.3f + value (iSize) * 0.02f;
+            const auto time = 0.3f + value (iDensityTime) * 0.08f;
+            // (reflective walls: brighter, longer; soft ones swallow the highs)
+            fdn.set (size, 0.4f + value (iDensityTime) * 0.005f, time, time * (0.3f + reflect * 0.7f), 1500.0f, 3000.0f + reflect * 15000.0f, 0.0f);
+            for (auto* f : { &lowCutL, &lowCutR }) f->setLowPass (value (iLowCut), sampleRate);
+            for (auto* f : { &highCutL, &highCutR }) f->setLowPass (value (iHighCut), sampleRate);
+            const auto modOn = choice (iModOn) == 1;
+            const auto depth = value (iIntensity) * 0.01f * 0.004f * (float) sampleRate;
+            const auto phase = value (iPhase) / 360.0f;
+            const auto dry = value (iDry) * 0.01f, wet = value (iWet) * 0.01f;
+
+            for (int i = 0; i < n; ++i)
+            {
+                pre.push (0.5f * (l[i] + r[i]));
+                const auto x = pre.read (preS);
+                float tl, tr;
+                fdn.process (x, x, tl, tr);
+                tl = highCutL.lowPass (lowCutL.highPass (tl));
+                tr = highCutR.lowPass (lowCutR.highPass (tr));
+                if (modOn && depth > 0.0f)
+                {
+                    // The LFO wobbles a short delay on each side, the right's phase set against the left's
+                    const auto a = lfo.peek (0.0), b = lfo.peek (phase);
+                    lfo.next (value (iRate), sampleRate);
+                    modL.push (tl);
+                    modR.push (tr);
+                    tl = modL.read (2.0f + depth * (0.5f + 0.5f * a));
+                    tr = modR.read (2.0f + depth * (0.5f + 0.5f * b));
+                }
+                l[i] = l[i] * dry + tl * wet;
+                r[i] = r[i] * dry + tr * wet;
+            }
+        }
+
+    private:
+        DelayLine pre, modL, modR;
+        Fdn fdn;
+        OnePole lowCutL, lowCutR, highCutL, highCutR;
+        Lfo lfo;
+    };
+
     template <typename T>
     std::unique_ptr<BuiltInEffect> make (const EffectInfo& info) { return std::make_unique<T> (info); }
 }
@@ -701,6 +1021,57 @@ const std::vector<StockEffect>& stockReverbEffects()
               { "mix", "Mix", pc, 0.0f, 100.0f, 25.0f, 50.0f },
               { "lowCut", "Low Cut", hz, 10.0f, 1000.0f, 80.0f, 150.0f } }, "Reverb" },
           make<ConvolutionSpace> },
+
+        { { "platinumVerb", "PlatinumVerb", {
+              { "predelay", "Predelay", ms, 0.0f, 200.0f, 10.0f, 30.0f },
+              { "shape", "Room Shape", "", 0.0f, 4.0f, 2.0f, 2.0f, { "3", "4", "5", "6", "7" } },
+              { "roomSize", "Room Size", " m", 1.0f, 70.0f, 20.0f, 20.0f },
+              { "stereoBase", "Stereo Base", " m", 0.0f, 2.0f, 0.3f, 0.5f },
+              { "erScale", "ER Scale", pc, 50.0f, 200.0f, 100.0f, 100.0f },
+              { "initial", "Initial Delay", ms, 0.0f, 200.0f, 25.0f, 30.0f },
+              { "spread", "Spread", pc, 0.0f, 200.0f, 100.0f, 100.0f },
+              { "crossover", "Crossover", hz, 50.0f, 2000.0f, 600.0f, 400.0f },
+              { "lowRatio", "Low Ratio", pc, 20.0f, 200.0f, 100.0f, 100.0f },
+              { "lowLevel", "Low Freq Level", " dB", -30.0f, 6.0f, 0.0f, -6.0f },
+              { "highCut", "High Cut", hz, 200.0f, 20000.0f, 8000.0f, 6000.0f },
+              { "density", "Density", pc, 0.0f, 100.0f, 70.0f, 50.0f },
+              { "diffusion", "Diffusion", pc, 0.0f, 100.0f, 70.0f, 50.0f },
+              { "time", "Reverb Time", s, 0.3f, 20.0f, 2.2f, 2.5f },
+              { "balance", "Balance ER/Reverb", pc, -100.0f, 100.0f, 0.0f, 0.0f },
+              { "dry", "Dry", pc, 0.0f, 100.0f, 100.0f, 50.0f },
+              { "wet", "Wet", pc, 0.0f, 100.0f, 25.0f, 50.0f } }, "Reverb" },
+          make<PlatinumVerb> },
+
+        { { "enVerb", "EnVerb", {
+              { "attack", "Attack", ms, 0.0f, 2000.0f, 20.0f, 200.0f },
+              { "decay", "Decay", ms, 0.0f, 3000.0f, 300.0f, 400.0f },
+              { "sustain", "Sustain", pc, 0.0f, 100.0f, 60.0f, 50.0f },
+              { "hold", "Hold", ms, 0.0f, 10000.0f, 500.0f, 1000.0f },
+              { "release", "Release", s, 0.05f, 20.0f, 1.5f, 2.0f },
+              { "dryDelay", "Dry Signal Delay", ms, 0.0f, 500.0f, 0.0f, 100.0f },
+              { "density", "Density", pc, 0.0f, 100.0f, 70.0f, 50.0f },
+              { "spread", "Spread", pc, 0.0f, 200.0f, 100.0f, 100.0f },
+              { "highCut", "High Cut", hz, 200.0f, 20000.0f, 9000.0f, 6000.0f },
+              { "crossover", "Crossover", hz, 50.0f, 2000.0f, 500.0f, 400.0f },
+              { "lowLevel", "Low Freq Level", " dB", -30.0f, 6.0f, -3.0f, -6.0f },
+              { "dry", "Dry", pc, 0.0f, 100.0f, 100.0f, 50.0f },
+              { "wet", "Wet", pc, 0.0f, 100.0f, 30.0f, 50.0f } }, "Reverb" },
+          make<EnVerb> },
+
+        { { "silverVerb", "SilverVerb", {
+              { "predelay", "Predelay", ms, 0.0f, 200.0f, 10.0f, 30.0f },
+              { "reflectivity", "Reflectivity", pc, 0.0f, 100.0f, 60.0f, 50.0f },
+              { "size", "Size", pc, 0.0f, 100.0f, 50.0f, 50.0f },
+              { "densityTime", "Density/Time", pc, 0.0f, 100.0f, 40.0f, 50.0f },
+              { "lowCut", "Low Cut", hz, 10.0f, 2000.0f, 80.0f, 200.0f },
+              { "highCut", "High Cut", hz, 1000.0f, 20000.0f, 9000.0f, 6000.0f },
+              { "modOn", "Modulation", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "rate", "Rate", hz, 0.05f, 10.0f, 0.5f, 1.0f },
+              { "phase", "Phase", juce::String (juce::CharPointer_UTF8 ("\xc2\xb0")), 0.0f, 360.0f, 180.0f, 180.0f },
+              { "intensity", "Intensity", pc, 0.0f, 100.0f, 20.0f, 50.0f },
+              { "dry", "Dry", pc, 0.0f, 100.0f, 100.0f, 50.0f },
+              { "wet", "Wet", pc, 0.0f, 100.0f, 25.0f, 50.0f } }, "Reverb" },
+          make<SilverVerb> },
     };
     return effects;
 }
