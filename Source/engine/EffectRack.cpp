@@ -194,6 +194,7 @@ std::shared_ptr<Effect> EffectRack::effectFor (const juce::ValueTree& insert, do
             for (size_t p = 0; p < params.size(); ++p)
                 builtIn->setParameter ((int) p, (float) (double) insert.getProperty (params[p].id, params[p].defaultValue));
             builtIn->setAttachedFile (insert.getProperty ("irFile").toString());
+            builtIn->messageThreadUpdate();
         }
 
         return entry.effect;
@@ -215,6 +216,7 @@ std::shared_ptr<Effect> EffectRack::effectFor (const juce::ValueTree& insert, do
         for (size_t p = 0; p < params.size(); ++p)
             effect->setParameter ((int) p, (float) (double) insert.getProperty (params[p].id, params[p].defaultValue));
         effect->setAttachedFile (insert.getProperty ("irFile").toString());
+        effect->messageThreadUpdate();
 
         entry = { key, sampleRate, effect };
         return effect;

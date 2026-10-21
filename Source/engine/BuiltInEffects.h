@@ -65,6 +65,9 @@ const std::vector<StockEffect>& stockAmpEffects();
 const std::vector<StockEffect>& stockPitchEffects();
 const std::vector<StockEffect>& stockUtilityEffects();
 const std::vector<StockEffect>& stockExtraEffects();
+const std::vector<StockEffect>& stockPedalboardEffects();
+/** The Pedalboard: a pedal type's three knob names. */
+std::vector<juce::String> pedalboardKnobNames (int type);
 
 /**
     Base for Riff's own effects. Parameter values are atomics written by the
@@ -93,6 +96,9 @@ public:
     /** A file the effect works from (Space Designer's impulse response), from the insert's "irFile" property.
         Message thread; empty for none. */
     virtual void setAttachedFile (const juce::String& /*path*/) {}
+
+    /** Called on the message thread after the knobs were set (the Pedalboard builds its pedals here). */
+    virtual void messageThreadUpdate() {}
 
     /** What its window's meter shows (a compressor's gain reduction in dB, a pitch correction's cents). */
     virtual float displayValue() const noexcept { return 0.0f; }

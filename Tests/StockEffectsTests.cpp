@@ -682,3 +682,45 @@ TEST_CASE ("Space Designer plays a sampled impulse response from a file", "[stoc
     CHECK (std::abs ((int) at - 4800) < 64);
     file.deleteFile();
 }
+
+TEST_CASE ("Pedalboard plays its pedals in a row; Amp Designer and Bass Amp Designer models all play", "[stockfx]")
+{
+    auto board = make ("pedalboard");
+    const auto [l, r] = run (*board, sine (220.0, 0.5, 0.4f), sine (220.0, 0.5, 0.4f));
+    CHECK (peakOf (l, 12000) > 0.01f);
+    CHECK (peakOf (l, 12000) < 4.0f);
+    // Every pedal type, on its own
+    for (int type = 0; type < 23; ++type)
+    {
+        INFO ("pedal " << type);
+        auto one = make ("pedalboard");
+        set (*one, "p1Type", (float) type);
+        set (*one, "p1On", 1.0f);
+        for (int s = 2; s <= 6; ++s) set (*one, "p" + juce::String (s) + "On", 0.0f);
+        one->messageThreadUpdate();
+        const auto [a, b] = run (*one, sine (330.0, 0.3, 0.4f), sine (330.0, 0.3, 0.4f));
+        CHECK (std::isfinite (peakOf (a)));
+        CHECK (peakOf (a, 4800) < 8.0f);
+    }
+    for (int model = 0; model < 24; ++model)
+    {
+        INFO ("amp " << model);
+        auto amp = make ("guitarAmp");
+        set (*amp, "model", (float) model);
+        set (*amp, "revOn", 1.0f);
+        set (*amp, "fxOn", 1.0f);
+        const auto [a, b] = run (*amp, sine (110.0, 0.3, 0.3f), sine (110.0, 0.3, 0.3f));
+        CHECK (peakOf (a, 4800) > 0.005f);
+        CHECK (peakOf (a, 4800) < 4.0f);
+    }
+    for (int model = 0; model < 3; ++model)
+    {
+        auto bass = make ("bassAmp");
+        set (*bass, "model", (float) model);
+        set (*bass, "compOn", 1.0f);
+        set (*bass, "addEqOn", 1.0f);
+        const auto [a, b] = run (*bass, sine (55.0, 0.3, 0.3f), sine (55.0, 0.3, 0.3f));
+        CHECK (peakOf (a, 4800) > 0.005f);
+        CHECK (peakOf (a, 4800) < 4.0f);
+    }
+}

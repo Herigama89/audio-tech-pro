@@ -833,7 +833,7 @@ namespace
         const RF amp (30.0f, 24.0f, (float) b.getWidth() - 60.0f, 420.0f);
         tweed (g, amp);
         // The chrome control strip
-        const auto strip = RF (amp.getX() + 26.0f, amp.getY() + 22.0f, amp.getWidth() - 52.0f, 150.0f);
+        const auto strip = RF (amp.getX() + 26.0f, amp.getY() + 16.0f, amp.getWidth() - 52.0f, 210.0f);
         juce::ColourGradient chrome (juce::Colour (0xffe9ebee), 0.0f, strip.getY(), juce::Colour (0xff8a9096), 0.0f, strip.getBottom(), false);
         chrome.addColour (0.5, juce::Colour (0xffc5c9ce));
         g.setGradientFill (chrome);
@@ -853,6 +853,16 @@ namespace
         g.setColour (juce::Colour (0xff6b5536));
         g.fillRoundedRectangle (plate, 6.0f);
         title (g, plate.toNearestInt(), "Audio Tech", juce::Colour (0xfff0dfc0), 18.0f);
+        // The strip's section names
+        const auto ink = juce::Colour (0xff2a2a2a);
+        title (g, R (450, 228, 170, 16), "REVERB", ink, 12.0f);
+        title (g, R (630, 228, 170, 16), "TREM / VIB", ink, 12.0f);
+        title (g, R (630, 186, 85, 14), "DEPTH", ink, 10.5f);
+        title (g, R (720, 186, 85, 14), "SPEED", ink, 10.5f);
+        title (g, R (490, 200, 90, 14), "LEVEL", ink, 10.5f);
+        g.setColour (juce::Colours::black.withAlpha (0.2f));
+        g.fillRect (440, 50, 1, 180);
+        g.fillRect (810, 50, 1, 180);
         // The model bar below
         g.setColour (juce::Colour (0xff1a1a1c));
         g.fillRect (0, b.getHeight() - 110, b.getWidth(), 110);
@@ -864,17 +874,12 @@ namespace
     {
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1f2022), 0.0f, 0.0f, juce::Colour (0xff09090a), 0.0f, (float) b.getBottom(), false));
         g.fillRect (b);
-        // A black head with vents, a brushed aluminium front
+        // A black head, a brushed aluminium front
         const RF head (40.0f, 20.0f, (float) b.getWidth() - 80.0f, 420.0f);
         g.setColour (juce::Colour (0xff161718));
         g.fillRoundedRectangle (head, 10.0f);
-        for (int k = 0; k < 2; ++k)
-            for (float x = head.getX() + 120.0f + (float) k * (head.getWidth() * 0.5f - 60.0f); x < head.getX() + 120.0f + (float) k * (head.getWidth() * 0.5f - 60.0f) + head.getWidth() * 0.32f; x += 9.0f)
-            {
-                g.setColour (juce::Colours::black);
-                g.fillRect (x, head.getY() + 18.0f, 4.0f, 60.0f);
-            }
-        const auto front = RF (head.getX() + 20.0f, head.getY() + 100.0f, head.getWidth() - 40.0f, head.getHeight() - 120.0f);
+        title (g, R (70, 26, 300, 34), "BASS AMP", juce::Colour (0xffd8dadc), 22.0f, juce::Justification::centredLeft);
+        const auto front = RF (head.getX() + 20.0f, head.getY() + 70.0f, head.getWidth() - 40.0f, head.getHeight() - 90.0f);
         juce::ColourGradient metal (juce::Colour (0xffd9dcdf), 0.0f, front.getY(), juce::Colour (0xff8e9398), 0.0f, front.getBottom(), false);
         metal.addColour (0.55, juce::Colour (0xffbfc3c7));
         g.setGradientFill (metal);
@@ -886,13 +891,6 @@ namespace
             g.fillRect (front.getX(), y, front.getWidth(), 1.0f);
         }
         screws (g, front.toNearestInt(), 18.0f);
-        // The badge
-        const auto badge = RF (front.getCentreX() - 120.0f, front.getY() + 30.0f, 240.0f, 100.0f);
-        g.setColour (juce::Colour (0xff101010));
-        g.fillEllipse (badge);
-        g.setColour (juce::Colour (0xff8a8f94));
-        g.drawEllipse (badge, 3.0f);
-        title (g, badge.toNearestInt(), "BASS", juce::Colour (0xffd8dadc), 38.0f);
         g.setColour (juce::Colour (0xff1a1a1c));
         g.fillRect (0, b.getHeight() - 110, b.getWidth(), 110);
     }
@@ -1199,6 +1197,39 @@ namespace
         title (g, R (690, 16, 200, 26), sampledMode ? "SAMPLED IR" : "SYNTHESIZED IR", juce::Colours::white.withAlpha (0.4f), 12.0f, juce::Justification::centredLeft);
     }
 
+    //==============================================================================
+    // Pedalboard: six stomp boxes on a dark board, each coloured by its kind
+    //==============================================================================
+    void paintPedalboard (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
+    {
+        textured (g, b, juce::Colour (0xff2a2b2e), juce::Colour (0xff151517), 0.06f);
+        for (int s = 0; s < 6; ++s)
+        {
+            const auto n = juce::String (s + 1);
+            const auto type = juce::roundToInt (valueOf (info, v, ("p" + n + "Type").toRawUTF8()));
+            const auto on = valueOf (info, v, ("p" + n + "On").toRawUTF8()) > 0.5f;
+            const RF box (20.0f + (float) s * 200.0f, 20.0f, 180.0f, 360.0f);
+            const auto colour = juce::Colour::fromHSV ((float) ((type * 37) % 100) / 100.0f, 0.55f, 0.75f, 1.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.5f));
+            g.fillRoundedRectangle (box.translated (0.0f, 4.0f), 12.0f);
+            g.setGradientFill (juce::ColourGradient (colour.brighter (0.15f), 0.0f, box.getY(), colour.darker (0.35f), 0.0f, box.getBottom(), false));
+            g.fillRoundedRectangle (box, 12.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.4f));
+            g.drawRoundedRectangle (box, 12.0f, 1.5f);
+            // The knob names for this pedal
+            const auto names = pedalboardKnobNames (type);
+            const RF knobs[] { { box.getX() + 10.0f, 70.0f, 80.0f, 16.0f }, { box.getX() + 90.0f, 70.0f, 80.0f, 16.0f }, { box.getX() + 50.0f, 165.0f, 80.0f, 16.0f } };
+            for (int k = 0; k < 3; ++k)
+                title (g, knobs[k].toNearestInt(), names[(size_t) k].toUpperCase(), juce::Colours::black.withAlpha (0.75f), 11.5f);
+            // The lamp
+            g.setColour (on ? juce::Colour (0xffff3b30) : juce::Colour (0xff4a1512));
+            g.fillEllipse (box.getCentreX() - 6.0f, 262.0f, 12.0f, 12.0f);
+            // The footswitch housing
+            g.setColour (juce::Colour (0xff2b2c2f));
+            g.fillRoundedRectangle (box.getX() + 40.0f, 290.0f, 100.0f, 70.0f, 8.0f);
+        }
+    }
+
     void addHardwareDesigns (std::map<juce::String, Design>& d)
     {
         const auto knob = Kind::knob;
@@ -1309,15 +1340,31 @@ namespace
             c.label = juce::Colour (0xff2a2a2a); c.value = juce::Colour (0xffd8dadc); c.accent = juce::Colour (0xffd8dadc); c.track = juce::Colours::black;
             c.valueAbove = false;
             c.paint = paintGuitarAmp;
-            const char* ids[] { "gain", "bass", "mid", "treble", "presence", "master" };
-            const char* names[] { "GAIN", "BASS", "MIDDLE", "TREBLE", "PRESENCE", "MASTER" };
-            for (int k = 0; k < 6; ++k)
-                c.controls.push_back ({ ids[k], knob, R (110 + k * 150, 52, 120, 134), names[k] });
-            c.controls.push_back ({ "model", Kind::dropdown, R (90, 486, 200, 30), "Amp", juce::Colour (0xffaab0b6) });
-            c.controls.push_back ({ "cab", Kind::dropdown, R (330, 486, 200, 30), "Cabinet", juce::Colour (0xffaab0b6) });
-            c.controls.push_back ({ "mic", knob, R (580, 452, 90, 100), "Mic", juce::Colour (0xffaab0b6) });
-            c.controls.push_back ({ "output", knob, R (720, 452, 90, 100), "Output", juce::Colour (0xffaab0b6) });
-            c.controls.push_back ({ "mix", knob, R (860, 452, 90, 100), "Mix", juce::Colour (0xffaab0b6) });
+            const auto grey = juce::Colour (0xffaab0b6);
+            c.controls = {
+                { "gain", knob, R (60, 74, 95, 120), "GAIN" },
+                { "bass", knob, R (160, 74, 95, 120), "BASS" },
+                { "mid", knob, R (250, 74, 95, 120), "MIDS" },
+                { "treble", knob, R (340, 74, 95, 120), "TREBLE" },
+                { "eqType", Kind::dropdown, R (250, 200, 130, 24), "-", juce::Colour (0xff2a2a2a) },
+                { "revOn", Kind::toggle, R (500, 52, 70, 22), "=ON" },
+                { "revType", Kind::dropdown, R (455, 80, 160, 24), "-", juce::Colour (0xff2a2a2a) },
+                { "revLevel", knob, R (490, 108, 90, 100), "-" },
+                { "fxOn", Kind::toggle, R (680, 52, 70, 22), "=ON" },
+                { "fxMode", Kind::segmented, R (640, 80, 160, 24), "-" },
+                { "fxDepth", knob, R (630, 108, 85, 95), "-" },
+                { "fxSpeed", knob, R (720, 108, 85, 95), "-" },
+                { "fxSync", Kind::segmented, R (650, 202, 140, 20), "-" },
+                { "presence", knob, R (840, 74, 95, 120), "PRESENCE" },
+                { "master", knob, R (940, 74, 95, 120), "MASTER" },
+                { "model", Kind::dropdown, R (40, 486, 210, 30), "Amp", grey },
+                { "cab", Kind::dropdown, R (265, 486, 220, 30), "Cabinet", grey },
+                { "micType", Kind::dropdown, R (500, 486, 160, 30), "Mic", grey },
+                { "mic", knob, R (680, 452, 80, 100), "Position", grey },
+                { "micDistance", knob, R (770, 452, 80, 100), "Distance", grey },
+                { "output", knob, R (870, 452, 80, 100), "Output", grey },
+                { "mix", knob, R (960, 452, 80, 100), "Mix", grey },
+            };
             d["guitarAmp"] = c;
         }
         {
@@ -1328,16 +1375,54 @@ namespace
             c.label = juce::Colour (0xff1c1c1c); c.value = juce::Colour (0xffd8dadc); c.accent = juce::Colour (0xffd8dadc); c.track = juce::Colours::black;
             c.valueAbove = false;
             c.paint = paintBassAmp;
-            const char* ids[] { "gain", "bass", "lowMid", "highMid", "treble", "master" };
-            const char* names[] { "GAIN", "BASS", "LO MID", "HI MID", "TREBLE", "MASTER" };
-            for (int k = 0; k < 6; ++k)
-                c.controls.push_back ({ ids[k], knob, R ((k < 3 ? 110 : 650) + (k % 3) * 120, 270, 110, 130), names[k] });
-            c.controls.push_back ({ "cab", Kind::dropdown, R (60, 486, 170, 30), "Cabinet", juce::Colour (0xffaab0b6) });
-            c.controls.push_back ({ "mic", knob, R (260, 452, 90, 100), "Mic", juce::Colour (0xffaab0b6) });
-            c.controls.push_back ({ "blend", knob, R (380, 452, 90, 100), "DI Blend", juce::Colour (0xffaab0b6) });
-            c.controls.push_back ({ "diLevel", knob, R (500, 452, 90, 100), "DI Level", juce::Colour (0xffaab0b6) });
-            c.controls.push_back ({ "mix", knob, R (620, 452, 90, 100), "Mix", juce::Colour (0xffaab0b6) });
-            c.controls.push_back ({ "output", knob, R (740, 452, 90, 100), "Output", juce::Colour (0xffaab0b6) });
+            const auto grey = juce::Colour (0xffaab0b6);
+            c.pageParam = "page";
+            c.controls = {
+                { "page", Kind::segmented, R (850, 30, 200, 26), "-", grey },
+                // The amp page: the head's front panel
+                { "channel", Kind::segmented, R (90, 140, 120, 26), "CHANNEL", {}, 1 },
+                { "bright", Kind::toggle, R (230, 140, 80, 26), "=BRIGHT", {}, 1 },
+                { "eqOn", Kind::toggle, R (330, 140, 70, 26), "=EQ", {}, 1 },
+                { "lowSw", Kind::segmented, R (420, 140, 140, 26), "LOW", {}, 1 },
+                { "midSw", Kind::segmented, R (580, 140, 120, 26), "MID FREQ", {}, 1 },
+                { "highSw", Kind::segmented, R (720, 140, 150, 26), "HIGH", {}, 1 },
+                { "gain", knob, R (110, 270, 110, 130), "GAIN", {}, 1 },
+                { "bass", knob, R (240, 270, 110, 130), "BASS", {}, 1 },
+                { "lowMid", knob, R (370, 270, 110, 130), "MIDS", {}, 1 },
+                { "treble", knob, R (650, 270, 110, 130), "TREBLE", {}, 1 },
+                { "master", knob, R (780, 270, 110, 130), "MASTER", {}, 1 },
+                // The pedals page: compressor, extra EQ
+                { "compOn", Kind::toggle, R (90, 140, 120, 26), "=COMPRESSOR", {}, 2 },
+                { "compHard", Kind::segmented, R (90, 176, 120, 24), "-", {}, 2 },
+                { "comp", knob, R (230, 130, 90, 110), "COMP", {}, 2 },
+                { "compGain", knob, R (330, 130, 90, 110), "GAIN", {}, 2 },
+                { "addEqOn", Kind::toggle, R (450, 140, 120, 26), "=EXTRA EQ", {}, 2 },
+                { "addEqType", Kind::segmented, R (580, 140, 180, 26), "-", {}, 2 },
+                { "addEqPost", Kind::segmented, R (770, 140, 110, 26), "-", {}, 2 },
+                { "loGain", knob, R (110, 290, 80, 100), "LO GAIN", {}, 2 },
+                { "loFreq", knob, R (195, 290, 80, 100), "LO kHz", {}, 2 },
+                { "loQ", knob, R (280, 290, 80, 100), "LO Q", {}, 2 },
+                { "hiGain", knob, R (380, 290, 80, 100), "HI GAIN", {}, 2 },
+                { "hiFreq", knob, R (465, 290, 80, 100), "HI kHz", {}, 2 },
+                { "hiQ", knob, R (550, 290, 80, 100), "HI Q", {}, 2 },
+                // The D.I. box page
+                { "diBoost", knob, R (110, 150, 110, 130), "BOOST", {}, 3 },
+                { "diHfCut", Kind::toggle, R (260, 170, 100, 26), "=HF CUT", {}, 3 },
+                { "diToneOn", Kind::toggle, R (380, 170, 100, 26), "=TONE", {}, 3 },
+                { "diTone", Kind::segmented, R (500, 170, 300, 26), "TONE CURVE", {}, 3 },
+                { "diLevel", knob, R (850, 150, 110, 130), "DI LEVEL", {}, 3 },
+                // Always: the bottom bar
+                { "model", Kind::dropdown, R (40, 486, 170, 30), "Amp", grey },
+                { "cab", Kind::dropdown, R (225, 486, 210, 30), "Cabinet", grey },
+                { "micType", Kind::dropdown, R (450, 486, 150, 30), "Mic", grey },
+                { "mic", knob, R (610, 452, 75, 100), "Position", grey },
+                { "micDistance", knob, R (690, 452, 75, 100), "Distance", grey },
+                { "blend", knob, R (770, 452, 75, 100), "Blend", grey },
+                { "mix", knob, R (850, 452, 75, 100), "Mix", grey },
+                { "output", knob, R (930, 452, 75, 100), "Output", grey },
+            };
+            for (int b = 0; b < 7; ++b)
+                c.controls.push_back ({ "g" + juce::String (b + 1), Kind::fader, R (650 + b * 50, 250, 34, 170), "-", juce::Colour (0xff6a6e73), 2 });
             d["bassAmp"] = c;
         }
         {
@@ -1798,6 +1883,29 @@ namespace
             };
             d["convSpace"] = c;
         }
+        {
+            // Pedalboard
+            const auto knob = Kind::knob;
+            Design c;
+            c.width = 1220; c.height = 500;
+            c.knobs = KnobStyle::black;
+            c.label = juce::Colours::black.withAlpha (0.75f); c.value = juce::Colours::white; c.accent = juce::Colours::white; c.track = juce::Colours::black;
+            c.valueAbove = false;
+            c.paint = paintPedalboard;
+            for (int s = 0; s < 6; ++s)
+            {
+                const auto n = juce::String (s + 1);
+                const auto x = 20 + s * 200;
+                c.controls.push_back ({ "p" + n + "Type", Kind::dropdown, R (x + 10, 30, 160, 28), "-", juce::Colours::white });
+                c.controls.push_back ({ "p" + n + "K1", knob, R (x + 15, 86, 70, 70), "-" });
+                c.controls.push_back ({ "p" + n + "K2", knob, R (x + 95, 86, 70, 70), "-" });
+                c.controls.push_back ({ "p" + n + "K3", knob, R (x + 55, 182, 70, 70), "-" });
+                c.controls.push_back ({ "p" + n + "On", Kind::toggle, R (x + 55, 300, 70, 50), "=ON/OFF" });
+            }
+            c.controls.push_back ({ "mix", knob, R (470, 392, 90, 100), "MIX", juce::Colour (0xffc9ccd0) });
+            c.controls.push_back ({ "output", knob, R (660, 392, 90, 100), "OUTPUT", juce::Colour (0xffc9ccd0) });
+            d["pedalboard"] = c;
+        }
         addHardwareDesigns (d);
         return d;
     }
@@ -2213,7 +2321,7 @@ void DesignLook::drawComboBox (juce::Graphics& g, int w, int h, bool, int, int, 
         g.setColour (juce::Colours::white.withAlpha (0.25f));
         g.drawRoundedRectangle (box.getLocalBounds().toFloat().reduced (0.5f), 3.0f, 1.0f);
     }
-    g.setColour (design.value);
+    g.setColour (box.getProperties().contains ("ink") ? juce::Colour::fromString (box.getProperties()["ink"].toString()) : design.value);
     const auto cx = (float) w - 10.0f, cy = (float) box.getHeight() * 0.5f;
     juce::Path p;
     p.startNewSubPath (cx - 4.0f, cy - 2.0f); p.lineTo (cx, cy - 6.0f); p.lineTo (cx + 4.0f, cy - 2.0f);
@@ -2226,7 +2334,8 @@ void DesignLook::positionComboBoxText (juce::ComboBox& box, juce::Label& label)
     const auto inset = design.lcdValues ? 6 : 0;
     label.setBounds (inset, 0, box.getWidth() - 20 - inset, box.getHeight());
     label.setFont (getComboBoxFont (box));
-    label.setColour (juce::Label::textColourId, design.value);
+    // (a menu with its own ink, for one sitting on a light panel)
+    label.setColour (juce::Label::textColourId, box.getProperties().contains ("ink") ? juce::Colour::fromString (box.getProperties()["ink"].toString()) : design.value);
     label.setJustificationType (box.getProperties()["centred"] ? juce::Justification::centred : juce::Justification::centredLeft);
 }
 

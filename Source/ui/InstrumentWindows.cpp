@@ -424,6 +424,8 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                 for (size_t n = 0; n < p->choices.size(); ++n)
                     box->addItem (p->choices[n], (int) n + 1);
                 box->getProperties().set ("centred", c.bounds.getHeight() >= 38);
+                if (! c.colour.isTransparent())
+                    box->getProperties().set ("ink", c.colour.toString());
                 box->setWantsKeyboardFocus (false);
                 box->onChange = [box, setValue, current, id = c.id, name = p->name]
                 {
