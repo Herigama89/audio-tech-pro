@@ -1465,6 +1465,110 @@ namespace
     }
 
     //==============================================================================
+    // Match EQ: the template, the current material and the filter that matches them, over the analyser
+    //==============================================================================
+    constexpr int matchBands = 31;
+    double matchBandFrequency (int k) { return 1000.0 * std::pow (2.0, (k - 17) / 3.0); }
+
+    void paintMatchEq (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
+    {
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff383b40), 0.0f, 0.0f, juce::Colour (0xff222428), 0.0f, (float) b.getBottom(), false));
+        g.fillRect (b);
+        const RF screen (20.0f, 50.0f, (float) b.getWidth() - 40.0f, 290.0f);
+        g.setColour (juce::Colour (0xff0f1114));
+        g.fillRoundedRectangle (screen, 5.0f);
+        const auto xOf = [screen] (double f) { return screen.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * screen.getWidth(); };
+        const auto yOf = [screen] (double db) { return screen.getCentreY() - (float) (juce::jlimit (-24.0, 24.0, db) / 24.0) * screen.getHeight() * 0.5f; };
+        g.setFont (juce::FontOptions (11.0f));
+        for (const auto f : { 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0 })
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.07f));
+            g.fillRect (xOf (f), screen.getY(), 1.0f, screen.getHeight());
+            g.setColour (juce::Colours::white.withAlpha (0.4f));
+            g.drawText (f >= 1000.0 ? juce::String ((int) (f / 1000.0)) + "k" : juce::String ((int) f), RF (xOf (f) + 3.0f, screen.getBottom() - 16.0f, 40.0f, 14.0f), juce::Justification::left, false);
+        }
+        for (const auto db : { -18.0, -12.0, -6.0, 0.0, 6.0, 12.0, 18.0 })
+        {
+            g.setColour (juce::Colours::white.withAlpha (db == 0.0 ? 0.2f : 0.06f));
+            g.fillRect (screen.getX(), yOf (db), screen.getWidth(), 1.0f);
+            g.setColour (juce::Colours::white.withAlpha (0.35f));
+            g.drawText (juce::String ((int) db), RF (screen.getX() + 4.0f, yOf (db) - 13.0f, 30.0f, 12.0f), juce::Justification::left, false);
+        }
+        if (valueOf (info, v, "analyzer", 1.0f) > 0.5f)
+            drawSpectrum (g, screen, xOf, juce::Colour (0xff6c8fb3));
+
+        // The two spectra, each about its own average
+        const auto spectrumCurve = [&] (const char* prefix, juce::Colour colour)
+        {
+            std::array<float, matchBands> d {};
+            float mean = 0.0f;
+            int valid = 0;
+            for (int k = 0; k < matchBands; ++k)
+            {
+                d[(size_t) k] = valueOf (info, v, (juce::String (prefix) + juce::String (k + 1)).toRawUTF8(), -120.0f);
+                if (d[(size_t) k] > -119.0f) { mean += d[(size_t) k]; ++valid; }
+            }
+            if (valid < 3)
+                return false;
+            mean /= (float) valid;
+            juce::Path path;
+            for (int k = 0; k < matchBands; ++k)
+            {
+                const auto p = juce::Point<float> (xOf (matchBandFrequency (k)), yOf (d[(size_t) k] - mean));
+                if (k == 0) path.startNewSubPath (p); else path.lineTo (p);
+            }
+            g.setColour (colour);
+            g.strokePath (path, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved));
+            return true;
+        };
+        const auto hasTemplate = spectrumCurve ("t", juce::Colour (0xffffa23c));
+        const auto hasCurrent = spectrumCurve ("c", juce::Colour (0xff53d37a));
+
+        // The filter
+        juce::Path filter;
+        for (int x = 0; x <= (int) screen.getWidth(); x += 2)
+        {
+            const auto f = 20.0 * std::pow (1000.0, x / (double) screen.getWidth());
+            const auto p = juce::Point<float> (screen.getX() + (float) x, yOf (info.response (v, f, 48000.0)));
+            if (x == 0) filter.startNewSubPath (p); else filter.lineTo (p);
+        }
+        g.setColour (juce::Colour (0xfff2f2f2));
+        g.strokePath (filter, juce::PathStrokeType (2.2f, juce::PathStrokeType::curved));
+
+        // Legend and status
+        int count = 0;
+        const auto* m = paintingMeters (count);
+        const auto status = [&] (bool has, int secondsAt, const char* learnId)
+        {
+            if (valueOf (info, v, learnId) > 0.5f)
+                return "Learning... " + juce::String (count > secondsAt ? m[secondsAt] : 0.0f, 1) + " s";
+            return juce::String (has ? "Learned" : "Empty");
+        };
+        g.setFont (juce::FontOptions (13.0f));
+        const auto legend = [&] (int x, juce::Colour c, const juce::String& text)
+        {
+            g.setColour (c);
+            g.fillRoundedRectangle (RF ((float) x, 22.0f, 14.0f, 4.0f), 2.0f);
+            g.setColour (juce::Colours::white.withAlpha (0.8f));
+            g.drawText (text, R (x + 20, 14, 260, 20), juce::Justification::centredLeft, false);
+        };
+        legend (24, juce::Colour (0xffffa23c), "Template: " + status (hasTemplate, 62, "learnT"));
+        legend (290, juce::Colour (0xff53d37a), "Current: " + status (hasCurrent, 63, "learnC"));
+        legend (556, juce::Colour (0xfff2f2f2), hasTemplate && hasCurrent ? juce::String ("Filter: matching") : juce::String ("Filter: learn both to match"));
+
+        // Section titles
+        const auto ink = juce::Colours::white.withAlpha (0.55f);
+        title (g, R (20, 356, 300, 20), "TEMPLATE", ink, 13.0f);
+        title (g, R (340, 356, 200, 20), "CURRENT MATERIAL", ink, 13.0f);
+        title (g, R (560, 356, 240, 20), "MATCH", ink, 13.0f);
+        title (g, R (820, 356, 160, 20), "OUTPUT", ink, 13.0f);
+        title (g, R (830, 474, 150, 16), "Gain", ink, 12.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.25f));
+        for (const auto x : { 330, 550, 810 })
+            g.fillRect (x, 360, 1, 180);
+    }
+
+    //==============================================================================
     // Delay Designer: the taps on a timeline, the selected tap's parameters below, the master section
     //==============================================================================
     void paintDelayDesigner (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
@@ -2334,6 +2438,69 @@ namespace
                 { "bypass", Kind::toggle, R (460, 440, 110, 28), "=BYPASS" },
             };
             d["masteringAssistant"] = m;
+        }
+        {
+            // Match EQ
+            Design c;
+            c.width = 1000; c.height = 560;
+            c.knobs = KnobStyle::dark;
+            c.label = juce::Colours::white.withAlpha (0.6f); c.value = juce::Colour (0xffffc46b); c.accent = juce::Colour (0xffffa23c); c.track = juce::Colour (0xff17191c);
+            c.meters = true;
+            c.analyzer = true;
+            c.paint = paintMatchEq;
+            c.controls = {
+                { "learnT", Kind::toggle, R (40, 392, 120, 30), "=LEARN" },
+                { "clearT", Kind::toggle, R (180, 392, 120, 30), "=CLEAR" },
+                { "irFile", Kind::fileButton, R (40, 436, 260, 30), "-" },
+                { "learnC", Kind::toggle, R (370, 392, 140, 30), "=LEARN" },
+                { "clearC", Kind::toggle, R (370, 436, 140, 30), "=CLEAR" },
+                { "apply", Kind::knob, R (570, 384, 110, 150), "Apply" },
+                { "smoothing", Kind::knob, R (690, 384, 110, 150), "Smoothing" },
+                { "phase", Kind::segmented, R (830, 392, 150, 30), "-" },
+                { "analyzer", Kind::toggle, R (830, 436, 150, 30), "=ANALYZER" },
+                { "output", Kind::field, R (830, 490, 150, 30), "-", juce::Colours::white },
+            };
+            c.graphs.push_back ({ R (20, 50, 960, 290), { { "u1Freq", "u1Gain", "u1Q", "u1On" }, { "u2Freq", "u2Gain", "u2Q", "u2On" },
+                                                          { "u3Freq", "u3Gain", "u3Q", "u3On" }, { "u4Freq", "u4Gain", "u4Q", "u4On" } } });
+            // What it learns (and a reference file's spectrum) goes into its parameters, so it is kept with the project
+            c.learn = [] (const float* m, int count, const EffectInfo& fx, const float* v, const std::function<void (const juce::String&, float)>& set)
+            {
+                if (count < 96)
+                    return;
+                static int tick = 0;
+                ++tick;
+                const auto band = [] (const char* prefix, int k) { return juce::String (prefix) + juce::String (k + 1); };
+                const auto write = [&] (const char* prefix, const float* from, bool force)
+                {
+                    for (int k = 0; k < matchBands; ++k)
+                    {
+                        const auto id = band (prefix, k);
+                        const auto now = juce::jlimit (-120.0f, 20.0f, std::round (from[k] * 100.0f) / 100.0f);
+                        if (force || std::abs (valueOf (fx, v, id.toRawUTF8(), -120.0f) - now) > 0.05f)
+                            set (id, now);
+                    }
+                };
+                std::array<float, matchBands> cleared;
+                cleared.fill (-120.0f);
+                for (const auto& [flag, prefix] : { std::pair { "clearT", "t" }, std::pair { "clearC", "c" } })
+                    if (valueOf (fx, v, flag) > 0.5f)
+                    {
+                        write (prefix, cleared.data(), true);
+                        set (flag, 0.0f);
+                        if (juce::String (prefix) == "t") set ("learnT", 0.0f); else set ("learnC", 0.0f);
+                    }
+                const auto generation = m[64];
+                if (generation > 0.5f && std::abs (generation - valueOf (fx, v, "templateGen")) > 0.5f)
+                {
+                    write ("t", m + 65, false);
+                    set ("templateGen", generation);
+                }
+                if (tick % 8 != 0)
+                    return;
+                if (valueOf (fx, v, "learnT") > 0.5f && m[62] > 0.25f) write ("t", m, false);
+                if (valueOf (fx, v, "learnC") > 0.5f && m[63] > 0.25f) write ("c", m + 31, false);
+            };
+            d["matchEq"] = c;
         }
         {
             // Delay Designer

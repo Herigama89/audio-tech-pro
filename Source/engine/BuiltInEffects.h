@@ -67,6 +67,8 @@ const std::vector<StockEffect>& stockUtilityEffects();
 const std::vector<StockEffect>& stockExtraEffects();
 /** Delay Designer's parameters: 11 globals, then 12 for each of its 26 taps (A to Z). */
 std::vector<ParamInfo> delayDesignerParams();
+/** Match EQ's parameters: 10 globals, 4 bands of your own (freq, gain, Q, on), then the template and current spectra (31 third octaves each, dB). */
+std::vector<ParamInfo> matchEqParams();
 const std::vector<StockEffect>& stockPedalboardEffects();
 const std::vector<StockEffect>& stockMeteringEffects();
 /** Pitch Correction's scales and chords: their names, and each one's notes from the root (12 flags). */

@@ -281,7 +281,7 @@ void EffectPanel::buildDesign (const EffectInfo& info)
             b->setWantsKeyboardFocus (false);
             b->onClick = [this, id = c.id]
             {
-                fileChooser = std::make_unique<juce::FileChooser> ("Choose an impulse response", juce::File(), "*.wav;*.aif;*.aiff;*.flac;*.caf");
+                fileChooser = std::make_unique<juce::FileChooser> (insert[ids::effect].toString() == "matchEq" ? "Choose a reference track" : "Choose an impulse response", juce::File(), "*.wav;*.aif;*.aiff;*.flac;*.caf;*.mp3;*.m4a");
                 fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                                           [this, id] (const juce::FileChooser& chooser)
                                           {
@@ -299,7 +299,7 @@ void EffectPanel::buildDesign (const EffectInfo& info)
             refreshers.push_back ([this, b, id = c.id]
             {
                 const auto path = insert.getProperty (juce::Identifier (id)).toString();
-                b->setButtonText (path.isEmpty() ? juce::String ("Load IR...") : juce::File (path).getFileNameWithoutExtension());
+                b->setButtonText (path.isEmpty() ? juce::String (insert[ids::effect].toString() == "matchEq" ? "Load Reference File..." : "Load IR...") : juce::File (path).getFileNameWithoutExtension());
             });
             Placed placed;
             placed.control = c;
@@ -616,7 +616,19 @@ void EffectPanel::updateSpectrum()
 void EffectPanel::timerCallback()
 {
     if (meterSource != nullptr && design != nullptr && design->meters)
+    {
         meterCount = meterSource (meterValues.data(), (int) meterValues.size());
+        if (design->learn != nullptr && meterCount > 0)
+            if (const auto* info = findBuiltInEffect (insert[ids::effect].toString()))
+            {
+                std::array<float, BuiltInEffect::maxParams> v {};
+                for (size_t i = 0; i < info->params.size(); ++i)
+                    v[i] = (float) (double) insert.getProperty (juce::Identifier (info->params[i].id), info->params[i].defaultValue);
+                // (not undoable: what was learned, as it comes in)
+                design->learn (meterValues.data(), meterCount, *info, v.data(),
+                               [this] (const juce::String& id, float value) { insert.setProperty (juce::Identifier (id), value, nullptr); });
+            }
+    }
     if (analyzerSource != nullptr && design != nullptr && design->analyzer)
         updateSpectrum();
     // The meter: quick to rise, easing back

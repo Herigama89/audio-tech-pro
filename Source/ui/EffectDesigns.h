@@ -71,6 +71,10 @@ namespace riff::effectdesign
         juce::String pageParam;                 // (a face with pages: the parameter choosing which one shows, page = its value + 1)
         /** Whether a control applies with the current settings (e.g. a compressor circuit without a Knee); greyed out if not. */
         std::function<bool (const juce::String& id, const EffectInfo&, const float* values)> enabled;
+        /** Called with each fresh set of readings: may set parameters from them (Match EQ keeps what it learned this way,
+            so it is saved with the project). */
+        std::function<void (const float* meters, int count, const EffectInfo&, const float* values,
+                            const std::function<void (const juce::String& id, float value)>& set)> learn;
         /** Draws the face behind the controls: panels, titles, screens, meters. */
         std::function<void (juce::Graphics&, juce::Rectangle<int>, const EffectInfo&, const float* values, float live)> paint;
     };

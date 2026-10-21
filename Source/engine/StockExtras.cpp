@@ -88,6 +88,294 @@ namespace
     };
 
     //==============================================================================
+    /** Match EQ: learns the average spectrum of a reference (the template, played or from a file) and of the
+        material, and makes a filter that turns the one into the other, by an Apply amount, smoothed. */
+    namespace match
+    {
+        constexpr int bands = 31;                    // third octaves, 20 Hz to 20 kHz
+        constexpr int globals = 10, perUser = 4, users = 4;
+        constexpr int templateAt = globals + users * perUser, currentAt = templateAt + bands;
+        enum Global { apply, smoothing, phase, analyzer, learnT, learnC, clearT, clearC, output, templateGen };
+        constexpr float empty = -120.0f;
+
+        inline double bandFrequency (int k) noexcept { return 1000.0 * std::pow (2.0, (k - 17) / 3.0); }
+
+        /** The matching curve, dB per band: template minus current, each about its own average, smoothed. */
+        inline std::array<double, bands> curve (const float* v)
+        {
+            std::array<double, bands> d {};
+            double meanT = 0.0, meanC = 0.0;
+            int valid = 0;
+            for (int k = 0; k < bands; ++k)
+                if (v[templateAt + k] > empty + 1.0f && v[currentAt + k] > empty + 1.0f)
+                {
+                    meanT += v[templateAt + k];
+                    meanC += v[currentAt + k];
+                    ++valid;
+                }
+            if (valid < 3)
+                return d;
+            meanT /= valid;
+            meanC /= valid;
+            std::array<double, bands> raw {};
+            std::array<bool, bands> has {};
+            for (int k = 0; k < bands; ++k)
+                if ((has[(size_t) k] = v[templateAt + k] > empty + 1.0f && v[currentAt + k] > empty + 1.0f))
+                    raw[(size_t) k] = (v[templateAt + k] - meanT) - (v[currentAt + k] - meanC);
+            const auto sigma = v[smoothing] * 0.01 * 3.0;
+            for (int k = 0; k < bands; ++k)
+            {
+                double sum = 0.0, weights = 0.0;
+                for (int j = 0; j < bands; ++j)
+                {
+                    if (! has[(size_t) j])
+                        continue;
+                    const auto w = sigma < 0.05 ? (j == k ? 1.0 : 0.0) : std::exp (-0.5 * juce::square ((j - k) / sigma));
+                    sum += raw[(size_t) j] * w;
+                    weights += w;
+                }
+                d[(size_t) k] = juce::jlimit (-30.0, 30.0, weights > 0.0 ? sum / weights : 0.0) * v[apply] * 0.01;
+            }
+            return d;
+        }
+
+        inline double response (const float* v, double freq, double rate)
+        {
+            const auto d = curve (v);
+            const auto at = juce::jlimit (0.0, (double) bands - 1.0, 3.0 * std::log2 (std::max (1.0, freq) / 1000.0) + 17.0);
+            const auto k = std::min (bands - 2, (int) at);
+            auto db = d[(size_t) k] + (at - k) * (d[(size_t) k + 1] - d[(size_t) k]);
+            for (int u = 0; u < users; ++u)
+            {
+                const auto* b = v + globals + u * perUser;
+                if (b[3] < 0.5f || std::abs (b[1]) < 0.01f)
+                    continue;
+                Biquad peak;
+                peak.setPeak (rate, b[0], b[1], b[2]);
+                db += peak.magnitudeDb (freq, rate);
+            }
+            return db + v[output];
+        }
+
+        /** Third-octave band levels, accumulated while learning. */
+        struct Bank
+        {
+            std::array<Biquad, bands> filters;
+            std::array<double, bands> energy {};
+            double samples = 0.0;
+
+            void prepare (double rate)
+            {
+                for (int k = 0; k < bands; ++k)
+                    filters[(size_t) k].setBandPass (rate, std::min (bandFrequency (k), rate * 0.45), 4.32);
+                reset();
+            }
+            void reset() noexcept
+            {
+                for (auto& f : filters) f.reset();
+                energy.fill (0.0);
+                samples = 0.0;
+            }
+            void add (float x) noexcept
+            {
+                for (size_t k = 0; k < (size_t) bands; ++k)
+                {
+                    const auto y = filters[k].process (x, 0);
+                    energy[k] += (double) y * y;
+                }
+                samples += 1.0;
+            }
+            float db (int k) const noexcept
+            {
+                return samples < 1.0 ? empty : (float) juce::jmax ((double) empty + 2.0, 10.0 * std::log10 (energy[(size_t) k] / samples + 1.0e-14));
+            }
+        };
+    }
+
+    class MatchEq final : public BuiltInEffect,
+                          private juce::Timer
+    {
+    public:
+        static constexpr int taps = 4096;
+        explicit MatchEq (const EffectInfo& i) : BuiltInEffect (i)
+        {
+            for (auto* set : { &learnedTemplate, &learnedCurrent, &fileTemplate })
+                for (auto& x : *set)
+                    x.store (match::empty);
+        }
+        ~MatchEq() override { stopTimer(); }
+
+        int getLatencySamples() const override { return choice (match::phase) == 0 ? taps / 2 : 0; }
+
+        void prepare (double rate, int maxBlock) override
+        {
+            sampleRate = preparedRate = rate;
+            blockSize = std::max (16, maxBlock);
+            convolution.prepare ({ rate, (juce::uint32) blockSize, 2 });
+            templateBank.prepare (rate);
+            currentBank.prepare (rate);
+            built.fill (std::numeric_limits<float>::quiet_NaN());
+            rebuild();
+            startTimerHz (6);
+        }
+
+        void setAttachedFile (const juce::String& path) override
+        {
+            if (path == filePath)
+                return;
+            filePath = path;
+            const juce::File file (path);
+            if (path.isEmpty() || ! file.existsAsFile())
+                return;
+            juce::AudioFormatManager formats;
+            formats.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+            if (reader == nullptr)
+                return;
+            match::Bank bank;
+            bank.prepare (reader->sampleRate);
+            const auto length = std::min<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 180.0));
+            juce::AudioBuffer<float> chunk ((int) std::min (2u, reader->numChannels), 65536);
+            for (juce::int64 at = 0; at < length; at += chunk.getNumSamples())
+            {
+                const auto n = (int) std::min<juce::int64> (chunk.getNumSamples(), length - at);
+                reader->read (&chunk, 0, n, at, true, chunk.getNumChannels() > 1);
+                for (int i = 0; i < n; ++i)
+                    bank.add (chunk.getNumChannels() > 1 ? 0.5f * (chunk.getSample (0, i) + chunk.getSample (1, i)) : chunk.getSample (0, i));
+            }
+            for (int k = 0; k < match::bands; ++k)
+                fileTemplate[(size_t) k].store (bank.db (k));
+            fileGeneration.store (fileGeneration.load() + 1);
+        }
+
+        /** 0-30 the template being learned, 31-61 the material being learned, 62/63 seconds learned of each,
+            64 the file template's generation (changes when a file was read), 65-95 the file's template. */
+        int readMeters (float* dest, int capacity) const noexcept override
+        {
+            if (capacity < 96)
+                return 0;
+            for (int k = 0; k < match::bands; ++k)
+            {
+                dest[k] = learnedTemplate[(size_t) k].load (std::memory_order_relaxed);
+                dest[31 + k] = learnedCurrent[(size_t) k].load (std::memory_order_relaxed);
+                dest[65 + k] = fileTemplate[(size_t) k].load (std::memory_order_relaxed);
+            }
+            dest[62] = secondsT.load (std::memory_order_relaxed);
+            dest[63] = secondsC.load (std::memory_order_relaxed);
+            dest[64] = (float) fileGeneration.load (std::memory_order_relaxed);
+            return 96;
+        }
+
+        void process (float* l, float* r, int n) noexcept override
+        {
+            // Learning: the input's spectrum, before the filter
+            const auto learningT = value (match::learnT) > 0.5f, learningC = value (match::learnC) > 0.5f;
+            if (learningT && ! wasLearningT) templateBank.reset();
+            if (learningC && ! wasLearningC) currentBank.reset();
+            wasLearningT = learningT;
+            wasLearningC = learningC;
+            if (learningT || learningC)
+            {
+                for (int i = 0; i < n; ++i)
+                {
+                    const auto x = 0.5f * (l[i] + r[i]);
+                    if (learningT) templateBank.add (x);
+                    if (learningC) currentBank.add (x);
+                }
+                for (int k = 0; k < match::bands; ++k)
+                {
+                    if (learningT) learnedTemplate[(size_t) k].store (templateBank.db (k), std::memory_order_relaxed);
+                    if (learningC) learnedCurrent[(size_t) k].store (currentBank.db (k), std::memory_order_relaxed);
+                }
+                secondsT.store ((float) (templateBank.samples / sampleRate), std::memory_order_relaxed);
+                secondsC.store ((float) (currentBank.samples / sampleRate), std::memory_order_relaxed);
+            }
+
+            for (int at = 0; at < n; at += blockSize)
+            {
+                const auto count = std::min (blockSize, n - at);
+                float* channels[] { l + at, r + at };
+                juce::dsp::AudioBlock<float> block (channels, 2, (size_t) count);
+                convolution.process (juce::dsp::ProcessContextReplacing<float> (block));
+            }
+        }
+
+    private:
+        void timerCallback() override { rebuild(); }
+
+        void rebuild()
+        {
+            std::array<float, maxParams> v;
+            for (size_t i = 0; i < v.size(); ++i)
+                v[i] = values[i].load();
+            // (learning or clearing doesn't change the filter)
+            for (auto i : { match::analyzer, match::learnT, match::learnC, match::clearT, match::clearC, match::templateGen })
+                v[(size_t) i] = 0.0f;
+            if (v == built || sampleRate <= 0.0)
+                return;
+            built = v;
+            const auto minimum = juce::roundToInt (v[match::phase]) == 1;
+            // The curve's magnitude at each bin of a long FFT
+            constexpr int order = 13, size = 1 << order;
+            juce::dsp::FFT fft (order);
+            std::vector<std::complex<float>> spectrum ((size_t) size), work ((size_t) size);
+            for (int b = 0; b <= size / 2; ++b)
+            {
+                const auto f = std::max (5.0, b * sampleRate / size);
+                const auto mag = (float) std::pow (10.0, match::response (v.data(), f, sampleRate) / 20.0);
+                spectrum[(size_t) b] = mag;
+                if (b > 0 && b < size / 2)
+                    spectrum[(size_t) (size - b)] = mag;
+            }
+            juce::AudioBuffer<float> ir (1, taps);
+            if (! minimum)
+            {
+                // zero phase, back to time, centred and windowed
+                fft.perform (spectrum.data(), work.data(), true);
+                for (int i = 0; i < taps; ++i)
+                {
+                    const auto source = (i - taps / 2 + size) % size;
+                    const auto w = 0.42f - 0.5f * std::cos (twoPi * i / (taps - 1)) + 0.08f * std::cos (2.0f * twoPi * i / (taps - 1));
+                    ir.setSample (0, i, work[(size_t) source].real() * w);
+                }
+            }
+            else
+            {
+                // minimum phase from the real cepstrum: log magnitude, to quefrency, folded, and back
+                for (auto& c : spectrum)
+                    c = std::log (std::max (1.0e-6f, std::abs (c)));
+                fft.perform (spectrum.data(), work.data(), true);
+                for (int i = 1; i < size / 2; ++i)
+                {
+                    work[(size_t) i] *= 2.0f;
+                    work[(size_t) (size - i)] = 0.0f;
+                }
+                fft.perform (work.data(), spectrum.data(), false);
+                for (auto& c : spectrum)
+                    c = std::exp (c);
+                fft.perform (spectrum.data(), work.data(), true);
+                for (int i = 0; i < taps; ++i)
+                {
+                    const auto fade = i < taps * 3 / 4 ? 1.0f : 0.5f + 0.5f * std::cos (juce::MathConstants<float>::pi * (float) (i - taps * 3 / 4) / (float) (taps / 4));
+                    ir.setSample (0, i, work[(size_t) i].real() * fade);
+                }
+            }
+            convolution.loadImpulseResponse (std::move (ir), sampleRate, juce::dsp::Convolution::Stereo::no,
+                                             juce::dsp::Convolution::Trim::no, juce::dsp::Convolution::Normalise::no);
+        }
+
+        juce::dsp::Convolution convolution;
+        int blockSize = 512;
+        std::array<float, maxParams> built {};
+        match::Bank templateBank, currentBank;
+        bool wasLearningT = false, wasLearningC = false;
+        std::array<std::atomic<float>, match::bands> learnedTemplate {}, learnedCurrent {}, fileTemplate {};
+        std::atomic<float> secondsT { 0.0f }, secondsC { 0.0f };
+        std::atomic<int> fileGeneration { 0 };
+        juce::String filePath;
+    };
+
+    //==============================================================================
     /** Logic's Delay Designer: up to 26 taps (A to Z), each with its own time, level, pan, transposition,
         filter, flip and mute; taps can snap to a tempo grid with swing, and one tap feeds back. */
     class DelayDesigner final : public BuiltInEffect
@@ -329,6 +617,40 @@ namespace
     std::unique_ptr<BuiltInEffect> make (const EffectInfo& info) { return std::make_unique<T> (info); }
 }
 
+std::vector<ParamInfo> matchEqParams()
+{
+    const std::vector<juce::String> onOff { "Off", "On" };
+    std::vector<ParamInfo> p {
+        { "apply", "Apply", " %", -100.0f, 200.0f, 100.0f, 100.0f },
+        { "smoothing", "Smoothing", " %", 0.0f, 100.0f, 30.0f, 30.0f },
+        { "phase", "Phase", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Linear", "Minimum" } },
+        { "analyzer", "Analyzer", "", 0.0f, 1.0f, 1.0f, 0.5f, onOff },
+        { "learnT", "Learn Template", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff },
+        { "learnC", "Learn Current", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff },
+        { "clearT", "Clear Template", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff },
+        { "clearC", "Clear Current", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff },
+        { "output", "Gain", " dB", -24.0f, 24.0f, 0.0f, 0.0f },
+        { "templateGen", "Template File", "", 0.0f, 100000.0f, 0.0f, 50000.0f },
+    };
+    const float freqs[] { 100.0f, 500.0f, 2500.0f, 8000.0f };
+    for (int u = 0; u < 4; ++u)
+    {
+        const auto n = juce::String (u + 1);
+        p.push_back ({ "u" + n + "Freq", "Band " + n + " Freq", " Hz", 20.0f, 20000.0f, freqs[u], 1000.0f });
+        p.push_back ({ "u" + n + "Gain", "Band " + n + " Gain", " dB", -24.0f, 24.0f, 0.0f, 0.0f });
+        p.push_back ({ "u" + n + "Q", "Band " + n + " Q", "", 0.1f, 10.0f, 1.0f, 1.0f });
+        p.push_back ({ "u" + n + "On", "Band " + n, "", 0.0f, 1.0f, 1.0f, 0.5f, onOff });
+    }
+    for (const char* set : { "t", "c" })
+        for (int k = 0; k < 31; ++k)
+        {
+            const auto f = 1000.0 * std::pow (2.0, (k - 17) / 3.0);
+            const auto name = juce::String (set[0] == 't' ? "Template " : "Current ") + (f >= 1000.0 ? juce::String (f / 1000.0, 1) + "k" : juce::String (juce::roundToInt (f)));
+            p.push_back ({ juce::String (set) + juce::String (k + 1), name, " dB", -120.0f, 20.0f, -120.0f, -40.0f });
+        }
+    return p;
+}
+
 std::vector<ParamInfo> delayDesignerParams()
 {
     const juce::String ms (" ms"), hz (" Hz"), pc (" %"), dB (" dB");
@@ -384,6 +706,7 @@ const std::vector<StockEffect>& stockExtraEffects()
 
         return std::vector<StockEffect> {
             { linear, make<LinearPhaseEq> },
+            { { "matchEq", "Match EQ", matchEqParams(), "EQ", match::response }, make<MatchEq> },
             { { "delayDesigner", "Delay Designer", taps, "Delay" }, make<DelayDesigner> },
             { { "subBass", "Sub Bass", {
                   { "cut", "Bass Range", hz, 60.0f, 300.0f, 150.0f, 150.0f },

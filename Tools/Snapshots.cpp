@@ -114,7 +114,7 @@ public:
             panel.setSize (panel.getWidth(), panel.getHeight());
             panel.resized();
             juce::MessageManager::getInstance()->runDispatchLoopUntil (120);
-            save (panel, "fx-" + spec.replaceCharacters (":=,", "_-_") + ".png");
+            save (panel, "fx-" + spec.replaceCharacters (":=,", "_-_").substring (0, 120) + ".png");
         }
         return 0;
     }

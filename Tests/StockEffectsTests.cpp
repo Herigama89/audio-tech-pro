@@ -839,3 +839,49 @@ TEST_CASE ("Meters: loudness to EBU R128, tuner, mastering assistant stays under
     master->readMeters (m.data(), (int) m.size());
     CHECK (m[2] <= -0.8f);   // true peak, dBTP
 }
+
+TEST_CASE ("Match EQ learns two spectra and makes the filter between them", "[stockfx]")
+{
+    const auto gainAt = [] (BuiltInEffect& e, double freq)
+    {
+        const auto [l, r] = run (e, sine (freq, 1.0, 0.1f), sine (freq, 1.0, 0.1f));
+        return juce::Decibels::gainToDecibels (peakOf (l, 24000) / 0.1f);
+    };
+
+    // A template brighter by 1 dB per band above 1 kHz than the (flat) material: the filter lifts the top
+    for (const auto phase : { 0.0f, 1.0f })
+    {
+        auto eq = make ("matchEq");
+        set (*eq, "phase", phase);
+        set (*eq, "smoothing", 0.0f);
+        for (int k = 1; k <= 31; ++k)
+        {
+            set (*eq, "c" + juce::String (k), -40.0f);
+            set (*eq, "t" + juce::String (k), -40.0f + (float) std::max (0, k - 18));
+        }
+        eq->prepare (rate, block);   // (rebuilds now)
+        CHECK (eq->getLatencySamples() == (phase < 0.5f ? 2048 : 0));
+        const auto low = gainAt (*eq, 200.0), high = gainAt (*eq, 10000.0);
+        CHECK (high - low > 8.0f);
+        CHECK (high - low < 13.0f);
+
+        // Apply at 0 %: flat
+        set (*eq, "apply", 0.0f);
+        eq->prepare (rate, block);
+        CHECK_THAT (gainAt (*eq, 200.0) - gainAt (*eq, 10000.0), Catch::Matchers::WithinAbs (0.0, 0.5));
+    }
+
+    // Learning: white noise gives a spectrum rising 1 dB per third octave (equal energy per Hz)
+    auto learner = make ("matchEq");
+    set (*learner, "learnT", 1.0f);
+    juce::Random random (3);
+    std::vector<float> l (48000 * 2), r (48000 * 2);
+    for (size_t i = 0; i < l.size(); ++i)
+        l[i] = r[i] = random.nextFloat() * 0.5f - 0.25f;
+    run (*learner, l, r);
+    std::array<float, BuiltInEffect::meterCapacity> m {};
+    REQUIRE (learner->readMeters (m.data(), (int) m.size()) == 96);
+    CHECK (m[62] > 1.9f);
+    CHECK_THAT (m[27] - m[17], Catch::Matchers::WithinAbs (9.5, 2.0));
+    CHECK (m[31] <= -119.0f);   // (the current wasn't learned)
+}
