@@ -311,8 +311,16 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                 else if (c.kind == effectdesign::Kind::fader)
                 {
                     k->slider.setSliderStyle (juce::Slider::LinearVertical);
-                    k->slider.setTextBoxStyle (juce::Slider::TextBoxAbove, false, c.bounds.getWidth() + 30, 24);
+                    if (design->lcdValues || ! design->valueAbove)
+                    {
+                        k->slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+                        k->slider.setPopupDisplayEnabled (true, true, this);
+                    }
+                    else
+                        k->slider.setTextBoxStyle (juce::Slider::TextBoxAbove, false, c.bounds.getWidth() + 30, 24);
                 }
+                else if (design->lcdValues)
+                    k->slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, juce::jmin (96, c.bounds.getWidth()), 24);
                 else if (design->valueAbove)
                     k->slider.setTextBoxStyle (juce::Slider::TextBoxAbove, false, c.bounds.getWidth(), 24);
                 else
@@ -320,6 +328,8 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                     k->slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
                     k->slider.setPopupDisplayEnabled (true, true, this);
                 }
+                if (c.kind != effectdesign::Kind::field && ! c.colour.isTransparent())
+                    k->slider.getProperties().set ("cap", c.colour.toString());   // (the knob's or fader cap's own colour)
                 k->slider.lookAndFeelChanged();
                 placed.component = &k->slider;
                 break;

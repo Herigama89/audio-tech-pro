@@ -36,7 +36,7 @@ namespace riff::effectdesign
         juce::Colour colour {};                 // (fields: the band's colour)
     };
 
-    enum class KnobStyle { silver, dark, light };
+    enum class KnobStyle { silver, dark, light, black, white, chrome };
 
     struct Design
     {
@@ -45,6 +45,8 @@ namespace riff::effectdesign
         KnobStyle knobs = KnobStyle::dark;
         juce::Colour label, value, accent, track;
         bool valueAbove = true;                 // (silver knobs show their scale instead)
+        bool showScale = false;                 // the knob's lowest and highest values under it (as Logic's newer plug-ins)
+        bool lcdValues = false;                 // values in small dark windows under the knobs (older hardware-style faces)
         bool live = false;                      // a meter that follows the sound (gain reduction, correction)
         /** Draws the face behind the controls: panels, titles, screens, meters. */
         std::function<void (juce::Graphics&, juce::Rectangle<int>, const EffectInfo&, const float* values, float live)> paint;
@@ -69,6 +71,7 @@ namespace riff::effectdesign
         juce::Font getComboBoxFont (juce::ComboBox&) override;
         juce::Label* createSliderTextBox (juce::Slider&) override;
         juce::Slider::SliderLayout getSliderLayout (juce::Slider&) override;
+        juce::Colour hardwareLamp() const;
 
         const Design& design;
     };
