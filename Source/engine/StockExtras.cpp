@@ -88,56 +88,147 @@ namespace
     };
 
     //==============================================================================
-    /** Six taps, each with its own time and level, alternating sides by the spread, and feedback from the last. */
+    /** Logic's Delay Designer: up to 26 taps (A to Z), each with its own time, level, pan, transposition,
+        filter, flip and mute; taps can snap to a tempo grid with swing, and one tap feeds back. */
     class DelayDesigner final : public BuiltInEffect
     {
     public:
+        static constexpr int maxTaps = 26, globals = 11, perTap = 12;
+        enum Global { tapSel, tapCount, sync, grid, swing, fbOn, fbTap, fbLevel, dry, wet, view };
+        enum Tap { time, level, pan, transpose, cents, filterOn, hpFreq, lpFreq, slope, reso, flip, mute };
+        static int index (int tap, Tap p) noexcept { return globals + tap * perTap + (int) p; }
+
         using BuiltInEffect::BuiltInEffect;
+
         void prepare (double rate, int) override
         {
             sampleRate = preparedRate = rate;
-            line.prepare ((int) (4.1 * rate));
-            lowCut.reset();
-            highCut.reset();
-            feedbackSample = 0.0f;
+            window = (float) (0.08 * rate);
+            for (auto& line : lines)
+                line.prepare ((int) (10.2 * rate) + (int) window * 2 + 8);
+            for (auto& t : taps)
+                t = {};
+            feedbackL = feedbackR = 0.0f;
         }
+
+        /** A tap's time in ms, snapped to the grid (with swing) when Sync is on. */
+        static double tapTimeMs (const float* v, int t, double beatsPerMinute)
+        {
+            const auto ms = (double) v[index (t, time)];
+            if (v[sync] < 0.5f)
+                return ms;
+            static constexpr double beats[] { 1.0, 0.5, 0.25, 0.125, 2.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0, 1.0 / 12.0 };
+            const auto stepMs = beats[juce::jlimit (0, 7, juce::roundToInt (v[grid]))] * 60000.0 / std::max (20.0, beatsPerMinute);
+            const auto n = std::max (1.0, std::round (ms / stepMs));
+            const auto odd = ((long long) n) % 2 == 1;
+            return n * stepMs + (odd ? ((double) v[swing] - 50.0) / 50.0 * stepMs : 0.0);
+        }
+
+        int readMeters (float* dest, int capacity) const noexcept override
+        {
+            std::array<float, maxParams> v;
+            for (size_t i = 0; i < v.size(); ++i)
+                v[i] = values[i].load (std::memory_order_relaxed);
+            const auto count = std::min (capacity, maxTaps);
+            for (int t = 0; t < count; ++t)
+                dest[t] = (float) tapTimeMs (v.data(), t, bpm.load (std::memory_order_relaxed));
+            return count;
+        }
+
         void process (float* l, float* r, int n) noexcept override
         {
-            const auto feedback = value (12) * 0.01f;
-            const auto spread = value (13) * 0.01f;
-            lowCut.setLowPass (value (14), sampleRate);
-            highCut.setLowPass (12000.0, sampleRate);
-            const auto mix = value (15) * 0.01f;
-            std::array<float, 6> delays, levels;
-            float longest = 1.0f;
-            for (size_t t = 0; t < 6; ++t)
+            std::array<float, maxParams> v;
+            for (size_t i = 0; i < v.size(); ++i)
+                v[i] = values[i].load (std::memory_order_relaxed);
+            const auto count = juce::jlimit (1, maxTaps, juce::roundToInt (v[tapCount]) + 1);
+            const auto tempo = bpm.load (std::memory_order_relaxed);
+            const auto fbIndex = juce::roundToInt (v[fbTap]);
+            const auto fbGain = v[fbOn] > 0.5f && fbIndex < count ? v[fbLevel] * 0.01f : 0.0f;
+            const auto dryGain = v[dry] * 0.01f, wetGain = v[wet] * 0.01f;
+
+            struct Setting { float delay, gain, panL, panR, step; bool pitched, flipped, filtered, firstOrder; };
+            std::array<Setting, maxTaps> set {};
+            for (int t = 0; t < count; ++t)
             {
-                delays[t] = std::max (1.0f, value ((int) t * 2) * 0.001f * (float) sampleRate);
-                levels[t] = dbToGain (value ((int) t * 2 + 1));
-                if (value ((int) t * 2 + 1) <= -59.0f)
-                    levels[t] = 0.0f;
-                longest = std::max (longest, delays[t]);
+                auto& s = set[(size_t) t];
+                auto& state = taps[(size_t) t];
+                const auto lvl = v[(size_t) index (t, level)];
+                s.gain = v[(size_t) index (t, mute)] > 0.5f || lvl <= -59.9f ? 0.0f : dbToGain (lvl);
+                s.delay = (float) std::max (1.0, tapTimeMs (v.data(), t, tempo) * 0.001 * sampleRate);
+                const auto p = juce::jlimit (-1.0f, 1.0f, v[(size_t) index (t, pan)] * 0.01f);
+                s.panL = p > 0.0f ? 1.0f - p : 1.0f;
+                s.panR = p < 0.0f ? 1.0f + p : 1.0f;
+                const auto semis = v[(size_t) index (t, transpose)] + v[(size_t) index (t, cents)] * 0.01f;
+                s.pitched = std::abs (semis) > 0.001f;
+                s.step = s.pitched ? (1.0f - std::pow (2.0f, semis / 12.0f)) / window : 0.0f;
+                s.flipped = v[(size_t) index (t, flip)] > 0.5f;
+                s.filtered = v[(size_t) index (t, filterOn)] > 0.5f;
+                s.firstOrder = v[(size_t) index (t, slope)] < 0.5f;
+                if (s.filtered)
+                {
+                    const auto q = 0.707 + v[(size_t) index (t, reso)] * 0.01 * 7.0;
+                    const auto hp = juce::jlimit (10.0, sampleRate * 0.45, (double) v[(size_t) index (t, hpFreq)]);
+                    const auto lp = juce::jlimit (10.0, sampleRate * 0.45, (double) v[(size_t) index (t, lpFreq)]);
+                    if (s.firstOrder) { state.hp.setFirstOrderHighPass (sampleRate, hp); state.lp.setFirstOrderLowPass (sampleRate, lp); }
+                    else              { state.hp.setHighPass (sampleRate, hp, q); state.lp.setLowPass (sampleRate, lp, q); }
+                }
             }
+
             for (int i = 0; i < n; ++i)
             {
-                line.push (0.5f * (l[i] + r[i]) + feedbackSample * feedback);
-                float wl = 0.0f, wr = 0.0f;
-                for (size_t t = 0; t < 6; ++t)
+                float wl = 0.0f, wr = 0.0f, fl = 0.0f, fr = 0.0f;
+                for (int t = 0; t < count; ++t)
                 {
-                    const auto tap = line.read (delays[t]) * levels[t];
-                    const auto pan = (t % 2 == 0 ? -1.0f : 1.0f) * spread;
-                    wl += tap * (1.0f - pan) * 0.5f;
-                    wr += tap * (1.0f + pan) * 0.5f;
+                    const auto& s = set[(size_t) t];
+                    auto& state = taps[(size_t) t];
+                    if (s.gain == 0.0f && t != fbIndex)
+                        continue;
+                    float a, b;
+                    if (s.pitched)
+                    {
+                        // two read heads sweeping through an 80 ms window, crossfaded: the tap's pitch moves
+                        state.phase += s.step;
+                        state.phase -= std::floor (state.phase);
+                        const auto p2 = state.phase + 0.5f - std::floor (state.phase + 0.5f);
+                        const auto g1 = std::sin (juce::MathConstants<float>::pi * state.phase);
+                        const auto w1 = g1 * g1, w2 = 1.0f - w1;
+                        const auto d1 = s.delay + state.phase * window, d2 = s.delay + p2 * window;
+                        a = lines[0].read (d1) * w1 + lines[0].read (d2) * w2;
+                        b = lines[1].read (d1) * w1 + lines[1].read (d2) * w2;
+                    }
+                    else
+                    {
+                        a = lines[0].read (s.delay);
+                        b = lines[1].read (s.delay);
+                    }
+                    if (s.filtered)
+                    {
+                        a = state.lp.process (state.hp.process (a, 0), 0);
+                        b = state.lp.process (state.hp.process (b, 1), 1);
+                    }
+                    if (s.flipped)
+                        std::swap (a, b);
+                    a *= s.gain * s.panL;
+                    b *= s.gain * s.panR;
+                    if (t == fbIndex) { fl = a; fr = b; }
+                    wl += a;
+                    wr += b;
                 }
-                feedbackSample = highCut.lowPass (lowCut.highPass (line.read (longest)));
-                l[i] = l[i] * (1.0f - mix) + wl * mix * 2.0f;
-                r[i] = r[i] * (1.0f - mix) + wr * mix * 2.0f;
+                feedbackL = fl * fbGain;
+                feedbackR = fr * fbGain;
+                lines[0].push (l[i] + softClip (feedbackL));
+                lines[1].push (r[i] + softClip (feedbackR));
+                l[i] = l[i] * dryGain + wl * wetGain;
+                r[i] = r[i] * dryGain + wr * wetGain;
             }
         }
+
     private:
-        DelayLine line;
-        OnePole lowCut, highCut;
-        float feedbackSample = 0.0f;
+        static float softClip (float x) noexcept { return std::abs (x) < 1.0f ? x : std::tanh (x); }
+        struct TapState { Biquad hp, lp; float phase = 0.0f; };
+        std::array<DelayLine, 2> lines;
+        std::array<TapState, maxTaps> taps {};
+        float window = 2400.0f, feedbackL = 0.0f, feedbackR = 0.0f;
     };
 
     //==============================================================================
@@ -238,6 +329,48 @@ namespace
     std::unique_ptr<BuiltInEffect> make (const EffectInfo& info) { return std::make_unique<T> (info); }
 }
 
+std::vector<ParamInfo> delayDesignerParams()
+{
+    const juce::String ms (" ms"), hz (" Hz"), pc (" %"), dB (" dB");
+    std::vector<juce::String> letters;
+    for (char c = 'A'; c <= 'Z'; ++c)
+        letters.push_back (juce::String::charToString (c));
+    const std::vector<juce::String> onOff { "Off", "On" };
+    std::vector<juce::String> counts;
+    for (int c = 1; c <= 26; ++c)
+        counts.push_back (juce::String (c));
+    std::vector<ParamInfo> p {
+        { "tapSel", "Tap", "", 0.0f, 25.0f, 0.0f, 12.5f, letters },
+        { "tapCount", "Taps", "", 0.0f, 25.0f, 3.0f, 12.5f, counts },
+        { "sync", "Sync", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff },
+        { "grid", "Grid", "", 0.0f, 7.0f, 2.0f, 3.5f, { "1/4", "1/8", "1/16", "1/32", "1/4 T", "1/8 T", "1/16 T", "1/32 T" } },
+        { "swing", "Swing", pc, 50.0f, 100.0f, 50.0f, 75.0f },
+        { "fbOn", "Feedback", "", 0.0f, 1.0f, 1.0f, 0.5f, onOff },
+        { "fbTap", "Feedback Tap", "", 0.0f, 25.0f, 3.0f, 12.5f, letters },
+        { "feedback", "Feedback Level", pc, 0.0f, 100.0f, 30.0f, 40.0f },
+        { "dry", "Dry", pc, 0.0f, 100.0f, 100.0f, 50.0f },
+        { "mix", "Wet", pc, 0.0f, 100.0f, 50.0f, 50.0f },
+        { "view", "View", "", 0.0f, 4.0f, 4.0f, 2.0f, { "Cutoff", "Reso", "Transp", "Pan", "Level" } },
+    };
+    for (int t = 0; t < 26; ++t)
+    {
+        const auto n = juce::String (t + 1), name = "Tap " + letters[(size_t) t] + " ";
+        p.push_back ({ "time" + n, name + "Delay", ms, 0.0f, 10000.0f, (float) (t + 1) * 250.0f, 1000.0f });
+        p.push_back ({ "level" + n, name + "Level", dB, -60.0f, 0.0f, juce::jmax (-30.0f, -3.0f - (float) t * 2.0f), -12.0f });
+        p.push_back ({ "pan" + n, name + "Pan", pc, -100.0f, 100.0f, (t % 2 == 0 ? -1.0f : 1.0f) * (float) juce::jmin (100, 30 + t * 10), 0.0f });
+        p.push_back ({ "transp" + n, name + "Transpose", " st", -24.0f, 24.0f, 0.0f, 0.0f });
+        p.push_back ({ "cents" + n, name + "Fine", " ct", -50.0f, 50.0f, 0.0f, 0.0f });
+        p.push_back ({ "filter" + n, name + "Filter", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff });
+        p.push_back ({ "hp" + n, name + "HP Cutoff", hz, 20.0f, 20000.0f, 20.0f, 1000.0f });
+        p.push_back ({ "lp" + n, name + "LP Cutoff", hz, 20.0f, 20000.0f, 20000.0f, 1000.0f });
+        p.push_back ({ "slope" + n, name + "Slope", "", 0.0f, 1.0f, 1.0f, 0.5f, { "6 dB", "12 dB" } });
+        p.push_back ({ "reso" + n, name + "Reso", pc, 0.0f, 100.0f, 0.0f, 50.0f });
+        p.push_back ({ "flip" + n, name + "Flip", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff });
+        p.push_back ({ "mute" + n, name + "Mute", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff });
+    }
+    return p;
+}
+
 const std::vector<StockEffect>& stockExtraEffects()
 {
     const juce::String ms (" ms"), hz (" Hz"), pc (" %"), dB (" dB");
@@ -247,18 +380,7 @@ const std::vector<StockEffect>& stockExtraEffects()
         const auto& channel = stockEqEffects().front().info;
         EffectInfo linear { "linearEq", "Linear Phase EQ", channel.params, "EQ", channel.response, channel.columns };
 
-        std::vector<ParamInfo> taps;
-        const float times[] { 125, 250, 375, 500, 750, 1000 }, levels[] { -6, -9, -12, -15, -20, -24 };
-        for (int t = 0; t < 6; ++t)
-        {
-            const auto n = juce::String (t + 1);
-            taps.push_back ({ "time" + n, "Tap " + n + " Time", ms, 1.0f, 4000.0f, times[t], 400.0f });
-            taps.push_back ({ "level" + n, "Tap " + n + " Level", dB, -60.0f, 0.0f, levels[t], -12.0f });
-        }
-        taps.push_back ({ "feedback", "Feedback", pc, 0.0f, 95.0f, 20.0f, 40.0f });
-        taps.push_back ({ "spread", "Spread", pc, 0.0f, 100.0f, 70.0f, 50.0f });
-        taps.push_back ({ "lowCut", "Low Cut", hz, 10.0f, 1000.0f, 100.0f, 150.0f });
-        taps.push_back ({ "mix", "Mix", pc, 0.0f, 100.0f, 35.0f, 50.0f });
+        const auto taps = delayDesignerParams();
 
         return std::vector<StockEffect> {
             { linear, make<LinearPhaseEq> },

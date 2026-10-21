@@ -1464,6 +1464,123 @@ namespace
         row (225, "SOURCE / GAIN", lufsText (meterAt (3)) + " LUFS  " + (meterAt (13, 0.0f) >= 0.0f ? "+" : "") + juce::String (meterAt (13, 0.0f), 1) + " dB");
     }
 
+    //==============================================================================
+    // Delay Designer: the taps on a timeline, the selected tap's parameters below, the master section
+    //==============================================================================
+    void paintDelayDesigner (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
+    {
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3a3d42), 0.0f, 0.0f, juce::Colour (0xff24262a), 0.0f, (float) b.getBottom(), false));
+        g.fillRect (b);
+        constexpr int globals = 11, perTap = 12;
+        const auto tapValue = [v] (int t, int p) { return v[globals + t * perTap + p]; };
+        const auto count = juce::jlimit (1, 26, juce::roundToInt (valueOf (info, v, "tapCount", 3.0f)) + 1);
+        const auto selected = juce::roundToInt (valueOf (info, v, "tapSel"));
+        const auto viewMode = juce::roundToInt (valueOf (info, v, "view", 4.0f));
+        const auto fbTap = valueOf (info, v, "fbOn", 1.0f) > 0.5f ? juce::roundToInt (valueOf (info, v, "fbTap", 3.0f)) : -1;
+        int readings = 0;
+        const auto* times = paintingMeters (readings);
+        const auto timeOf = [&] (int t) { return t < readings ? times[t] : tapValue (t, 0); };
+
+        // The tap display
+        const RF screen (20.0f, 52.0f, (float) b.getWidth() - 40.0f, 270.0f);
+        g.setColour (juce::Colour (0xff111316));
+        g.fillRoundedRectangle (screen, 5.0f);
+        auto plot = screen.reduced (14.0f, 12.0f).withTrimmedBottom (26.0f);
+        float longest = 500.0f;
+        for (int t = 0; t < count; ++t)
+            longest = std::max (longest, timeOf (t));
+        longest *= 1.12f;
+        const auto xOf = [&] (float ms) { return plot.getX() + ms / longest * plot.getWidth(); };
+        // time ruler
+        const auto step = longest > 6000.0f ? 1000.0f : longest > 2500.0f ? 500.0f : longest > 1000.0f ? 250.0f : 100.0f;
+        g.setFont (juce::FontOptions (11.0f));
+        for (float ms = 0.0f; ms <= longest; ms += step)
+        {
+            const auto x = xOf (ms);
+            g.setColour (juce::Colours::white.withAlpha (0.07f));
+            g.fillRect (x, plot.getY(), 1.0f, plot.getHeight());
+            g.setColour (juce::Colours::white.withAlpha (0.4f));
+            g.drawText (ms >= 1000.0f ? juce::String (ms / 1000.0f, 2) + " s" : juce::String ((int) ms) + " ms",
+                        RF (x - 40.0f, screen.getBottom() - 20.0f, 80.0f, 14.0f), juce::Justification::centred, false);
+        }
+        const auto centreLine = viewMode == 2 || viewMode == 3;
+        if (centreLine)
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.18f));
+            g.fillRect (plot.getX(), plot.getCentreY(), plot.getWidth(), 1.0f);
+        }
+        const juce::Colour viewColours[] { juce::Colour (0xffffb648), juce::Colour (0xffff7a59), juce::Colour (0xff5ad1ff), juce::Colour (0xffb98bff), juce::Colour (0xff7ee08c) };
+        const auto ink = viewColours[juce::jlimit (0, 4, viewMode)];
+        const auto barW = juce::jlimit (4.0f, 18.0f, plot.getWidth() / (float) (count * 2 + 2));
+        const auto freqY = [&] (float f) { return plot.getBottom() - (float) (std::log (juce::jlimit (20.0f, 20000.0f, f) / 20.0f) / std::log (1000.0f)) * plot.getHeight(); };
+        for (int t = 0; t < count; ++t)
+        {
+            const auto x = xOf (timeOf (t));
+            const auto muted = tapValue (t, 11) > 0.5f;
+            const auto colour = (muted ? juce::Colours::grey : ink).withAlpha (t == selected ? 1.0f : 0.6f);
+            g.setColour (colour);
+            RF bar;
+            switch (viewMode)
+            {
+                case 0:
+                {
+                    const auto on = tapValue (t, 5) > 0.5f;
+                    const auto top = freqY (on ? tapValue (t, 7) : 20000.0f), bottom = freqY (on ? tapValue (t, 6) : 20.0f);
+                    bar = RF (x - barW * 0.5f, top, barW, std::max (2.0f, bottom - top));
+                    if (! on) g.setColour (colour.withAlpha (0.25f));
+                    break;
+                }
+                case 1:  { const auto h = tapValue (t, 9) * 0.01f * plot.getHeight(); bar = RF (x - barW * 0.5f, plot.getBottom() - h, barW, std::max (2.0f, h)); break; }
+                case 2:
+                case 3:
+                {
+                    const auto amount = viewMode == 2 ? (tapValue (t, 3) + tapValue (t, 4) * 0.01f) / 24.0f : tapValue (t, 2) / 100.0f;
+                    const auto h = amount * plot.getHeight() * 0.5f;
+                    bar = RF (x - barW * 0.5f, h > 0 ? plot.getCentreY() - h : plot.getCentreY(), barW, std::max (2.0f, std::abs (h)));
+                    break;
+                }
+                default: { const auto h = (tapValue (t, 1) + 60.0f) / 60.0f * plot.getHeight(); bar = RF (x - barW * 0.5f, plot.getBottom() - h, barW, std::max (2.0f, h)); break; }
+            }
+            g.fillRoundedRectangle (bar, 2.0f);
+            if (t == selected)
+            {
+                g.setColour (juce::Colours::white);
+                g.drawRoundedRectangle (bar.expanded (2.0f), 3.0f, 1.2f);
+            }
+            g.setColour (t == selected ? juce::Colours::white : juce::Colours::white.withAlpha (0.6f));
+            g.setFont (juce::FontOptions (12.0f, t == selected ? juce::Font::bold : juce::Font::plain));
+            g.drawText (juce::String::charToString ((juce::juce_wchar) ('A' + t)), RF (x - 10.0f, plot.getBottom() + 2.0f, 20.0f, 14.0f), juce::Justification::centred, false);
+            if (t == fbTap)
+            {
+                g.setColour (juce::Colour (0xffffd84a));
+                g.drawText ("FB", RF (x - 14.0f, plot.getY() - 12.0f, 28.0f, 12.0f), juce::Justification::centred, false);
+            }
+        }
+        const char* viewNames[] { "Cutoff", "Resonance", "Transposition", "Pan", "Level" };
+        g.setColour (ink);
+        g.setFont (juce::FontOptions (13.0f));
+        g.drawText (viewNames[juce::jlimit (0, 4, viewMode)], screen.reduced (14.0f, 8.0f).removeFromTop (16.0f), juce::Justification::topRight, false);
+
+        // The tap parameter bar
+        g.setColour (juce::Colour (0xff2b2e33));
+        g.fillRoundedRectangle (RF (12.0f, 334.0f, (float) b.getWidth() - 24.0f, 82.0f), 5.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.55f));
+        g.setFont (juce::FontOptions (12.0f));
+        const std::pair<int, const char*> labels[] { { 20, "Tap" }, { 105, "Delay" }, { 230, "Transpose" }, { 310, "Fine" }, { 395, "Filter" },
+                                                     { 465, "HP Cutoff" }, { 575, "LP Cutoff" }, { 685, "Slope" }, { 805, "Reso" },
+                                                     { 895, "Pan" }, { 985, "Level" }, { 1085, "Flip" }, { 1140, "Mute" } };
+        for (const auto& [x, text] : labels)
+            g.drawText (text, R (x, 344, 110, 16), juce::Justification::centredLeft, false);
+
+        // The master section
+        g.setColour (juce::Colours::black.withAlpha (0.25f));
+        g.fillRect (12, 428, b.getWidth() - 24, 1);
+        title (g, R (150, 436, 330, 20), "SYNC", juce::Colours::white.withAlpha (0.55f), 13.0f);
+        title (g, R (520, 436, 320, 20), "FEEDBACK", juce::Colours::white.withAlpha (0.55f), 13.0f);
+        title (g, R (880, 436, 280, 20), "MIX", juce::Colours::white.withAlpha (0.55f), 13.0f);
+    }
+
+
     void addHardwareDesigns (std::map<juce::String, Design>& d)
     {
         const auto knob = Kind::knob;
@@ -2217,6 +2334,57 @@ namespace
                 { "bypass", Kind::toggle, R (460, 440, 110, 28), "=BYPASS" },
             };
             d["masteringAssistant"] = m;
+        }
+        {
+            // Delay Designer
+            Design c;
+            c.width = 1210; c.height = 600;
+            c.knobs = KnobStyle::dark;
+            c.label = juce::Colours::white.withAlpha (0.6f); c.value = juce::Colour (0xff7ee08c); c.accent = juce::Colour (0xff7ee08c); c.track = juce::Colour (0xff17191c);
+            c.meters = true;
+            c.paint = paintDelayDesigner;
+            c.pageParam = "tapSel";
+            const auto ink = juce::Colour (0xffe8eaec);
+            c.controls = {
+                { "view", Kind::segmented, R (20, 14, 460, 28), "-" },
+                { "tapSel", Kind::dropdown, R (20, 368, 70, 30), "-", ink },
+                { "tapCount", Kind::knob, R (30, 450, 100, 140), "Taps" },
+                { "sync", Kind::toggle, R (170, 486, 80, 30), "=SYNC" },
+                { "grid", Kind::dropdown, R (265, 486, 90, 30), "-", ink },
+                { "swing", Kind::knob, R (370, 450, 100, 140), "Swing" },
+                { "fbOn", Kind::toggle, R (540, 486, 90, 30), "=ON" },
+                { "fbTap", Kind::dropdown, R (645, 486, 70, 30), "-", ink },
+                { "feedback", Kind::knob, R (730, 450, 100, 140), "Level" },
+                { "dry", Kind::knob, R (900, 450, 100, 140), "Dry" },
+                { "mix", Kind::knob, R (1040, 450, 100, 140), "Wet" },
+            };
+            for (int t = 0; t < 26; ++t)
+            {
+                const auto n = juce::String (t + 1);
+                const auto page = t + 1;
+                c.controls.push_back ({ "time" + n, Kind::field, R (105, 368, 110, 30), "-", ink, page });
+                c.controls.push_back ({ "transp" + n, Kind::field, R (230, 368, 70, 30), "-", ink, page });
+                c.controls.push_back ({ "cents" + n, Kind::field, R (310, 368, 70, 30), "-", ink, page });
+                c.controls.push_back ({ "filter" + n, Kind::toggle, R (395, 368, 56, 30), "=ON", {}, page });
+                c.controls.push_back ({ "hp" + n, Kind::field, R (465, 368, 100, 30), "-", ink, page });
+                c.controls.push_back ({ "lp" + n, Kind::field, R (575, 368, 100, 30), "-", ink, page });
+                c.controls.push_back ({ "slope" + n, Kind::segmented, R (685, 368, 110, 30), "-", {}, page });
+                c.controls.push_back ({ "reso" + n, Kind::field, R (805, 368, 80, 30), "-", ink, page });
+                c.controls.push_back ({ "pan" + n, Kind::field, R (895, 368, 80, 30), "-", ink, page });
+                c.controls.push_back ({ "level" + n, Kind::field, R (985, 368, 90, 30), "-", ink, page });
+                c.controls.push_back ({ "flip" + n, Kind::toggle, R (1085, 368, 50, 30), "=FLIP", {}, page });
+                c.controls.push_back ({ "mute" + n, Kind::toggle, R (1140, 368, 52, 30), "=MUTE", {}, page });
+            }
+            c.enabled = [] (const juce::String& id, const EffectInfo& fx, const float* v)
+            {
+                if (id == "grid" || id == "swing") return valueOf (fx, v, "sync") > 0.5f;
+                if (id == "fbTap" || id == "feedback") return valueOf (fx, v, "fbOn", 1.0f) > 0.5f;
+                for (const char* prefix : { "hp", "lp", "slope", "reso" })
+                    if (id.startsWith (prefix) && id.substring ((int) std::strlen (prefix)).containsOnly ("0123456789"))
+                        return valueOf (fx, v, ("filter" + id.substring ((int) std::strlen (prefix))).toRawUTF8()) > 0.5f;
+                return true;
+            };
+            d["delayDesigner"] = c;
         }
         addHardwareDesigns (d);
         return d;

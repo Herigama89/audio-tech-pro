@@ -65,6 +65,8 @@ const std::vector<StockEffect>& stockAmpEffects();
 const std::vector<StockEffect>& stockPitchEffects();
 const std::vector<StockEffect>& stockUtilityEffects();
 const std::vector<StockEffect>& stockExtraEffects();
+/** Delay Designer's parameters: 11 globals, then 12 for each of its 26 taps (A to Z). */
+std::vector<ParamInfo> delayDesignerParams();
 const std::vector<StockEffect>& stockPedalboardEffects();
 const std::vector<StockEffect>& stockMeteringEffects();
 /** Pitch Correction's scales and chords: their names, and each one's notes from the root (12 flags). */
@@ -111,7 +113,7 @@ public:
     /** What its window's meter shows (a compressor's gain reduction in dB, a pitch correction's cents). */
     virtual float displayValue() const noexcept { return 0.0f; }
 
-    static constexpr int maxParams = 64;
+    static constexpr int maxParams = 336;
 
     //==============================================================================
     // The analyzer's feed: while a window shows the spectrum, the last few thousand output samples (mono)

@@ -553,14 +553,15 @@ TEST_CASE ("Utility and specialized: gain, oscillator, denoiser, vocoder", "[sto
 
 TEST_CASE ("Delay Designer's taps and Sub Bass's octave", "[stockfx]")
 {
+    // One tap at 200 ms, the rest silent: the impulse comes back 200 ms later
     auto dd = make ("delayDesigner");
+    set (*dd, "dry", 0.0f);
     set (*dd, "mix", 100.0f);
-    set (*dd, "feedback", 0.0f);
-    set (*dd, "spread", 0.0f);
-    for (int t = 2; t <= 6; ++t)
-        set (*dd, "level" + juce::String (t), -60.0f);
+    set (*dd, "fbOn", 0.0f);
+    set (*dd, "tapCount", 0.0f);
     set (*dd, "time1", 200.0f);
     set (*dd, "level1", 0.0f);
+    set (*dd, "pan1", 0.0f);
     std::vector<float> l (24000, 0.0f), r (24000, 0.0f);
     l[0] = r[0] = 1.0f;
     const auto [ol, orr] = run (*dd, l, r);
@@ -569,6 +570,68 @@ TEST_CASE ("Delay Designer's taps and Sub Bass's octave", "[stockfx]")
         if (std::abs (ol[i]) > std::abs (ol[at]))
             at = i;
     CHECK (std::abs ((int) at - 9600) <= 2);
+    CHECK (std::abs (ol[at]) > 0.9f);
+
+    // Synced to a 1/8 grid at 120 BPM: 230 ms snaps to 250 ms; swing pushes the odd step later
+    std::array<float, BuiltInEffect::meterCapacity> m {};
+    dd->setPosition (0, true, 120.0);
+    set (*dd, "sync", 1.0f);
+    set (*dd, "grid", 1.0f);
+    set (*dd, "time1", 230.0f);
+    dd->readMeters (m.data(), (int) m.size());
+    CHECK_THAT (m[0], Catch::Matchers::WithinAbs (250.0, 0.01));
+    set (*dd, "swing", 75.0f);
+    dd->readMeters (m.data(), (int) m.size());
+    CHECK_THAT (m[0], Catch::Matchers::WithinAbs (375.0, 0.01));
+    set (*dd, "sync", 0.0f);
+
+    // A tap transposed up a fifth plays the input a fifth higher
+    set (*dd, "time1", 50.0f);
+    set (*dd, "transp1", 7.0f);
+    const auto [pl, pr] = run (*dd, sine (300.0, 1.0, 0.5f), sine (300.0, 1.0, 0.5f));
+    CHECK_THAT (frequencyOf (pl, 12000, 48000), Catch::Matchers::WithinAbs (300.0 * std::pow (2.0, 7.0 / 12.0), 8.0));
+    set (*dd, "transp1", 0.0f);
+
+    // Its filter: a high pass at 2 kHz takes a 100 Hz tone down
+    set (*dd, "filter1", 1.0f);
+    set (*dd, "hp1", 2000.0f);
+    const auto [fl, fr] = run (*dd, sine (100.0, 0.5, 0.5f), sine (100.0, 0.5, 0.5f));
+    CHECK (peakOf (fl, 12000) < 0.05f);
+    set (*dd, "filter1", 0.0f);
+
+    // Pan hard left: nothing on the right; Flip: the other way round
+    set (*dd, "pan1", -100.0f);
+    const auto [hl, hr] = run (*dd, sine (300.0, 0.3, 0.5f), sine (300.0, 0.3, 0.5f));
+    CHECK (peakOf (hr, 4800) < 0.001f);
+    CHECK (peakOf (hl, 4800) > 0.4f);
+
+    // Feedback from the tap: the echo repeats, and decays
+    set (*dd, "pan1", 0.0f);
+    set (*dd, "time1", 100.0f);
+    set (*dd, "fbOn", 1.0f);
+    set (*dd, "fbTap", 0.0f);
+    set (*dd, "feedback", 50.0f);
+    auto fresh = make ("delayDesigner");
+    for (const auto& [id, val] : std::vector<std::pair<const char*, float>> { { "dry", 0.0f }, { "mix", 100.0f }, { "tapCount", 0.0f }, { "time1", 100.0f },
+                                                                              { "level1", 0.0f }, { "pan1", 0.0f }, { "fbOn", 1.0f }, { "fbTap", 0.0f }, { "feedback", 50.0f } })
+        set (*fresh, id, val);
+    const auto [el, er] = run (*fresh, l, r);
+    CHECK_THAT (el[9600], Catch::Matchers::WithinAbs (0.5, 0.05));
+    CHECK_THAT (el[14400], Catch::Matchers::WithinAbs (0.25, 0.05));
+
+    // All 26 taps at full: finite and bounded
+    auto all = make ("delayDesigner");
+    set (*all, "tapCount", 25.0f);
+    for (int t = 1; t <= 26; ++t)
+    {
+        set (*all, "transp" + juce::String (t), (float) (t % 5) * 3.0f - 6.0f);
+        set (*all, "filter" + juce::String (t), 1.0f);
+        set (*all, "reso" + juce::String (t), 100.0f);
+    }
+    set (*all, "feedback", 100.0f);
+    const auto [al, ar] = run (*all, sine (220.0, 3.0, 0.5f), sine (220.0, 3.0, 0.5f));
+    for (auto x : al) REQUIRE (std::isfinite (x));
+    CHECK (peakOf (al) < 50.0f);
 
     auto sub = make ("subBass");
     set (*sub, "dry", -60.0f);
