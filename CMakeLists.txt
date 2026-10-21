@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
 endif()
 
-project(AudioTechPro VERSION 0.74.0 LANGUAGES C CXX)
+project(AudioTechPro VERSION 0.75.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -61,6 +61,10 @@ set(RIFF_CORE_SOURCES
     Source/engine/StockEq.cpp
     Source/engine/StockDynamics.cpp
     Source/engine/StockDelay.cpp
+    Source/engine/StockReverb.cpp
+    Source/engine/StockModulation.cpp
+    Source/engine/StockDistortion.cpp
+    Source/engine/StockFilter.cpp
     Source/engine/PluginScanChild.cpp
     Source/import/ProjectImport.cpp
     Source/import/ReadAbleton.cpp
@@ -227,6 +231,7 @@ set(RIFF_UI_SOURCES
     Source/ui/LatencyCalibrator.cpp
     Source/ui/PianoRoll.cpp
     Source/ui/InstrumentWindows.cpp
+    Source/ui/EffectFace.cpp
     Source/ui/Mixer.cpp
     Source/ui/ConsoleStripWindow.cpp
     Source/ui/EventList.cpp

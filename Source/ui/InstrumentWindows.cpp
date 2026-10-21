@@ -145,6 +145,10 @@ EffectPanel::EffectPanel (juce::ValueTree i, juce::UndoManager& um)
     : insert (i), undoManager (um)
 {
     const auto* info = findBuiltInEffect (insert[ids::effect].toString());
+    look = std::make_unique<effectface::FaceLook> (effectface::accentFor (info != nullptr ? info->category : juce::String()));
+    setLookAndFeel (look.get());
+    bypassButton.setColour (juce::ToggleButton::textColourId, juce::Colours::white.withAlpha (0.8f));
+    bypassButton.setColour (juce::ToggleButton::tickColourId, look->accent);
 
     bypassButton.onClick = [this]
     {
@@ -161,7 +165,7 @@ EffectPanel::EffectPanel (juce::ValueTree i, juce::UndoManager& um)
             k->id = p.id;
 
             k->slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-            k->slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 18);
+            k->slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 68, 17);
             if (p.isChoice())
             {
                 // A switch (circuit, mode, note value...): the knob steps through its settings, shown by name
@@ -218,6 +222,8 @@ EffectPanel::EffectPanel (juce::ValueTree i, juce::UndoManager& um)
             addAndMakeVisible (k->slider);
 
             k->label.setText (p.name, juce::dontSendNotification);
+            k->label.setFont (juce::FontOptions (11.5f));
+            k->label.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.75f));
             k->label.setJustificationType (juce::Justification::centred);
             addAndMakeVisible (k->label);
         }
@@ -225,19 +231,12 @@ EffectPanel::EffectPanel (juce::ValueTree i, juce::UndoManager& um)
 
     insert.addListener (this);
     refresh();
-    auto columns = juce::jlimit (1, knobsPerRow, knobs.size());
-    auto rows = (knobs.size() + knobsPerRow - 1) / knobsPerRow;
-    if (info != nullptr && ! info->columns.empty())
-    {
-        columns = (int) info->columns.size();
-        rows = *std::max_element (info->columns.begin(), info->columns.end());
-    }
-    const bool curve = info != nullptr && info->response != nullptr;
-    setSize (juce::jmax (curve ? 560 : 260, columns * knobWidth + 24), 24 + 6 + (curve ? curveHeight + 10 : 0) + juce::jmax (1, rows) * knobHeight + 12);
+    setSize (faceWidth, layoutFace (false));
 }
 
 EffectPanel::~EffectPanel()
 {
+    setLookAndFeel (nullptr);
     insert.removeListener (this);
 }
 
@@ -251,107 +250,145 @@ void EffectPanel::refresh()
                                    juce::dontSendNotification);
     for (auto* k : knobs)
         k->slider.updateText();
-    if (! curveArea.isEmpty())
-        repaint (curveArea);
+    if (! displayArea.isEmpty())
+        repaint (displayArea);
 }
 
 void EffectPanel::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::background);
-
-    // The EQ's curve (as Logic's Channel EQ shows it): 20 Hz to 20 kHz, +-24 dB
     const auto* info = findBuiltInEffect (insert[ids::effect].toString());
-    if (info == nullptr || info->response == nullptr || curveArea.isEmpty())
-        return;
-    const auto area = curveArea.toFloat();
-    g.setColour (juce::Colours::black.withAlpha (0.35f));
-    g.fillRoundedRectangle (area, 4.0f);
-    const auto xOf = [area] (double f) { return area.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * area.getWidth(); };
-    const auto yOf = [area] (double db) { return area.getCentreY() - (float) (db / 24.0) * area.getHeight() * 0.5f; };
-    g.setFont (juce::FontOptions (10.0f));
-    for (const auto f : { 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0 })
+    const auto accent = look->accent;
+
+    // The face: brushed dark metal, a title bar with the effect's name and family
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2b3038), 0.0f, 0.0f, juce::Colour (0xff1a1d22), 0.0f, (float) getHeight(), false));
+    g.fillAll();
+    for (int y = 0; y < getHeight(); y += 3)
     {
-        g.setColour (juce::Colours::white.withAlpha (0.08f));
-        g.fillRect (xOf (f), area.getY(), 1.0f, area.getHeight());
-        g.setColour (theme::dimText.withAlpha (0.7f));
-        g.drawText (f >= 1000.0 ? juce::String ((int) (f / 1000.0)) + "k" : juce::String ((int) f), juce::Rectangle<float> (xOf (f) + 2.0f, area.getBottom() - 13.0f, 30.0f, 12.0f),
-                    juce::Justification::left, false);
+        g.setColour (juce::Colours::white.withAlpha ((y / 3) % 2 == 0 ? 0.012f : 0.0f));
+        g.fillRect (0, y, getWidth(), 1);
     }
-    for (const auto db : { -18.0, -12.0, -6.0, 0.0, 6.0, 12.0, 18.0 })
+    auto header = getLocalBounds().removeFromTop (headerHeight).toFloat();
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3a4049), 0.0f, 0.0f, juce::Colour (0xff23272d), 0.0f, header.getBottom(), false));
+    g.fillRect (header);
+    g.setColour (accent);
+    g.fillRect (header.removeFromBottom (2.0f));
+    g.setColour (juce::Colours::black.withAlpha (0.6f));
+    g.fillRect (0.0f, (float) headerHeight, (float) getWidth(), 1.0f);
+    auto title = getLocalBounds().removeFromTop (headerHeight - 2).reduced (14, 0).toFloat();
+    g.setColour (accent);
+    g.fillEllipse (title.getX(), title.getCentreY() - 4.0f, 8.0f, 8.0f);
+    title.removeFromLeft (16.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.95f));
+    g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+    const auto name = info != nullptr ? info->name : juce::String ("Effect");
+    g.drawText (name, title, juce::Justification::centredLeft, false);
+    g.setColour (juce::Colours::white.withAlpha (0.4f));
+    g.setFont (juce::FontOptions (11.5f));
+    g.drawText (info != nullptr ? info->category.toUpperCase() : juce::String(), title.withTrimmedLeft (juce::GlyphArrangement::getStringWidth (juce::FontOptions (16.0f, juce::Font::bold), name) + 12.0f),
+                juce::Justification::centredLeft, false);
+
+    // The display
+    if (info != nullptr && ! displayArea.isEmpty())
     {
-        g.setColour (juce::Colours::white.withAlpha (db == 0.0 ? 0.18f : 0.06f));
-        g.fillRect (area.getX(), yOf (db), area.getWidth(), 1.0f);
+        std::array<float, BuiltInEffect::maxParams> v {};
+        for (size_t i = 0; i < info->params.size(); ++i)
+            v[i] = (float) (double) insert.getProperty (juce::Identifier (info->params[i].id), info->params[i].defaultValue);
+        effectface::drawDisplay (g, displayArea.toFloat(), *info, v.data(), accent);
     }
 
-    std::array<float, BuiltInEffect::maxParams> v {};
-    for (size_t i = 0; i < info->params.size(); ++i)
-        v[i] = (float) (double) insert.getProperty (juce::Identifier (info->params[i].id), info->params[i].defaultValue);
-    juce::Path curve;
-    for (int x = 0; x <= (int) area.getWidth(); x += 2)
+    // The sections: inset panels with their names
+    for (const auto& box : sectionBoxes)
     {
-        const auto f = 20.0 * std::pow (1000.0, x / (double) area.getWidth());
-        const auto y = juce::jlimit (area.getY(), area.getBottom(), yOf (info->response (v.data(), f, 48000.0)));
-        if (x == 0)
-            curve.startNewSubPath (area.getX(), y);
-        else
-            curve.lineTo (area.getX() + (float) x, y);
+        auto b = box.area.toFloat();
+        g.setColour (juce::Colours::black.withAlpha (0.22f));
+        g.fillRoundedRectangle (b, 6.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.06f));
+        g.drawRoundedRectangle (b.reduced (0.5f), 6.0f, 1.0f);
+        if (box.title.isNotEmpty())
+        {
+            g.setColour (accent.withAlpha (0.85f));
+            g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+            g.drawText (box.title.toUpperCase(), b.removeFromTop ((float) sectionTitleHeight).reduced (8.0f, 0.0f), juce::Justification::centredLeft, false);
+        }
     }
-    juce::Path fill (curve);
-    fill.lineTo (area.getRight(), yOf (0.0));
-    fill.lineTo (area.getX(), yOf (0.0));
-    fill.closeSubPath();
-    g.setColour (theme::accent.withAlpha (0.18f));
-    g.fillPath (fill);
-    g.setColour (theme::accent);
-    g.strokePath (curve, juce::PathStrokeType (2.0f));
+}
+
+int EffectPanel::layoutFace (bool apply)
+{
+    const auto* info = findBuiltInEffect (insert[ids::effect].toString());
+    if (! apply && info != nullptr)
+    {
+        // As wide as all the sections side by side (up to about a thousand pixels; then they wrap)
+        int total = 0, index = 0;
+        for (const auto& section : effectface::sectionsFor (*info))
+        {
+            const auto count = juce::jmin (section.count, knobs.size() - index);
+            index += juce::jmax (0, count);
+            total += (section.vertical ? 1 : juce::jmin (count, 12)) * cellWidth + 2 * sectionPad + sectionGap;
+        }
+        faceWidth = juce::jlimit (effectface::hasDisplay (*info) ? 520 : 360, 1000, total - sectionGap + 28);
+    }
+    const auto width = apply ? getWidth() : faceWidth;
+    auto y = headerHeight + 10;
+    if (apply)
+    {
+        bypassButton.setBounds (width - 108, (headerHeight - 24) / 2, 96, 24);
+        displayArea = {};
+    }
+    if (info != nullptr && effectface::hasDisplay (*info))
+    {
+        if (apply)
+            displayArea = { 14, y, width - 28, displayHeight };
+        y += displayHeight + 10;
+    }
+    if (info == nullptr)
+        return y + 10;
+
+    // Sections flow left to right, wrapping; a long one breaks into rows of its own
+    if (apply)
+        sectionBoxes.clear();
+    const auto inner = width - 28;
+    const auto perRow = juce::jmax (1, (inner - 2 * sectionPad) / cellWidth);
+    int x = 14, rowHeight = 0, index = 0, widest = 0;
+    for (const auto& section : effectface::sectionsFor (*info))
+    {
+        const auto count = juce::jmin (section.count, knobs.size() - index);
+        if (count <= 0)
+            break;
+        const auto across = section.vertical ? 1 : juce::jmin (count, perRow);
+        const auto down = section.vertical ? count : (count + perRow - 1) / perRow;
+        const auto w = across * cellWidth + 2 * sectionPad;
+        const auto h = sectionTitleHeight + down * cellHeight + sectionPad;
+        if (x > 14 && x + w > 14 + inner)
+        {
+            x = 14;
+            y += rowHeight + sectionGap;
+            rowHeight = 0;
+        }
+        if (apply)
+        {
+            sectionBoxes.push_back ({ section.title, { x, y, w, h } });
+            for (int k = 0; k < count; ++k)
+            {
+                const auto col = section.vertical ? 0 : k % perRow, row = section.vertical ? k : k / perRow;
+                auto cell = juce::Rectangle<int> (x + sectionPad + col * cellWidth, y + sectionTitleHeight + row * cellHeight, cellWidth, cellHeight);
+                auto* knob = knobs[index + k];
+                knob->label.setBounds (cell.removeFromTop (16));
+                knob->slider.setBounds (cell.reduced (4, 0));
+            }
+        }
+        index += count;
+        x += w + sectionGap;
+        widest = juce::jmax (widest, x - sectionGap);
+        rowHeight = juce::jmax (rowHeight, h);
+    }
+    juce::ignoreUnused (widest);
+    return y + rowHeight + 14;
 }
 
 void EffectPanel::resized()
 {
-    auto area = getLocalBounds().reduced (12);
-    bypassButton.setBounds (area.removeFromTop (24).removeFromLeft (100));
-    area.removeFromTop (6);
-
-    const auto* info = findBuiltInEffect (insert[ids::effect].toString());
-    curveArea = {};
-    if (info != nullptr && info->response != nullptr)
-    {
-        curveArea = area.removeFromTop (curveHeight);
-        area.removeFromTop (10);
-    }
-
-    // Columns of knobs when the effect lays them out so (an EQ's bands)
-    if (info != nullptr && ! info->columns.empty())
-    {
-        auto strip = area.withSizeKeepingCentre ((int) info->columns.size() * knobWidth, area.getHeight());
-        int index = 0;
-        for (const auto count : info->columns)
-        {
-            auto column = strip.removeFromLeft (knobWidth);
-            for (int c = 0; c < count && index < knobs.size(); ++c, ++index)
-            {
-                auto cell = column.removeFromTop (knobHeight);
-                knobs[index]->label.setBounds (cell.removeFromTop (20));
-                knobs[index]->slider.setBounds (cell.reduced (2, 0));
-            }
-        }
-        return;
-    }
-
-    // The knobs in rows (as many to a row as fit, at most eight), each row centred
-    const auto perRow = juce::jlimit (1, knobsPerRow, area.getWidth() / knobWidth);
-    for (int start = 0; start < knobs.size(); start += perRow)
-    {
-        auto row = area.removeFromTop (knobHeight);
-        const auto count = juce::jmin (perRow, knobs.size() - start);
-        row = row.withSizeKeepingCentre (count * knobWidth, row.getHeight());
-        for (int i = start; i < start + count; ++i)
-        {
-            auto column = row.removeFromLeft (knobWidth);
-            knobs[i]->label.setBounds (column.removeFromTop (20));
-            knobs[i]->slider.setBounds (column.reduced (2, 0));
-        }
-    }
+    layoutFace (true);
 }
 
 } // namespace riff

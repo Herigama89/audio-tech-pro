@@ -57,6 +57,10 @@ struct StockEffect
 const std::vector<StockEffect>& stockEqEffects();
 const std::vector<StockEffect>& stockDynamicsEffects();
 const std::vector<StockEffect>& stockDelayEffects();
+const std::vector<StockEffect>& stockReverbEffects();
+const std::vector<StockEffect>& stockModulationEffects();
+const std::vector<StockEffect>& stockDistortionEffects();
+const std::vector<StockEffect>& stockFilterEffects();
 
 /**
     Base for Riff's own effects. Parameter values are atomics written by the

@@ -143,6 +143,58 @@ namespace riff::dsp
         float next() noexcept { state = state * 1664525u + 1013904223u; return (float) (state >> 8) / 8388608.0f - 1.0f; }
     };
 
+    /** A state-variable filter (topology-preserving: stays smooth when swept fast). */
+    struct Svf
+    {
+        float ic1 = 0.0f, ic2 = 0.0f, g = 0.0f, k = 1.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+        void set (double freq, double q, double rate) noexcept
+        {
+            g = (float) std::tan (juce::MathConstants<double>::pi * juce::jlimit (10.0, rate * 0.45, freq) / rate);
+            k = (float) (1.0 / std::max (0.3, q));
+            a1 = 1.0f / (1.0f + g * (g + k));
+            a2 = g * a1;
+            a3 = g * a2;
+        }
+        void reset() noexcept { ic1 = ic2 = 0.0f; }
+        /** Runs one sample; gives the low-, band- and high-pass outputs. */
+        void tick (float x, float& low, float& band, float& high) noexcept
+        {
+            const auto v3 = x - ic2;
+            const auto v1 = a1 * ic1 + a2 * v3;
+            const auto v2 = ic2 + a2 * ic1 + a3 * v3;
+            ic1 = 2.0f * v1 - ic1;
+            ic2 = 2.0f * v2 - ic2;
+            low = v2;
+            band = v1;
+            high = x - k * v1 - v2;
+        }
+    };
+
+    /** A first-order all-pass section (phasers, spring dispersion). */
+    struct AllPass1
+    {
+        float z = 0.0f;
+        float process (float x, float a) noexcept
+        {
+            const auto y = a * x + z;
+            z = x - a * y;
+            return y;
+        }
+    };
+
+    /** A Schroeder all-pass around a delay (reverb diffusion). */
+    struct DiffusionAllPass
+    {
+        DelayLine line;
+        float process (float x, float delay, float g) noexcept
+        {
+            const auto d = line.read (delay);
+            const auto v = x - g * d;
+            line.push (v);
+            return d + g * v;
+        }
+    };
+
     /** The decibel gain of the usual knee'd compressor curve. */
     inline float compressorGainDb (float levelDb, float threshold, float ratio, float kneeDb) noexcept
     {

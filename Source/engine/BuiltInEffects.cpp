@@ -56,7 +56,8 @@ const std::vector<EffectInfo>& originalEffects()
 /** Every stock family, in menu order. */
 std::vector<const std::vector<StockEffect>*> stockFamilies()
 {
-    return { &stockEqEffects(), &stockDynamicsEffects(), &stockDelayEffects() };
+    return { &stockEqEffects(), &stockDynamicsEffects(), &stockDelayEffects(), &stockReverbEffects(),
+             &stockModulationEffects(), &stockDistortionEffects(), &stockFilterEffects() };
 }
 }
 

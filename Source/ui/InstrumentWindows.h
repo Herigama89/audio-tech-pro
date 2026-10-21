@@ -1,4 +1,5 @@
 #pragma once
+#include "EffectFace.h"
 
 #include <JuceHeader.h>
 #include "Theme.h"
@@ -196,8 +197,16 @@ private:
     juce::UndoManager& undoManager;
     juce::ToggleButton bypassButton { "Bypass" };
     juce::OwnedArray<Knob> knobs;
-    juce::Rectangle<int> curveArea;   // (EQs: their curve)
-    static constexpr int knobsPerRow = 8, knobWidth = 88, knobHeight = 112, curveHeight = 180;
+    /** Places the display, sections and knobs (or, not applying, works out the height they need). */
+    int layoutFace (bool apply);
+
+    struct SectionBox { juce::String title; juce::Rectangle<int> area; };
+    std::vector<SectionBox> sectionBoxes;
+    juce::Rectangle<int> displayArea;
+    std::unique_ptr<effectface::FaceLook> look;
+    int faceWidth = 760;
+    static constexpr int headerHeight = 42, displayHeight = 170, cellWidth = 76, cellHeight = 96,
+                         sectionTitleHeight = 20, sectionPad = 6, sectionGap = 8;
 };
 
 } // namespace riff

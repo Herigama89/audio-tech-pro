@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "../Source/engine/BuiltInEffects.h"
+#include <set>
 
 using namespace riff;
 
@@ -219,4 +220,44 @@ TEST_CASE ("Delays: the echo arrives on time, in ms or in time with the song", "
     const auto [sl, sr] = run (*sd, a, b);
     CHECK (sl[47] == 1.0f);
     CHECK (sr[10] == 1.0f);
+}
+
+TEST_CASE ("Reverbs ring on after a click; tremolo moves the level; bitcrusher steps", "[stockfx]")
+{
+    for (const auto* type : { "studioReverb", "plateReverb", "springReverb" })
+    {
+        INFO (type);
+        auto rv = make (type);
+        set (*rv, "mix", 100.0f);
+        std::vector<float> l (48000, 0.0f), r (48000, 0.0f);
+        l[0] = r[0] = 1.0f;
+        const auto [ol, orr] = run (*rv, l, r);
+        float tail = 0.0f;
+        for (size_t i = 9600; i < 24000; ++i)
+            tail = std::max (tail, std::abs (ol[i]) + std::abs (orr[i]));
+        CHECK (tail > 1.0e-4f);   // still sounding 200-500 ms later
+        CHECK (tail < 2.0f);
+    }
+
+    auto trem = make ("tremolo");
+    set (*trem, "sync", 0.0f);
+    set (*trem, "rate", 5.0f);
+    set (*trem, "depth", 100.0f);
+    std::vector<float> ones (48000, 0.5f);
+    const auto [tl, tr] = run (*trem, ones, ones);
+    float lo = 1.0f, hi = 0.0f;
+    for (size_t i = 4800; i < tl.size(); ++i)
+    {
+        lo = std::min (lo, tl[i]);
+        hi = std::max (hi, tl[i]);
+    }
+    CHECK (lo < 0.05f);
+    CHECK (hi > 0.45f);
+
+    auto crush = make ("bitcrusher");
+    set (*crush, "bits", 2.0f);
+    set (*crush, "downsample", 1.0f);
+    const auto [cl, cr] = run (*crush, sine (100.0, 0.1, 0.9f), sine (100.0, 0.1, 0.9f));
+    std::set<float> levels (cl.begin(), cl.end());
+    CHECK (levels.size() <= 5);
 }
