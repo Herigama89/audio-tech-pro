@@ -28,7 +28,17 @@ jobs:
           RIFF_BUILD_TESTS: "ON"
         run: sh scripts/make-mac-dmg.sh
       - name: Test
-        run: ./build-universal/AudioTechProTests_artefacts/Release/AudioTechProTests
+        # (failures are listed in one annotation on the run's page, so they can be read without the log)
+        run: |
+          set +e
+          ./build-universal/AudioTechProTests_artefacts/Release/AudioTechProTests --reporter compact > test-output.txt 2>&1
+          code=$?
+          cat test-output.txt
+          if [ $code -ne 0 ]; then
+            failed=$(grep -E 'failed|FAILED|error' test-output.txt | head -120 | awk '{printf "%s%%0A", $0}')
+            echo "::error title=Mac test failures::$failed"
+            exit $code
+          fi
       - name: Installer and uninstaller (.pkg)
         env:
           RIFF_BUILD_TESTS: "ON"

@@ -859,7 +859,18 @@ TEST_CASE ("Match EQ learns two spectra and makes the filter between them", "[st
             set (*eq, "c" + juce::String (k), -40.0f);
             set (*eq, "t" + juce::String (k), -40.0f + (float) std::max (0, k - 18));
         }
+        // (the convolution takes up a new impulse response on a background thread: give it time, playing silence)
+        const auto settle = [] (BuiltInEffect& e)
+        {
+            for (int k = 0; k < 60; ++k)
+            {
+                juce::Thread::sleep (20);
+                std::vector<float> zl (block, 0.0f), zr (block, 0.0f);
+                e.process (zl.data(), zr.data(), block);
+            }
+        };
         eq->prepare (rate, block);   // (rebuilds now)
+        settle (*eq);
         CHECK (eq->getLatencySamples() == (phase < 0.5f ? 2048 : 0));
         const auto low = gainAt (*eq, 200.0), high = gainAt (*eq, 10000.0);
         CHECK (high - low > 8.0f);
@@ -868,6 +879,7 @@ TEST_CASE ("Match EQ learns two spectra and makes the filter between them", "[st
         // Apply at 0 %: flat
         set (*eq, "apply", 0.0f);
         eq->prepare (rate, block);
+        settle (*eq);
         CHECK_THAT (gainAt (*eq, 200.0) - gainAt (*eq, 10000.0), Catch::Matchers::WithinAbs (0.0, 0.5));
     }
 
