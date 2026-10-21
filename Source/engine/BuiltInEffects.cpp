@@ -6,7 +6,16 @@ namespace riff
 //==============================================================================
 // Catalogue
 //==============================================================================
-const std::vector<EffectInfo>& builtInEffects()
+const juce::StringArray& effectCategories()
+{
+    static const juce::StringArray categories { "EQ", "Dynamics", "Delay", "Reverb", "Modulation", "Distortion", "Filter",
+                                                "Amps and Pedals", "Pitch", "Imaging", "Specialized", "Utility" };
+    return categories;
+}
+
+namespace
+{
+const std::vector<EffectInfo>& originalEffects()
 {
     static const std::vector<EffectInfo> effects {
         { "eq", "EQ", {
@@ -16,31 +25,52 @@ const std::vector<EffectInfo>& builtInEffects()
             { "midGain",  "Mid",       " dB", -18.0f,  18.0f,    0.0f,    0.0f },
             { "midQ",     "Mid Q",     "",    0.2f,    10.0f,    1.0f,    1.2f },
             { "highFreq", "High Freq", " Hz", 1000.0f, 18000.0f, 8000.0f, 5000.0f },
-            { "highGain", "High",      " dB", -18.0f,  18.0f,    0.0f,    0.0f } } },
+            { "highGain", "High",      " dB", -18.0f,  18.0f,    0.0f,    0.0f } }, "EQ" },
 
         { "compressor", "Compressor", {
             { "threshold", "Threshold", " dB", -60.0f, 0.0f,    -18.0f, -18.0f },
             { "ratio",     "Ratio",     ":1",   1.0f,   20.0f,  4.0f,   4.0f },
             { "attack",    "Attack",    " ms",  0.1f,   100.0f, 10.0f,  10.0f },
             { "release",   "Release",   " ms",  10.0f,  1000.0f, 120.0f, 150.0f },
-            { "makeup",    "Makeup",    " dB",  0.0f,   24.0f,  0.0f,   6.0f } } },
+            { "makeup",    "Makeup",    " dB",  0.0f,   24.0f,  0.0f,   6.0f } }, "Dynamics" },
 
         { "delay", "Delay", {
             { "time",     "Time",     " ms", 1.0f, 2000.0f, 375.0f, 400.0f },
             { "feedback", "Feedback", "",    0.0f, 0.95f,   0.35f,  0.4f },
-            { "mix",      "Mix",      "",    0.0f, 1.0f,    0.3f,   0.5f } } },
+            { "mix",      "Mix",      "",    0.0f, 1.0f,    0.3f,   0.5f } }, "Delay" },
 
         { "reverb", "Reverb", {
             { "size",    "Size",    "", 0.0f, 1.0f, 0.6f,  0.5f },
             { "damping", "Damping", "", 0.0f, 1.0f, 0.5f,  0.5f },
             { "width",   "Width",   "", 0.0f, 1.0f, 1.0f,  0.5f },
-            { "mix",     "Mix",     "", 0.0f, 1.0f, 0.25f, 0.5f } } },
+            { "mix",     "Mix",     "", 0.0f, 1.0f, 0.25f, 0.5f } }, "Reverb" },
 
         { "limiter", "Limiter", {
             { "ceiling", "Ceiling", " dB", -12.0f, 0.0f,    -0.3f, -3.0f },
-            { "release", "Release", " ms", 10.0f,  1000.0f, 100.0f, 150.0f } } },
+            { "release", "Release", " ms", 10.0f,  1000.0f, 100.0f, 150.0f } }, "Dynamics" },
     };
 
+    return effects;
+}
+
+/** Every stock family, in menu order. */
+std::vector<const std::vector<StockEffect>*> stockFamilies()
+{
+    return { &stockEqEffects(), &stockDynamicsEffects(), &stockDelayEffects() };
+}
+}
+
+const std::vector<EffectInfo>& builtInEffects()
+{
+    // The first five (as they've always been), then each family's
+    static const std::vector<EffectInfo> effects = []
+    {
+        auto all = originalEffects();
+        for (const auto* family : stockFamilies())
+            for (const auto& e : *family)
+                all.push_back (e.info);
+        return all;
+    }();
     return effects;
 }
 
@@ -111,6 +141,20 @@ void Biquad::setHighShelf (double rate, double freq, double gainDb, double q)
     normalise (*this,
                A * ((A + 1) + (A - 1) * cw + s), -2 * A * ((A - 1) + (A + 1) * cw), A * ((A + 1) + (A - 1) * cw - s),
                (A + 1) - (A - 1) * cw + s, 2 * ((A - 1) - (A + 1) * cw), (A + 1) - (A - 1) * cw - s);
+}
+
+void Biquad::setBandPass (double rate, double freq, double q)
+{
+    const auto w = juce::MathConstants<double>::twoPi * clampFreq (freq, rate) / rate;
+    const auto cw = std::cos (w), alpha = std::sin (w) / (2.0 * q);
+    normalise (*this, alpha, 0, -alpha, 1 + alpha, -2 * cw, 1 - alpha);
+}
+
+void Biquad::setNotch (double rate, double freq, double q)
+{
+    const auto w = juce::MathConstants<double>::twoPi * clampFreq (freq, rate) / rate;
+    const auto cw = std::cos (w), alpha = std::sin (w) / (2.0 * q);
+    normalise (*this, 1, -2 * cw, 1, 1 + alpha, -2 * cw, 1 - alpha);
 }
 
 void Biquad::setHighPass (double rate, double freq, double q)
@@ -362,6 +406,10 @@ std::unique_ptr<BuiltInEffect> BuiltInEffect::create (const juce::String& type)
     if (type == "delay")      return std::make_unique<DelayEffect> (*info);
     if (type == "reverb")     return std::make_unique<ReverbEffect> (*info);
     if (type == "limiter")    return std::make_unique<LimiterEffect> (*info);
+    for (const auto* family : stockFamilies())
+        for (const auto& e : *family)
+            if (e.info.type == type)
+                return e.make (*info);   // (made with the catalogue's copy, which lives for good)
     return nullptr;
 }
 

@@ -22,6 +22,7 @@
 #include "ui/AudioSuitePanel.h"
 #include "engine/BuiltInEffects.h"
 #include "ui/GeneratorPanel.h"
+#include "ui/InstrumentWindows.h"
 #include "ui/AssistantPanel.h"
 #include "ui/ScreenRecordPanel.h"
 #include "ui/CombineInterfacesPanel.h"
@@ -313,6 +314,27 @@ public:
                 save (main, "pitch-editor-docked.png");
                 main.closeAudioEditor();
                 main.project.removeChild (vocal, nullptr);
+            }
+
+            // The stock effects' windows: an EQ with its curve, the compressor's circuits, a synced delay
+            {
+                auto fxTrack = model::addTrack (main.project, "FX", nullptr);
+                auto chain = model::chainFor (main.project, fxTrack[ids::id].toString());
+                auto eq = model::addBuiltinInsert (chain, "channelEq", -1, nullptr);
+                eq.setProperty ("hpFreq", 60.0f, nullptr);
+                eq.setProperty ("p1Gain", -4.0f, nullptr);
+                eq.setProperty ("p2Freq", 2500.0f, nullptr);
+                eq.setProperty ("p2Gain", 5.0f, nullptr);
+                eq.setProperty ("p2Q", 1.6f, nullptr);
+                eq.setProperty ("hsGain", 3.0f, nullptr);
+                for (const auto* type : { "channelEq", "studioComp", "stereoDelay", "tubeEq" })
+                {
+                    auto insert = juce::String (type) == "channelEq" ? eq : model::addBuiltinInsert (chain, type, -1, nullptr);
+                    EffectPanel panel (insert, main.undoManager);
+                    panel.resized();
+                    save (panel, juce::String ("fx-") + type + ".png");
+                }
+                main.project.removeChild (fxTrack, nullptr);
             }
 
             main.timeline.selectOnly (track[ids::id].toString());

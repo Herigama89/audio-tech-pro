@@ -1388,7 +1388,7 @@ void MainComponent::chooseAudioSuiteEffect (juce::Component& target)
     for (const auto& info : builtInEffects())
     {
         PluginPicker::Entry e { info.name, app::effectsName, {}, [this, type = info.type] { setAudioSuiteBuiltIn (type); } };
-        e.category = PluginPicker::categoryOf ({}, info.name);
+        e.category = info.category.isNotEmpty() ? info.category : PluginPicker::categoryOf ({}, info.name);
         e.key = "builtin:" + info.type;
         entries.push_back (std::move (e));
     }
@@ -1464,7 +1464,7 @@ void MainComponent::addAudioSuiteItems (juce::PopupMenu& menu)
     // Every effect, grouped by kind (as Pro Tools' AudioSuite menu is).
     std::map<juce::String, juce::PopupMenu> groups;
     for (const auto& info : builtInEffects())
-        groups[PluginPicker::categoryOf ({}, info.name)].addItem (info.name, [this, type = info.type] { setAudioSuiteBuiltIn (type); });
+        groups[info.category.isNotEmpty() ? info.category : PluginPicker::categoryOf ({}, info.name)].addItem (info.name, [this, type = info.type] { setAudioSuiteBuiltIn (type); });
     for (const auto& type : visiblePluginTypes())
         if (! type.isInstrument)
             groups[PluginPicker::categoryOf (type.category, type.name)].addItem (type.name + "  (" + type.manufacturerName + ")",

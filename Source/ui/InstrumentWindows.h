@@ -196,6 +196,8 @@ private:
     juce::UndoManager& undoManager;
     juce::ToggleButton bypassButton { "Bypass" };
     juce::OwnedArray<Knob> knobs;
+    juce::Rectangle<int> curveArea;   // (EQs: their curve)
+    static constexpr int knobsPerRow = 8, knobWidth = 88, knobHeight = 112, curveHeight = 180;
 };
 
 } // namespace riff

@@ -15,17 +15,48 @@ struct ParamInfo
 {
     juce::String id, name, suffix;
     float min, max, defaultValue, midPoint;   // midPoint: value at the centre of the knob
+    std::vector<juce::String> choices {};     // a switch: values 0..n-1, shown by name (min 0, max n-1)
+
+    bool isChoice() const noexcept { return ! choices.empty(); }
+    juce::String text (float value) const
+    {
+        if (isChoice())
+            return choices[(size_t) juce::jlimit (0, (int) choices.size() - 1, juce::roundToInt (value))];
+        return {};
+    }
 };
 
 struct EffectInfo
 {
     juce::String type, name;
     std::vector<ParamInfo> params;
+    juce::String category {};   // as Logic's plug-in menu: EQ, Dynamics, Delay, Reverb, Modulation...
+
+    /** For EQs: the curve (dB at a frequency) for a set of parameter values, drawn in the effect's window. */
+    std::function<double (const float* values, double freq, double sampleRate)> response {};
+
+    /** How the window lays its knobs out, when not simply in rows: how many knobs stack in each column
+        (an EQ's bands side by side, each band's frequency, gain and Q above one another). */
+    std::vector<int> columns {};
 };
 
 /** All built-in effects, in menu order. */
 const std::vector<EffectInfo>& builtInEffects();
 const EffectInfo* findBuiltInEffect (const juce::String& type);
+
+/** Logic's plug-in categories, in menu order. */
+const juce::StringArray& effectCategories();
+
+class BuiltInEffect;
+/** One stock effect: its description and how to make it. Each family (EQ, Dynamics...) lists its own. */
+struct StockEffect
+{
+    EffectInfo info;
+    std::function<std::unique_ptr<BuiltInEffect> (const EffectInfo&)> make;
+};
+const std::vector<StockEffect>& stockEqEffects();
+const std::vector<StockEffect>& stockDynamicsEffects();
+const std::vector<StockEffect>& stockDelayEffects();
 
 /**
     Base for Riff's own effects. Parameter values are atomics written by the
@@ -45,11 +76,23 @@ public:
     void setAutomatedParameter (int index, float value) noexcept override { setParameter (index, value); }
     float getParameter (int index) const noexcept;
 
+    void setPosition (juce::int64, bool isPlaying, double beatsPerMinute) noexcept override
+    {
+        bpm.store (beatsPerMinute > 1.0 ? beatsPerMinute : 120.0, std::memory_order_relaxed);
+        playing.store (isPlaying, std::memory_order_relaxed);
+    }
+
+    static constexpr int maxParams = 16;
+
 protected:
-    static constexpr int maxParams = 12;
     const EffectInfo& info;
     std::array<std::atomic<float>, maxParams> values;
     double sampleRate = 44100.0;
+    std::atomic<double> bpm { 120.0 };   // the song's tempo, for delays in time with it
+    std::atomic<bool> playing { false };
+
+    float value (int index) const noexcept { return values[(size_t) index].load (std::memory_order_relaxed); }
+    int choice (int index) const noexcept  { return juce::roundToInt (value (index)); }
 };
 
 /** A second-order IIR section (RBJ cookbook), allocation-free. */
@@ -63,6 +106,9 @@ struct Biquad
     void setPeak (double rate, double freq, double gainDb, double q);
     void setHighPass (double rate, double freq, double q = 0.707);
     void setLowPass (double rate, double freq, double q = 0.707);
+    void setBandPass (double rate, double freq, double q);
+    void setNotch (double rate, double freq, double q);
+    void setIdentity() noexcept { b0 = 1; b1 = b2 = a1 = a2 = 0; }
     void reset() noexcept { z1 = {}; z2 = {}; }
 
     /** The filter's gain at a frequency, in dB (for drawing EQ curves). */

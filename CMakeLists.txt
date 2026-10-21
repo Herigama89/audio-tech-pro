@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
 endif()
 
-project(AudioTechPro VERSION 0.73.0 LANGUAGES C CXX)
+project(AudioTechPro VERSION 0.74.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -58,6 +58,9 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/ptformat)
 set_source_files_properties(ThirdParty/ptformat/ptformat.cc PROPERTIES COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/w;/UDEBUG,-w;-UDEBUG>")
 
 set(RIFF_CORE_SOURCES
+    Source/engine/StockEq.cpp
+    Source/engine/StockDynamics.cpp
+    Source/engine/StockDelay.cpp
     Source/engine/PluginScanChild.cpp
     Source/import/ProjectImport.cpp
     Source/import/ReadAbleton.cpp
@@ -303,6 +306,7 @@ if(RIFF_BUILD_TESTS)
         Tests/ThemeTests.cpp
         Tests/AutomixTests.cpp
         Tests/NoteToolsTests.cpp
+        Tests/StockEffectsTests.cpp
         Source/ui/Theme.cpp
         Source/ui/ThemePack.cpp
         Source/ui/ScreenRecordPanel.cpp

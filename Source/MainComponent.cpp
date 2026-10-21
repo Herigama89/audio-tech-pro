@@ -2972,7 +2972,7 @@ void MainComponent::showEffectMenu (const juce::String& owner, int slot, juce::V
         {
             place ([this, type] (juce::ValueTree chain, int index) { return model::addBuiltinInsert (chain, type, index, &undoManager); });
         } };
-        e.category = PluginPicker::categoryOf ({}, info.name);
+        e.category = info.category.isNotEmpty() ? info.category : PluginPicker::categoryOf ({}, info.name);
         e.key = "builtin:" + info.type;
         entries.push_back (std::move (e));
     }

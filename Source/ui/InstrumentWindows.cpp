@@ -161,13 +161,31 @@ EffectPanel::EffectPanel (juce::ValueTree i, juce::UndoManager& um)
             k->id = p.id;
 
             k->slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-            k->slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 76, 18);
-            k->slider.setRange (p.min, p.max, 0.0);
-            if (p.midPoint > p.min && p.midPoint < p.max)
-                k->slider.setSkewFactorFromMidPoint (p.midPoint);
+            k->slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 18);
+            if (p.isChoice())
+            {
+                // A switch (circuit, mode, note value...): the knob steps through its settings, shown by name
+                k->slider.setRange (p.min, p.max, 1.0);
+                k->slider.textFromValueFunction = [p] (double v) { return p.text ((float) v); };
+                k->slider.valueFromTextFunction = [p] (const juce::String& t)
+                {
+                    for (size_t c = 0; c < p.choices.size(); ++c)
+                        if (p.choices[c].equalsIgnoreCase (t.trim()))
+                            return (double) c;
+                    return (double) p.defaultValue;
+                };
+                k->slider.setMouseDragSensitivity (juce::jmax (60, (int) p.choices.size() * 18));
+            }
+            else
+            {
+                k->slider.setRange (p.min, p.max, 0.0);
+                if (p.midPoint > p.min && p.midPoint < p.max)
+                    k->slider.setSkewFactorFromMidPoint (p.midPoint);
+                k->slider.setNumDecimalPlacesToDisplay (p.max > 100.0f ? 0 : (p.max > 10.0f ? 1 : 2));
+                k->slider.setTextValueSuffix (p.suffix);
+            }
             k->slider.setDoubleClickReturnValue (true, p.defaultValue);
-            k->slider.setNumDecimalPlacesToDisplay (p.max > 100.0f ? 0 : (p.max > 10.0f ? 1 : 2));
-            k->slider.setTextValueSuffix (p.suffix);
+            k->slider.updateText();   // (a switch shows its setting's name from the start)
             // Touch, Latch or Write while playing: the knob is written as automation too.
             const auto owner = [this] { return insert.getParent()[ids::owner].toString(); };
             const auto param = [this, k] { return model::insertParam (insert[ids::id].toString(), k->id); };
@@ -207,7 +225,15 @@ EffectPanel::EffectPanel (juce::ValueTree i, juce::UndoManager& um)
 
     insert.addListener (this);
     refresh();
-    setSize (juce::jmax (260, knobs.size() * 86 + 24), 170);
+    auto columns = juce::jlimit (1, knobsPerRow, knobs.size());
+    auto rows = (knobs.size() + knobsPerRow - 1) / knobsPerRow;
+    if (info != nullptr && ! info->columns.empty())
+    {
+        columns = (int) info->columns.size();
+        rows = *std::max_element (info->columns.begin(), info->columns.end());
+    }
+    const bool curve = info != nullptr && info->response != nullptr;
+    setSize (juce::jmax (curve ? 560 : 260, columns * knobWidth + 24), 24 + 6 + (curve ? curveHeight + 10 : 0) + juce::jmax (1, rows) * knobHeight + 12);
 }
 
 EffectPanel::~EffectPanel()
@@ -223,11 +249,61 @@ void EffectPanel::refresh()
     for (int i = 0; i < knobs.size() && info != nullptr; ++i)
         knobs[i]->slider.setValue (insert.getProperty (juce::Identifier (knobs[i]->id), info->params[(size_t) i].defaultValue),
                                    juce::dontSendNotification);
+    for (auto* k : knobs)
+        k->slider.updateText();
+    if (! curveArea.isEmpty())
+        repaint (curveArea);
 }
 
 void EffectPanel::paint (juce::Graphics& g)
 {
     g.fillAll (theme::background);
+
+    // The EQ's curve (as Logic's Channel EQ shows it): 20 Hz to 20 kHz, +-24 dB
+    const auto* info = findBuiltInEffect (insert[ids::effect].toString());
+    if (info == nullptr || info->response == nullptr || curveArea.isEmpty())
+        return;
+    const auto area = curveArea.toFloat();
+    g.setColour (juce::Colours::black.withAlpha (0.35f));
+    g.fillRoundedRectangle (area, 4.0f);
+    const auto xOf = [area] (double f) { return area.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * area.getWidth(); };
+    const auto yOf = [area] (double db) { return area.getCentreY() - (float) (db / 24.0) * area.getHeight() * 0.5f; };
+    g.setFont (juce::FontOptions (10.0f));
+    for (const auto f : { 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0 })
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.08f));
+        g.fillRect (xOf (f), area.getY(), 1.0f, area.getHeight());
+        g.setColour (theme::dimText.withAlpha (0.7f));
+        g.drawText (f >= 1000.0 ? juce::String ((int) (f / 1000.0)) + "k" : juce::String ((int) f), juce::Rectangle<float> (xOf (f) + 2.0f, area.getBottom() - 13.0f, 30.0f, 12.0f),
+                    juce::Justification::left, false);
+    }
+    for (const auto db : { -18.0, -12.0, -6.0, 0.0, 6.0, 12.0, 18.0 })
+    {
+        g.setColour (juce::Colours::white.withAlpha (db == 0.0 ? 0.18f : 0.06f));
+        g.fillRect (area.getX(), yOf (db), area.getWidth(), 1.0f);
+    }
+
+    std::array<float, BuiltInEffect::maxParams> v {};
+    for (size_t i = 0; i < info->params.size(); ++i)
+        v[i] = (float) (double) insert.getProperty (juce::Identifier (info->params[i].id), info->params[i].defaultValue);
+    juce::Path curve;
+    for (int x = 0; x <= (int) area.getWidth(); x += 2)
+    {
+        const auto f = 20.0 * std::pow (1000.0, x / (double) area.getWidth());
+        const auto y = juce::jlimit (area.getY(), area.getBottom(), yOf (info->response (v.data(), f, 48000.0)));
+        if (x == 0)
+            curve.startNewSubPath (area.getX(), y);
+        else
+            curve.lineTo (area.getX() + (float) x, y);
+    }
+    juce::Path fill (curve);
+    fill.lineTo (area.getRight(), yOf (0.0));
+    fill.lineTo (area.getX(), yOf (0.0));
+    fill.closeSubPath();
+    g.setColour (theme::accent.withAlpha (0.18f));
+    g.fillPath (fill);
+    g.setColour (theme::accent);
+    g.strokePath (curve, juce::PathStrokeType (2.0f));
 }
 
 void EffectPanel::resized()
@@ -236,11 +312,45 @@ void EffectPanel::resized()
     bypassButton.setBounds (area.removeFromTop (24).removeFromLeft (100));
     area.removeFromTop (6);
 
-    for (auto* k : knobs)
+    const auto* info = findBuiltInEffect (insert[ids::effect].toString());
+    curveArea = {};
+    if (info != nullptr && info->response != nullptr)
     {
-        auto column = area.removeFromLeft (86);
-        k->label.setBounds (column.removeFromTop (20));
-        k->slider.setBounds (column);
+        curveArea = area.removeFromTop (curveHeight);
+        area.removeFromTop (10);
+    }
+
+    // Columns of knobs when the effect lays them out so (an EQ's bands)
+    if (info != nullptr && ! info->columns.empty())
+    {
+        auto strip = area.withSizeKeepingCentre ((int) info->columns.size() * knobWidth, area.getHeight());
+        int index = 0;
+        for (const auto count : info->columns)
+        {
+            auto column = strip.removeFromLeft (knobWidth);
+            for (int c = 0; c < count && index < knobs.size(); ++c, ++index)
+            {
+                auto cell = column.removeFromTop (knobHeight);
+                knobs[index]->label.setBounds (cell.removeFromTop (20));
+                knobs[index]->slider.setBounds (cell.reduced (2, 0));
+            }
+        }
+        return;
+    }
+
+    // The knobs in rows (as many to a row as fit, at most eight), each row centred
+    const auto perRow = juce::jlimit (1, knobsPerRow, area.getWidth() / knobWidth);
+    for (int start = 0; start < knobs.size(); start += perRow)
+    {
+        auto row = area.removeFromTop (knobHeight);
+        const auto count = juce::jmin (perRow, knobs.size() - start);
+        row = row.withSizeKeepingCentre (count * knobWidth, row.getHeight());
+        for (int i = start; i < start + count; ++i)
+        {
+            auto column = row.removeFromLeft (knobWidth);
+            knobs[i]->label.setBounds (column.removeFromTop (20));
+            knobs[i]->slider.setBounds (column.reduced (2, 0));
+        }
     }
 }
 
