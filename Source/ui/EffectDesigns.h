@@ -66,6 +66,7 @@ namespace riff::effectdesign
             juce::Rectangle<int> area;
             std::vector<GraphHandle> handles;
             int page = 0;
+            bool pad = false;   // an XY pad: across is the first handle's "freq" parameter over its range (not log frequency); a click anywhere moves it
         };
         std::vector<Graph> graphs;
         juce::String pageParam;                 // (a face with pages: the parameter choosing which one shows, page = its value + 1)

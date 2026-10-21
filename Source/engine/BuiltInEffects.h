@@ -71,6 +71,9 @@ std::vector<ParamInfo> delayDesignerParams();
 std::vector<ParamInfo> matchEqParams();
 const std::vector<StockEffect>& stockPedalboardEffects();
 const std::vector<StockEffect>& stockMeteringEffects();
+const std::vector<StockEffect>& stockMultiEffects();
+/** Step FX: how many steps each of its step modulators has room for. */
+inline constexpr int stepFxMaxSteps = 32;
 /** Pitch Correction's scales and chords: their names, and each one's notes from the root (12 flags). */
 const std::vector<juce::String>& pitchScaleNames();
 const int* pitchScaleMask (int scale);
@@ -95,8 +98,9 @@ public:
     void setAutomatedParameter (int index, float value) noexcept override { setParameter (index, value); }
     float getParameter (int index) const noexcept;
 
-    void setPosition (juce::int64, bool isPlaying, double beatsPerMinute) noexcept override
+    void setPosition (juce::int64 samplePosition, bool isPlaying, double beatsPerMinute) noexcept override
     {
+        position.store (samplePosition, std::memory_order_relaxed);
         bpm.store (beatsPerMinute > 1.0 ? beatsPerMinute : 120.0, std::memory_order_relaxed);
         playing.store (isPlaying, std::memory_order_relaxed);
     }
@@ -148,6 +152,7 @@ protected:
     double sampleRate = 44100.0;
     std::atomic<double> bpm { 120.0 };   // the song's tempo, for delays in time with it
     std::atomic<bool> playing { false };
+    std::atomic<juce::int64> position { 0 };   // the song position at the block, in samples (for steps in time with it)
     std::atomic<bool> tapOn { false };
     std::array<std::atomic<float>, tapSize> tap {};
     std::atomic<int> tapPos { 0 };

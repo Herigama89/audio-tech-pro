@@ -346,8 +346,9 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                 else if (c.kind == effectdesign::Kind::fader)
                 {
                     k->slider.setSliderStyle (juce::Slider::LinearVertical);
-                    if (design->lcdValues || ! design->valueAbove)
+                    if (design->lcdValues || ! design->valueAbove || c.bounds.getWidth() < 40)
                     {
+                        // (no room for the value, or none wanted: it shows while dragged)
                         k->slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
                         k->slider.setPopupDisplayEnabled (true, true, this);
                     }
@@ -451,8 +452,20 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                          std::function<void (const juce::String&, float, bool)> put, const EffectInfo& fx)
                 : graph (g), current (std::move (get)), set (std::move (put)), info (fx) {}
 
-            float xOf (double f) const { return (float) (std::log (f / 20.0) / std::log (1000.0)) * (float) getWidth(); }
-            double freqAt (float x) const { return juce::jlimit (10.0, 20000.0, 20.0 * std::pow (1000.0, (double) x / getWidth())); }
+            float xOf (double f) const
+            {
+                if (graph.pad && ! graph.handles.empty())
+                    if (const auto* p = paramOf (graph.handles.front().freq))
+                        return (float) ((f - p->min) / std::max (1.0e-6, (double) (p->max - p->min))) * (float) getWidth();
+                return (float) (std::log (f / 20.0) / std::log (1000.0)) * (float) getWidth();
+            }
+            double freqAt (float x) const
+            {
+                if (graph.pad && ! graph.handles.empty())
+                    if (const auto* p = paramOf (graph.handles.front().freq))
+                        return p->min + juce::jlimit (0.0, 1.0, (double) x / getWidth()) * (p->max - p->min);
+                return juce::jlimit (10.0, 20000.0, 20.0 * std::pow (1000.0, (double) x / getWidth()));
+            }
             // (up the side: the parameter's range, its middle at the middle)
             float yOf (const juce::String& id, double value) const
             {
@@ -486,7 +499,16 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                 }
                 return best;
             }
-            void mouseDown (const juce::MouseEvent& e) override { dragging = handleAt (e.position); started = false; }
+            void mouseDown (const juce::MouseEvent& e) override
+            {
+                dragging = handleAt (e.position);
+                started = false;
+                if (graph.pad && dragging < 0 && ! graph.handles.empty())
+                {
+                    dragging = 0;
+                    mouseDrag (e);
+                }
+            }
             void mouseDrag (const juce::MouseEvent& e) override
             {
                 if (dragging < 0) return;
@@ -498,7 +520,7 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                 };
                 set (h.freq, clampTo (h.freq, freqAt (e.position.x)), ! started);
                 if (h.gain.isNotEmpty())
-                    set (h.gain, clampTo (h.gain, std::round (valueAt (h.gain, e.position.y) * 100.0) / 100.0), false);
+                    set (h.gain, clampTo (h.gain, std::round (valueAt (h.gain, e.position.y) * 1000.0) / 1000.0), false);
                 started = true;
             }
             void mouseDoubleClick (const juce::MouseEvent& e) override
@@ -518,7 +540,8 @@ void EffectPanel::buildDesign (const EffectInfo& info)
             }
             void mouseMove (const juce::MouseEvent& e) override
             {
-                setMouseCursor (handleAt (e.position) >= 0 ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor);
+                setMouseCursor (graph.pad ? juce::MouseCursor::CrosshairCursor
+                                          : handleAt (e.position) >= 0 ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor);
             }
 
             const effectdesign::Design::Graph& graph;

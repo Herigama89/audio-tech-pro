@@ -1569,6 +1569,122 @@ namespace
     }
 
     //==============================================================================
+    // Multi Effects (Phat FX, Step FX): processor panels, modulators, an XY pad
+    //==============================================================================
+    void multiPanel (juce::Graphics& g, R area, juce::Colour accent, bool on)
+    {
+        g.setColour (juce::Colour (0xff2a2c31));
+        g.fillRoundedRectangle (area.toFloat(), 6.0f);
+        g.setColour (on ? accent.withAlpha (0.9f) : juce::Colours::white.withAlpha (0.12f));
+        g.fillRoundedRectangle (area.toFloat().removeFromTop (3.0f).reduced (6.0f, 0.0f), 1.5f);
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.drawRoundedRectangle (area.toFloat().reduced (0.5f), 6.0f, 1.0f);
+    }
+
+    void smallLabel (juce::Graphics& g, R area, const juce::String& text, juce::Justification j = juce::Justification::centredLeft)
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.5f));
+        g.setFont (juce::FontOptions (11.5f));
+        g.drawText (text, area, j, false);
+    }
+
+    void xyPad (juce::Graphics& g, R area, float x, float y, juce::Colour accent, bool active)
+    {
+        g.setColour (juce::Colour (0xff131417));
+        g.fillRoundedRectangle (area.toFloat(), 5.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.06f));
+        for (int k = 1; k < 4; ++k)
+        {
+            g.fillRect (area.getX() + area.getWidth() * k / 4, area.getY(), 1, area.getHeight());
+            g.fillRect (area.getX(), area.getY() + area.getHeight() * k / 4, area.getWidth(), 1);
+        }
+        const juce::Point<float> puck (area.getX() + x * area.getWidth(), area.getBottom() - y * area.getHeight());
+        g.setColour (accent.withAlpha (active ? 0.25f : 0.1f));
+        g.fillRect (puck.x, (float) area.getY(), 1.0f, (float) area.getHeight());
+        g.fillRect ((float) area.getX(), puck.y, (float) area.getWidth(), 1.0f);
+        g.setColour (active ? accent : juce::Colours::grey);
+        g.fillEllipse (puck.x - 7.0f, puck.y - 7.0f, 14.0f, 14.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.8f));
+        g.drawEllipse (puck.x - 7.0f, puck.y - 7.0f, 14.0f, 14.0f, 1.2f);
+    }
+
+    const juce::Colour phatAccent (0xffffb03a), stepAccent (0xff47c6e8);
+
+    void paintPhatFx (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
+    {
+        g.fillAll (juce::Colour (0xff1b1c1f));
+        const auto on = [&] (const char* id) { return valueOf (info, v, id) > 0.5f; };
+        const std::tuple<int, int, const char*> units[] { { 12, 190, "bpOn" }, { 210, 240, "fOn" }, { 458, 250, "dOn" }, { 716, 150, "mOn" }, { 874, 150, "bOn" }, { 1032, 156, "cOn" } };
+        for (const auto& [x, w, id] : units)
+            multiPanel (g, R (x, 12, w, 288), phatAccent, on (id));
+        // The order strip
+        smallLabel (g, R (12, 314, 60, 24), "ORDER");
+        g.setColour (juce::Colours::white.withAlpha (0.35f));
+        for (int k = 0; k < 5; ++k)
+        {
+            const auto x = 92.0f + (float) (k + 1) * 182.0f - 26.0f;
+            juce::Path arrow;
+            arrow.addTriangle (x, 320.0f, x, 332.0f, x + 10.0f, 326.0f);
+            g.fillPath (arrow);
+        }
+        const std::tuple<int, int, const char*> mods[] { { 12, 270, "l1On" }, { 290, 270, "l2On" }, { 568, 220, "eOn" } };
+        for (const auto& [x, w, id] : mods)
+        {
+            multiPanel (g, R (x, 356, w, 352), phatAccent, on (id));
+            smallLabel (g, R (x + 8, 394, 80, 14), "TARGET");
+        }
+        multiPanel (g, R (796, 356, 260, 352), phatAccent, on ("xOn") || on ("yOn"));
+        smallLabel (g, R (806, 362, 150, 16), "XY PAD");
+        xyPad (g, R (806, 386, 150, 150), valueOf (info, v, "xyX", 0.5f), valueOf (info, v, "xyY", 0.5f), phatAccent, on ("xOn") || on ("yOn"));
+        multiPanel (g, R (1064, 356, 124, 352), phatAccent, true);
+        smallLabel (g, R (1072, 362, 110, 16), "MASTER");
+        title (g, R (12, 680, 1044, 24), "PHAT FX", juce::Colours::white.withAlpha (0.12f), 18.0f, juce::Justification::centredRight);
+    }
+
+    void paintStepFx (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
+    {
+        g.fillAll (juce::Colour (0xff17191c));
+        const auto on = [&] (const char* id) { return valueOf (info, v, id) > 0.5f; };
+        const std::tuple<int, int, const char*> units[] { { 12, 260, "fltOn" }, { 280, 150, "distOn" }, { 438, 300, "modOn" }, { 746, 278, "dlyOn" }, { 1032, 156, "revOn" } };
+        for (const auto& [x, w, id] : units)
+            multiPanel (g, R (x, 12, w, 228), stepAccent, on (id));
+
+        // The selected step modulator: its steps as bars, the one playing lit
+        const auto k = juce::jlimit (0, 2, juce::roundToInt (valueOf (info, v, "view")));
+        const auto n = juce::String (k + 1);
+        multiPanel (g, R (12, 248, 1176, 256), stepAccent, valueOf (info, v, ("s" + n + "On").toRawUTF8()) > 0.5f);
+        const char* heads[] { "Target", "Depth", "Rate", "Swing", "Attack", "Hold", "Release", "Steps" };
+        const int headX[] { 360, 540, 640, 730, 820, 910, 1000, 1090 };
+        for (int h = 0; h < 8; ++h)
+            smallLabel (g, R (headX[h], 252, 90, 14), heads[h]);
+        const auto length = juce::roundToInt (valueOf (info, v, ("s" + n + "Length").toRawUTF8(), 15.0f)) + 1;
+        int count = 0;
+        const auto* m = paintingMeters (count);
+        const auto playing = count > k ? juce::roundToInt (m[k]) : -1;
+        for (int st = 0; st < stepFxMaxSteps; ++st)
+        {
+            const auto x = 30 + st * 35;
+            const R slot (x, 300, 32, 170);
+            g.setColour (st >= length ? juce::Colours::black.withAlpha (0.25f) : st == playing ? stepAccent.withAlpha (0.28f) : juce::Colour (0xff202227));
+            g.fillRoundedRectangle (slot.toFloat(), 3.0f);
+            g.setColour (juce::Colours::white.withAlpha (st == playing ? 0.9f : 0.35f));
+            g.setFont (juce::FontOptions (10.0f));
+            g.drawText (juce::String (st + 1), R (x, 286, 32, 12), juce::Justification::centred, false);
+            if (st % 4 == 0)
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.08f));
+                g.fillRect (x - 2, 286, 1, 210);
+            }
+        }
+        multiPanel (g, R (12, 512, 560, 236), stepAccent, on ("xOn") || on ("yOn"));
+        smallLabel (g, R (22, 518, 150, 16), "XY PAD");
+        xyPad (g, R (22, 540, 196, 196), valueOf (info, v, "xyX", 0.5f), valueOf (info, v, "xyY", 0.5f), stepAccent, on ("xOn") || on ("yOn"));
+        multiPanel (g, R (580, 512, 608, 236), stepAccent, true);
+        smallLabel (g, R (590, 518, 150, 16), "MASTER");
+        title (g, R (580, 716, 596, 24), "STEP FX", juce::Colours::white.withAlpha (0.12f), 18.0f, juce::Justification::centredRight);
+    }
+
+    //==============================================================================
     // Delay Designer: the taps on a timeline, the selected tap's parameters below, the master section
     //==============================================================================
     void paintDelayDesigner (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
@@ -2440,6 +2556,183 @@ namespace
             d["masteringAssistant"] = m;
         }
         {
+            // Phat FX
+            const auto knob = Kind::knob, drop = Kind::dropdown, toggle = Kind::toggle;
+            const auto ink = juce::Colour (0xffe9e9ea);
+            Design c;
+            c.width = 1200; c.height = 720;
+            c.knobs = KnobStyle::dark;
+            c.label = juce::Colours::white.withAlpha (0.6f); c.value = phatAccent; c.accent = phatAccent; c.track = juce::Colour (0xff121316);
+            c.paint = paintPhatFx;
+            c.controls = {
+                // Bandpass
+                { "bpOn", toggle, R (20, 20, 174, 24), "=BANDPASS" }, { "bpType", drop, R (20, 50, 174, 24), "-", ink },
+                { "bpLow", knob, R (16, 84, 60, 100), "Low" }, { "bpHigh", knob, R (76, 84, 60, 100), "High" }, { "bpReject", knob, R (136, 84, 60, 100), "Reject" },
+                { "bpLowRes", knob, R (36, 190, 60, 100), "Low Res" }, { "bpHighRes", knob, R (110, 190, 60, 100), "High Res" },
+                // Filter
+                { "fOn", toggle, R (218, 20, 224, 24), "=FILTER" }, { "fType", drop, R (218, 50, 224, 24), "-", ink },
+                { "fCutoff", knob, R (226, 84, 100, 100), "Cutoff" }, { "fRes", knob, R (334, 84, 100, 100), "Res" },
+                { "fDrive", knob, R (226, 190, 100, 100), "Drive" }, { "fMix", knob, R (334, 190, 100, 100), "Mix" },
+                // Distortion
+                { "dOn", toggle, R (466, 20, 234, 24), "=DISTORTION" },
+                { "dType1", drop, R (464, 50, 78, 24), "-", ink }, { "dType2", drop, R (544, 50, 78, 24), "-", ink }, { "dType3", drop, R (624, 50, 78, 24), "-", ink },
+                { "dAmt1", knob, R (466, 84, 74, 100), "Amount 1" }, { "dAmt2", knob, R (546, 84, 74, 100), "Amount 2" }, { "dAmt3", knob, R (626, 84, 74, 100), "Amount 3" },
+                // Mod FX
+                { "mOn", toggle, R (724, 20, 134, 24), "=MOD FX" }, { "mType", drop, R (724, 50, 134, 24), "-", ink },
+                { "mRate", knob, R (746, 84, 90, 100), "Rate" }, { "mMix", knob, R (746, 190, 90, 100), "Mix" },
+                // Bass Enhancer
+                { "bOn", toggle, R (882, 20, 134, 24), "=BASS ENHANCER" }, { "bType", drop, R (882, 50, 134, 24), "-", ink },
+                { "bAmount", knob, R (904, 84, 90, 100), "Amount" }, { "bTune", knob, R (904, 190, 90, 100), "Tune" },
+                // Compressor
+                { "cOn", toggle, R (1040, 20, 140, 24), "=COMPRESSOR" }, { "cType", drop, R (1040, 50, 140, 24), "-", ink },
+                { "cAmount", knob, R (1065, 84, 90, 100), "Amount" }, { "cRelease", knob, R (1065, 190, 90, 100), "Release" },
+                // Envelope follower
+                { "eOn", toggle, R (576, 364, 204, 24), "=ENVELOPE FOLLOWER" }, { "eTarget", drop, R (576, 410, 204, 24), "-", ink },
+                { "eAttack", knob, R (580, 446, 96, 110), "Attack" }, { "eRelease", knob, R (680, 446, 96, 110), "Release" },
+                { "eDepth", knob, R (630, 570, 96, 110), "Depth" },
+                // XY pad
+                { "xOn", toggle, R (964, 386, 84, 22), "=X" }, { "xT1", drop, R (964, 412, 84, 22), "-", ink }, { "xD1", Kind::field, R (964, 436, 84, 20), "-", ink },
+                { "xT2", drop, R (964, 460, 84, 22), "-", ink }, { "xD2", Kind::field, R (964, 484, 84, 20), "-", ink },
+                { "yOn", toggle, R (806, 548, 60, 22), "=Y" }, { "yT1", drop, R (872, 548, 90, 22), "-", ink }, { "yD1", Kind::field, R (966, 548, 82, 22), "-", ink },
+                { "yT2", drop, R (872, 576, 90, 22), "-", ink }, { "yD2", Kind::field, R (966, 576, 82, 22), "-", ink },
+                // Master
+                { "limiter", drop, R (1072, 384, 108, 24), "-", ink },
+                { "input", knob, R (1081, 414, 90, 96), "Input" }, { "mix", knob, R (1081, 512, 90, 96), "Mix" }, { "output", knob, R (1081, 608, 90, 96), "Output" },
+            };
+            for (int s = 0; s < 6; ++s)
+                c.controls.push_back ({ "slot" + juce::String (s + 1), drop, R (92 + s * 182, 314, 150, 24), "-", ink });
+            for (int k = 0; k < 2; ++k)
+            {
+                const auto n = juce::String (k + 1);
+                const auto x = 12 + k * 278;
+                c.controls.push_back ({ "l" + n + "On", toggle, R (x + 8, 364, 90, 24), "=LFO " + n });
+                c.controls.push_back ({ "l" + n + "Wave", drop, R (x + 104, 364, 158, 24), "-", ink });
+                c.controls.push_back ({ "l" + n + "Target", drop, R (x + 8, 410, 254, 24), "-", ink });
+                c.controls.push_back ({ "l" + n + "Rate", knob, R (x + 8, 446, 84, 110), "Rate" });
+                c.controls.push_back ({ "l" + n + "Depth", knob, R (x + 96, 446, 84, 110), "Depth" });
+                c.controls.push_back ({ "l" + n + "Sync", toggle, R (x + 186, 470, 76, 24), "=SYNC" });
+                c.controls.push_back ({ "l" + n + "Div", drop, R (x + 186, 500, 76, 24), "-", ink });
+            }
+            c.graphs.push_back ({ R (806, 386, 150, 150), { { "xyX", "xyY", {}, {} } }, 0, true });
+            c.enabled = [] (const juce::String& id, const EffectInfo& fx, const float* v)
+            {
+                const auto on = [&] (const char* which) { return valueOf (fx, v, which) > 0.5f; };
+                if (id.endsWith ("On") || id.startsWith ("slot") || id == "xyX" || id == "xyY") return true;
+                if (id.startsWith ("bp")) return on ("bpOn");
+                if (id == "fType" || id == "fCutoff" || id == "fRes" || id == "fDrive" || id == "fMix") return on ("fOn");
+                if (id.startsWith ("dType") || id.startsWith ("dAmt")) return on ("dOn");
+                if (id == "mType" || id == "mRate" || id == "mMix") return on ("mOn");
+                if (id == "bType" || id == "bAmount" || id == "bTune") return on ("bOn");
+                if (id == "cType" || id == "cAmount" || id == "cRelease") return on ("cOn");
+                for (const char* lfo : { "l1", "l2" })
+                    if (id.startsWith (lfo))
+                    {
+                        const auto n = juce::String (lfo);
+                        if (! on ((n + "On").toRawUTF8())) return false;
+                        const auto synced = on ((n + "Sync").toRawUTF8());
+                        if (id.endsWith ("Rate")) return ! synced;
+                        if (id.endsWith ("Div")) return synced;
+                        return true;
+                    }
+                if (id.startsWith ("e")) return on ("eOn");
+                if (id.startsWith ("x")) return on ("xOn");
+                if (id.startsWith ("y")) return on ("yOn");
+                return true;
+            };
+            d["phatFx"] = c;
+        }
+        {
+            // Step FX
+            const auto knob = Kind::knob, drop = Kind::dropdown, toggle = Kind::toggle, field = Kind::field;
+            const auto ink = juce::Colour (0xffe9e9ea);
+            Design c;
+            c.width = 1200; c.height = 760;
+            c.knobs = KnobStyle::dark;
+            c.label = juce::Colours::white.withAlpha (0.6f); c.value = stepAccent; c.accent = stepAccent; c.track = juce::Colour (0xff121316);
+            c.paint = paintStepFx;
+            c.meters = true;
+            c.pageParam = "view";
+            c.controls = {
+                // Filter
+                { "fltOn", toggle, R (20, 20, 120, 24), "=FILTER" }, { "fltType", drop, R (146, 20, 118, 24), "-", ink },
+                { "fltCutoff", knob, R (20, 60, 78, 100), "Cutoff" }, { "fltRes", knob, R (102, 60, 78, 100), "Res" }, { "fltMix", knob, R (184, 60, 78, 100), "Mix" },
+                // Distortion
+                { "distOn", toggle, R (288, 20, 134, 24), "=DISTORTION" },
+                { "distExciter", knob, R (290, 60, 64, 100), "Exciter" }, { "distDirt", knob, R (358, 60, 64, 100), "Dirt" },
+                // Mod FX
+                { "modOn", toggle, R (446, 20, 284, 24), "=MOD FX" },
+                { "modDelay", knob, R (446, 56, 70, 96), "Delay" }, { "modRate", knob, R (518, 56, 70, 96), "Rate" }, { "modDepth", knob, R (590, 56, 70, 96), "Depth" },
+                { "modFeedback", knob, R (482, 140, 70, 96), "Feedback" }, { "modMix", knob, R (590, 140, 70, 96), "Mix" },
+                // Delay
+                { "dlyOn", toggle, R (754, 20, 120, 24), "=DELAY" }, { "dlyFilter", drop, R (880, 20, 136, 24), "-", ink },
+                { "dlyFeedback", knob, R (754, 56, 70, 96), "Feedback" }, { "dlyCutoff", knob, R (826, 56, 70, 96), "Cutoff" }, { "dlyMix", knob, R (898, 56, 70, 96), "Mix" },
+                { "dlySync", toggle, R (970, 60, 46, 22), "=SYNC" },
+                { "dlyTimeL", knob, R (790, 140, 70, 96), "Time L" }, { "dlyTimeR", knob, R (868, 140, 70, 96), "Time R" },
+                { "dlyDivL", drop, R (950, 160, 66, 22), "-", ink }, { "dlyDivR", drop, R (950, 190, 66, 22), "-", ink },
+                // Reverb
+                { "revOn", toggle, R (1040, 20, 140, 24), "=REVERB" }, { "revType", drop, R (1040, 50, 140, 24), "-", ink },
+                { "revTime", knob, R (1040, 84, 70, 100), "Time" }, { "revMix", knob, R (1110, 84, 70, 100), "Mix" },
+                // Which step modulator shows
+                { "view", Kind::segmented, R (20, 266, 236, 24), "-" },
+                // XY pad
+                { "xOn", toggle, R (236, 540, 60, 22), "=X" }, { "xT1", drop, R (302, 540, 150, 22), "-", ink }, { "xD1", field, R (458, 540, 100, 22), "-", ink },
+                { "xT2", drop, R (302, 568, 150, 22), "-", ink }, { "xD2", field, R (458, 568, 100, 22), "-", ink },
+                { "yOn", toggle, R (236, 620, 60, 22), "=Y" }, { "yT1", drop, R (302, 620, 150, 22), "-", ink }, { "yD1", field, R (458, 620, 100, 22), "-", ink },
+                { "yT2", drop, R (302, 648, 150, 22), "-", ink }, { "yD2", field, R (458, 648, 100, 22), "-", ink },
+                // Master
+                { "input", knob, R (620, 560, 110, 140), "Input" }, { "mix", knob, R (760, 560, 110, 140), "Mix" }, { "output", knob, R (900, 560, 110, 140), "Output" },
+            };
+            for (int k = 0; k < 3; ++k)
+            {
+                const auto n = juce::String (k + 1);
+                const auto page = k + 1;
+                const auto id = [&] (const char* what) { return "s" + n + what; };
+                c.controls.push_back ({ id ("On"), toggle, R (264, 266, 86, 24), "=ON", {}, page });
+                c.controls.push_back ({ id ("Target"), drop, R (360, 266, 170, 24), "-", ink, page });
+                c.controls.push_back ({ id ("Depth"), field, R (540, 266, 90, 24), "-", ink, page });
+                c.controls.push_back ({ id ("Rate"), drop, R (640, 266, 80, 24), "-", ink, page });
+                c.controls.push_back ({ id ("Swing"), field, R (730, 266, 80, 24), "-", ink, page });
+                c.controls.push_back ({ id ("Attack"), field, R (820, 266, 80, 24), "-", ink, page });
+                c.controls.push_back ({ id ("Hold"), field, R (910, 266, 80, 24), "-", ink, page });
+                c.controls.push_back ({ id ("Release"), field, R (1000, 266, 80, 24), "-", ink, page });
+                c.controls.push_back ({ id ("Length"), drop, R (1090, 266, 90, 24), "-", ink, page });
+                for (int st = 0; st < stepFxMaxSteps; ++st)
+                {
+                    const auto x = 30 + st * 35;
+                    c.controls.push_back ({ "s" + n + "L" + juce::String (st + 1), Kind::fader, R (x, 302, 32, 166), "-", {}, page });
+                    c.controls.push_back ({ "s" + n + "S" + juce::String (st + 1), drop, R (x, 474, 32, 22), "-", ink, page });
+                }
+            }
+            c.graphs.push_back ({ R (22, 540, 196, 196), { { "xyX", "xyY", {}, {} } }, 0, true });
+            c.enabled = [] (const juce::String& id, const EffectInfo& fx, const float* v)
+            {
+                const auto on = [&] (const char* which) { return valueOf (fx, v, which) > 0.5f; };
+                if (id.endsWith ("On") || id == "view" || id == "xyX" || id == "xyY") return true;
+                const std::pair<const char*, const char*> units[] { { "flt", "fltOn" }, { "dist", "distOn" }, { "mod", "modOn" }, { "dly", "dlyOn" }, { "rev", "revOn" } };
+                for (const auto& [prefix, onId] : units)
+                    if (id.startsWith (prefix))
+                    {
+                        if (! on (onId)) return false;
+                        if (id == "dlyTimeL" || id == "dlyTimeR") return ! on ("dlySync");
+                        if (id == "dlyDivL" || id == "dlyDivR") return on ("dlySync");
+                        return true;
+                    }
+                if (id.startsWith ("x")) return on ("xOn");
+                if (id.startsWith ("y")) return on ("yOn");
+                for (const char* k : { "s1", "s2", "s3" })
+                    if (id.startsWith (k))
+                    {
+                        if (! on ((juce::String (k) + "On").toRawUTF8())) return false;
+                        const auto rest = id.substring (2);
+                        if ((rest.startsWith ("L") || rest.startsWith ("S")) && rest.substring (1).containsOnly ("0123456789"))
+                            return rest.substring (1).getIntValue() <= juce::roundToInt (valueOf (fx, v, (juce::String (k) + "Length").toRawUTF8(), 15.0f)) + 1;
+                        return true;
+                    }
+                return true;
+            };
+            d["stepFx"] = c;
+        }
+        {
             // Match EQ
             Design c;
             c.width = 1000; c.height = 560;
@@ -2972,6 +3265,13 @@ void DesignLook::drawComboBox (juce::Graphics& g, int w, int h, bool, int, int, 
         g.setColour (juce::Colours::white.withAlpha (0.25f));
         g.drawRoundedRectangle (box.getLocalBounds().toFloat().reduced (0.5f), 3.0f, 1.0f);
     }
+    if (w < 44)
+    {
+        // (a narrow one, as a step's cell: a small box, the value alone)
+        g.setColour (juce::Colours::white.withAlpha (0.07f));
+        g.fillRoundedRectangle (box.getLocalBounds().toFloat().reduced (1.0f), 3.0f);
+        return;
+    }
     g.setColour (box.getProperties().contains ("ink") ? juce::Colour::fromString (box.getProperties()["ink"].toString()) : design.value);
     const auto cx = (float) w - 10.0f, cy = (float) box.getHeight() * 0.5f;
     juce::Path p;
@@ -2983,11 +3283,13 @@ void DesignLook::drawComboBox (juce::Graphics& g, int w, int h, bool, int, int, 
 void DesignLook::positionComboBoxText (juce::ComboBox& box, juce::Label& label)
 {
     const auto inset = design.lcdValues ? 6 : 0;
-    label.setBounds (inset, 0, box.getWidth() - 20 - inset, box.getHeight());
-    label.setFont (getComboBoxFont (box));
+    const auto narrow = box.getWidth() < 44;
+    label.setBounds (narrow ? 0 : inset, 0, narrow ? box.getWidth() : box.getWidth() - 20 - inset, box.getHeight());
+    label.setFont (narrow ? juce::Font (juce::FontOptions (11.0f)) : getComboBoxFont (box));
+    label.setBorderSize (narrow ? juce::BorderSize<int>() : label.getBorderSize());
     // (a menu with its own ink, for one sitting on a light panel)
     label.setColour (juce::Label::textColourId, box.getProperties().contains ("ink") ? juce::Colour::fromString (box.getProperties()["ink"].toString()) : design.value);
-    label.setJustificationType (box.getProperties()["centred"] ? juce::Justification::centred : juce::Justification::centredLeft);
+    label.setJustificationType (box.getProperties()["centred"] || narrow ? juce::Justification::centred : juce::Justification::centredLeft);
 }
 
 juce::Font DesignLook::getComboBoxFont (juce::ComboBox& box)

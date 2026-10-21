@@ -885,3 +885,86 @@ TEST_CASE ("Match EQ learns two spectra and makes the filter between them", "[st
     CHECK_THAT (m[27] - m[17], Catch::Matchers::WithinAbs (9.5, 2.0));
     CHECK (m[31] <= -119.0f);   // (the current wasn't learned)
 }
+
+TEST_CASE ("Step FX gates in time with the song; Phat FX's modulators and order", "[stockfx]")
+{
+    // Step FX's first modulator gates the sound: 1/16 steps at 120 BPM, every fourth step a rest
+    auto step = make ("stepFx");
+    set (*step, "fltOn", 0.0f);
+    step->setPosition (0, false, 120.0);   // (stopped: the steps run on their own from the start)
+    const auto [sl, sr] = run (*step, sine (440.0, 1.0, 0.5f), sine (440.0, 1.0, 0.5f));
+    const auto windowPeak = [] (const std::vector<float>& s, double from, double to)
+    {
+        float p = 0.0f;
+        for (auto i = (size_t) (from * rate); i < (size_t) (to * rate); ++i)
+            p = std::max (p, std::abs (s[i]));
+        return p;
+    };
+    CHECK (windowPeak (sl, 0.01, 0.1) > 0.4f);     // step 1: full
+    CHECK (windowPeak (sl, 0.39, 0.49) < 0.02f);   // step 4: a rest
+    CHECK (windowPeak (sl, 0.51, 0.6) > 0.4f);     // step 5: on the beat again
+    for (auto x : sl) REQUIRE (std::isfinite (x));
+
+    // ...and its depth at 0 % leaves it alone
+    set (*step, "s1Depth", 0.0f);
+    const auto [ul, ur] = run (*step, sine (440.0, 1.0, 0.5f), sine (440.0, 1.0, 0.5f));
+    CHECK (windowPeak (ul, 0.39, 0.49) > 0.4f);
+
+    // Phat FX: an LFO on the filter cutoff makes the level of a bright tone move
+    auto phat = make ("phatFx");
+    set (*phat, "cOn", 0.0f);
+    set (*phat, "dOn", 0.0f);
+    set (*phat, "fType", 1.0f);
+    set (*phat, "fCutoff", 1000.0f);
+    set (*phat, "fRes", 0.0f);
+    set (*phat, "l1On", 1.0f);
+    set (*phat, "l1Sync", 0.0f);
+    set (*phat, "l1Rate", 2.0f);
+    set (*phat, "l1Depth", 100.0f);
+    const auto [pl, pr] = run (*phat, sine (3000.0, 1.0, 0.3f), sine (3000.0, 1.0, 0.3f));
+    float lowest = 1.0f, highest = 0.0f;
+    for (int w = 1; w < 20; ++w)
+    {
+        const auto peak = windowPeak (pl, w * 0.05, w * 0.05 + 0.02);
+        lowest = std::min (lowest, peak);
+        highest = std::max (highest, peak);
+    }
+    CHECK (highest > lowest * 3.0f);
+
+    // The order: distortion then a low pass is darker than a low pass then distortion
+    const auto brightness = [] (const std::vector<float>& s)
+    {
+        double diff = 0.0, level = 0.0;
+        for (size_t i = 1; i < s.size(); ++i) { diff += juce::square (s[i] - s[i - 1]); level += juce::square (s[i]); }
+        return diff / std::max (1.0e-9, level);
+    };
+    const auto ordered = [&] (bool distortionFirst)
+    {
+        auto fx = make ("phatFx");
+        set (*fx, "cOn", 0.0f);
+        set (*fx, "fType", 1.0f);
+        set (*fx, "fCutoff", 400.0f);
+        set (*fx, "fRes", 0.0f);
+        set (*fx, "dType1", 7.0f);
+        set (*fx, "dAmt1", 100.0f);
+        set (*fx, "slot1", distortionFirst ? 2.0f : 1.0f);
+        set (*fx, "slot2", distortionFirst ? 1.0f : 2.0f);
+        set (*fx, "slot3", 0.0f);
+        return brightness (run (*fx, sine (200.0, 0.5, 0.8f), sine (200.0, 0.5, 0.8f)).first);
+    };
+    CHECK (ordered (true) < ordered (false));
+
+    // Every unit and modulator on, extreme settings: stays finite
+    auto all = make ("phatFx");
+    for (const auto* id : { "bpOn", "mOn", "bOn", "l2On", "eOn", "xOn", "yOn" })
+        set (*all, id, 1.0f);
+    set (*all, "bType", 2.0f);
+    set (*all, "fRes", 100.0f);
+    set (*all, "dAmt2", 100.0f);
+    set (*all, "dAmt3", 100.0f);
+    set (*all, "xT1", 7.0f);
+    set (*all, "input", 24.0f);
+    const auto [al, ar] = run (*all, sine (110.0, 1.0, 0.9f), sine (110.0, 1.0, 0.9f));
+    for (auto x : al) REQUIRE (std::isfinite (x));
+    CHECK (peakOf (al) < 4.0f);
+}
