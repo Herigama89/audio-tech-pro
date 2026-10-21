@@ -24,7 +24,15 @@ namespace riff::effectdesign
         fader,       // a vertical fader
         segmented,   // a row of buttons, one per setting
         toggle,      // one button: off or on
-        dropdown     // a menu of the settings
+        dropdown,    // a menu of the settings
+        hotspot      // an invisible on/off over something the face draws (Channel EQ's band icons)
+    };
+
+    /** A point on a curve display that can be dragged: frequency across, gain up and down, the wheel for Q. */
+    struct GraphHandle
+    {
+        juce::String freq, gain, q;   // (gain empty: a cut, it only moves across)
+        juce::String on;              // (the band's on/off: double-click toggles it)
     };
 
     struct Control
@@ -32,7 +40,7 @@ namespace riff::effectdesign
         juce::String id;
         Kind kind = Kind::knob;
         juce::Rectangle<int> bounds;
-        juce::String label {};                  // (empty: the parameter's name; "-" for none)
+        juce::String label {};                  // (empty: the parameter's name; "-" for none; a toggle's "=TEXT": its caption)
         juce::Colour colour {};                 // (fields: the band's colour)
     };
 
@@ -49,6 +57,9 @@ namespace riff::effectdesign
         bool lcdValues = false;                 // values in small dark windows under the knobs (older hardware-style faces)
         bool live = false;                      // a meter that follows the sound (gain reduction, correction)
         bool analyzer = false;                  // a live spectrum of the output behind the curve (as Logic's EQs)
+        juce::Rectangle<int> graphArea;         // the curve display the handles live in (20 Hz to 20 kHz across)
+        double graphDb = 24.0;                  // (its range up and down from the middle)
+        std::vector<GraphHandle> graph;
         /** Whether a control applies with the current settings (e.g. a compressor circuit without a Knee); greyed out if not. */
         std::function<bool (const juce::String& id, const EffectInfo&, const float* values)> enabled;
         /** Draws the face behind the controls: panels, titles, screens, meters. */

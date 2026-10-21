@@ -142,26 +142,19 @@ namespace
     //==============================================================================
     // Channel EQ (as Logic's): navy screen, a colour per band, values to drag
     //==============================================================================
-    const juce::Colour bandColours[] { juce::Colour (0xffa5adb8), juce::Colour (0xffff9a3c), juce::Colour (0xffe7d94a), juce::Colour (0xff3ddc6a),
-                                       juce::Colour (0xff38d6c4), juce::Colour (0xff6fa8ff), juce::Colour (0xffc28bff), juce::Colour (0xffd0d4da) };
+    // (as Logic's: red, orange, yellow, green, aqua, blue, purple, pink)
+    const juce::Colour bandColours[] { juce::Colour (0xffff5c5c), juce::Colour (0xffff9a3c), juce::Colour (0xffe7d94a), juce::Colour (0xff3ddc6a),
+                                       juce::Colour (0xff38d6c4), juce::Colour (0xff4f9bff), juce::Colour (0xffb07bff), juce::Colour (0xffff7ad0) };
+    constexpr int channelOn1 = 25, channelAnalyzer = 33;
 
-    /** A Channel EQ band on its own (the others flat), for its own coloured curve. */
+    /** A Channel EQ band on its own (the others switched off), for its own coloured curve. */
     double bandResponse (const EffectInfo& info, const float* v, int band, double f, double rate)
     {
         std::array<float, BuiltInEffect::maxParams> only {};
         std::copy (v, v + info.params.size(), only.begin());
-        only[0] = 10.0f; only[2] = 0.0f; only[4] = 0.0f; only[7] = 0.0f; only[10] = 0.0f; only[13] = 0.0f; only[14] = 20000.0f; only[15] = 0.0f;
-        switch (band)
-        {
-            case 0: only[0] = v[0]; break;
-            case 1: only[2] = v[2]; break;
-            case 2: only[4] = v[4]; break;
-            case 3: only[7] = v[7]; break;
-            case 4: only[10] = v[10]; break;
-            case 5: only[13] = v[13]; break;
-            case 6: only[14] = v[14]; break;
-            default: break;
-        }
+        for (int k = 0; k < 8; ++k)
+            only[(size_t) (channelOn1 + k)] = k == band ? v[channelOn1 + k] : 0.0f;
+        only[15] = 0.0f;   // (no master gain)
         return info.response (only.data(), f, rate);
     }
 
@@ -169,7 +162,7 @@ namespace
     {
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1a2433), 0.0f, 0.0f, juce::Colour (0xff0f1620), 0.0f, (float) bounds.getBottom(), false));
         g.fillRect (bounds);
-        const RF screen (40.0f, 48.0f, (float) bounds.getWidth() - 80.0f, 262.0f);
+        const RF screen (40.0f, 48.0f, (float) bounds.getWidth() - 160.0f, 262.0f);
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1d2b3e), 0.0f, screen.getY(), juce::Colour (0xff15202f), 0.0f, screen.getBottom(), false));
         g.fillRect (screen);
 
@@ -198,13 +191,16 @@ namespace
         g.setColour (juce::Colours::white.withAlpha (0.5f));
         g.fillRect (screen.getX(), yOf (0.0), screen.getWidth(), 1.0f);
         // The analyzer: the output's spectrum behind the curves
-        drawSpectrum (g, screen, xOf, juce::Colour (0xff7fb4e6));
+        if (info.params.size() > (size_t) channelAnalyzer && v[channelAnalyzer] > 0.5f)
+            drawSpectrum (g, screen, xOf, juce::Colour (0xff7fb4e6));
 
         // Each band's own curve in its colour, then the whole curve over them
         juce::Graphics::ScopedSaveState clip (g);
         g.reduceClipRegion (screen.toNearestInt());
-        for (int band = 0; band < 7; ++band)
+        for (int band = 0; band < 8; ++band)
         {
+            if (v[channelOn1 + band] < 0.5f)
+                continue;
             juce::Path fill;
             fill.startNewSubPath (screen.getX(), yOf (0.0));
             for (int x = 0; x <= (int) screen.getWidth(); x += 3)
@@ -230,22 +226,24 @@ namespace
         g.setColour (juce::Colour (0xffe4eef8));
         g.strokePath (curve, juce::PathStrokeType (1.8f));
         // The bands' points
-        const struct { int band, freq, gain; } points[] { { 1, 1, 2 }, { 2, 3, 4 }, { 3, 6, 7 }, { 4, 9, 10 }, { 5, 12, 13 } };
+        const struct { int band, freq, gain; } points[] { { 0, 0, -1 }, { 1, 1, 2 }, { 2, 3, 4 }, { 3, 6, 7 }, { 4, 9, 10 }, { 5, 16, 17 }, { 6, 12, 13 }, { 7, 14, -1 } };
         for (const auto& p : points)
         {
-            const auto x = xOf (v[p.freq]), y = yOf (v[p.gain]);
-            g.setColour (bandColours[p.band]);
-            g.fillEllipse (x - 6.0f, y - 6.0f, 12.0f, 12.0f);
+            const auto on = v[channelOn1 + p.band] > 0.5f;
+            const auto x = xOf (juce::jlimit (20.0f, 20000.0f, v[p.freq])), y = yOf (p.gain < 0 ? 0.0f : v[p.gain]);
+            g.setColour (bandColours[p.band].withAlpha (on ? 1.0f : 0.35f));
+            if (on) g.fillEllipse (x - 6.0f, y - 6.0f, 12.0f, 12.0f);
+            else g.drawEllipse (x - 5.0f, y - 5.0f, 10.0f, 10.0f, 1.5f);
             g.setColour (juce::Colours::black.withAlpha (0.5f));
             g.drawEllipse (x - 6.0f, y - 6.0f, 12.0f, 12.0f, 1.0f);
         }
     }
 
-    void paintChannelEqIcons (juce::Graphics& g, int width)
+    void paintChannelEqIcons (juce::Graphics& g, int width, const float* v)
     {
-        // The band icons above the screen: the shape of each band's filter
+        // The band icons above the screen, which are the bands' on/off buttons: lit in the band's colour when on
         const auto columns = 8;
-        const auto step = (float) (width - 80) / (float) columns;
+        const auto step = (float) (width - 160) / (float) columns;
         for (int b = 0; b < columns; ++b)
         {
             const auto cx = 40.0f + step * ((float) b + 0.5f), cy = 24.0f;
@@ -261,9 +259,9 @@ namespace
                 default: p.startNewSubPath (cx - 14, cy); p.lineTo (cx - 7, cy); p.lineTo (cx, cy - 8); p.lineTo (cx + 7, cy); p.lineTo (cx + 14, cy);
                          p.startNewSubPath (cx - 7, cy); p.lineTo (cx, cy + 8); p.lineTo (cx + 7, cy); break;
             }
-            g.setColour (b == 7 ? bandColours[6] : bandColours[b == 6 ? 5 : b == 5 ? 4 : b]);
-            if (b == 7) g.setColour (juce::Colour (0xffa5adb8));
-            g.strokePath (p, juce::PathStrokeType (1.6f));
+            const auto on = v[channelOn1 + b] > 0.5f;
+            g.setColour (on ? bandColours[b] : juce::Colour (0xff59626e));
+            g.strokePath (p, juce::PathStrokeType (on ? 1.8f : 1.4f));
         }
     }
 
@@ -1251,27 +1249,48 @@ namespace
         }
         {
             Design c;
-            c.width = 1000; c.height = 440;
+            c.width = 1100; c.height = 490;
             c.knobs = KnobStyle::dark;
             c.label = juce::Colours::white.withAlpha (0.55f); c.value = juce::Colours::white; c.accent = juce::Colour (0xff4fa3ff); c.track = juce::Colour (0xff0d131c);
             c.paint = [] (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float live)
             {
                 paintChannelEq (g, b, info, v, live);
-                paintChannelEqIcons (g, b.getWidth());
+                paintChannelEqIcons (g, b.getWidth(), v);
+                // The bar along the bottom
+                g.setColour (juce::Colour (0xff0b1018));
+                g.fillRect (0, b.getHeight() - 56, b.getWidth(), 56);
+                g.setColour (juce::Colours::white.withAlpha (0.08f));
+                g.fillRect (0, b.getHeight() - 56, b.getWidth(), 1);
             };
-            // The values under the screen, one column per band in its colour
-            const auto column = [] (int b) { return 40 + (int) ((1000 - 80) / 8.0f * (float) b); };
-            const auto w = (1000 - 80) / 8;
+            // The values under the screen, one column per band in its colour: frequency, gain (a cut's slope), Q
+            const auto screenW = 1100 - 160;
+            const auto w = screenW / 8;
+            const auto column = [w] (int b) { return 40 + w * b; };
             const std::vector<std::vector<const char*>> bands {
-                { "hpFreq" }, { "lsFreq", "lsGain" }, { "p1Freq", "p1Gain", "p1Q" }, { "p2Freq", "p2Gain", "p2Q" },
-                { "p3Freq", "p3Gain", "p3Q" }, { "hsFreq", "hsGain" }, { "lpFreq" }, { "output" } };
+                { "hpFreq", "hpSlope", "hpQ" }, { "lsFreq", "lsGain", "lsQ" }, { "p1Freq", "p1Gain", "p1Q" }, { "p2Freq", "p2Gain", "p2Q" },
+                { "p3Freq", "p3Gain", "p3Q" }, { "p4Freq", "p4Gain", "p4Q" }, { "hsFreq", "hsGain", "hsQ" }, { "lpFreq", "lpSlope", "lpQ" } };
             for (int b = 0; b < 8; ++b)
+            {
                 for (size_t row = 0; row < bands[(size_t) b].size(); ++row)
-                    c.controls.push_back ({ bands[(size_t) b][row], Kind::field, R (column (b), 326 + (int) row * 30, w, 28), "-",
-                                            b == 7 ? juce::Colour (0xffd0d4da) : bandColours[b] });
+                    c.controls.push_back ({ bands[(size_t) b][row], Kind::field, R (column (b), 322 + (int) row * 30, w, 28), "-", bandColours[b] });
+                c.controls.push_back ({ "on" + juce::String (b + 1), Kind::hotspot, R (column (b) + w / 2 - 26, 6, 52, 36), "-" });
+            }
+            c.controls.push_back ({ "output", Kind::fader, R (1100 - 92, 70, 60, 240), "Gain", juce::Colours::white.withAlpha (0.7f) });
+            c.controls.push_back ({ "analyzer", Kind::toggle, R (40, 446, 100, 30), "=ANALYZER" });
+            c.controls.push_back ({ "analyzerPost", Kind::segmented, R (150, 446, 120, 30), "-" });
+            c.controls.push_back ({ "qCouple", Kind::toggle, R (300, 446, 100, 30), "=Q-COUPLE" });
+            c.controls.push_back ({ "hq", Kind::toggle, R (410, 446, 60, 30), "=HQ" });
+            c.controls.push_back ({ "processing", Kind::dropdown, R (840, 446, 150, 30), "-" });
+            // The curve's points: drag them
+            c.graphArea = R (40, 48, screenW, 262);
+            c.graphDb = 24.0;
+            c.graph = { { "hpFreq", {}, "hpQ", "on1" }, { "lsFreq", "lsGain", "lsQ", "on2" }, { "p1Freq", "p1Gain", "p1Q", "on3" }, { "p2Freq", "p2Gain", "p2Q", "on4" },
+                        { "p3Freq", "p3Gain", "p3Q", "on5" }, { "p4Freq", "p4Gain", "p4Q", "on6" }, { "hsFreq", "hsGain", "hsQ", "on7" }, { "lpFreq", {}, "lpQ", "on8" } };
             c.analyzer = true;
             d["channelEq"] = c;
             d["linearEq"] = c;
+            // (the linear phase one has no oversampling or one-side processing: always both, always exact)
+            d["linearEq"].enabled = [] (const juce::String& id, const EffectInfo&, const float*) { return id != "hq" && id != "processing"; };
         }
         {
             Design c;
@@ -1659,6 +1678,15 @@ juce::Colour DesignLook::hardwareLamp() const
 
 void DesignLook::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down)
 {
+    if (b.getProperties()["hotspot"])
+    {
+        if (over)
+        {
+            g.setColour (juce::Colours::white.withAlpha (down ? 0.12f : 0.06f));
+            g.fillRoundedRectangle (b.getLocalBounds().toFloat(), 4.0f);
+        }
+        return;
+    }
     auto r = b.getLocalBounds().toFloat().reduced (1.0f);
     const auto on = b.getToggleState();
     if (design.knobs == KnobStyle::silver)
@@ -1709,6 +1737,8 @@ void DesignLook::drawButtonBackground (juce::Graphics& g, juce::Button& b, const
 
 void DesignLook::drawButtonText (juce::Graphics& g, juce::TextButton& b, bool, bool)
 {
+    if (b.getProperties()["hotspot"])
+        return;
     const auto on = b.getToggleState();
     juce::Colour colour;
     if (design.knobs == KnobStyle::silver)

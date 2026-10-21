@@ -100,7 +100,7 @@ TEST_CASE ("Every stock effect plays noise safely, at every setting's extremes",
                 most = std::max ({ most, std::abs (ol[i]), std::abs (orr[i]) });
             }
             CHECK (finite);
-            CHECK (most < 1.0e5f);   // (every EQ band at +24 dB on one frequency is loud, but nothing blows up)
+            CHECK (most < 1.0e8f);   // (every EQ band at +24 dB and a resonant cut on one frequency is very loud, but nothing blows up)
         }
     }
 }
@@ -137,6 +137,42 @@ TEST_CASE ("Stock EQs: flat at their defaults, and the curve matches what they p
     set (*cut, "hpFreq", 200.0f);
     const auto [cl, cr] = run (*cut, sine (30.0, 1.0, 0.5f), sine (30.0, 1.0, 0.5f));
     CHECK (peakOf (cl, 24000) < 0.01f);
+}
+
+TEST_CASE ("Channel EQ: cut slopes, bands on and off, one-side processing, HQ", "[stockfx]")
+{
+    // An octave below the low cut: 6 dB/oct takes off about 6 dB, 48 dB/oct far more
+    for (const auto [slope, lo, hi] : { std::tuple { 0.0f, 0.35f, 0.65f }, std::tuple { 5.0f, 0.0f, 0.02f } })
+    {
+        auto e = make ("channelEq");
+        set (*e, "hpFreq", 400.0f);
+        set (*e, "hpSlope", slope);
+        const auto [l, r] = run (*e, sine (200.0, 1.0, 1.0f), sine (200.0, 1.0, 1.0f));
+        CHECK (peakOf (l, 24000) >= lo);
+        CHECK (peakOf (l, 24000) <= hi);
+    }
+    // A band switched off does nothing
+    auto off = make ("channelEq");
+    set (*off, "p2Freq", 1000.0f);
+    set (*off, "p2Gain", 12.0f);
+    set (*off, "on4", 0.0f);
+    const auto [ol, orr] = run (*off, sine (1000.0, 0.5, 0.25f), sine (1000.0, 0.5, 0.25f));
+    CHECK_THAT (peakOf (ol, 12000), Catch::Matchers::WithinAbs (0.25, 0.01));
+    // Left only: the right channel passes untouched
+    auto left = make ("channelEq");
+    set (*left, "p2Freq", 1000.0f);
+    set (*left, "p2Gain", 12.0f);
+    set (*left, "processing", 1.0f);
+    const auto [ll, lr] = run (*left, sine (1000.0, 0.5, 0.1f), sine (1000.0, 0.5, 0.1f));
+    CHECK (peakOf (ll, 12000) > 0.3f);
+    CHECK_THAT (peakOf (lr, 12000), Catch::Matchers::WithinAbs (0.1, 0.005));
+    // HQ: the same boost, oversampled
+    auto hq = make ("channelEq");
+    set (*hq, "p2Freq", 1000.0f);
+    set (*hq, "p2Gain", 12.0f);
+    set (*hq, "hq", 1.0f);
+    const auto [hl, hr] = run (*hq, sine (1000.0, 0.5, 0.1f), sine (1000.0, 0.5, 0.1f));
+    CHECK_THAT (peakOf (hl, 12000), Catch::Matchers::WithinAbs (0.398, 0.03));
 }
 
 TEST_CASE ("Studio Compressor: every circuit turns a loud tone down; mix and auto gain", "[stockfx]")

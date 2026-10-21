@@ -93,7 +93,7 @@ public:
     /** What its window's meter shows (a compressor's gain reduction in dB, a pitch correction's cents). */
     virtual float displayValue() const noexcept { return 0.0f; }
 
-    static constexpr int maxParams = 32;
+    static constexpr int maxParams = 48;
 
     //==============================================================================
     // The analyzer's feed: while a window shows the spectrum, the last few thousand output samples (mono)
@@ -147,6 +147,8 @@ struct Biquad
     void setLowPass (double rate, double freq, double q = 0.707);
     void setBandPass (double rate, double freq, double q);
     void setNotch (double rate, double freq, double q);
+    void setFirstOrderHighPass (double rate, double freq);   // (6 dB per octave)
+    void setFirstOrderLowPass (double rate, double freq);
     void setIdentity() noexcept { b0 = 1; b1 = b2 = a1 = a2 = 0; }
     void reset() noexcept { z1 = {}; z2 = {}; }
 

@@ -166,6 +166,20 @@ void Biquad::setHighPass (double rate, double freq, double q)
     normalise (*this, (1 + cw) / 2, -(1 + cw), (1 + cw) / 2, 1 + alpha, -2 * cw, 1 - alpha);
 }
 
+void Biquad::setFirstOrderHighPass (double rate, double freq)
+{
+    const auto k = std::tan (juce::MathConstants<double>::pi * clampFreq (freq, rate) / rate);
+    b0 = (float) (1.0 / (1.0 + k)); b1 = -b0; b2 = 0.0f;
+    a1 = (float) ((k - 1.0) / (k + 1.0)); a2 = 0.0f;
+}
+
+void Biquad::setFirstOrderLowPass (double rate, double freq)
+{
+    const auto k = std::tan (juce::MathConstants<double>::pi * clampFreq (freq, rate) / rate);
+    b0 = (float) (k / (1.0 + k)); b1 = b0; b2 = 0.0f;
+    a1 = (float) ((k - 1.0) / (k + 1.0)); a2 = 0.0f;
+}
+
 void Biquad::setLowPass (double rate, double freq, double q)
 {
     const auto w = juce::MathConstants<double>::twoPi * clampFreq (freq, rate) / rate;

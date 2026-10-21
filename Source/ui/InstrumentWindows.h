@@ -217,6 +217,7 @@ private:
     std::function<float()> liveValue;
     float liveShown = 0.0f;
     std::function<double (float*, int)> analyzerSource;
+    std::unique_ptr<juce::Component> graphEditor;
     effectdesign::Spectrum spectrum;
     std::unique_ptr<juce::dsp::FFT> fft;
     std::vector<float> fftData, window;

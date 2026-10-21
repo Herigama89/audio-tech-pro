@@ -278,7 +278,8 @@ void EffectPanel::buildDesign (const EffectInfo& info)
             continue;
         Placed placed;
         placed.control = c;
-        const auto labelText = c.label == "-" ? juce::String() : c.label.isNotEmpty() ? c.label : p->name;
+        const auto caption = c.kind == effectdesign::Kind::toggle && c.label.startsWith ("=");
+        const auto labelText = c.label == "-" || caption || c.kind == effectdesign::Kind::hotspot ? juce::String() : c.label.isNotEmpty() ? c.label : p->name;
         if (labelText.isNotEmpty())
         {
             auto* l = extraLabels.add (new juce::Label ({}, labelText));
@@ -360,12 +361,15 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                 break;
             }
             case effectdesign::Kind::toggle:
+            case effectdesign::Kind::hotspot:
             {
                 auto* b = new juce::TextButton();
                 extras.add (b);
                 b->setWantsKeyboardFocus (false);
-                const auto onText = p->choices.size() > 1 ? p->choices.back() : juce::String ("ON");
-                const auto offText = p->choices.size() > 1 ? p->choices.front() : juce::String ("OFF");
+                if (c.kind == effectdesign::Kind::hotspot)
+                    b->getProperties().set ("hotspot", true);
+                const auto onText = caption ? c.label.substring (1) : p->choices.size() > 1 ? p->choices.back() : juce::String ("ON");
+                const auto offText = caption ? c.label.substring (1) : p->choices.size() > 1 ? p->choices.front() : juce::String ("OFF");
                 b->onClick = [setValue, current, id = c.id, name = p->name] { setValue (id, name, current (id) > 0.5f ? 0.0f : 1.0f); };
                 addAndMakeVisible (b);
                 refreshers.push_back ([b, current, id = c.id, onText, offText]
@@ -398,6 +402,94 @@ void EffectPanel::buildDesign (const EffectInfo& info)
             }
         }
         placedControls.push_back (placed);
+    }
+
+    if (! design->graph.empty() && ! design->graphArea.isEmpty())
+    {
+        /** Drags the curve's points: frequency across, gain up and down, the wheel for Q, double-click for on/off. */
+        struct GraphEditor final : public juce::Component
+        {
+            GraphEditor (const effectdesign::Design& d, std::function<float (const juce::String&)> get,
+                         std::function<void (const juce::String&, float, bool)> put, const EffectInfo& fx)
+                : design (d), current (std::move (get)), set (std::move (put)), info (fx) {}
+
+            float xOf (double f) const { return (float) (std::log (f / 20.0) / std::log (1000.0)) * (float) getWidth(); }
+            double freqAt (float x) const { return juce::jlimit (10.0, 20000.0, 20.0 * std::pow (1000.0, (double) x / getWidth())); }
+            float yOf (double db) const { return (float) getHeight() * 0.5f - (float) (db / design.graphDb) * (float) getHeight() * 0.5f; }
+            double dbAt (float y) const { return ((double) getHeight() * 0.5 - y) / (getHeight() * 0.5) * design.graphDb; }
+
+            const ParamInfo* paramOf (const juce::String& id) const
+            {
+                for (const auto& p : info.params)
+                    if (p.id == id) return &p;
+                return nullptr;
+            }
+            int handleAt (juce::Point<float> at) const
+            {
+                int best = -1;
+                float bestDistance = 16.0f;
+                for (size_t k = 0; k < design.graph.size(); ++k)
+                {
+                    const auto& h = design.graph[k];
+                    const juce::Point<float> p (xOf (current (h.freq)), h.gain.isEmpty() ? yOf (0.0) : yOf (current (h.gain)));
+                    if (p.getDistanceFrom (at) < bestDistance) { bestDistance = p.getDistanceFrom (at); best = (int) k; }
+                }
+                return best;
+            }
+            void mouseDown (const juce::MouseEvent& e) override { dragging = handleAt (e.position); started = false; }
+            void mouseDrag (const juce::MouseEvent& e) override
+            {
+                if (dragging < 0) return;
+                const auto& h = design.graph[(size_t) dragging];
+                const auto clampTo = [this] (const juce::String& id, double value)
+                {
+                    const auto* p = paramOf (id);
+                    return (float) (p != nullptr ? juce::jlimit ((double) p->min, (double) p->max, value) : value);
+                };
+                set (h.freq, clampTo (h.freq, freqAt (e.position.x)), ! started);
+                if (h.gain.isNotEmpty())
+                    set (h.gain, clampTo (h.gain, std::round (dbAt (e.position.y) * 10.0) / 10.0), false);
+                started = true;
+            }
+            void mouseDoubleClick (const juce::MouseEvent& e) override
+            {
+                const auto k = handleAt (e.position);
+                if (k >= 0 && design.graph[(size_t) k].on.isNotEmpty())
+                    set (design.graph[(size_t) k].on, current (design.graph[(size_t) k].on) > 0.5f ? 0.0f : 1.0f, true);
+            }
+            void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
+            {
+                const auto k = handleAt (e.position);
+                if (k < 0 || design.graph[(size_t) k].q.isEmpty()) return;
+                const auto& id = design.graph[(size_t) k].q;
+                const auto* p = paramOf (id);
+                const auto q = current (id) * std::pow (1.15f, wheel.deltaY * 4.0f);
+                set (id, p != nullptr ? juce::jlimit (p->min, p->max, q) : q, true);
+            }
+            void mouseMove (const juce::MouseEvent& e) override
+            {
+                setMouseCursor (handleAt (e.position) >= 0 ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor);
+            }
+
+            const effectdesign::Design& design;
+            std::function<float (const juce::String&)> current;
+            std::function<void (const juce::String&, float, bool)> set;
+            const EffectInfo& info;
+            int dragging = -1;
+            bool started = false;
+        };
+        auto editor = std::make_unique<GraphEditor> (*design, current, [this, paramOf] (const juce::String& id, float value, bool newGesture)
+        {
+            if (newGesture)
+            {
+                const auto* p = paramOf (id);
+                undoManager.beginNewTransaction (p != nullptr ? p->name : id);
+            }
+            insert.setProperty (juce::Identifier (id), value, &undoManager);
+        }, info);
+        editor->setBounds (design->graphArea);
+        addAndMakeVisible (*editor);
+        graphEditor = std::move (editor);
     }
 }
 
