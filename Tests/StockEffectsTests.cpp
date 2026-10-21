@@ -1056,3 +1056,68 @@ TEST_CASE ("Beat Breaker: straight is transparent, slices replay and reverse", "
     CHECK (rl[96000 + 1000] > rl[96000 + 20000]);
     for (auto x : rl) REQUIRE (std::isfinite (x));
 }
+
+TEST_CASE ("Room Simulator: its reverb time, freeze, both models", "[stockfx]")
+{
+    // The decay time, measured from an impulse (Schroeder's backward integral, -5 to -25 dB)
+    const auto measuredRt = [] (const std::vector<float>& s)
+    {
+        std::vector<double> energy (s.size());
+        double sum = 0.0;
+        for (size_t i = s.size(); i-- > 0;) { sum += (double) s[i] * s[i]; energy[i] = sum; }
+        const auto db = [&] (size_t i) { return 10.0 * std::log10 (energy[i] / energy[0] + 1.0e-30); };
+        size_t a = 0, b = 0;
+        while (a < s.size() && db (a) > -5.0) ++a;
+        b = a;
+        while (b < s.size() && db (b) > -25.0) ++b;
+        return (double) (b - a) / rate * 3.0;
+    };
+    auto room = make ("roomSim");
+    set (*room, "dryLevel", -60.0f);
+    set (*room, "refLevel", -60.0f);
+    set (*room, "reverbLevel", 0.0f);
+    set (*room, "lowMult", 1.0f);
+    set (*room, "highMult", 1.0f);
+    set (*room, "reverbTime", 2.0f);
+    std::vector<float> impulse ((size_t) (rate * 5.0), 0.0f);
+    impulse[0] = 1.0f;
+    const auto [il, ir] = run (*room, impulse, impulse);
+    CHECK_THAT (measuredRt (il), Catch::Matchers::WithinRel (2.0, 0.3));
+    for (auto x : il) REQUIRE (std::isfinite (x));
+
+    // Longer: 4 s
+    auto longer = make ("roomSim");
+    for (const auto& [id, val] : std::vector<std::pair<const char*, float>> { { "dryLevel", -60.0f }, { "refLevel", -60.0f }, { "reverbLevel", 0.0f },
+                                                                              { "lowMult", 1.0f }, { "highMult", 1.0f }, { "reverbTime", 4.0f } })
+        set (*longer, id, val);
+    std::vector<float> impulse2 ((size_t) (rate * 8.0), 0.0f);
+    impulse2[0] = 1.0f;
+    const auto [ll, lr] = run (*longer, impulse2, impulse2);
+    CHECK_THAT (measuredRt (ll), Catch::Matchers::WithinRel (4.0, 0.3));
+
+    // Freeze: the tail goes on, new sound doesn't get in
+    auto frozen = make ("roomSim");
+    set (*frozen, "dryLevel", -60.0f);
+    set (*frozen, "refLevel", -60.0f);
+    set (*frozen, "reverbTime", 0.5f);
+    auto tone = sine (440.0, 0.5, 0.5f);
+    run (*frozen, tone, tone);
+    set (*frozen, "freeze", 1.0f);
+    std::vector<float> silence ((size_t) (rate * 3.0), 0.0f);
+    const auto [fl, fr] = run (*frozen, silence, silence);
+    CHECK (peakOf (fl, (size_t) (rate * 2.5)) > 0.01f);
+
+    // The classic model, with Enhance; the modern one in each mode: all play and stay finite
+    for (const auto& settings : std::vector<std::vector<std::pair<const char*, float>>> {
+             { { "model", 0.0f }, { "enhance", 1.0f } }, { { "model", 0.0f } }, { { "mode", 1.0f } }, { { "mode", 2.0f }, { "density", 200.0f } },
+             { { "roomSize", 1000000.0f }, { "reverbTime", 100.0f } }, { { "roomSize", 1.0f } } })
+    {
+        auto fx = make ("roomSim");
+        for (const auto& [id, val] : settings)
+            set (*fx, id, val);
+        const auto [ol, orr] = run (*fx, sine (220.0, 1.0, 0.5f), sine (220.0, 1.0, 0.5f));
+        for (auto x : ol) REQUIRE (std::isfinite (x));
+        CHECK (peakOf (ol) < 10.0f);
+        CHECK (peakOf (ol, 24000) > 0.01f);
+    }
+}

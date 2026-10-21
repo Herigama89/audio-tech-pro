@@ -467,18 +467,22 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                 return juce::jlimit (10.0, 20000.0, 20.0 * std::pow (1000.0, (double) x / getWidth()));
             }
             // (up the side: the parameter's range, its middle at the middle)
+            // (a wide range of positive values, as a time multiplier from 0.1 to 10: logarithmic)
+            static bool logarithmic (const ParamInfo& p) { return p.min > 0.0f && p.max / p.min >= 50.0f; }
             float yOf (const juce::String& id, double value) const
             {
                 const auto* p = paramOf (id);
                 if (p == nullptr) return (float) getHeight() * 0.5f;
-                const auto t = (value - p->min) / std::max (1.0e-6, (double) (p->max - p->min));
+                const auto t = logarithmic (*p) ? std::log (std::max (value, (double) p->min) / p->min) / std::log ((double) p->max / p->min)
+                                                : (value - p->min) / std::max (1.0e-6, (double) (p->max - p->min));
                 return (float) ((1.0 - t) * getHeight());
             }
             double valueAt (const juce::String& id, float y) const
             {
                 const auto* p = paramOf (id);
                 if (p == nullptr) return 0.0;
-                return p->min + (1.0 - juce::jlimit (0.0, 1.0, (double) y / getHeight())) * (p->max - p->min);
+                const auto t = 1.0 - juce::jlimit (0.0, 1.0, (double) y / getHeight());
+                return logarithmic (*p) ? p->min * std::pow ((double) p->max / p->min, t) : p->min + t * (p->max - p->min);
             }
 
             const ParamInfo* paramOf (const juce::String& id) const

@@ -58,7 +58,7 @@ std::vector<const std::vector<StockEffect>*> stockFamilies()
 {
     return { &stockEqEffects(), &stockDynamicsEffects(), &stockDelayEffects(), &stockReverbEffects(),
              &stockModulationEffects(), &stockDistortionEffects(), &stockFilterEffects(), &stockAmpEffects(),
-             &stockPitchEffects(), &stockUtilityEffects(), &stockExtraEffects(), &stockPedalboardEffects(), &stockMeteringEffects(), &stockMultiEffects() };
+             &stockPitchEffects(), &stockUtilityEffects(), &stockExtraEffects(), &stockPedalboardEffects(), &stockMeteringEffects(), &stockMultiEffects(), &stockRoomSimEffects() };
 }
 }
 

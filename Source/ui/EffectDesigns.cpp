@@ -1914,6 +1914,82 @@ namespace
     }
 
     //==============================================================================
+    // Room Simulator: the reverb time with the room's range, in/out meters, the multiplier graph
+    //==============================================================================
+    void paintRoomSim (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
+    {
+        const auto modern = valueOf (info, v, "model", 1.0f) > 0.5f;
+        const auto accent = modern ? juce::Colour (0xff6fb7ff) : juce::Colour (0xffffa94a);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2a2f38), 0.0f, 0.0f, juce::Colour (0xff181b21), 0.0f, (float) b.getBottom(), false));
+        g.fillRect (b);
+        int count = 0;
+        const auto* m = paintingMeters (count);
+        // The room's range of reverb times, as a ring around the knob
+        if (count >= 4)
+        {
+            const auto& p = info.params[1];
+            const auto angle = [&] (float t)
+            {
+                const auto unit = std::log (std::max (t, p.min) / p.min) / std::log (p.max / p.min);
+                return juce::MathConstants<float>::pi * (1.2f + 1.6f * juce::jlimit (0.0f, 1.0f, unit)) - juce::MathConstants<float>::pi * 2.0f;
+            };
+            juce::Path ring;
+            ring.addCentredArc (150.0f, 205.0f, 104.0f, 104.0f, 0.0f, angle (m[2]), angle (m[3]), true);
+            g.setColour (accent.withAlpha (0.45f));
+            g.strokePath (ring, juce::PathStrokeType (5.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            // the meters
+            for (int k = 0; k < 2; ++k)
+            {
+                const RF bar (290.0f + k * 22.0f, 80.0f, 14.0f, 240.0f);
+                g.setColour (juce::Colours::black.withAlpha (0.5f));
+                g.fillRoundedRectangle (bar, 3.0f);
+                const auto level = juce::jlimit (0.0f, 1.0f, (m[k] + 60.0f) / 60.0f);
+                g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3ddc6a), 0.0f, bar.getBottom(), juce::Colour (0xffffd84a), 0.0f, bar.getY(), false));
+                g.fillRoundedRectangle (bar.withTop (bar.getBottom() - bar.getHeight() * level), 3.0f);
+                smallLabel (g, R ((int) bar.getX() - 6, 324, 26, 14), k == 0 ? "In" : "Out", juce::Justification::centred);
+            }
+        }
+        // The multiplier graph: 0.1x to 10x up the side, frequency across
+        const RF graph (340.0f, 70.0f, 640.0f, 250.0f);
+        g.setColour (juce::Colour (0xff0e1014));
+        g.fillRoundedRectangle (graph, 6.0f);
+        const auto xOf = [&] (double f) { return graph.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * graph.getWidth(); };
+        const auto yOf = [&] (double mult) { return graph.getBottom() - (float) ((std::log10 (juce::jlimit (0.1, 10.0, mult)) + 1.0) / 2.0) * graph.getHeight(); };
+        g.setFont (juce::FontOptions (11.0f));
+        for (const auto mult : { 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0 })
+        {
+            g.setColour (juce::Colours::white.withAlpha (mult == 1.0 ? 0.25f : 0.07f));
+            g.fillRect (graph.getX(), yOf (mult), graph.getWidth(), 1.0f);
+            g.setColour (juce::Colours::white.withAlpha (0.45f));
+            g.drawText (juce::String (mult) + "x", RF (graph.getX() + 4.0f, yOf (mult) - 13.0f, 40.0f, 12.0f), juce::Justification::left, false);
+            const auto seconds = mult * valueOf (info, v, "reverbTime", 2.0f);
+            g.drawText (seconds >= 10.0 ? juce::String (seconds, 0) + " s" : juce::String (seconds, 2) + " s", RF (graph.getRight() - 64.0f, yOf (mult) - 13.0f, 60.0f, 12.0f), juce::Justification::right, false);
+        }
+        const auto lowX = modern ? valueOf (info, v, "lowXover", 300.0f) : 500.0f, highX = modern ? valueOf (info, v, "highXover", 3000.0f) : 1000.0f;
+        const auto lowM = valueOf (info, v, "lowMult", 1.0f), highM = valueOf (info, v, "highMult", 1.0f);
+        juce::Path curve;
+        curve.startNewSubPath (graph.getX(), yOf (lowM));
+        curve.lineTo (xOf (lowX), yOf (lowM));
+        curve.lineTo (xOf (std::max (lowX * 1.6f, 1000.0f)), yOf (1.0));
+        curve.lineTo (xOf (std::max (highX, 1000.0f)), yOf (1.0));
+        curve.lineTo (xOf (std::max (highX, 1000.0f) * 1.6f), yOf (highM));
+        curve.lineTo (graph.getRight(), yOf (highM));
+        g.setColour (accent);
+        g.strokePath (curve, juce::PathStrokeType (2.2f));
+        for (const auto& [f, mult] : { std::pair { lowX, lowM }, std::pair { highX, highM } })
+        {
+            g.setColour (accent);
+            g.fillEllipse (xOf (f) - 6.0f, yOf (mult) - 6.0f, 12.0f, 12.0f);
+            g.setColour (juce::Colours::white);
+            g.drawEllipse (xOf (f) - 6.0f, yOf (mult) - 6.0f, 12.0f, 12.0f, 1.2f);
+        }
+        smallLabel (g, R (348, 74, 300, 14), "REVERB TIME MULTIPLIER");
+        g.setColour (juce::Colours::black.withAlpha (0.3f));
+        g.fillRect (12, 334, b.getWidth() - 24, 1);
+        title (g, R (20, 520, b.getWidth() - 40, 30), modern ? "ROOM SIMULATOR  -  MODERN" : "ROOM SIMULATOR  -  CLASSIC", juce::Colours::white.withAlpha (0.12f), 16.0f, juce::Justification::centredRight);
+    }
+
+    //==============================================================================
     // Delay Designer: the taps on a timeline, the selected tap's parameters below, the master section
     //==============================================================================
     void paintDelayDesigner (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
@@ -3038,6 +3114,58 @@ namespace
                 return true;
             };
             d["beatBreaker"] = c;
+        }
+        {
+            // Room Simulator
+            const auto knob = Kind::knob, drop = Kind::dropdown, toggle = Kind::toggle;
+            const auto ink = juce::Colour (0xffe9e9ea);
+            Design c;
+            c.width = 1000; c.height = 560;
+            c.knobs = KnobStyle::dark;
+            c.label = juce::Colours::white.withAlpha (0.6f); c.value = juce::Colour (0xff9fd0ff); c.accent = juce::Colour (0xff6fb7ff); c.track = juce::Colour (0xff11141a);
+            c.paint = paintRoomSim;
+            c.meters = true;
+            c.pageParam = "panel";
+            c.controls = {
+                { "model", Kind::segmented, R (20, 16, 220, 28), "-" },
+                { "freeze", toggle, R (560, 16, 100, 28), "=FREEZE" },
+                { "add", toggle, R (668, 16, 80, 28), "=ADD" },
+                { "clear", toggle, R (756, 16, 80, 28), "=CLEAR" },
+                { "mode", drop, R (860, 16, 120, 28), "-", ink },
+                { "enhance", toggle, R (250, 16, 110, 28), "=ENHANCE" },
+                { "reverbTime", knob, R (60, 70, 180, 250), "Reverb Time" },
+                { "panel", Kind::segmented, R (20, 346, 400, 28), "-" },
+                { "lowMult", Kind::field, R (360, 288, 80, 24), "-", ink }, { "lowXover", Kind::field, R (446, 288, 90, 24), "-", ink },
+                { "highMult", Kind::field, R (790, 288, 80, 24), "-", ink }, { "highXover", Kind::field, R (876, 288, 96, 24), "-", ink },
+            };
+            const char* pages[3][6] { { "roomSize", "density", "reverbDelay", "dryLevel", "refLevel", "reverbLevel" },
+                                      { "refDelay", "refSpread", "highCut", "bassGain", "bassXover", "correlation" },
+                                      { "drySource", "refSource", "corrL", "corrR", "subsonic", nullptr } };
+            for (int pg = 0; pg < 3; ++pg)
+                for (int k = 0; k < 6; ++k)
+                    if (const auto* id = pages[pg][k])
+                    {
+                        const auto x = 20 + k * 162;
+                        if (pg < 2)
+                            c.controls.push_back ({ id, knob, R (x, 384, 140, 140), {}, {}, pg + 1 });
+                        else if (juce::String (id) == "subsonic")
+                            c.controls.push_back ({ id, toggle, R (x + 10, 430, 120, 28), "=SUBSONIC", {}, pg + 1 });
+                        else
+                            c.controls.push_back ({ id, drop, R (x, 430, 150, 28), "-", ink, pg + 1 });
+                    }
+            c.graphs.push_back ({ R (340, 70, 640, 250), { { "lowXover", "lowMult", {}, {} }, { "highXover", "highMult", {}, {} } } });
+            c.enabled = [] (const juce::String& id, const EffectInfo& fx, const float* v)
+            {
+                const auto modern = valueOf (fx, v, "model", 1.0f) > 0.5f;
+                const auto frozen = valueOf (fx, v, "freeze") > 0.5f;
+                if (id == "add") return frozen;
+                if (id == "enhance") return ! modern;
+                if (id == "reverbTime" || id == "lowMult" || id == "highMult") return modern || valueOf (fx, v, "enhance") < 0.5f;
+                for (const char* only : { "mode", "density", "lowXover", "highXover", "refSpread", "highCut", "bassGain", "bassXover", "correlation", "corrL", "corrR" })
+                    if (id == only) return modern;
+                return true;
+            };
+            d["roomSim"] = c;
         }
         {
             // Match EQ
