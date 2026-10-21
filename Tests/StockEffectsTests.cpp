@@ -968,3 +968,53 @@ TEST_CASE ("Step FX gates in time with the song; Phat FX's modulators and order"
     for (auto x : al) REQUIRE (std::isfinite (x));
     CHECK (peakOf (al) < 4.0f);
 }
+
+TEST_CASE ("Remix FX: gater, tape stop, repeater, reverse", "[stockfx]")
+{
+    const auto windowPeak = [] (const std::vector<float>& s, double from, double to)
+    {
+        float p = 0.0f;
+        for (auto i = (size_t) (from * rate); i < (size_t) (to * rate); ++i)
+            p = std::max (p, std::abs (s[i]));
+        return p;
+    };
+    // Gater fully up at 1/8 (120 BPM: 0.25 s): on for the first half, off for the second
+    auto gater = make ("remixFx");
+    gater->setPosition (0, false, 120.0);
+    set (*gater, "gater", 100.0f);
+    set (*gater, "gaterRate", 3.0f);
+    const auto [gl, gr] = run (*gater, sine (300.0, 1.0, 0.5f), sine (300.0, 1.0, 0.5f));
+    CHECK (windowPeak (gl, 0.27, 0.36) > 0.45f);
+    CHECK (windowPeak (gl, 0.40, 0.49) < 0.02f);
+
+    // Tape Stop over a half note: slowing, then silent
+    auto stop = make ("remixFx");
+    stop->setPosition (0, false, 120.0);
+    set (*stop, "tapeStop", 1.0f);
+    set (*stop, "tapeStopDiv", 1.0f);
+    const auto [tl, tr] = run (*stop, sine (300.0, 2.0, 0.5f), sine (300.0, 2.0, 0.5f));
+    CHECK (windowPeak (tl, 0.0, 0.2) > 0.3f);
+    CHECK (windowPeak (tl, 1.1, 1.9) < 0.001f);
+    for (auto x : tl) REQUIRE (std::isfinite (x));
+
+    // Repeater on a pad: what came just before it was touched, over and over (a tone that then stops keeps sounding)
+    auto rep = make ("remixFx");
+    rep->setPosition (0, false, 120.0);
+    set (*rep, "padAEffect", 1.0f);
+    set (*rep, "padAX", 0.3f);
+    set (*rep, "padAY", 1.0f);
+    auto input = sine (300.0, 1.0, 0.5f);
+    std::fill (input.begin() + 24000, input.end(), 0.0f);
+    std::vector<float> l1 (input.begin(), input.begin() + 24000), r1 = l1;
+    run (*rep, l1, r1);
+    set (*rep, "padAOn", 1.0f);
+    std::vector<float> l2 (input.begin() + 24000, input.end()), r2 = l2;
+    const auto [ol, orr] = run (*rep, l2, r2);
+    CHECK (windowPeak (ol, 0.1, 0.4) > 0.3f);
+
+    // Reverse plays and stays finite
+    auto rev = make ("remixFx");
+    set (*rev, "reverse", 1.0f);
+    const auto [vl, vr] = run (*rev, sine (300.0, 1.0, 0.5f), sine (300.0, 1.0, 0.5f));
+    for (auto x : vl) REQUIRE (std::isfinite (x));
+}

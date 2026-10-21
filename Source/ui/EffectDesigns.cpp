@@ -1684,6 +1684,48 @@ namespace
         title (g, R (580, 716, 596, 24), "STEP FX", juce::Colours::white.withAlpha (0.12f), 18.0f, juce::Justification::centredRight);
     }
 
+    const juce::Colour remixA (0xffff5a8a), remixB (0xff4fa8ff);
+
+    void paintRemixFx (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
+    {
+        g.fillAll (juce::Colour (0xff141518));
+        const auto on = [&] (const char* id) { return valueOf (info, v, id) > 0.5f; };
+        const char* padNames[] { "Filter", "Repeater", "Wobble", "Reverb", "Orbit", "Delay" };
+        const auto pad = [&] (R area, const char* x, const char* y, bool active, juce::Colour colour, int effect)
+        {
+            g.setGradientFill (juce::ColourGradient (colour.withAlpha (active ? 0.35f : 0.14f), (float) area.getX(), (float) area.getY(),
+                                                     juce::Colour (0xff141518), (float) area.getRight(), (float) area.getBottom(), false));
+            g.fillRoundedRectangle (area.toFloat(), 10.0f);
+            g.setColour (colour.withAlpha (active ? 0.9f : 0.35f));
+            g.drawRoundedRectangle (area.toFloat().reduced (0.5f), 10.0f, 1.5f);
+            g.setColour (juce::Colours::white.withAlpha (0.25f));
+            g.setFont (juce::FontOptions (30.0f, juce::Font::bold));
+            g.drawText (juce::String (padNames[juce::jlimit (0, 5, effect)]).toUpperCase(), area.reduced (20), juce::Justification::bottomLeft, false);
+            const juce::Point<float> puck (area.getX() + valueOf (info, v, x, 0.5f) * area.getWidth(), area.getBottom() - valueOf (info, v, y, 0.5f) * area.getHeight());
+            g.setColour (colour.withAlpha (active ? 0.9f : 0.4f));
+            g.fillEllipse (puck.x - 16.0f, puck.y - 16.0f, 32.0f, 32.0f);
+            g.setColour (juce::Colours::white.withAlpha (active ? 0.9f : 0.4f));
+            g.drawEllipse (puck.x - 16.0f, puck.y - 16.0f, 32.0f, 32.0f, 2.0f);
+        };
+        pad (R (20, 62, 380, 380), "padAX", "padAY", on ("padAOn") || on ("padALock"), remixA, juce::roundToInt (valueOf (info, v, "padAEffect")));
+        pad (R (700, 62, 380, 380), "padBX", "padBY", on ("padBOn") || on ("padBLock"), remixB, juce::roundToInt (valueOf (info, v, "padBEffect", 1.0f)));
+        // The middle: the two sliders' tracks
+        for (const auto& [x, id, name] : { std::tuple { 448, "gater", "GATER" }, std::tuple { 572, "downsampler", "DOWNSAMPLER" } })
+        {
+            g.setColour (juce::Colour (0xff22242a));
+            g.fillRoundedRectangle (RF ((float) x, 116.0f, 80.0f, 300.0f), 8.0f);
+            const auto level = valueOf (info, v, id) * 0.01f;
+            g.setColour (juce::Colour (0xffffc04a).withAlpha (0.25f + 0.5f * level));
+            g.fillRoundedRectangle (RF ((float) x, 116.0f + 300.0f * (1.0f - level), 80.0f, 300.0f * level), 8.0f);
+            smallLabel (g, R (x - 20, 96, 120, 16), name, juce::Justification::centred);
+        }
+        multiPanel (g, R (20, 470, 1060, 96), juce::Colour (0xffffc04a), true);
+        smallLabel (g, R (32, 476, 200, 14), "SETTINGS");
+        smallLabel (g, R (40, 490, 280, 14), "Filter");
+        smallLabel (g, R (370, 490, 300, 14), "Reverb Color");
+        smallLabel (g, R (720, 490, 200, 14), "Orbit");
+    }
+
     //==============================================================================
     // Delay Designer: the taps on a timeline, the selected tap's parameters below, the master section
     //==============================================================================
@@ -2731,6 +2773,30 @@ namespace
                 return true;
             };
             d["stepFx"] = c;
+        }
+        {
+            // Remix FX
+            const auto drop = Kind::dropdown, toggle = Kind::toggle;
+            const auto ink = juce::Colour (0xffe9e9ea);
+            Design c;
+            c.width = 1100; c.height = 580;
+            c.knobs = KnobStyle::dark;
+            c.label = juce::Colours::white.withAlpha (0.6f); c.value = juce::Colour (0xffffc04a); c.accent = juce::Colour (0xffffc04a); c.track = juce::Colour (0xff121316);
+            c.paint = paintRemixFx;
+            c.controls = {
+                { "padAEffect", drop, R (20, 20, 180, 28), "-", remixA }, { "padAOn", toggle, R (210, 20, 90, 28), "=ACTIVE" }, { "padALock", toggle, R (310, 20, 90, 28), "=LOCK" },
+                { "padBEffect", drop, R (700, 20, 180, 28), "-", remixB }, { "padBOn", toggle, R (890, 20, 90, 28), "=ACTIVE" }, { "padBLock", toggle, R (990, 20, 90, 28), "=LOCK" },
+                { "reverse", toggle, R (420, 20, 80, 28), "=REVERSE" }, { "scratch", toggle, R (510, 20, 80, 28), "=SCRATCH" }, { "tapeStop", toggle, R (600, 20, 80, 28), "=TAPE STOP" },
+                { "reverseDiv", drop, R (420, 54, 80, 24), "-", ink }, { "scratchDiv", drop, R (510, 54, 80, 24), "-", ink }, { "tapeStopDiv", drop, R (600, 54, 80, 24), "-", ink },
+                { "gater", Kind::fader, R (448, 116, 80, 300), "-" }, { "downsampler", Kind::fader, R (572, 116, 80, 300), "-" },
+                { "gaterRate", drop, R (440, 424, 96, 24), "-", ink }, { "downType", drop, R (558, 424, 110, 24), "-", ink },
+                { "filterType", Kind::segmented, R (40, 506, 280, 28), "-" },
+                { "reverbColor", Kind::segmented, R (370, 506, 300, 28), "-" },
+                { "orbitType", Kind::segmented, R (720, 506, 200, 28), "-" },
+            };
+            c.graphs.push_back ({ R (20, 62, 380, 380), { { "padAX", "padAY", {}, {} } }, 0, true });
+            c.graphs.push_back ({ R (700, 62, 380, 380), { { "padBX", "padBY", {}, {} } }, 0, true });
+            d["remixFx"] = c;
         }
         {
             // Match EQ

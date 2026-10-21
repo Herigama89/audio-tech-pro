@@ -338,13 +338,13 @@ namespace
     class PhatFx final : public ModulatedEffect
     {
     public:
+        enum Key { k_l1On, k_eOn, k_input, k_output, k_mix, k_limiter, k_slot1, k_bpOn, k_bpType, k_bpLowRes, k_bpHighRes, k_bpLow, k_bpHigh, k_bpReject, k_fOn, k_fType, k_fCutoff, k_fRes, k_fDrive, k_fMix, k_dOn, k_dType1, k_mOn, k_mType, k_mMix, k_mRate, k_bOn, k_bType, k_bAmount, k_bTune, k_cOn, k_cType, k_cAmount, k_cRelease, k_dAmt1, keyCount };
+        static constexpr const char* keyNames[] { "l1On", "eOn", "input", "output", "mix", "limiter", "slot1", "bpOn", "bpType", "bpLowRes", "bpHighRes", "bpLow", "bpHigh", "bpReject", "fOn", "fType", "fCutoff", "fRes", "fDrive", "fMix", "dOn", "dType1", "mOn", "mType", "mMix", "mRate", "bOn", "bType", "bAmount", "bTune", "cOn", "cType", "cAmount", "cRelease", "dAmt1" };
         explicit PhatFx (const EffectInfo& i) : ModulatedEffect (i, phatTargets())
         {
             xy = idx ("xyX");
-            for (const auto* id : { "input", "output", "mix", "limiter", "slot1", "bpOn", "bpType", "bpLow", "bpHigh", "bpLowRes", "bpHighRes", "bpReject",
-                                    "fOn", "fType", "fCutoff", "fRes", "fDrive", "fMix", "dOn", "dType1", "dAmt1", "mOn", "mType", "mMix", "mRate",
-                                    "bOn", "bType", "bAmount", "bTune", "cOn", "cType", "cAmount", "cRelease", "l1On", "eOn" })
-                at[id] = idx (id);
+            for (int k = 0; k < keyCount; ++k)
+                at[(size_t) k] = (int) indexOf (info, keyNames[k]);
         }
 
         void prepare (double rate, int) override
@@ -374,7 +374,7 @@ namespace
         }
 
     private:
-        float p (const char* id) const noexcept { return v[(size_t) at.at (id)]; }
+        float p (Key key) const noexcept { return v[(size_t) at[(size_t) key]]; }
         float p (int index) const noexcept { return v[(size_t) index]; }
 
         float lfoValue (int k, int wave, double phase) noexcept
@@ -393,7 +393,7 @@ namespace
 
         void modulators (int count) noexcept
         {
-            const auto l1 = at.at ("l1On");
+            const auto l1 = at[k_l1On];
             for (int k = 0; k < 2; ++k)
             {
                 const auto base = l1 + k * 7;   // on, wave, target, rate, sync, division, depth
@@ -415,7 +415,7 @@ namespace
                 lfoShown[(size_t) k] = value;
                 modulate (juce::roundToInt (v[(size_t) base + 2]), value * v[(size_t) base + 6] * 0.005f);
             }
-            const auto e = at.at ("eOn");   // on, target, attack, release, depth
+            const auto e = at[k_eOn];   // on, target, attack, release, depth
             if (v[(size_t) e] > 0.5f)
                 modulate (juce::roundToInt (v[(size_t) e + 1]), std::min (1.0f, envelope * v[(size_t) e + 4] * 0.01f));
             envAttack = std::exp (-1.0f / (std::max (0.1f, v[(size_t) e + 2]) * 0.001f * (float) sampleRate));
@@ -425,11 +425,11 @@ namespace
 
         void configure() noexcept
         {
-            inputGain = dbToGain (p ("input"));
-            outputGain = dbToGain (p ("output"));
-            wet = p ("mix") * 0.01f;
-            limiterMode = juce::roundToInt (p ("limiter"));
-            const auto s1 = at.at ("slot1");
+            inputGain = dbToGain (p (k_input));
+            outputGain = dbToGain (p (k_output));
+            wet = p (k_mix) * 0.01f;
+            limiterMode = juce::roundToInt (p (k_limiter));
+            const auto s1 = at[k_slot1];
             std::array<bool, 6> used {};
             orderCount = 0;
             for (int s = 0; s < 6; ++s)
@@ -438,16 +438,16 @@ namespace
                 if (! used[(size_t) unit]) { used[(size_t) unit] = true; order[(size_t) orderCount++] = unit; }
             }
             // Bandpass
-            bpOn = p ("bpOn") > 0.5f;
-            const auto steep = juce::roundToInt (p ("bpType")) == 1;
-            const auto lowQ = 0.707 + p ("bpLowRes") * 0.06, highQ = 0.707 + p ("bpHighRes") * 0.06;
-            const auto low = std::min (p ("bpLow"), p ("bpHigh"));
+            bpOn = p (k_bpOn) > 0.5f;
+            const auto steep = juce::roundToInt (p (k_bpType)) == 1;
+            const auto lowQ = 0.707 + p (k_bpLowRes) * 0.06, highQ = 0.707 + p (k_bpHighRes) * 0.06;
+            const auto low = std::min (p (k_bpLow), p (k_bpHigh));
             for (int s = 0; s < 2; ++s)
             {
                 if (s == 0 || steep)
                 {
                     bandpass[(size_t) s * 2].setHighPass (sampleRate, low, s == 0 ? lowQ : 0.707);
-                    bandpass[(size_t) s * 2 + 1].setLowPass (sampleRate, std::min ((double) p ("bpHigh"), sampleRate * 0.45), s == 0 ? highQ : 0.707);
+                    bandpass[(size_t) s * 2 + 1].setLowPass (sampleRate, std::min ((double) p (k_bpHigh), sampleRate * 0.45), s == 0 ? highQ : 0.707);
                 }
                 else
                 {
@@ -455,30 +455,30 @@ namespace
                     bandpass[3].setIdentity();
                 }
             }
-            reject = p ("bpReject") * 0.01f;
+            reject = p (k_bpReject) * 0.01f;
             // Filter
-            fOn = p ("fOn") > 0.5f;
-            filter.set (juce::roundToInt (p ("fType")), p ("fCutoff"), p ("fRes") * 0.01f, sampleRate);
-            fDrive = 1.0f + p ("fDrive") * 0.12f;
-            fMix = p ("fMix") * 0.01f;
+            fOn = p (k_fOn) > 0.5f;
+            filter.set (juce::roundToInt (p (k_fType)), p (k_fCutoff), p (k_fRes) * 0.01f, sampleRate);
+            fDrive = 1.0f + p (k_fDrive) * 0.12f;
+            fMix = p (k_fMix) * 0.01f;
             // Distortion
-            dOn = p ("dOn") > 0.5f;
-            const auto d1 = at.at ("dType1");
+            dOn = p (k_dOn) > 0.5f;
+            const auto d1 = at[k_dType1];
             for (int k = 0; k < 3; ++k)
             {
                 dType[(size_t) k] = juce::roundToInt (v[(size_t) (d1 + k * 2)]);
                 dAmount[(size_t) k] = v[(size_t) (d1 + k * 2 + 1)];
             }
             // Mod FX
-            mOn = p ("mOn") > 0.5f;
-            mType = juce::roundToInt (p ("mType"));
-            mMix = p ("mMix") * 0.01f;
-            mRate = p ("mRate");
+            mOn = p (k_mOn) > 0.5f;
+            mType = juce::roundToInt (p (k_mType));
+            mMix = p (k_mMix) * 0.01f;
+            mRate = p (k_mRate);
             // Bass Enhancer
-            bOn = p ("bOn") > 0.5f;
-            bType = juce::roundToInt (p ("bType"));
-            bAmount = p ("bAmount") * 0.01f;
-            const auto tune = (double) p ("bTune");
+            bOn = p (k_bOn) > 0.5f;
+            bType = juce::roundToInt (p (k_bType));
+            bAmount = p (k_bAmount) * 0.01f;
+            const auto tune = (double) p (k_bTune);
             if (std::abs (tune - builtTune) > 0.01 || bType != builtType || std::abs (bAmount - builtAmount) > 0.001f)
             {
                 bassBand.setBandPass (sampleRate, tune, 1.2);
@@ -487,15 +487,15 @@ namespace
                 builtTune = tune; builtType = bType; builtAmount = bAmount;
             }
             // Compressor
-            cOn = p ("cOn") > 0.5f;
-            cType = juce::roundToInt (p ("cType"));
-            cAmount = p ("cAmount") * 0.01f;
+            cOn = p (k_cOn) > 0.5f;
+            cType = juce::roundToInt (p (k_cType));
+            cAmount = p (k_cAmount) * 0.01f;
             static constexpr float ratios[] { 4.0f, 1.0f, 3.0f, 4.0f, 8.0f, 4.0f, 3.0f, 12.0f, 3.0f };
             static constexpr float attacks[] { 5.0f, 0.1f, 3.0f, 2.0f, 0.3f, 1.0f, 8.0f, 0.2f, 10.0f };
             ratio = ratios[juce::jlimit (0, 8, cType)];
             threshold = -cAmount * 40.0f;
             cAttack = std::exp (-1.0f / (attacks[juce::jlimit (0, 8, cType)] * 0.001f * (float) sampleRate));
-            cRelease = std::exp (-1.0f / (std::max (5.0f, p ("cRelease")) * 0.001f * (float) sampleRate));
+            cRelease = std::exp (-1.0f / (std::max (5.0f, p (k_cRelease)) * 0.001f * (float) sampleRate));
             makeup = dbToGain (-threshold * (1.0f - 1.0f / ratio) * 0.5f);
         }
 
@@ -596,7 +596,7 @@ namespace
             if (cType >= 6) { a = saturate (a * 1.1f) / 1.1f; b = saturate (b * 1.1f) / 1.1f; }   // (the vintage ones colour it)
         }
 
-        std::map<juce::String, int> at;
+        std::array<int, keyCount> at {};
         std::array<std::array<Shaper, 2>, 3> shapers;
         std::array<Biquad, 4> bandpass;
         MultiFilter filter;
@@ -712,13 +712,13 @@ namespace
     class StepFx final : public ModulatedEffect
     {
     public:
+        enum Key { k_s1On, k_input, k_output, k_mix, k_fltOn, k_fltType, k_fltCutoff, k_fltRes, k_fltMix, k_distOn, k_distExciter, k_distDirt, k_modOn, k_modDelay, k_modRate, k_modDepth, k_modFeedback, k_modMix, k_dlyOn, k_dlyFilter, k_dlyFeedback, k_dlyMix, k_dlySync, k_dlyDivL, k_dlyTimeL, k_dlyDivR, k_dlyTimeR, k_dlyCutoff, k_revOn, k_revTime, k_revMix, k_revType, keyCount };
+        static constexpr const char* keyNames[] { "s1On", "input", "output", "mix", "fltOn", "fltType", "fltCutoff", "fltRes", "fltMix", "distOn", "distExciter", "distDirt", "modOn", "modDelay", "modRate", "modDepth", "modFeedback", "modMix", "dlyOn", "dlyFilter", "dlyFeedback", "dlyMix", "dlySync", "dlyDivL", "dlyTimeL", "dlyDivR", "dlyTimeR", "dlyCutoff", "revOn", "revTime", "revMix", "revType" };
         explicit StepFx (const EffectInfo& i) : ModulatedEffect (i, stepTargets())
         {
             xy = idx ("xyX");
-            for (const auto* id : { "input", "mix", "output", "fltOn", "fltType", "fltCutoff", "fltRes", "fltMix", "distOn", "distExciter", "distDirt",
-                                    "modOn", "modDelay", "modRate", "modDepth", "modFeedback", "modMix", "dlyOn", "dlyFilter", "dlyFeedback", "dlyCutoff",
-                                    "dlyMix", "dlySync", "dlyTimeL", "dlyTimeR", "dlyDivL", "dlyDivR", "revOn", "revType", "revTime", "revMix", "s1On" })
-                at[id] = idx (id);
+            for (int k = 0; k < keyCount; ++k)
+                at[(size_t) k] = (int) indexOf (info, keyNames[k]);
         }
 
         static int modulatorBase (int s1, int k) noexcept { return s1 + k * (stepsAt + 2 * stepFxMaxSteps); }
@@ -778,7 +778,7 @@ namespace
         }
 
     private:
-        float p (const char* id) const noexcept { return v[(size_t) at.at (id)]; }
+        float p (Key key) const noexcept { return v[(size_t) at[(size_t) key]]; }
 
         /** A step modulator's value now (0..1), from its steps, swing and envelope. */
         float stepValue01 (int base, double beat, int k) noexcept
@@ -823,7 +823,7 @@ namespace
 
         void stepModulators (double beat, float& gate) noexcept
         {
-            const auto s1 = at.at ("s1On");
+            const auto s1 = at[k_s1On];
             for (int k = 0; k < 3; ++k)
             {
                 const auto base = modulatorBase (s1, k);
@@ -847,30 +847,30 @@ namespace
 
         void configure (double tempo) noexcept
         {
-            inputGain = dbToGain (p ("input"));
-            outputGain = dbToGain (p ("output"));
-            wet = p ("mix") * 0.01f;
-            fltOn = p ("fltOn") > 0.5f;
-            filter.set (juce::roundToInt (p ("fltType")), p ("fltCutoff"), p ("fltRes") * 0.01f, sampleRate);
-            fltMix = p ("fltMix") * 0.01f;
-            distOn = p ("distOn") > 0.5f;
-            exciterAmount = p ("distExciter");
-            dirtAmount = p ("distDirt");
-            modOn = p ("modOn") > 0.5f;
-            modDelay = p ("modDelay");
-            modRate = p ("modRate");
-            modDepth = p ("modDepth") * 0.01f;
-            modFeedback = p ("modFeedback") * 0.01f;
-            modMix = p ("modMix") * 0.01f;
-            dlyOn = p ("dlyOn") > 0.5f;
-            dlyType = juce::roundToInt (p ("dlyFilter"));
-            dlyFeedback = p ("dlyFeedback") * 0.01f;
-            dlyMix = p ("dlyMix") * 0.01f;
-            const auto synced = p ("dlySync") > 0.5f;
+            inputGain = dbToGain (p (k_input));
+            outputGain = dbToGain (p (k_output));
+            wet = p (k_mix) * 0.01f;
+            fltOn = p (k_fltOn) > 0.5f;
+            filter.set (juce::roundToInt (p (k_fltType)), p (k_fltCutoff), p (k_fltRes) * 0.01f, sampleRate);
+            fltMix = p (k_fltMix) * 0.01f;
+            distOn = p (k_distOn) > 0.5f;
+            exciterAmount = p (k_distExciter);
+            dirtAmount = p (k_distDirt);
+            modOn = p (k_modOn) > 0.5f;
+            modDelay = p (k_modDelay);
+            modRate = p (k_modRate);
+            modDepth = p (k_modDepth) * 0.01f;
+            modFeedback = p (k_modFeedback) * 0.01f;
+            modMix = p (k_modMix) * 0.01f;
+            dlyOn = p (k_dlyOn) > 0.5f;
+            dlyType = juce::roundToInt (p (k_dlyFilter));
+            dlyFeedback = p (k_dlyFeedback) * 0.01f;
+            dlyMix = p (k_dlyMix) * 0.01f;
+            const auto synced = p (k_dlySync) > 0.5f;
             const auto beatMs = 60000.0 / std::max (20.0, tempo);
-            dlyTime[0] = (float) ((synced ? divisionBeats[juce::jlimit (0, 8, juce::roundToInt (p ("dlyDivL")))] * beatMs : p ("dlyTimeL")) * 0.001 * sampleRate);
-            dlyTime[1] = (float) ((synced ? divisionBeats[juce::jlimit (0, 8, juce::roundToInt (p ("dlyDivR")))] * beatMs : p ("dlyTimeR")) * 0.001 * sampleRate);
-            const auto cutoff = (double) p ("dlyCutoff");
+            dlyTime[0] = (float) ((synced ? divisionBeats[juce::jlimit (0, 8, juce::roundToInt (p (k_dlyDivL)))] * beatMs : p (k_dlyTimeL)) * 0.001 * sampleRate);
+            dlyTime[1] = (float) ((synced ? divisionBeats[juce::jlimit (0, 8, juce::roundToInt (p (k_dlyDivR)))] * beatMs : p (k_dlyTimeR)) * 0.001 * sampleRate);
+            const auto cutoff = (double) p (k_dlyCutoff);
             for (int c = 0; c < 2; ++c)
             {
                 auto& f = delayFilter[(size_t) c];
@@ -882,10 +882,10 @@ namespace
                     default: f[0].setLowPass (sampleRate, std::min (cutoff, sampleRate * 0.45), 0.707); f[1].setHighPass (sampleRate, 250.0, 0.707); break;
                 }
             }
-            revOn = p ("revOn") > 0.5f;
-            revTime = p ("revTime");
-            revMix = p ("revMix") * 0.01f;
-            const auto type = juce::roundToInt (p ("revType"));
+            revOn = p (k_revOn) > 0.5f;
+            revTime = p (k_revTime);
+            revMix = p (k_revMix) * 0.01f;
+            const auto type = juce::roundToInt (p (k_revType));
             if (type != revType) { revType = type; reverb.set (type, sampleRate); }
         }
 
@@ -923,7 +923,7 @@ namespace
             r = (dryB + (b - dryB) * wet) * outputGain;
         }
 
-        std::map<juce::String, int> at;
+        std::array<int, keyCount> at {};
         MultiFilter filter;
         std::array<Shaper, 2> exciter, dirt;
         ModUnit mod;
@@ -1008,6 +1008,287 @@ namespace
         return p;
     }
 
+    //==============================================================================
+    // Remix FX
+    //==============================================================================
+    const std::vector<juce::String> padEffects { "Filter", "Repeater", "Wobble", "Reverb", "Orbit", "Delay" };
+    const std::vector<juce::String> buttonDivisions { "1/1", "1/2", "1/4", "1/8", "1/16" };
+    constexpr double buttonBeats[] { 4.0, 2.0, 1.0, 0.5, 0.25 };
+
+    /** Logic's DJ-style multi-effect: two XY pads, a gater and a downsampler, reverse, scratch and tape stop. */
+    class RemixFx final : public BuiltInEffect
+    {
+    public:
+        enum Key { k_reverse, k_scratch, k_tapeStop, k_reverseDiv, k_scratchDiv, k_tapeStopDiv, k_gater, k_gaterRate, k_downsampler, k_downType, k_padAEffect, k_padBEffect, k_padAOn, k_padBOn, k_padALock, k_padBLock, k_padAX, k_padBX, k_padAY, k_padBY, k_filterType, k_reverbColor, k_orbitType, keyCount };
+        static constexpr const char* keyNames[] { "reverse", "scratch", "tapeStop", "reverseDiv", "scratchDiv", "tapeStopDiv", "gater", "gaterRate", "downsampler", "downType", "padAEffect", "padBEffect", "padAOn", "padBOn", "padALock", "padBLock", "padAX", "padBX", "padAY", "padBY", "filterType", "reverbColor", "orbitType" };
+        explicit RemixFx (const EffectInfo& i) : BuiltInEffect (i)
+        {
+            for (int k = 0; k < keyCount; ++k)
+                at[(size_t) k] = (int) indexOf (info, keyNames[k]);
+        }
+
+        void prepare (double rate, int) override
+        {
+            sampleRate = preparedRate = rate;
+            for (auto& b : history) b.assign ((size_t) (8.5 * rate), 0.0f);
+            write = 0;
+            for (auto& pad : pads) pad = {};
+            for (auto& pad : pads) { pad.reverb.prepare (rate); pad.reverb.set (1, rate); pad.orbit.prepare (rate); for (auto& d : pad.echo) d.prepare ((int) (2.1 * rate)); }
+            gatePhase = 0.0;
+            held = { 0.0f, 0.0f };
+            holdCount = 0.0f;
+            buttons = {};
+        }
+
+        void process (float* l, float* r, int n) noexcept override
+        {
+            const auto tempo = std::max (20.0, bpm.load (std::memory_order_relaxed));
+            const auto beatSamples = 60.0 / tempo * sampleRate;
+            const auto size = (int) history[0].size();
+            // The buttons: each takes over the sound from when it was pressed
+            const int downKeys[] { at[k_reverse], at[k_scratch], at[k_tapeStop] }, lengthKeys[] { at[k_reverseDiv], at[k_scratchDiv], at[k_tapeStopDiv] };
+            for (size_t b = 0; b < 3; ++b)
+            {
+                const auto down = value (downKeys[b]) > 0.5f;
+                auto& state = buttons[b];
+                if (down && ! state.active) { state.active = true; state.start = write; state.t = 0.0; state.played = 0.0; }
+                if (! down) state.active = false;
+                state.length = buttonBeats[juce::jlimit (0, 4, choice (lengthKeys[b]))] * beatSamples;
+            }
+            const auto gaterAmount = value (at[k_gater]) * 0.01f;
+            const auto gaterSamples = divisionBeats[juce::jlimit (0, 8, choice (at[k_gaterRate]))] * beatSamples;
+            const auto downAmount = value (at[k_downsampler]) * 0.01f;
+            const auto downType = choice (at[k_downType]);
+            for (size_t k = 0; k < 2; ++k)
+                configurePad (k, beatSamples);
+
+            for (int i = 0; i < n; ++i)
+            {
+                history[0][(size_t) write] = l[i];
+                history[1][(size_t) write] = r[i];
+                auto a = l[i], b = r[i];
+                // Reverse: the beat (or so) from the press, backwards, again and again
+                if (auto& s = buttons[0]; s.active)
+                {
+                    const auto back = std::fmod (s.t, s.length);
+                    a = readAt (0, (double) s.start - back, size);
+                    b = readAt (1, (double) s.start - back, size);
+                    s.t += 1.0;
+                }
+                // Scratch: the record pushed back and forth around where it was pressed
+                if (auto& s = buttons[1]; s.active)
+                {
+                    const auto cycle = s.t / s.length;
+                    const auto offset = (1.0 - std::cos (juce::MathConstants<double>::twoPi * cycle)) * 0.5 * s.length * 0.5;
+                    a = readAt (0, (double) s.start - offset, size);
+                    b = readAt (1, (double) s.start - offset, size);
+                    s.t += 1.0;
+                }
+                // Tape Stop: slowing to a halt over the length, then silence
+                if (auto& s = buttons[2]; s.active)
+                {
+                    const auto progress = std::min (1.0, s.t / s.length);
+                    const auto speed = 1.0 - progress;
+                    s.played += speed;
+                    const auto fade = (float) std::min (1.0, speed * 8.0);
+                    a = readAt (0, (double) s.start + s.played, size) * fade;
+                    b = readAt (1, (double) s.start + s.played, size) * fade;
+                    s.t += 1.0;
+                }
+                // Gater: on for the first half of each division
+                if (gaterAmount > 0.0f)
+                {
+                    gatePhase += 1.0 / gaterSamples;
+                    gatePhase -= std::floor (gatePhase);
+                    const auto open = gatePhase < 0.5 ? 1.0f : 1.0f - gaterAmount;
+                    gateGain += (open - gateGain) * 0.02f;
+                    a *= gateGain;
+                    b *= gateGain;
+                }
+                // Downsampler: fewer samples (and bits), more as it's pushed up
+                if (downAmount > 0.0f)
+                {
+                    const auto factor = 1.0f + downAmount * downAmount * (downType == 2 ? 60.0f : 30.0f);
+                    if ((holdCount += 1.0f) >= factor) { holdCount -= factor; held = { a, b }; }
+                    a = held[0];
+                    b = held[1];
+                    if (downType >= 1)
+                    {
+                        const auto q = std::pow (2.0f, 14.0f - downAmount * (downType == 2 ? 11.0f : 9.0f));
+                        a = std::round (a * q) / q;
+                        b = std::round (b * q) / q;
+                    }
+                }
+                for (size_t k = 0; k < 2; ++k)
+                    processPad (k, a, b, size);
+                l[i] = a;
+                r[i] = b;
+                write = (write + 1) % size;
+            }
+        }
+
+    private:
+        struct Button { bool active = false; int start = 0; double t = 0.0, length = 1.0, played = 0.0; };
+        struct Pad
+        {
+            int effect = 0;
+            bool active = false, wasActive = false;
+            float x = 0.5f, y = 0.5f;
+            int captureStart = 0;
+            double repeat = 1.0, repeatT = 0.0;
+            MultiFilter filter;
+            double wobblePhase = 0.0, wobbleHz = 2.0;
+            SmallReverb reverb;
+            ModUnit orbit;
+            std::array<DelayLine, 2> echo;
+            double echoSamples = 1.0;
+        };
+
+        float readAt (int ch, double at, int size) const noexcept
+        {
+            const auto wrapped = std::fmod (at, (double) size) + (at < 0.0 ? size : 0.0);
+            const auto i0 = (int) wrapped % size;
+            const auto frac = (float) (wrapped - std::floor (wrapped));
+            const auto& h = history[(size_t) ch];
+            return h[(size_t) i0] + frac * (h[(size_t) ((i0 + 1) % size)] - h[(size_t) i0]);
+        }
+
+        void configurePad (size_t k, double beatSamples) noexcept
+        {
+            const auto a = k == 0;
+            auto& pad = pads[k];
+            pad.effect = choice (a ? at[k_padAEffect] : at[k_padBEffect]);
+            pad.active = value (a ? at[k_padAOn] : at[k_padBOn]) > 0.5f || value (a ? at[k_padALock] : at[k_padBLock]) > 0.5f;
+            pad.x = value (a ? at[k_padAX] : at[k_padBX]);
+            pad.y = value (a ? at[k_padAY] : at[k_padBY]);
+            if (pad.active && ! pad.wasActive) { pad.captureStart = write; pad.repeatT = 0.0; }
+            pad.wasActive = pad.active;
+            if (! pad.active)
+                return;
+            switch (pad.effect)
+            {
+                case 0:   // Filter: left of the middle a low pass coming down, right a high pass going up; up: resonance
+                {
+                    const auto phat = choice (at[k_filterType]) == 0;
+                    const auto side = pad.x - 0.5f;
+                    const auto cutoff = side < 0.0f ? 20000.0 * std::pow (0.0015, (double) -side * 2.0) : 20.0 * std::pow (600.0, (double) side * 2.0);
+                    pad.filter.set (side < 0.0f ? (phat ? 4 : 1) : (phat ? 5 : 3), cutoff, pad.y * 0.85f, sampleRate);
+                    break;
+                }
+                case 1:   // Repeater: across, the length repeated (1/2 to 1/32)
+                {
+                    static constexpr double lengths[] { 2.0, 1.0, 0.5, 0.25, 0.125 };
+                    pad.repeat = lengths[juce::jlimit (0, 4, (int) (pad.x * 5.0f))] * beatSamples;
+                    break;
+                }
+                case 2:   // Wobble: across, the speed (in time); up, the depth
+                {
+                    static constexpr double beats[] { 1.0, 0.5, 1.0 / 3.0, 0.25, 1.0 / 6.0, 0.125 };
+                    pad.wobbleHz = sampleRate / (beats[juce::jlimit (0, 5, (int) (pad.x * 6.0f))] * beatSamples);
+                    break;
+                }
+                case 3: pad.reverb.set (juce::jlimit (0, 2, 2 - choice (at[k_reverbColor])), sampleRate); break;
+                case 5:
+                {
+                    static constexpr double beats[] { 1.0, 0.75, 0.5, 1.0 / 3.0, 0.25, 0.125 };
+                    pad.echoSamples = beats[juce::jlimit (0, 5, (int) (pad.x * 6.0f))] * beatSamples;
+                    break;
+                }
+                default: break;
+            }
+        }
+
+        void processPad (size_t k, float& a, float& b, int size) noexcept
+        {
+            auto& pad = pads[k];
+            if (! pad.active)
+                return;
+            switch (pad.effect)
+            {
+                case 0:
+                    if (std::abs (pad.x - 0.5f) > 0.02f) { a = pad.filter.process (a, 0); b = pad.filter.process (b, 1); }
+                    break;
+                case 1:
+                {
+                    const auto t = std::fmod (pad.repeatT, pad.repeat);
+                    const auto at = (double) pad.captureStart - pad.repeat + t;
+                    const auto fade = (float) std::min (1.0, std::min (t, pad.repeat - t) / 64.0);
+                    const auto mix = 0.4f + 0.6f * pad.y;
+                    a += (readAt (0, at, size) * fade - a) * mix;
+                    b += (readAt (1, at, size) * fade - b) * mix;
+                    pad.repeatT += 1.0;
+                    break;
+                }
+                case 2:
+                {
+                    pad.wobblePhase += pad.wobbleHz / sampleRate;
+                    pad.wobblePhase -= std::floor (pad.wobblePhase);
+                    const auto lfo = 0.5 - 0.5 * std::cos (juce::MathConstants<double>::twoPi * pad.wobblePhase);
+                    pad.filter.set (0, 150.0 * std::pow (60.0, lfo * (0.3 + 0.7 * pad.y)), 0.55f, sampleRate);
+                    a = pad.filter.process (a, 0);
+                    b = pad.filter.process (b, 1);
+                    break;
+                }
+                case 3: pad.reverb.process (a, b, 0.5f + pad.x * 7.5f, pad.y * 0.85f, sampleRate); break;
+                case 4:
+                {
+                    const auto flanger = choice (at[k_orbitType]) != 1;
+                    pad.orbit.process (a, b, sampleRate, 0.1 + pad.x * 4.0, flanger ? 2.5f : 6.0f, flanger ? 2.0f : 4.0f, flanger ? 1 : 2,
+                                       flanger ? 0.7f * pad.y : 0.0f, 0.5f, 0.25f);
+                    break;
+                }
+                default:
+                {
+                    const auto el = pad.echo[0].read ((float) pad.echoSamples), er = pad.echo[1].read ((float) pad.echoSamples);
+                    const auto fb = 0.25f + 0.65f * pad.y;
+                    pad.echo[0].push (a + er * fb);   // (ping pong)
+                    pad.echo[1].push (b + el * fb);
+                    a += el * 0.6f;
+                    b += er * 0.6f;
+                    break;
+                }
+            }
+        }
+
+        std::array<int, keyCount> at {};
+        std::array<std::vector<float>, 2> history;
+        int write = 0;
+        std::array<Pad, 2> pads;
+        std::array<Button, 3> buttons {};
+        double gatePhase = 0.0;
+        float gateGain = 1.0f, holdCount = 0.0f;
+        std::array<float, 2> held {};
+    };
+
+    std::vector<ParamInfo> remixParams()
+    {
+        std::vector<ParamInfo> p {
+            { "gater", "Gater", " %", 0.0f, 100.0f, 0.0f, 50.0f },
+            { "gaterRate", "Gater Rate", "", 0.0f, 8.0f, 5.0f, 4.0f, divisions },
+            { "downsampler", "Downsampler", " %", 0.0f, 100.0f, 0.0f, 50.0f },
+            { "downType", "Downsampler Type", "", 0.0f, 2.0f, 0.0f, 1.0f, { "Downsample", "Crush", "Lo-Fi" } },
+            { "reverse", "Reverse", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff },
+            { "reverseDiv", "Reverse Length", "", 0.0f, 4.0f, 2.0f, 2.0f, buttonDivisions },
+            { "scratch", "Scratch", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff },
+            { "scratchDiv", "Scratch Speed", "", 0.0f, 4.0f, 3.0f, 2.0f, buttonDivisions },
+            { "tapeStop", "Tape Stop", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff },
+            { "tapeStopDiv", "Tape Stop Length", "", 0.0f, 4.0f, 1.0f, 2.0f, buttonDivisions },
+        };
+        for (const char* pad : { "A", "B" })
+        {
+            const auto n = juce::String ("pad") + pad, name = juce::String ("Pad ") + pad + " ";
+            p.push_back ({ n + "Effect", name + "Effect", "", 0.0f, 5.0f, juce::String (pad) == "A" ? 0.0f : 1.0f, 2.5f, padEffects });
+            p.push_back ({ n + "X", name + "X", "", 0.0f, 1.0f, 0.5f, 0.5f });
+            p.push_back ({ n + "Y", name + "Y", "", 0.0f, 1.0f, 0.5f, 0.5f });
+            p.push_back ({ n + "On", name + "Active", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff });
+            p.push_back ({ n + "Lock", name + "Lock", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff });
+        }
+        p.push_back ({ "filterType", "Filter Type", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Phat 24 dB", "Classic 12 dB" } });
+        p.push_back ({ "reverbColor", "Reverb Color", "", 0.0f, 2.0f, 1.0f, 1.0f, { "Dark", "Medium", "Bright" } });
+        p.push_back ({ "orbitType", "Orbit Type", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Flanger", "Phaser" } });
+        return p;
+    }
+
     template <typename T>
     std::unique_ptr<BuiltInEffect> make (const EffectInfo& info) { return std::make_unique<T> (info); }
 }
@@ -1017,6 +1298,7 @@ const std::vector<StockEffect>& stockMultiEffects()
     static const std::vector<StockEffect> effects {
         { { "phatFx", "Phat FX", phatParams(), "Multi Effects" }, make<PhatFx> },
         { { "stepFx", "Step FX", stepParams(), "Multi Effects" }, make<StepFx> },
+        { { "remixFx", "Remix FX", remixParams(), "Multi Effects" }, make<RemixFx> },
     };
     return effects;
 }
