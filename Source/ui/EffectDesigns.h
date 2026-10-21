@@ -59,6 +59,7 @@ namespace riff::effectdesign
         bool lcdValues = false;                 // values in small dark windows under the knobs (older hardware-style faces)
         bool live = false;                      // a meter that follows the sound (gain reduction, correction)
         bool analyzer = false;                  // a live spectrum of the output behind the curve (as Logic's EQs)
+        bool meters = false;                    // the effect's own readings (meters, loudness), refreshed while open
         /** Curve displays with points to drag: 20 Hz to 20 kHz across, each point's value over its parameter's range up the side. */
         struct Graph
         {
@@ -82,6 +83,10 @@ namespace riff::effectdesign
         bool valid = false;
         static double frequencyOf (int point) noexcept { return 20.0 * std::pow (1000.0, (double) point / (points - 1)); }
     };
+    /** The effect's readings for the window being painted (see BuiltInEffect::readMeters), and how many. */
+    const float* paintingMeters (int& count) noexcept;
+    void setPaintingMeters (const float* values, int count) noexcept;
+
     /** Set by the window while its face paints (nullptr otherwise). */
     const Spectrum* paintingSpectrum() noexcept;
     void setPaintingSpectrum (const Spectrum*) noexcept;

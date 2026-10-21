@@ -3240,6 +3240,11 @@ void MainComponent::openInsertWindow (const juce::ValueTree& insert)
         auto* effect = effectRack.getBuiltIn (id);
         return effect != nullptr ? effect->displayValue() : 0.0f;
     });
+    host->panel.setMeterSource ([this, id] (float* dest, int capacity)
+    {
+        auto* effect = effectRack.getBuiltIn (id);
+        return effect != nullptr ? effect->readMeters (dest, capacity) : 0;
+    });
     host->panel.setAnalyzerSource ([this, id] (float* dest, int count)
     {
         auto* effect = effectRack.getBuiltIn (id);

@@ -743,3 +743,36 @@ TEST_CASE ("Pedalboard plays its pedals in a row; Amp Designer and Bass Amp Desi
         CHECK (peakOf (a, 4800) < 4.0f);
     }
 }
+
+TEST_CASE ("Meters: loudness to EBU R128, tuner, mastering assistant stays under -1 dBTP", "[stockfx]")
+{
+    // A 1 kHz sine at -23 dBFS on both channels reads -23 LUFS
+    auto loud = make ("loudnessMeter");
+    const auto amp = juce::Decibels::decibelsToGain (-23.0f);
+    run (*loud, sine (1000.0, 4.0, amp), sine (1000.0, 4.0, amp));
+    std::array<float, BuiltInEffect::meterCapacity> m {};
+    REQUIRE (loud->readMeters (m.data(), (int) m.size()) >= 5);
+    CHECK_THAT (m[2], Catch::Matchers::WithinAbs (-23.0, 0.5));   // integrated
+    CHECK_THAT (m[0], Catch::Matchers::WithinAbs (-23.0, 0.5));   // momentary
+
+    auto tuner = make ("tuner");
+    run (*tuner, sine (440.0, 1.0, 0.5f), sine (440.0, 1.0, 0.5f));
+    tuner->readMeters (m.data(), (int) m.size());
+    CHECK (m[3] > 0.5f);
+    CHECK (juce::roundToInt (m[1]) == 69);
+    CHECK (std::abs (m[2]) < 5.0f);
+
+    auto master = make ("masteringAssistant");
+    master->setPosition (0, true, 120.0);
+    set (*master, "loudness", -8.0f);
+    juce::Random random (5);
+    std::vector<float> l (48000 * 3), r (48000 * 3);
+    for (size_t i = 0; i < l.size(); ++i)
+    {
+        l[i] = (random.nextFloat() * 2.0f - 1.0f) * ((i / 4800) % 2 == 0 ? 0.9f : 0.2f);
+        r[i] = l[i] * 0.9f;
+    }
+    run (*master, l, r);
+    master->readMeters (m.data(), (int) m.size());
+    CHECK (m[2] <= -0.8f);   // true peak, dBTP
+}

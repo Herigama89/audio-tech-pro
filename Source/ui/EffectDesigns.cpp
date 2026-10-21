@@ -1245,6 +1245,225 @@ namespace
         }
     }
 
+    //==============================================================================
+    // Meters: dark glass screens, green to amber to red
+    //==============================================================================
+    float meterAt (int index, float fallback = -100.0f)
+    {
+        int count = 0;
+        const auto* m = paintingMeters (count);
+        return m != nullptr && index < count ? m[index] : fallback;
+    }
+
+    void meterBar (juce::Graphics& g, RF bar, float db, float holdDb, bool vertical = true)
+    {
+        g.setColour (juce::Colour (0xff0b0d10));
+        g.fillRoundedRectangle (bar, 3.0f);
+        const auto t = juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 66.0f);
+        const auto filled = vertical ? bar.withTop (bar.getBottom() - bar.getHeight() * t) : bar.withWidth (bar.getWidth() * t);
+        juce::ColourGradient grad (juce::Colour (0xff3ddc6a), vertical ? 0.0f : bar.getX(), vertical ? bar.getBottom() : 0.0f,
+                                   juce::Colour (0xffff3b30), vertical ? 0.0f : bar.getRight(), vertical ? bar.getY() : 0.0f, false);
+        grad.addColour (0.8, juce::Colour (0xffe7d94a));
+        g.setGradientFill (grad);
+        g.fillRect (filled);
+        if (holdDb > -99.0f)
+        {
+            const auto h = juce::jlimit (0.0f, 1.0f, (holdDb + 60.0f) / 66.0f);
+            g.setColour (juce::Colours::white);
+            if (vertical) g.fillRect (bar.getX(), bar.getBottom() - bar.getHeight() * h, bar.getWidth(), 2.0f);
+            else g.fillRect (bar.getX() + bar.getWidth() * h, bar.getY(), 2.0f, bar.getHeight());
+        }
+    }
+
+    void meterBackground (juce::Graphics& g, R b)
+    {
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2c3138), 0.0f, 0.0f, juce::Colour (0xff1a1d22), 0.0f, (float) b.getBottom(), false));
+        g.fillRect (b);
+    }
+
+    juce::String lufsText (float v) { return v <= -69.9f ? juce::String ("--") : juce::String (v, 1); }
+
+    void paintLevelMeter (juce::Graphics& g, R b, const EffectInfo&, const float*, float)
+    {
+        meterBackground (g, b);
+        const char* names[] { "L", "R" };
+        for (int c = 0; c < 2; ++c)
+        {
+            const RF bar (60.0f + (float) c * 70.0f, 40.0f, 40.0f, 300.0f);
+            meterBar (g, bar, meterAt (c), meterAt (4 + c));
+            // (RMS as a line across)
+            const auto rms = juce::jlimit (0.0f, 1.0f, (meterAt (2 + c) + 60.0f) / 66.0f);
+            g.setColour (juce::Colour (0xff4fb7ff));
+            g.fillRect (bar.getX(), bar.getBottom() - bar.getHeight() * rms - 1.0f, bar.getWidth(), 3.0f);
+            title (g, R ((int) bar.getX(), 344, 40, 18), names[c], juce::Colours::white.withAlpha (0.7f), 14.0f);
+            title (g, R ((int) bar.getX() - 10, 14, 60, 20), juce::String (meterAt (4 + c), 1), juce::Colour (0xffe7d94a), 13.0f);
+        }
+        g.setFont (juce::FontOptions (11.0f));
+        for (const auto db : { 0, -6, -12, -24, -40, -60 })
+        {
+            const auto y = 340.0f - 300.0f * ((float) db + 60.0f) / 66.0f;
+            g.setColour (juce::Colours::white.withAlpha (0.5f));
+            g.drawText (juce::String (db), RF (10.0f, y - 7.0f, 40.0f, 14.0f), juce::Justification::right, false);
+        }
+    }
+
+    void paintLoudnessMeter (juce::Graphics& g, R b, const EffectInfo&, const float*, float)
+    {
+        meterBackground (g, b);
+        const char* names[] { "M", "S", "I" };
+        for (int k = 0; k < 3; ++k)
+        {
+            const RF bar (50.0f + (float) k * 80.0f, 60.0f, 46.0f, 300.0f);
+            // (LUFS: -60 at the bottom, 0 at the top)
+            meterBar (g, bar, meterAt (k) + 6.0f, -100.0f);
+            title (g, R ((int) bar.getX() - 10, 364, 66, 20), names[k], juce::Colours::white.withAlpha (0.8f), 15.0f);
+            title (g, R ((int) bar.getX() - 17, 28, 80, 24), lufsText (meterAt (k)), juce::Colour (0xff8fe39a), 16.0f);
+        }
+        title (g, R (300, 60, 200, 22), "LU RANGE", juce::Colours::white.withAlpha (0.6f), 13.0f);
+        title (g, R (300, 84, 200, 34), juce::String (meterAt (3, 0.0f), 1) + " LU", juce::Colours::white, 24.0f);
+        title (g, R (300, 150, 200, 22), "TRUE PEAK", juce::Colours::white.withAlpha (0.6f), 13.0f);
+        const auto tp = meterAt (4);
+        title (g, R (300, 174, 200, 34), (tp <= -99.0f ? juce::String ("--") : juce::String (tp, 1)) + " dBTP", tp > -1.0f ? juce::Colour (0xffff3b30) : juce::Colours::white, 24.0f);
+        title (g, R (300, 240, 200, 22), "LUFS", juce::Colours::white.withAlpha (0.4f), 13.0f);
+    }
+
+    void paintCorrelation (juce::Graphics& g, R b, const EffectInfo&, const float*, float)
+    {
+        meterBackground (g, b);
+        const RF bar (40.0f, 60.0f, (float) b.getWidth() - 80.0f, 30.0f);
+        g.setColour (juce::Colour (0xff0b0d10));
+        g.fillRoundedRectangle (bar, 4.0f);
+        const auto c = meterAt (0, 0.0f);
+        const auto x = bar.getCentreX() + c * bar.getWidth() * 0.5f;
+        g.setColour (c < 0.0f ? juce::Colour (0xffff3b30) : juce::Colour (0xff3ddc6a));
+        g.fillRect (std::min (x, bar.getCentreX()), bar.getY() + 4.0f, std::abs (x - bar.getCentreX()), bar.getHeight() - 8.0f);
+        g.setColour (juce::Colours::white);
+        g.fillRect (x - 1.5f, bar.getY(), 3.0f, bar.getHeight());
+        for (const auto [v, t] : { std::pair { -1.0f, "-1" }, std::pair { 0.0f, "0" }, std::pair { 1.0f, "+1" } })
+            title (g, R ((int) (bar.getCentreX() + v * bar.getWidth() * 0.5f) - 20, 96, 40, 18), t, juce::Colours::white.withAlpha (0.6f), 13.0f);
+        title (g, R (0, 20, b.getWidth(), 26), "CORRELATION " + juce::String (c, 2), juce::Colours::white.withAlpha (0.8f), 15.0f);
+    }
+
+    void paintMultiMeter (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
+    {
+        meterBackground (g, b);
+        const auto goniometer = valueOf (info, v, "view") > 0.5f;
+        const RF screen (20.0f, 50.0f, (float) b.getWidth() - 140.0f, 300.0f);
+        g.setColour (juce::Colour (0xff0b0d10));
+        g.fillRoundedRectangle (screen, 6.0f);
+        if (! goniometer)
+        {
+            const auto w = (screen.getWidth() - 20.0f) / 31.0f;
+            for (int k = 0; k < 31; ++k)
+                meterBar (g, RF (screen.getX() + 10.0f + (float) k * w, screen.getY() + 10.0f, w - 3.0f, screen.getHeight() - 30.0f), meterAt (k), -100.0f);
+            g.setFont (juce::FontOptions (10.0f));
+            for (int k = 0; k < 31; k += 3)
+            {
+                const auto f = 20.0 * std::pow (2.0, k / 3.0);
+                g.setColour (juce::Colours::white.withAlpha (0.5f));
+                g.drawText (f >= 1000.0 ? juce::String (f / 1000.0, 1) + "k" : juce::String ((int) f), RF (screen.getX() + 10.0f + (float) k * w - 8.0f, screen.getBottom() - 18.0f, w + 16.0f, 14.0f), juce::Justification::centred, false);
+            }
+        }
+        else
+        {
+            // The goniometer: side across, mid up; a mono signal is a vertical line
+            const auto c = screen.getCentre();
+            const auto r = screen.getHeight() * 0.45f;
+            g.setColour (juce::Colours::white.withAlpha (0.1f));
+            g.drawLine (c.x - r, c.y, c.x + r, c.y);
+            g.drawLine (c.x, c.y - r, c.x, c.y + r);
+            g.setColour (juce::Colour (0xff3ddc6a).withAlpha (0.8f));
+            for (int p = 0; p < 256; ++p)
+            {
+                const auto sx = meterAt (34 + p * 2, 0.0f), my = meterAt (34 + p * 2 + 1, 0.0f);
+                g.fillRect (c.x + juce::jlimit (-1.0f, 1.0f, sx) * r - 1.0f, c.y - juce::jlimit (-1.0f, 1.0f, my) * r - 1.0f, 2.0f, 2.0f);
+            }
+        }
+        // Peak levels and correlation on the right
+        meterBar (g, RF ((float) b.getWidth() - 100.0f, 50.0f, 30.0f, 300.0f), meterAt (32), -100.0f);
+        meterBar (g, RF ((float) b.getWidth() - 60.0f, 50.0f, 30.0f, 300.0f), meterAt (33), -100.0f);
+        const auto corr = meterAt (31, 0.0f);
+        title (g, R (20, 360, 300, 22), "Correlation " + juce::String (corr, 2), corr < 0.0f ? juce::Colour (0xffff3b30) : juce::Colours::white.withAlpha (0.7f), 14.0f, juce::Justification::centredLeft);
+    }
+
+    void paintTuner (juce::Graphics& g, R b, const EffectInfo&, const float*, float)
+    {
+        meterBackground (g, b);
+        static const char* names[] { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+        const auto found = meterAt (3, 0.0f) > 0.5f;
+        const auto note = juce::roundToInt (meterAt (1, 69.0f));
+        const auto cents = meterAt (2, 0.0f);
+        const auto inTune = std::abs (cents) < 3.0f;
+        title (g, R (0, 30, b.getWidth(), 80), found ? juce::String (names[(note % 12 + 12) % 12]) + juce::String (note / 12 - 1) : juce::String ("--"),
+               found && inTune ? juce::Colour (0xff3ddc6a) : juce::Colours::white, 60.0f);
+        // The needle's arc: -50 to +50 cents
+        const juce::Point<float> pivot ((float) b.getCentreX(), 330.0f);
+        const auto radius = 180.0f;
+        for (int c = -50; c <= 50; c += 10)
+        {
+            const auto a = (float) c / 50.0f * 0.9f;
+            g.setColour (juce::Colours::white.withAlpha (c == 0 ? 0.9f : 0.4f));
+            g.drawLine ({ pivot.getPointOnCircumference (radius, a), pivot.getPointOnCircumference (radius + (c == 0 ? 20.0f : 12.0f), a) }, c == 0 ? 2.5f : 1.5f);
+        }
+        if (found)
+        {
+            const auto a = juce::jlimit (-50.0f, 50.0f, cents) / 50.0f * 0.9f;
+            g.setColour (inTune ? juce::Colour (0xff3ddc6a) : juce::Colour (0xffff9a3c));
+            g.drawLine ({ pivot, pivot.getPointOnCircumference (radius + 10.0f, a) }, 3.0f);
+            title (g, R (0, 340, b.getWidth(), 24), juce::String (cents, 1) + " cents   " + juce::String (meterAt (0, 0.0f), 1) + " Hz", juce::Colours::white.withAlpha (0.7f), 15.0f);
+        }
+    }
+
+    void paintBpmCounter (juce::Graphics& g, R b, const EffectInfo&, const float*, float)
+    {
+        meterBackground (g, b);
+        const auto bpm = meterAt (0, 0.0f);
+        title (g, R (0, 30, b.getWidth(), 70), bpm > 1.0f ? juce::String (bpm, 1) : juce::String ("--"), juce::Colour (0xff8fe39a), 56.0f);
+        title (g, R (0, 100, b.getWidth(), 22), "BPM", juce::Colours::white.withAlpha (0.6f), 15.0f);
+    }
+
+    void paintMasteringAssistant (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
+    {
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff23272e), 0.0f, 0.0f, juce::Colour (0xff15171b), 0.0f, (float) b.getBottom(), false));
+        g.fillRect (b);
+        // The Auto EQ curve (eight octave bands) on the display
+        const RF screen (20.0f, 60.0f, 700.0f, 240.0f);
+        g.setColour (juce::Colour (0xff0b0d10));
+        g.fillRoundedRectangle (screen, 6.0f);
+        const auto amount = valueOf (info, v, "autoEq", 50.0f) * 0.01f;
+        const auto xOf = [screen] (double f) { return screen.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * screen.getWidth(); };
+        const auto yOf = [screen] (double db) { return screen.getCentreY() - (float) (db / 9.0) * screen.getHeight() * 0.5f; };
+        g.setColour (juce::Colours::white.withAlpha (0.12f));
+        g.fillRect (screen.getX(), screen.getCentreY(), screen.getWidth(), 1.0f);
+        Biquad bands[8];
+        for (int k = 0; k < 8; ++k)
+            bands[k].setPeak (48000.0, 62.5 * std::pow (2.0, k), meterAt (5 + k, 0.0f) * amount, 1.0);
+        juce::Path curve;
+        for (int x = 0; x <= (int) screen.getWidth(); x += 2)
+        {
+            const auto f = 20.0 * std::pow (1000.0, x / (double) screen.getWidth());
+            double db = 0.0;
+            for (auto& q : bands) db += q.magnitudeDb (f, 48000.0);
+            if (x == 0) curve.startNewSubPath (screen.getX(), yOf (db)); else curve.lineTo (screen.getX() + (float) x, yOf (db));
+        }
+        g.setColour (juce::Colour (0xffb07bff));
+        g.strokePath (curve, juce::PathStrokeType (2.2f));
+        drawSpectrum (g, screen, xOf, juce::Colour (0xff7fb4e6));
+        // Analysis progress and the readings
+        const auto progress = meterAt (4, 0.0f);
+        title (g, R (20, 16, 400, 30), progress < 1.0f ? "Analyzing... " + juce::String (juce::roundToInt (progress * 100.0f)) + " %" : juce::String ("Analysis complete"),
+               juce::Colours::white.withAlpha (0.75f), 15.0f, juce::Justification::centredLeft);
+        const auto row = [&] (int y, const juce::String& name, const juce::String& text)
+        {
+            title (g, R (750, y, 200, 18), name, juce::Colours::white.withAlpha (0.55f), 12.0f, juce::Justification::centredLeft);
+            title (g, R (750, y + 18, 200, 28), text, juce::Colours::white, 20.0f, juce::Justification::centredLeft);
+        };
+        row (60, "SHORT-TERM", lufsText (meterAt (0)) + " LUFS");
+        row (115, "INTEGRATED", lufsText (meterAt (1)) + " LUFS");
+        row (170, "TRUE PEAK", (meterAt (2) <= -99.0f ? juce::String ("--") : juce::String (meterAt (2), 1)) + " dBTP");
+        row (225, "SOURCE / GAIN", lufsText (meterAt (3)) + " LUFS  " + (meterAt (13, 0.0f) >= 0.0f ? "+" : "") + juce::String (meterAt (13, 0.0f), 1) + " dB");
+    }
+
     void addHardwareDesigns (std::map<juce::String, Design>& d)
     {
         const auto knob = Kind::knob;
@@ -1954,6 +2173,51 @@ namespace
             c.controls.push_back ({ "output", knob, R (660, 392, 90, 100), "OUTPUT", juce::Colour (0xffc9ccd0) });
             d["pedalboard"] = c;
         }
+        {
+            // The meters: their screens, a control or two
+            const auto meter = [&d] (const char* type, int w, int h, std::function<void (juce::Graphics&, R, const EffectInfo&, const float*, float)> paint,
+                                     std::vector<Control> controls)
+            {
+                Design c;
+                c.width = w; c.height = h;
+                c.knobs = KnobStyle::dark;
+                c.label = juce::Colours::white.withAlpha (0.6f); c.value = juce::Colour (0xff8fe39a); c.accent = juce::Colour (0xff8fe39a); c.track = juce::Colour (0xff17263a);
+                c.meters = true;
+                c.paint = std::move (paint);
+                c.controls = std::move (controls);
+                d[type] = c;
+            };
+            meter ("levelMeter", 220, 400, paintLevelMeter, { { "reset", Kind::toggle, R (60, 366, 110, 26), "=RESET HOLD" } });
+            meter ("loudnessMeter", 520, 420, paintLoudnessMeter, { { "running", Kind::segmented, R (300, 300, 200, 28), "-" },
+                                                                   { "reset", Kind::toggle, R (300, 350, 120, 28), "=RESET" } });
+            meter ("correlationMeter", 460, 140, paintCorrelation, {});
+            meter ("multiMeter", 820, 400, paintMultiMeter, { { "view", Kind::segmented, R (20, 12, 260, 28), "-" },
+                                                             { "peakHold", Kind::toggle, R (300, 12, 120, 28), "=PEAK HOLD" } });
+            meter ("tuner", 520, 400, paintTuner, { { "reference", Kind::field, R (160, 368, 200, 26), "-", juce::Colours::white } });
+            meter ("bpmCounter", 320, 150, paintBpmCounter, {});
+            Design m;
+            m.width = 960; m.height = 540;
+            m.knobs = KnobStyle::dark;
+            m.label = juce::Colours::white.withAlpha (0.6f); m.value = juce::Colour (0xffb07bff); m.accent = juce::Colour (0xffb07bff); m.track = juce::Colour (0xff17263a);
+            m.meters = true;
+            m.analyzer = true;
+            m.paint = paintMasteringAssistant;
+            m.controls = {
+                { "character", Kind::segmented, R (440, 18, 480, 30), "-" },
+                { "autoEq", Kind::knob, R (30, 330, 120, 170), "Auto EQ" },
+                { "loudness", Kind::knob, R (170, 330, 120, 170), "Loudness" },
+                { "width", Kind::knob, R (310, 330, 120, 170), "Width" },
+                { "excite", Kind::toggle, R (460, 360, 110, 28), "=EXCITE" },
+                { "loudComp", Kind::toggle, R (460, 400, 110, 28), "=LOUDNESS COMP" },
+                { "customOn", Kind::toggle, R (600, 360, 110, 28), "=CUSTOM EQ" },
+                { "customLow", Kind::knob, R (590, 400, 80, 124), "Low" },
+                { "customMid", Kind::knob, R (680, 400, 80, 124), "Mid" },
+                { "customHigh", Kind::knob, R (770, 400, 80, 124), "High" },
+                { "reanalyze", Kind::toggle, R (750, 290, 180, 28), "=REANALYZE" },
+                { "bypass", Kind::toggle, R (460, 440, 110, 28), "=BYPASS" },
+            };
+            d["masteringAssistant"] = m;
+        }
         addHardwareDesigns (d);
         return d;
     }
@@ -1962,7 +2226,11 @@ namespace
 namespace
 {
     const Spectrum* currentSpectrum = nullptr;
+    const float* currentMeters = nullptr;
+    int currentMeterCount = 0;
 }
+const float* paintingMeters (int& count) noexcept           { count = currentMeterCount; return currentMeters; }
+void setPaintingMeters (const float* values, int count) noexcept { currentMeters = values; currentMeterCount = count; }
 const Spectrum* paintingSpectrum() noexcept           { return currentSpectrum; }
 void setPaintingSpectrum (const Spectrum* s) noexcept { currentSpectrum = s; }
 

@@ -61,27 +61,63 @@ namespace
 
     //==============================================================================
     /** Width and direction of a stereo (or mid/side) signal. */
+    /**
+        Direction Mixer (as Logic's): an LR or MS input, the direction its centre points to (degrees: 90 hard
+        left, -90 hard right, beyond that turning back) and its spread (0 mono, 1 as is, 2 only the sides);
+        Split gives the lows and highs (either side of the crossover) their own direction and spread.
+    */
     class DirectionMixer final : public BuiltInEffect
     {
     public:
         using BuiltInEffect::BuiltInEffect;
-        void prepare (double rate, int) override { sampleRate = preparedRate = rate; }
+        enum Index { iInput, iSpread, iDirection, iOutput, iSplit, iCrossover, iDirLow, iSpreadLow };
+        void prepare (double rate, int) override { sampleRate = preparedRate = rate; split.reset(); lastX = -1.0f; }
+        static void place (float m, float s, float spread, float degrees, float& outL, float& outR) noexcept
+        {
+            // (the stereo base turned: 0 centre, +90 hard left, -90 hard right, 180 back to centre with the sides swapped)
+            const auto rad = degrees / 180.0f * pi;
+            const auto pan = std::sin (rad);                  // -1 right .. +1 left
+            const auto flip = std::cos (rad) < 0.0f ? -1.0f : 1.0f;
+            s *= spread * flip;
+            const auto angle = (1.0f - pan) * pi * 0.25f;     // 0 hard left .. pi/2 hard right
+            const auto gl = 1.41421356f * std::cos (angle), gr = 1.41421356f * std::sin (angle);
+            outL = (m + s) * gl;
+            outR = (m - s) * gr;
+        }
         void process (float* l, float* r, int n) noexcept override
         {
-            const bool msInput = choice (0) == 1;
-            const auto spread = value (1) * 0.01f;
-            const auto angle = (value (2) * 0.01f + 1.0f) * pi * 0.25f;   // -100..100: hard left..hard right
-            const auto gl = 1.41421356f * std::cos (angle), gr = 1.41421356f * std::sin (angle);
-            const auto out = dbToGain (value (3));
+            const bool msInput = choice (iInput) == 1;
+            const auto out = dbToGain (value (iOutput));
+            const auto splitOn = choice (iSplit) == 1;
+            if (splitOn && value (iCrossover) != lastX)
+            {
+                split.set (value (iCrossover), sampleRate);
+                lastX = value (iCrossover);
+            }
             for (int i = 0; i < n; ++i)
             {
-                auto m = msInput ? l[i] : 0.5f * (l[i] + r[i]);
-                auto s = msInput ? r[i] : 0.5f * (l[i] - r[i]);
-                s *= spread;
-                l[i] = (m + s) * gl * out;
-                r[i] = (m - s) * gr * out;
+                const auto m = msInput ? l[i] : 0.5f * (l[i] + r[i]);
+                const auto s = msInput ? r[i] : 0.5f * (l[i] - r[i]);
+                float a, b;
+                if (splitOn)
+                {
+                    float mLow, mHigh, sLow, sHigh;
+                    split.split (m, 0, mLow, mHigh);
+                    split.split (s, 1, sLow, sHigh);
+                    float la, lb, ha, hb;
+                    place (mLow, sLow, value (iSpreadLow), value (iDirLow), la, lb);
+                    place (mHigh, sHigh, value (iSpread), value (iDirection), ha, hb);
+                    a = la + ha; b = lb + hb;
+                }
+                else
+                    place (m, s, value (iSpread), value (iDirection), a, b);
+                l[i] = a * out;
+                r[i] = b * out;
             }
         }
+    private:
+        Crossover split;
+        float lastX = -1.0f;
     };
 
     //==============================================================================
@@ -276,6 +312,8 @@ namespace
             const auto drive = 1.0f + value (1) * 0.01f * 9.0f;
             const auto amount = value (2) * 0.01f;
             const bool even = choice (3) == 1;
+            const auto dry = choice (4) == 1 ? 1.0f : 0.0f;
+            const auto highRatio = value (5) * 0.01f;   // (the generated harmonics against the source's own top)
             for (int i = 0; i < n; ++i)
             {
                 // Odd: a soft clip; even: a rectifier-like curve (its offset is filtered away after)
@@ -284,9 +322,10 @@ namespace
                     const auto y = x * drive;
                     return even ? y * y / (1.0f + y * y) : saturate (y);
                 };
-                const auto a = postL.process (shape (hpL.process (l[i], 0)), 0), b = postR.process (shape (hpR.process (r[i], 0)), 0);
-                l[i] += a * amount;
-                r[i] += b * amount;
+                const auto hl = hpL.process (l[i], 0), hr = hpR.process (r[i], 0);
+                const auto a = postL.process (shape (hl), 0), b = postR.process (shape (hr), 0);
+                l[i] = l[i] * dry + (a * highRatio + hl * (1.0f - highRatio)) * amount * (dry > 0.0f ? 1.0f : 2.0f);
+                r[i] = r[i] * dry + (b * highRatio + hr * (1.0f - highRatio)) * amount * (dry > 0.0f ? 1.0f : 2.0f);
             }
         }
     private:
@@ -413,9 +452,13 @@ const std::vector<StockEffect>& stockUtilityEffects()
           make<StereoSpread> },
         { { "directionMixer", "Direction Mixer", {
               { "input", "Input", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Left/Right", "Mid/Side" } },
-              { "spread", "Spread", pc, 0.0f, 200.0f, 100.0f, 100.0f },
-              { "direction", "Direction", "", -100.0f, 100.0f, 0.0f, 0.0f },
-              { "output", "Output", dB, -24.0f, 12.0f, 0.0f, 0.0f } }, "Imaging" },
+              { "spread", "Spread (High)", "", 0.0f, 2.0f, 1.0f, 1.0f },
+              { "direction", "Direction (High)", juce::String (juce::CharPointer_UTF8 ("\xc2\xb0")), -180.0f, 180.0f, 0.0f, 0.0f },
+              { "output", "Output", dB, -24.0f, 12.0f, 0.0f, 0.0f },
+              { "split", "Split", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "crossover", "Crossover", hz, 50.0f, 5000.0f, 300.0f, 300.0f },
+              { "dirLow", "Direction Low", juce::String (juce::CharPointer_UTF8 ("\xc2\xb0")), -180.0f, 180.0f, 0.0f, 0.0f },
+              { "spreadLow", "Spread Low", "", 0.0f, 2.0f, 1.0f, 1.0f } }, "Imaging" },
           make<DirectionMixer> },
         { { "gain", "Gain", {
               { "gain", "Gain", dB, -96.0f, 24.0f, 0.0f, 0.0f },
@@ -448,7 +491,9 @@ const std::vector<StockEffect>& stockUtilityEffects()
               { "freq", "Frequency", hz, 1000.0f, 12000.0f, 4000.0f, 4000.0f },
               { "harmonics", "Harmonics", pc, 0.0f, 100.0f, 40.0f, 50.0f },
               { "amount", "Amount", pc, 0.0f, 100.0f, 30.0f, 50.0f },
-              { "color", "Color", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Odd", "Even" } } }, "Specialized" },
+              { "color", "Color", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Color 1", "Color 2" } },
+              { "dry", "Dry Signal", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "highRatio", "High Ratio", pc, 0.0f, 100.0f, 100.0f, 50.0f } }, "Specialized" },
           make<Exciter> },
         { { "denoiser", "Denoiser", {
               { "threshold", "Threshold", dB, -100.0f, -20.0f, -70.0f, -60.0f },

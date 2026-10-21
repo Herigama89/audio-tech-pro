@@ -187,6 +187,9 @@ public:
     /** Where a design's meter reads from (gain reduction, pitch correction): the running effect. */
     void setLiveValue (std::function<float()> source);
 
+    /** Where its meters read from (the running effect's readMeters). */
+    void setMeterSource (std::function<int (float* dest, int capacity)> source);
+
     /** Where the analyzer reads the output from: fills the latest samples and gives the sample rate (0: none). */
     void setAnalyzerSource (std::function<double (float* dest, int count)> source);
 
@@ -217,6 +220,9 @@ private:
     std::function<float()> liveValue;
     float liveShown = 0.0f;
     std::function<double (float*, int)> analyzerSource;
+    std::function<int (float*, int)> meterSource;
+    std::vector<float> meterValues;
+    int meterCount = 0;
     juce::OwnedArray<juce::Component> graphEditors;
     std::unique_ptr<juce::FileChooser> fileChooser;
     std::vector<int> graphPages;

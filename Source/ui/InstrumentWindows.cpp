@@ -551,6 +551,14 @@ void EffectPanel::setLiveValue (std::function<float()> source)
         startTimerHz (30);
 }
 
+void EffectPanel::setMeterSource (std::function<int (float*, int)> source)
+{
+    meterSource = std::move (source);
+    meterValues.assign ((size_t) BuiltInEffect::meterCapacity, 0.0f);
+    if (design != nullptr && design->meters && meterSource != nullptr)
+        startTimerHz (30);
+}
+
 void EffectPanel::setAnalyzerSource (std::function<double (float*, int)> source)
 {
     analyzerSource = std::move (source);
@@ -607,6 +615,8 @@ void EffectPanel::updateSpectrum()
 
 void EffectPanel::timerCallback()
 {
+    if (meterSource != nullptr && design != nullptr && design->meters)
+        meterCount = meterSource (meterValues.data(), (int) meterValues.size());
     if (analyzerSource != nullptr && design != nullptr && design->analyzer)
         updateSpectrum();
     // The meter: quick to rise, easing back
@@ -686,8 +696,10 @@ void EffectPanel::paint (juce::Graphics& g)
         for (size_t i = 0; i < info->params.size(); ++i)
             v[i] = (float) (double) insert.getProperty (juce::Identifier (info->params[i].id), info->params[i].defaultValue);
         effectdesign::setPaintingSpectrum (design->analyzer ? &spectrum : nullptr);
+        effectdesign::setPaintingMeters (meterValues.empty() ? nullptr : meterValues.data(), meterCount);
         design->paint (g, getLocalBounds(), *info, v.data(), liveShown);
         effectdesign::setPaintingSpectrum (nullptr);
+        effectdesign::setPaintingMeters (nullptr, 0);
         return;
     }
 

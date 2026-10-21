@@ -70,7 +70,32 @@ public:
                 insert.setProperty ("p3Freq", 7100.0f, nullptr);
                 insert.setProperty ("p3Gain", 2.0f, nullptr);
             }
+            // (the effect itself, fed a few seconds of something music-like, for the windows that show readings)
+            auto running = std::shared_ptr<BuiltInEffect> (BuiltInEffect::create (type).release());
+            if (running != nullptr)
+            {
+                const auto& params = running->getInfo().params;
+                running->prepare (48000.0, 512);
+                for (size_t p = 0; p < params.size(); ++p)
+                    running->setParameter ((int) p, (float) (double) insert.getProperty (juce::Identifier (params[p].id), params[p].defaultValue));
+                running->setPosition (0, true, 120.0);
+                juce::Random random (3);
+                std::vector<float> a (512), b (512);
+                double t = 0.0;
+                for (int block = 0; block < 48000 * 4 / 512; ++block)
+                {
+                    for (int i = 0; i < 512; ++i, t += 1.0 / 48000.0)
+                    {
+                        const auto beat = std::fmod (t, 0.5) < 0.05 ? 0.6f : 0.0f;
+                        const auto tone = 0.2f * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * t) + 0.1f * (float) std::sin (juce::MathConstants<double>::twoPi * 330.0 * t);
+                        a[(size_t) i] = tone + beat * (random.nextFloat() - 0.5f) + 0.02f * (random.nextFloat() - 0.5f);
+                        b[(size_t) i] = 0.8f * a[(size_t) i] + 0.05f * (random.nextFloat() - 0.5f);
+                    }
+                    running->process (a.data(), b.data(), 512);
+                }
+            }
             EffectPanel panel (insert, um);
+            panel.setMeterSource ([running] (float* dest, int capacity) { return running != nullptr ? running->readMeters (dest, capacity) : 0; });
             panel.setLiveValue ([type] { return type == "pitchCorrection" ? 22.0f : 8.5f; });
             panel.setAnalyzerSource ([] (float* dest, int count)
             {

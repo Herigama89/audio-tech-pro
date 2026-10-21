@@ -66,6 +66,7 @@ const std::vector<StockEffect>& stockPitchEffects();
 const std::vector<StockEffect>& stockUtilityEffects();
 const std::vector<StockEffect>& stockExtraEffects();
 const std::vector<StockEffect>& stockPedalboardEffects();
+const std::vector<StockEffect>& stockMeteringEffects();
 /** Pitch Correction's scales and chords: their names, and each one's notes from the root (12 flags). */
 const std::vector<juce::String>& pitchScaleNames();
 const int* pitchScaleMask (int scale);
@@ -102,6 +103,10 @@ public:
 
     /** Called on the message thread after the knobs were set (the Pedalboard builds its pedals here). */
     virtual void messageThreadUpdate() {}
+
+    /** More readings for its window (meters, loudness, a goniometer's points): fills dest, gives how many. Message thread. */
+    virtual int readMeters (float* /*dest*/, int /*capacity*/) const noexcept { return 0; }
+    static constexpr int meterCapacity = 1024;
 
     /** What its window's meter shows (a compressor's gain reduction in dB, a pitch correction's cents). */
     virtual float displayValue() const noexcept { return 0.0f; }
