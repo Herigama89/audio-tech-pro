@@ -643,3 +643,42 @@ TEST_CASE ("Filters: AutoFilter 4-pole slopes, Fuzz-Wah, Spectral Gate and the F
         CHECK (peakOf (l, 12000) < 4.0f);
     }
 }
+
+TEST_CASE ("Space Designer plays a sampled impulse response from a file", "[stockfx]")
+{
+    // An IR with a single tap 100 ms in
+    const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("riff-test-ir.wav");
+    {
+        juce::AudioBuffer<float> ir (2, 9600);
+        ir.clear();
+        ir.setSample (0, 4800, 1.0f);
+        ir.setSample (1, 4800, 1.0f);
+        file.deleteFile();
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::AudioFormatWriter> writer (wav.createWriterFor (new juce::FileOutputStream (file), 48000.0, 2, 24, {}, 0));
+        REQUIRE (writer != nullptr);
+        writer->writeFromAudioSampleBuffer (ir, 0, ir.getNumSamples());
+    }
+    auto e = make ("convSpace");
+    set (*e, "mode", 0.0f);
+    set (*e, "predelay", 0.0f);
+    set (*e, "direct", -60.0f);
+    set (*e, "mix", 100.0f);
+    set (*e, "lowCut", 10.0f);
+    e->setAttachedFile (file.getFullPathName());
+    // (the convolution takes its new impulse response in the background)
+    std::vector<float> silence (4800, 0.0f);
+    for (int k = 0; k < 40; ++k)
+    {
+        run (*e, silence, silence);
+        juce::Thread::sleep (5);
+    }
+    std::vector<float> click (24000, 0.0f);
+    click[0] = 1.0f;
+    const auto [l, r] = run (*e, click, click);
+    size_t at = 0;
+    for (size_t i = 0; i < l.size(); ++i)
+        if (std::abs (l[i]) > std::abs (l[at])) at = i;
+    CHECK (std::abs ((int) at - 4800) < 64);
+    file.deleteFile();
+}

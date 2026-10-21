@@ -490,8 +490,48 @@ namespace
                                    private juce::Timer
     {
     public:
+        /**
+            Space Designer (as Logic's): convolution with a sampled impulse response (a file) or one it
+            synthesizes (early reflections and a noise tail with its density envelope); the IR's quality,
+            size, length, pre-delay and reverse; a volume envelope (initial level, attack, decay lin/exp, end
+            level) and a filter envelope (LP 6/12, BP, HP with resonance; initial, break and end frequency);
+            stereo, mono or crossed-stereo input; a crossover below which the dry sound passes alone; a six-band
+            output EQ; direct and reverb levels.
+        */
+        enum Index { iLength, iPredelay, iEarly, iBrightStart, iBrightEnd, iDensity, iWidth, iReverse, iMix, iLowCut,
+                     iMode, iQuality, iSize, iVolOn, iInitLevel, iAttack, iDecay, iEndLevel, iExp,
+                     iFiltOn, iFiltType, iFiltRes, iInitFreq, iFiltAttack, iBreakFreq, iFiltDecay, iEndFreq,
+                     iDensOn, iInitDensity, iRamp, iEndDensity, iReflShape,
+                     iEqOn, iEqHpOn, iEqHpFreq, iEqLsOn, iEqLsFreq, iEqLsGain, iEqP1On, iEqP1Freq, iEqP1Gain, iEqP1Q,
+                     iEqP2On, iEqP2Freq, iEqP2Gain, iEqP2Q, iEqHsOn, iEqHsFreq, iEqHsGain, iEqLpOn, iEqLpFreq,
+                     iInput, iDirect, iXover, count };
+
         explicit ConvolutionSpace (const EffectInfo& info) : BuiltInEffect (info) {}
         ~ConvolutionSpace() override { stopTimer(); }
+
+        void setAttachedFile (const juce::String& path) override
+        {
+            if (path == filePath)
+                return;
+            filePath = path;
+            sampled.setSize (0, 0);
+            sampledRate = 0.0;
+            const juce::File file (path);
+            if (path.isNotEmpty() && file.existsAsFile())
+            {
+                juce::AudioFormatManager formats;
+                formats.registerBasicFormats();
+                if (std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file)); reader != nullptr)
+                {
+                    const auto length = (int) std::min<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 30.0));
+                    sampled.setSize ((int) std::min (2u, reader->numChannels), length);
+                    reader->read (&sampled, 0, length, 0, true, sampled.getNumChannels() > 1);
+                    sampledRate = reader->sampleRate;
+                }
+            }
+            built.fill (std::numeric_limits<float>::quiet_NaN());
+            rebuild();
+        }
 
         void prepare (double rate, int maxBlock) override
         {
@@ -499,6 +539,8 @@ namespace
             blockSize = std::max (16, maxBlock);
             convolution.prepare ({ rate, (juce::uint32) blockSize, 2 });
             dry.setSize (2, blockSize);
+            for (auto& f : eq) f.reset();
+            for (auto* c : { &xoverL, &xoverR }) c->reset();
             built.fill (std::numeric_limits<float>::quiet_NaN());
             rebuild();
             startTimerHz (5);
@@ -506,19 +548,49 @@ namespace
 
         void process (float* l, float* r, int n) noexcept override
         {
-            const auto mix = value (8) * 0.01f;
+            const auto direct = value (iDirect) <= -59.5f ? 0.0f : dbToGain (value (iDirect));
+            const auto reverb = value (iMix) * 0.01f * 0.5f;
+            const auto input = choice (iInput);   // Stereo, Mono, XStereo
+            const auto xover = value (iXover);
+            const auto eqOn = choice (iEqOn) == 1;
+            if (xover > 20.0f && xover != lastXover)
+            {
+                xoverL.set (xover, sampleRate);
+                xoverR.set (xover, sampleRate);
+                lastXover = xover;
+            }
+            updateEq();
             for (int at = 0; at < n; at += blockSize)
             {
                 const auto count = std::min (blockSize, n - at);
                 float* channels[] { l + at, r + at };
                 dry.copyFrom (0, 0, l + at, count);
                 dry.copyFrom (1, 0, r + at, count);
+                for (int i = 0; i < count; ++i)
+                {
+                    auto a = channels[0][i], b = channels[1][i];
+                    if (input == 1) a = b = 0.5f * (a + b);
+                    else if (input == 2) std::swap (a, b);
+                    // X-Over: only what's above it goes into the space
+                    if (xover > 20.0f)
+                    {
+                        float lowA, highA, lowB, highB;
+                        xoverL.split (a, 0, lowA, highA);
+                        xoverR.split (b, 1, lowB, highB);
+                        a = highA; b = highB;
+                    }
+                    channels[0][i] = a;
+                    channels[1][i] = b;
+                }
                 juce::dsp::AudioBlock<float> block (channels, 2, (size_t) count);
                 convolution.process (juce::dsp::ProcessContextReplacing<float> (block));
                 for (int i = 0; i < count; ++i)
                 {
-                    channels[0][i] = dry.getSample (0, i) * (1.0f - mix) + channels[0][i] * mix * 0.5f;
-                    channels[1][i] = dry.getSample (1, i) * (1.0f - mix) + channels[1][i] * mix * 0.5f;
+                    auto wa = channels[0][i], wb = channels[1][i];
+                    if (eqOn)
+                        for (auto& f : eq) { wa = f.process (wa, 0); wb = f.process (wb, 1); }
+                    channels[0][i] = dry.getSample (0, i) * direct + wa * reverb;
+                    channels[1][i] = dry.getSample (1, i) * direct + wb * reverb;
                 }
             }
         }
@@ -526,7 +598,79 @@ namespace
     private:
         void timerCallback() override { rebuild(); }
 
-        /** The impulse response: early reflections, then a noise tail fading (and darkening) over the length. */
+        void updateEq() noexcept
+        {
+            auto key = 0.0f;
+            for (int i = iEqHpOn; i <= iEqLpFreq; ++i) key += value (i) * (float) (i + 3) * 0.37f;
+            if (key == lastEqKey) return;
+            lastEqKey = key;
+            const auto on = [this] (int i) { return choice (i) == 1; };
+            std::array<Biquad, 6> fresh;
+            if (on (iEqHpOn)) fresh[0].setHighPass (sampleRate, value (iEqHpFreq), 0.707); else fresh[0].setIdentity();
+            if (on (iEqLsOn)) fresh[1].setLowShelf (sampleRate, value (iEqLsFreq), value (iEqLsGain)); else fresh[1].setIdentity();
+            if (on (iEqP1On)) fresh[2].setPeak (sampleRate, value (iEqP1Freq), value (iEqP1Gain), value (iEqP1Q)); else fresh[2].setIdentity();
+            if (on (iEqP2On)) fresh[3].setPeak (sampleRate, value (iEqP2Freq), value (iEqP2Gain), value (iEqP2Q)); else fresh[3].setIdentity();
+            if (on (iEqHsOn)) fresh[4].setHighShelf (sampleRate, value (iEqHsFreq), value (iEqHsGain)); else fresh[4].setIdentity();
+            if (on (iEqLpOn)) fresh[5].setLowPass (sampleRate, value (iEqLpFreq), 0.707); else fresh[5].setIdentity();
+            for (size_t k = 0; k < 6; ++k)
+            {
+                eq[k].b0 = fresh[k].b0; eq[k].b1 = fresh[k].b1; eq[k].b2 = fresh[k].b2; eq[k].a1 = fresh[k].a1; eq[k].a2 = fresh[k].a2;
+            }
+        }
+
+        /** Synthesized: early reflections, then a noise tail, its density following the density envelope. */
+        juce::AudioBuffer<float> synthesize (const std::array<float, maxParams>& v, int total) const
+        {
+            juce::AudioBuffer<float> ir (2, total);
+            ir.clear();
+            juce::Random random (1234);
+            const auto early = v[iEarly] * 0.01f;
+            // Early reflections: clusters in the first 80 ms, steeper with Reflection Shape
+            const auto shape = 0.2f + v[iReflShape] * 0.01f * 2.0f;
+            for (int e = 0; e < 14; ++e)
+                for (int c = 0; c < 2; ++c)
+                {
+                    const auto at = (int) ((0.004 + std::pow (random.nextDouble(), (double) shape) * 0.075) * sampleRate);
+                    if (at < total)
+                        ir.addSample (c, at, early * (random.nextFloat() * 1.4f - 0.7f) * (1.0f - (float) e / 14.0f));
+                }
+            const auto length = std::max (0.1f, v[iLength]);
+            const auto densOn = juce::roundToInt (v[iDensOn]) == 1;
+            for (int c = 0; c < 2; ++c)
+            {
+                auto* d = ir.getWritePointer (c);
+                for (int i = 0; i < total; ++i)
+                {
+                    const auto t = (float) i / (float) sampleRate;
+                    // Density: from the initial to the end density over the ramp (or the plain Density knob)
+                    auto density = v[iDensity] * 0.01f;
+                    if (densOn)
+                        density = juce::jmap (std::min (1.0f, t / std::max (0.01f, v[iRamp] * 0.001f)), v[iInitDensity] * 0.01f, v[iEndDensity] * 0.01f);
+                    auto noise = random.nextFloat() * 2.0f - 1.0f;
+                    if (density < 1.0f && random.nextFloat() > density * density + 0.02f)
+                        noise = 0.0f;
+                    const auto fade = std::min (1.0f, t / 0.02f);
+                    d[i] += noise * std::exp (-6.9f * t / length) * fade;
+                }
+            }
+            return ir;
+        }
+
+        /** The sampled IR at this rate, stretched by Size (resampled, as a bigger or smaller room). */
+        juce::AudioBuffer<float> fromFile (float size) const
+        {
+            const auto ratio = sampledRate / sampleRate / std::max (0.25f, size);
+            const auto length = (int) (sampled.getNumSamples() / ratio);
+            juce::AudioBuffer<float> ir (2, std::max (64, length));
+            for (int c = 0; c < 2; ++c)
+            {
+                juce::LagrangeInterpolator interp;
+                interp.process (ratio, sampled.getReadPointer (std::min (c, sampled.getNumChannels() - 1)), ir.getWritePointer (c), ir.getNumSamples(),
+                                sampled.getNumSamples(), 0);
+            }
+            return ir;
+        }
+
         void rebuild()
         {
             std::array<float, maxParams> v;
@@ -535,50 +679,121 @@ namespace
             if (v == built || sampleRate <= 0.0)
                 return;
             built = v;
-            const auto length = std::max (0.1f, v[0]);
-            const auto pre = v[1] * 0.001;
-            const auto early = v[2] * 0.01f;
-            const auto brightStart = v[3], brightEnd = v[4];
-            const auto density = v[5] * 0.01f;
-            const auto width = v[6] * 0.01f;
-            const bool reverse = juce::roundToInt (v[7]) == 1;
-            const auto lowCut = v[9];
+            const auto useFile = juce::roundToInt (v[iMode]) == 0 && sampled.getNumSamples() > 0;
+            const auto size = v[iSize] * 0.01f;
+            const auto length = std::max (0.1f, v[iLength]);
+            const auto pre = (int) (v[iPredelay] * 0.001 * sampleRate);
 
-            const auto total = (int) ((pre + length * 1.1) * sampleRate);
-            juce::AudioBuffer<float> ir (2, std::max (64, total));
+            auto body = useFile ? fromFile (size) : synthesize (v, (int) (length * 1.1f * size * sampleRate) + 64);
+            // Length: the IR cut to it (with a short fade)
+            const auto keep = std::min (body.getNumSamples(), (int) (length * sampleRate) + 1);
+            juce::AudioBuffer<float> ir (2, pre + keep + 1);
             ir.clear();
-            juce::Random random (1234);
-            const auto preSamples = (int) (pre * sampleRate);
-            // Early reflections: a few distinct echoes in the first 80 ms
-            for (int e = 0; e < 14; ++e)
+            for (int c = 0; c < 2; ++c)
+                ir.copyFrom (c, pre, body, c, 0, keep);
+            const auto fadeOut = std::min (keep, (int) (0.05 * sampleRate));
+            for (int c = 0; c < 2; ++c)
+                ir.applyGainRamp (c, pre + keep - fadeOut, fadeOut, 1.0f, 0.0f);
+
+            // Quality: Lo-Fi a quarter of the rate (grainy), Low a half
+            const auto quality = juce::roundToInt (v[iQuality]);
+            if (quality <= 1)
+            {
+                const auto hold = quality == 0 ? 4 : 2;
                 for (int c = 0; c < 2; ++c)
                 {
-                    const auto at = preSamples + (int) ((0.004 + random.nextDouble() * 0.075) * sampleRate);
-                    if (at < ir.getNumSamples())
-                        ir.addSample (c, at, early * (random.nextFloat() * 1.4f - 0.7f) * (1.0f - (float) e / 14.0f));
-                }
-            // The tail: noise, sparser when density is low, darkening from start to end brightness
-            std::array<OnePole, 2> lp;
-            for (int c = 0; c < 2; ++c)
-            {
-                lp[(size_t) c].reset();
-                OnePole cut;
-                cut.setLowPass (lowCut, sampleRate);
-                auto* d = ir.getWritePointer (c);
-                for (int i = preSamples; i < ir.getNumSamples(); ++i)
-                {
-                    const auto t = (float) (i - preSamples) / (float) sampleRate;
-                    const auto env = std::exp (-6.9f * t / length);
-                    if ((i & 63) == 0)
-                        lp[(size_t) c].setLowPass (brightStart * std::pow (brightEnd / brightStart, std::min (1.0f, t / length)), sampleRate);
-                    auto noise = random.nextFloat() * 2.0f - 1.0f;
-                    if (density < 1.0f && random.nextFloat() > density * density + 0.02f)
-                        noise = 0.0f;
-                    const auto fade = std::min (1.0f, t / 0.02f);   // (a soft onset after the early part)
-                    d[i] += cut.highPass (lp[(size_t) c].lowPass (noise)) * env * fade;
+                    OnePole lp;
+                    lp.setLowPass (sampleRate / (hold * 2.2), sampleRate);
+                    auto* d = ir.getWritePointer (c);
+                    float held = 0.0f;
+                    for (int i = 0; i < ir.getNumSamples(); ++i)
+                    {
+                        if (i % hold == 0) held = lp.lowPass (d[i]); else lp.lowPass (d[i]);
+                        d[i] = quality == 0 ? held : lp.z;
+                    }
                 }
             }
-            // Width: blend the two channels towards mono
+
+            // The volume envelope: initial level rising over the attack, then decaying to the end level
+            if (juce::roundToInt (v[iVolOn]) == 1)
+            {
+                const auto attack = v[iAttack] * 0.001f, decay = std::max (0.01f, v[iDecay]);
+                const auto init = v[iInitLevel] * 0.01f, end = v[iEndLevel] * 0.01f;
+                const auto exponential = juce::roundToInt (v[iExp]) == 1;
+                for (int c = 0; c < 2; ++c)
+                {
+                    auto* d = ir.getWritePointer (c);
+                    for (int i = pre; i < ir.getNumSamples(); ++i)
+                    {
+                        const auto t = (float) (i - pre) / (float) sampleRate;
+                        float g;
+                        if (t < attack) g = init + (1.0f - init) * t / std::max (attack, 1.0e-4f);
+                        else
+                        {
+                            const auto u = std::min (1.0f, (t - attack) / decay);
+                            g = exponential ? end + (1.0f - end) * (std::exp (-5.0f * u) - std::exp (-5.0f)) / (1.0f - std::exp (-5.0f))
+                                            : 1.0f + (end - 1.0f) * u;
+                        }
+                        d[i] *= g;
+                    }
+                }
+            }
+
+            // The filter envelope: initial to break frequency over its attack, then to the end frequency over its decay
+            if (juce::roundToInt (v[iFiltOn]) == 1)
+            {
+                const auto type = juce::roundToInt (v[iFiltType]);
+                const auto q = 0.6 + v[iFiltRes] * 0.01 * 6.0;
+                const auto attack = v[iFiltAttack] * 0.001f, decay = std::max (0.01f, v[iFiltDecay]);
+                for (int c = 0; c < 2; ++c)
+                {
+                    Svf f;
+                    OnePole one;
+                    auto* d = ir.getWritePointer (c);
+                    for (int i = pre; i < ir.getNumSamples(); ++i)
+                    {
+                        const auto t = (float) (i - pre) / (float) sampleRate;
+                        if (((i - pre) & 31) == 0)
+                        {
+                            const auto freq = t < attack ? v[iInitFreq] * std::pow (v[iBreakFreq] / v[iInitFreq], t / std::max (attack, 1.0e-4f))
+                                                         : v[iBreakFreq] * std::pow (v[iEndFreq] / v[iBreakFreq], std::min (1.0f, (t - attack) / decay));
+                            f.set (freq, q, sampleRate);
+                            one.setLowPass (freq, sampleRate);
+                        }
+                        float lp, bp, hp;
+                        f.tick (d[i], lp, bp, hp);
+                        d[i] = type == 0 ? one.lowPass (d[i]) : type == 1 ? lp : type == 2 ? bp : hp;
+                    }
+                }
+            }
+            else if (! useFile)
+            {
+                // (the synthesized tail darkens from Bright Start to Bright End, as before)
+                const auto start = v[iBrightStart], end = v[iBrightEnd];
+                for (int c = 0; c < 2; ++c)
+                {
+                    OnePole lp;
+                    auto* d = ir.getWritePointer (c);
+                    for (int i = pre; i < ir.getNumSamples(); ++i)
+                    {
+                        const auto t = (float) (i - pre) / (float) sampleRate;
+                        if (((i - pre) & 63) == 0)
+                            lp.setLowPass (start * std::pow (end / start, std::min (1.0f, t / length)), sampleRate);
+                        d[i] = lp.lowPass (d[i]);
+                    }
+                }
+            }
+
+            // Low cut and width
+            for (int c = 0; c < 2; ++c)
+            {
+                OnePole cut;
+                cut.setLowPass (v[iLowCut], sampleRate);
+                auto* d = ir.getWritePointer (c);
+                for (int i = 0; i < ir.getNumSamples(); ++i)
+                    d[i] = cut.highPass (d[i]);
+            }
+            const auto width = v[iWidth] * 0.01f;
             for (int i = 0; i < ir.getNumSamples(); ++i)
             {
                 const auto a = ir.getSample (0, i), b = ir.getSample (1, i);
@@ -586,15 +801,20 @@ namespace
                 ir.setSample (0, i, mid + side);
                 ir.setSample (1, i, mid - side);
             }
-            if (reverse)
+            if (juce::roundToInt (v[iReverse]) == 1)
                 for (int c = 0; c < 2; ++c)
-                    ir.reverse (c, preSamples, ir.getNumSamples() - preSamples);
+                    ir.reverse (c, pre, ir.getNumSamples() - pre);
             convolution.loadImpulseResponse (std::move (ir), sampleRate, juce::dsp::Convolution::Stereo::yes,
                                              juce::dsp::Convolution::Trim::no, juce::dsp::Convolution::Normalise::yes);
         }
 
         juce::dsp::Convolution convolution;
-        juce::AudioBuffer<float> dry;
+        juce::AudioBuffer<float> dry, sampled;
+        double sampledRate = 0.0;
+        juce::String filePath;
+        std::array<Biquad, 6> eq;
+        Crossover xoverL, xoverR;
+        float lastXover = -1.0f, lastEqKey = -1.0f;
         int blockSize = 512;
         std::array<float, maxParams> built {};
     };
@@ -1009,17 +1229,62 @@ const std::vector<StockEffect>& stockReverbEffects()
               { "mix", "Mix", pc, 0.0f, 100.0f, 30.0f, 50.0f } }, "Reverb" },
           make<SpringReverb> },
 
-        { { "convSpace", "Convolution Space", {
-              { "length", "Length", s, 0.1f, 12.0f, 2.5f, 3.0f },
-              { "predelay", "Pre-Delay", ms, 0.0f, 250.0f, 10.0f, 30.0f },
-              { "early", "Early", pc, 0.0f, 100.0f, 50.0f, 50.0f },
+        { { "convSpace", "Space Designer", {
+              { "length", "Length", s, 0.1f, 20.0f, 2.5f, 3.0f },
+              { "predelay", "Pre-Delay", ms, 0.0f, 500.0f, 10.0f, 50.0f },
+              { "early", "Early Reflections", pc, 0.0f, 100.0f, 50.0f, 50.0f },
               { "brightStart", "Bright Start", hz, 1000.0f, 20000.0f, 14000.0f, 8000.0f },
               { "brightEnd", "Bright End", hz, 200.0f, 20000.0f, 2500.0f, 4000.0f },
               { "density", "Density", pc, 0.0f, 100.0f, 100.0f, 50.0f },
-              { "width", "Width", pc, 0.0f, 100.0f, 100.0f, 50.0f },
+              { "width", "Spread", pc, 0.0f, 200.0f, 100.0f, 100.0f },
               { "reverse", "Reverse", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
-              { "mix", "Mix", pc, 0.0f, 100.0f, 25.0f, 50.0f },
-              { "lowCut", "Low Cut", hz, 10.0f, 1000.0f, 80.0f, 150.0f } }, "Reverb" },
+              { "mix", "Reverb", pc, 0.0f, 100.0f, 25.0f, 50.0f },
+              { "lowCut", "Low Cut", hz, 10.0f, 1000.0f, 20.0f, 150.0f },
+              { "mode", "IR Mode", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Sampled IR", "Synthesized IR" } },
+              { "quality", "Quality", "", 0.0f, 3.0f, 2.0f, 1.5f, { "Lo-Fi", "Low", "Medium", "High" } },
+              { "size", "Size", pc, 25.0f, 200.0f, 100.0f, 100.0f },
+              { "volOn", "Volume Env", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "initLevel", "Init Level", pc, 0.0f, 100.0f, 100.0f, 50.0f },
+              { "attack", "Attack", ms, 0.0f, 2000.0f, 0.0f, 100.0f },
+              { "decay", "Decay", s, 0.05f, 20.0f, 2.0f, 2.0f },
+              { "endLevel", "End Level", pc, 0.0f, 100.0f, 0.0f, 50.0f },
+              { "exp", "Decay Shape", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Lin", "Exp" } },
+              { "filtOn", "Filter Env", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "filtType", "Filter Type", "", 0.0f, 3.0f, 0.0f, 1.5f, { "LP 6dB", "LP 12dB", "BP", "HP" } },
+              { "filtRes", "Resonance", pc, 0.0f, 100.0f, 0.0f, 50.0f },
+              { "initFreq", "Init Freq", hz, 50.0f, 20000.0f, 16000.0f, 6000.0f },
+              { "filtAttack", "Filter Attack", ms, 0.0f, 2000.0f, 50.0f, 100.0f },
+              { "breakFreq", "Break Level", hz, 50.0f, 20000.0f, 8000.0f, 4000.0f },
+              { "filtDecay", "Filter Decay", s, 0.05f, 20.0f, 2.0f, 2.0f },
+              { "endFreq", "End Freq", hz, 50.0f, 20000.0f, 1500.0f, 2000.0f },
+              { "densOn", "Density Env", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "initDensity", "Init Density", pc, 0.0f, 100.0f, 30.0f, 50.0f },
+              { "ramp", "Ramp Time", ms, 0.0f, 2000.0f, 200.0f, 200.0f },
+              { "endDensity", "End Density", pc, 0.0f, 100.0f, 100.0f, 50.0f },
+              { "reflShape", "Reflection Shape", pc, 0.0f, 100.0f, 50.0f, 50.0f },
+              { "eqOn", "Output EQ", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "eqHpOn", "EQ Low Cut", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "eqHpFreq", "Low Cut Freq", hz, 20.0f, 2000.0f, 80.0f, 200.0f },
+              { "eqLsOn", "EQ Low Shelf", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "eqLsFreq", "Low Shelf Freq", hz, 20.0f, 2000.0f, 200.0f, 200.0f },
+              { "eqLsGain", "Low Shelf Gain", dB, -24.0f, 24.0f, 0.0f, 0.0f },
+              { "eqP1On", "EQ Low Mid", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "eqP1Freq", "Low Mid Freq", hz, 50.0f, 10000.0f, 500.0f, 800.0f },
+              { "eqP1Gain", "Low Mid Gain", dB, -24.0f, 24.0f, 0.0f, 0.0f },
+              { "eqP1Q", "Low Mid Q", "", 0.1f, 10.0f, 1.0f, 1.0f },
+              { "eqP2On", "EQ High Mid", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "eqP2Freq", "High Mid Freq", hz, 200.0f, 18000.0f, 3000.0f, 3000.0f },
+              { "eqP2Gain", "High Mid Gain", dB, -24.0f, 24.0f, 0.0f, 0.0f },
+              { "eqP2Q", "High Mid Q", "", 0.1f, 10.0f, 1.0f, 1.0f },
+              { "eqHsOn", "EQ High Shelf", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "eqHsFreq", "High Shelf Freq", hz, 1000.0f, 20000.0f, 8000.0f, 6000.0f },
+              { "eqHsGain", "High Shelf Gain", dB, -24.0f, 24.0f, 0.0f, 0.0f },
+              { "eqLpOn", "EQ High Cut", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "eqLpFreq", "High Cut Freq", hz, 1000.0f, 20000.0f, 12000.0f, 6000.0f },
+              { "input", "Input", "", 0.0f, 2.0f, 0.0f, 1.0f, { "Stereo", "Mono", "XStereo" } },
+              { "direct", "Direct", dB, -60.0f, 6.0f, 0.0f, -6.0f },
+              { "xover", "X-Over", hz, 0.0f, 1000.0f, 0.0f, 200.0f },
+              { "view", "View", "", 0.0f, 3.0f, 0.0f, 1.5f, { "Volume Env", "Filter Env", "Density Env", "Output EQ" } } }, "Reverb" },
           make<ConvolutionSpace> },
 
         { { "platinumVerb", "PlatinumVerb", {

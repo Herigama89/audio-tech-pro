@@ -90,6 +90,10 @@ public:
         playing.store (isPlaying, std::memory_order_relaxed);
     }
 
+    /** A file the effect works from (Space Designer's impulse response), from the insert's "irFile" property.
+        Message thread; empty for none. */
+    virtual void setAttachedFile (const juce::String& /*path*/) {}
+
     /** What its window's meter shows (a compressor's gain reduction in dB, a pitch correction's cents). */
     virtual float displayValue() const noexcept { return 0.0f; }
 

@@ -273,6 +273,40 @@ void EffectPanel::buildDesign (const EffectInfo& info)
 
     for (const auto& c : design->controls)
     {
+        if (c.kind == effectdesign::Kind::fileButton)
+        {
+            // A file for the insert (not a parameter): the button shows its name, a click picks another
+            auto* b = new juce::TextButton();
+            extras.add (b);
+            b->setWantsKeyboardFocus (false);
+            b->onClick = [this, id = c.id]
+            {
+                fileChooser = std::make_unique<juce::FileChooser> ("Choose an impulse response", juce::File(), "*.wav;*.aif;*.aiff;*.flac;*.caf");
+                fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                          [this, id] (const juce::FileChooser& chooser)
+                                          {
+                                              const auto file = chooser.getResult();
+                                              if (file.existsAsFile())
+                                              {
+                                                  undoManager.beginNewTransaction ("Load Impulse Response");
+                                                  insert.setProperty (juce::Identifier (id), file.getFullPathName(), &undoManager);
+                                                  // (a sampled IR was chosen: use it)
+                                                  insert.setProperty ("mode", 0.0f, &undoManager);
+                                              }
+                                          });
+            };
+            addAndMakeVisible (b);
+            refreshers.push_back ([this, b, id = c.id]
+            {
+                const auto path = insert.getProperty (juce::Identifier (id)).toString();
+                b->setButtonText (path.isEmpty() ? juce::String ("Load IR...") : juce::File (path).getFileNameWithoutExtension());
+            });
+            Placed placed;
+            placed.control = c;
+            placed.component = b;
+            placedControls.push_back (placed);
+            continue;
+        }
         const auto* p = paramOf (c.id);
         if (p == nullptr)
             continue;
@@ -360,6 +394,8 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                 placed.component = row;
                 break;
             }
+            case effectdesign::Kind::fileButton:
+                break;
             case effectdesign::Kind::toggle:
             case effectdesign::Kind::hotspot:
             {

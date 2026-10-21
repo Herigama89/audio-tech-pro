@@ -25,7 +25,8 @@ namespace riff::effectdesign
         segmented,   // a row of buttons, one per setting
         toggle,      // one button: off or on
         dropdown,    // a menu of the settings
-        hotspot      // an invisible on/off over something the face draws (Channel EQ's band icons)
+        hotspot,     // an invisible on/off over something the face draws (Channel EQ's band icons)
+        fileButton   // picks a file for the insert property named by the id (Space Designer's impulse response)
     };
 
     /** A point on a curve display that can be dragged: frequency across, gain up and down, the wheel for Q. */

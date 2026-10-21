@@ -1078,6 +1078,127 @@ namespace
         title (g, R (b.getWidth() - 330, 458, 300, 22), "OUTPUT", ink, 15.0f, juce::Justification::centredRight);
     }
 
+    //==============================================================================
+    // Space Designer (as Logic's): the impulse response with its envelopes over it, a parameter bar, the globals
+    //==============================================================================
+    void paintSpaceDesigner (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
+    {
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3a3f47), 0.0f, 0.0f, juce::Colour (0xff23262b), 0.0f, (float) b.getBottom(), false));
+        g.fillRect (b);
+        const RF screen (20.0f, 56.0f, (float) b.getWidth() - 40.0f, 250.0f);
+        g.setColour (juce::Colour (0xff0d1013));
+        g.fillRoundedRectangle (screen, 6.0f);
+        const auto length = std::max (0.1f, valueOf (info, v, "length", 2.5f));
+        const auto pre = valueOf (info, v, "predelay", 10.0f) * 0.001f;
+        const auto total = pre + length;
+        const auto xOf = [screen, total] (float t) { return screen.getX() + 10.0f + (screen.getWidth() - 20.0f) * t / total; };
+        const auto mid = screen.getCentreY(), half = screen.getHeight() * 0.42f;
+        // Time grid in seconds
+        g.setFont (juce::FontOptions (11.0f));
+        for (float t = 0.0f; t <= total; t += total > 6.0f ? 1.0f : 0.5f)
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.06f));
+            g.fillRect (xOf (t), screen.getY(), 1.0f, screen.getHeight());
+            g.setColour (juce::Colours::white.withAlpha (0.35f));
+            g.drawText (juce::String (t, 1) + "s", RF (xOf (t) + 2.0f, screen.getBottom() - 16.0f, 40.0f, 14.0f), juce::Justification::left, false);
+        }
+        // The impulse response's shape (the synthesized one, or a stand-in for a sampled one)
+        const auto volOn = valueOf (info, v, "volOn") > 0.5f;
+        const auto attack = valueOf (info, v, "attack") * 0.001f, decay = std::max (0.05f, valueOf (info, v, "decay", 2.0f));
+        const auto init = valueOf (info, v, "initLevel", 100.0f) * 0.01f, end = valueOf (info, v, "endLevel") * 0.01f;
+        const auto volumeAt = [&] (float t)
+        {
+            if (! volOn) return 1.0f;
+            if (t < attack) return init + (1.0f - init) * t / std::max (attack, 1.0e-4f);
+            const auto u = std::min (1.0f, (t - attack) / decay);
+            return 1.0f + (end - 1.0f) * u;
+        };
+        juce::Random random (9);
+        juce::Path wave;
+        for (int x = 0; x < (int) screen.getWidth() - 20; ++x)
+        {
+            const auto t = total * (float) x / (screen.getWidth() - 20.0f);
+            if (t < pre) continue;
+            const auto e = std::exp (-6.9f * (t - pre) / length) * volumeAt (t - pre);
+            const auto h = e * half * (0.4f + 0.6f * random.nextFloat());
+            wave.addRectangle (screen.getX() + 10.0f + (float) x, mid - h, 1.0f, h * 2.0f);
+        }
+        g.setColour (juce::Colour (0xff6f8fb4).withAlpha (0.8f));
+        g.fillPath (wave);
+        // The volume envelope (orange) and the filter envelope (blue)
+        if (volOn)
+        {
+            juce::Path env;
+            for (int x = 0; x <= 200; ++x)
+            {
+                const auto t = length * (float) x / 200.0f;
+                const auto y = mid - half * volumeAt (t);
+                if (x == 0) env.startNewSubPath (xOf (pre + t), y); else env.lineTo (xOf (pre + t), y);
+            }
+            g.setColour (juce::Colour (0xffff9a3c));
+            g.strokePath (env, juce::PathStrokeType (2.0f));
+        }
+        if (valueOf (info, v, "filtOn") > 0.5f)
+        {
+            const auto fi = valueOf (info, v, "initFreq", 16000.0f), fb = valueOf (info, v, "breakFreq", 8000.0f), fe = valueOf (info, v, "endFreq", 1500.0f);
+            const auto fa = valueOf (info, v, "filtAttack") * 0.001f, fd = std::max (0.05f, valueOf (info, v, "filtDecay", 2.0f));
+            const auto yOfF = [&] (float f) { return mid + half - (float) (std::log (f / 50.0f) / std::log (400.0f)) * half * 2.0f; };
+            juce::Path env;
+            env.startNewSubPath (xOf (pre), yOfF (fi));
+            env.lineTo (xOf (pre + fa), yOfF (fb));
+            env.lineTo (xOf (pre + fa + fd), yOfF (fe));
+            env.lineTo (xOf (total), yOfF (fe));
+            g.setColour (juce::Colour (0xff4fb7ff));
+            g.strokePath (env, juce::PathStrokeType (2.0f));
+        }
+        // The parameter bar and the globals panel
+        // The Output EQ page: its curve over the impulse response (frequency across, +-24 dB)
+        if (juce::roundToInt (valueOf (info, v, "view")) == 3)
+        {
+            const RF plot (30.0f, 66.0f, 1040.0f, 230.0f);
+            const auto rate = 48000.0;
+            const auto on = [&] (const char* id) { return valueOf (info, v, "eqOn") > 0.5f && valueOf (info, v, id, 1.0f) > 0.5f; };
+            Biquad bands[6];
+            if (on ("eqHpOn")) bands[0].setHighPass (rate, valueOf (info, v, "eqHpFreq", 80.0f), 0.707); else bands[0].setIdentity();
+            if (on ("eqLsOn")) bands[1].setLowShelf (rate, valueOf (info, v, "eqLsFreq", 200.0f), valueOf (info, v, "eqLsGain")); else bands[1].setIdentity();
+            if (on ("eqP1On")) bands[2].setPeak (rate, valueOf (info, v, "eqP1Freq", 500.0f), valueOf (info, v, "eqP1Gain"), valueOf (info, v, "eqP1Q", 1.0f)); else bands[2].setIdentity();
+            if (on ("eqP2On")) bands[3].setPeak (rate, valueOf (info, v, "eqP2Freq", 3000.0f), valueOf (info, v, "eqP2Gain"), valueOf (info, v, "eqP2Q", 1.0f)); else bands[3].setIdentity();
+            if (on ("eqHsOn")) bands[4].setHighShelf (rate, valueOf (info, v, "eqHsFreq", 8000.0f), valueOf (info, v, "eqHsGain")); else bands[4].setIdentity();
+            if (on ("eqLpOn")) bands[5].setLowPass (rate, valueOf (info, v, "eqLpFreq", 12000.0f), 0.707); else bands[5].setIdentity();
+            g.setColour (juce::Colour (0xff0d1013).withAlpha (0.75f));
+            g.fillRect (plot);
+            juce::Path curve;
+            for (int x = 0; x <= (int) plot.getWidth(); x += 2)
+            {
+                const auto f = 20.0 * std::pow (1000.0, x / (double) plot.getWidth());
+                double db = 0.0;
+                for (auto& q : bands) db += q.magnitudeDb (f, rate);
+                const auto y = juce::jlimit (plot.getY(), plot.getBottom(), plot.getCentreY() - (float) (db / 24.0) * plot.getHeight() * 0.5f);
+                if (x == 0) curve.startNewSubPath (plot.getX(), y); else curve.lineTo (plot.getX() + (float) x, y);
+            }
+            g.setColour (juce::Colours::white.withAlpha (0.12f));
+            g.fillRect (plot.getX(), plot.getCentreY(), plot.getWidth(), 1.0f);
+            g.setColour (juce::Colour (0xffe4eef8));
+            g.strokePath (curve, juce::PathStrokeType (1.8f));
+        }
+        g.setColour (juce::Colour (0xff1b1e22));
+        g.fillRect (20, 314, b.getWidth() - 40, 76);
+        g.setColour (juce::Colours::white.withAlpha (0.08f));
+        g.fillRect (20, 398, b.getWidth() - 40, 1);
+        // The bar's field names, for the page showing
+        const auto page = juce::roundToInt (valueOf (info, v, "view"));
+        const auto names = [&] (std::initializer_list<std::pair<int, const char*>> list)
+        {
+            for (const auto& [x, text] : list)
+                title (g, R (x, 318, 110, 18), text, juce::Colours::white.withAlpha (0.55f), 11.5f);
+        };
+        if (page == 0) names ({ { 105, "Init Level" }, { 210, "Attack" }, { 315, "Decay" }, { 420, "End Level" } });
+        if (page == 1) names ({ { 95, "Res" }, { 178, "Init Freq" }, { 263, "Attack" }, { 348, "Break Level" }, { 430, "Decay" }, { 503, "End Freq" } });
+        if (page == 2) names ({ { 110, "Init Density" }, { 225, "Ramp Time" }, { 340, "End Density" }, { 455, "Refl. Shape" } });
+        const auto sampledMode = valueOf (info, v, "mode", 1.0f) < 0.5f;
+        title (g, R (690, 16, 200, 26), sampledMode ? "SAMPLED IR" : "SYNTHESIZED IR", juce::Colours::white.withAlpha (0.4f), 12.0f, juce::Justification::centredLeft);
+    }
+
     void addHardwareDesigns (std::map<juce::String, Design>& d)
     {
         const auto knob = Kind::knob;
@@ -1603,6 +1724,79 @@ namespace
             c.controls.push_back ({ "width", Kind::knob, R (950, 500, 100, 110), "Stereo Width" });
             c.controls.push_back ({ "level", Kind::knob, R (1080, 500, 100, 110), "Level" });
             d["formantBank"] = c;
+        }
+        {
+            // Space Designer
+            Design c;
+            c.width = 1100; c.height = 660;
+            c.knobs = KnobStyle::dark;
+            c.label = juce::Colours::white.withAlpha (0.65f); c.value = juce::Colour (0xffff9a3c); c.accent = juce::Colour (0xffff9a3c); c.track = juce::Colour (0xff15181c);
+            c.paint = paintSpaceDesigner;
+            c.pageParam = "view";
+            const auto orange = juce::Colour (0xffff9a3c), blue = juce::Colour (0xff4fb7ff), grey = juce::Colour (0xffc9ced6);
+            c.controls = {
+                { "mode", Kind::segmented, R (20, 14, 300, 30), "-" },
+                { "irFile", Kind::fileButton, R (340, 14, 330, 30), "-" },
+                { "view", Kind::segmented, R (600, 320, 480, 26), "-" },
+                // Volume envelope bar
+                { "volOn", Kind::toggle, R (30, 322, 70, 24), "=ON", {}, 1 },
+                { "initLevel", Kind::field, R (110, 340, 100, 30), "-", orange, 1 },
+                { "attack", Kind::field, R (215, 340, 100, 30), "-", orange, 1 },
+                { "decay", Kind::field, R (320, 340, 100, 30), "-", orange, 1 },
+                { "endLevel", Kind::field, R (425, 340, 100, 30), "-", orange, 1 },
+                { "exp", Kind::segmented, R (530, 344, 60, 24), "-", {}, 1 },
+                // Filter envelope bar
+                { "filtOn", Kind::toggle, R (30, 322, 70, 24), "=ON", {}, 2 },
+                { "filtType", Kind::dropdown, R (30, 350, 80, 24), "-", {}, 2 },
+                { "filtRes", Kind::field, R (115, 340, 70, 30), "-", blue, 2 },
+                { "initFreq", Kind::field, R (190, 340, 85, 30), "-", blue, 2 },
+                { "filtAttack", Kind::field, R (280, 340, 75, 30), "-", blue, 2 },
+                { "breakFreq", Kind::field, R (360, 340, 85, 30), "-", blue, 2 },
+                { "filtDecay", Kind::field, R (450, 340, 70, 30), "-", blue, 2 },
+                { "endFreq", Kind::field, R (520, 340, 75, 30), "-", blue, 2 },
+                // Density envelope bar
+                { "densOn", Kind::toggle, R (30, 322, 70, 24), "=ON", {}, 3 },
+                { "initDensity", Kind::field, R (110, 340, 110, 30), "-", grey, 3 },
+                { "ramp", Kind::field, R (225, 340, 110, 30), "-", grey, 3 },
+                { "endDensity", Kind::field, R (340, 340, 110, 30), "-", grey, 3 },
+                { "reflShape", Kind::field, R (455, 340, 110, 30), "-", grey, 3 },
+                // The globals
+                { "quality", Kind::segmented, R (30, 430, 260, 28), "Quality" },
+                { "input", Kind::segmented, R (310, 430, 240, 28), "Input" },
+                { "reverse", Kind::toggle, R (570, 430, 100, 28), "=REVERSE" },
+                { "size", Kind::knob, R (20, 490, 100, 150), "Size" },
+                { "length", Kind::knob, R (125, 490, 100, 150), "Length" },
+                { "predelay", Kind::knob, R (230, 490, 100, 150), "Pre-Delay" },
+                { "early", Kind::knob, R (335, 490, 100, 150), "Early" },
+                { "width", Kind::knob, R (440, 490, 100, 150), "Spread" },
+                { "lowCut", Kind::knob, R (545, 490, 100, 150), "Low Cut" },
+                { "xover", Kind::knob, R (650, 490, 100, 150), "X-Over" },
+                { "direct", Kind::fader, R (900, 420, 60, 220), "Direct" },
+                { "mix", Kind::fader, R (990, 420, 60, 220), "Reverb" },
+                { "eqOn", Kind::toggle, R (690, 430, 100, 28), "=OUTPUT EQ" },
+            };
+            // The output EQ's bands in the bar on its page
+            const std::vector<std::vector<const char*>> eqBands {
+                { "eqHpOn", "eqHpFreq" }, { "eqLsOn", "eqLsFreq", "eqLsGain" }, { "eqP1On", "eqP1Freq", "eqP1Gain", "eqP1Q" },
+                { "eqP2On", "eqP2Freq", "eqP2Gain", "eqP2Q" }, { "eqHsOn", "eqHsFreq", "eqHsGain" }, { "eqLpOn", "eqLpFreq" } };
+            for (int b = 0; b < 6; ++b)
+            {
+                const auto x = 30 + b * 95;
+                c.controls.push_back ({ eqBands[(size_t) b][0], Kind::toggle, R (x, 318, 40, 20), "=" + juce::String (b + 1), {}, 4 });
+                for (size_t row = 1; row < eqBands[(size_t) b].size(); ++row)
+                    c.controls.push_back ({ eqBands[(size_t) b][row], Kind::field, R (x - 10, 338 + (int) (row - 1) * 18, 90, 18), "-", reverbEqColours[b], 4 });
+            }
+            c.graphs.push_back ({ R (30, 66, 1040, 230), { { "eqHpFreq", {}, {}, "eqHpOn" }, { "eqLsFreq", "eqLsGain", {}, "eqLsOn" },
+                                                           { "eqP1Freq", "eqP1Gain", "eqP1Q", "eqP1On" }, { "eqP2Freq", "eqP2Gain", "eqP2Q", "eqP2On" },
+                                                           { "eqHsFreq", "eqHsGain", {}, "eqHsOn" }, { "eqLpFreq", {}, {}, "eqLpOn" } }, 4 });
+            c.enabled = [] (const juce::String& id, const EffectInfo& fx, const float* v)
+            {
+                const auto sampled = valueOf (fx, v, "mode", 1.0f) < 0.5f;
+                if (id == "irFile") return sampled;
+                if (id == "early" || id == "densOn" || id == "initDensity" || id == "ramp" || id == "endDensity" || id == "reflShape") return ! sampled;
+                return true;
+            };
+            d["convSpace"] = c;
         }
         addHardwareDesigns (d);
         return d;
