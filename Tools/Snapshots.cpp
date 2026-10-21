@@ -327,7 +327,7 @@ public:
                 eq.setProperty ("p2Gain", 5.0f, nullptr);
                 eq.setProperty ("p2Q", 1.6f, nullptr);
                 eq.setProperty ("hsGain", 3.0f, nullptr);
-                for (const auto* type : { "channelEq", "studioComp", "stereoDelay", "tubeEq", "studioReverb", "phaser", "overdrive", "autoFilter", "noiseGate", "stepFilter", "guitarAmp", "pitchCorrection", "vocoder" })
+                for (const auto* type : { "channelEq", "studioComp", "stereoDelay", "tubeEq", "studioReverb", "phaser", "overdrive", "autoFilter", "noiseGate", "stepFilter", "guitarAmp", "pitchCorrection", "vocoder", "delayDesigner", "linearEq", "subBass" })
                 {
                     auto insert = juce::String (type) == "channelEq" ? eq : model::addBuiltinInsert (chain, type, -1, nullptr);
                     EffectPanel panel (insert, main.undoManager);

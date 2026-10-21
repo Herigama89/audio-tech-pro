@@ -27,6 +27,7 @@ std::vector<Section> sectionsFor (const EffectInfo& info)
     {
         static const std::map<juce::String, std::vector<juce::String>> bandNames {
             { "channelEq", { "Low Cut", "Low Shelf", "Low Mid", "Mid", "High Mid", "High Shelf", "High Cut", "Output" } },
+            { "linearEq", { "Low Cut", "Low Shelf", "Low Mid", "Mid", "High Mid", "High Shelf", "High Cut", "Output" } },
             { "consoleEq", { "Filter", "Low", "Mid", "High", "Output" } },
             { "tubeEq", { "Low", "High Boost", "High Atten", "Output" } } };
         std::vector<Section> s;
@@ -68,6 +69,9 @@ std::vector<Section> sectionsFor (const EffectInfo& info)
         { "autoFilter",   { { "Filter", 3 }, { "LFO", 4 }, { "Envelope", 3 }, { "Output", 3 } } },
         { "autoWah",      { { "Wah", 4 }, { "Envelope", 2 }, { "Output", 2 } } },
         { "stepFilter",   { { "Steps", 8 }, { "Sequence", 5 }, { "Output", 1 } } },
+        { "delayDesigner", { { "Taps", 12 }, { "Shape", 3 }, { "Output", 1 } } },
+        { "subBass",      { { "Bass", 1 }, { "Sub", 2 }, { "Mix", 1 }, { "Shape", 1 } } },
+        { "spreader",     { { "Spread", 3 }, { "Output", 2 } } },
         { "guitarAmp",    { { "Amp", 1 }, { "Preamp", 1 }, { "Tone", 4 }, { "Power", 1 }, { "Cabinet", 2 }, { "Output", 2 } } },
         { "bassAmp",      { { "Preamp", 1 }, { "Tone", 4 }, { "Power", 1 }, { "Cabinet", 2 }, { "DI", 2 }, { "Output", 2 } } },
         { "pitchCorrection", { { "Scale", 2 }, { "Correction", 3 } } },
@@ -256,6 +260,34 @@ void drawDisplay (juce::Graphics& g, juce::Rectangle<float> area, const EffectIn
         g.drawDashedLine (juce::Line<float> (xOf (threshold), a.getY(), xOf (threshold), a.getBottom()), dashes, 2, 1.0f);
         stroke (g, p, accent, a, false);
         caption (g, area, isLimiter ? "Ceiling " + juce::String (threshold, 1) + " dB" : "Threshold " + juce::String (threshold, 1) + " dB");
+        return;
+    }
+
+    if (info.type == "delayDesigner")
+    {
+        // Six taps over two seconds: height their level, above or below by their side
+        grid (g, a, 8, 2);
+        const auto spread = valueOf (info, v, "spread", 70.0f) * 0.01f;
+        const auto mid = a.getCentreY();
+        for (int t = 0; t < 6; ++t)
+        {
+            const auto n = juce::String (t + 1);
+            const auto time = valueOf (info, v, ("time" + n).toRawUTF8(), 250.0f) * 0.001f;
+            const auto db = valueOf (info, v, ("level" + n).toRawUTF8(), -12.0f);
+            if (db <= -59.0f || time > 2.0f)
+                continue;
+            const auto x = a.getX() + time / 2.0f * a.getWidth();
+            const auto h = juce::jlimit (0.05f, 1.0f, (db + 60.0f) / 60.0f) * a.getHeight() * 0.45f;
+            const auto side = t % 2 == 0 ? -1.0f : 1.0f;
+            g.setColour (accent);
+            if (side * spread < 0.0f || spread < 0.05f)
+                g.fillRoundedRectangle (x - 3.0f, mid - h, 6.0f, h, 3.0f);
+            if (side * spread > 0.0f || spread < 0.05f)
+                g.fillRoundedRectangle (x - 3.0f, mid, 6.0f, h, 3.0f);
+            g.setColour (juce::Colours::white.withAlpha (0.6f));
+            g.setFont (juce::FontOptions (10.0f));
+            g.drawText (n, juce::Rectangle<float> (x - 8.0f, side < 0.0f ? mid - h - 14.0f : mid + h + 2.0f, 16.0f, 12.0f), juce::Justification::centred, false);
+        }
         return;
     }
 

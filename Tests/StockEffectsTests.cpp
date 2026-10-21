@@ -385,3 +385,29 @@ TEST_CASE ("Utility and specialized: gain, oscillator, denoiser, vocoder", "[sto
     CHECK (peakOf (vl, 12000) > 0.01f);
 }
 
+
+TEST_CASE ("Delay Designer's taps and Sub Bass's octave", "[stockfx]")
+{
+    auto dd = make ("delayDesigner");
+    set (*dd, "mix", 100.0f);
+    set (*dd, "feedback", 0.0f);
+    set (*dd, "spread", 0.0f);
+    for (int t = 2; t <= 6; ++t)
+        set (*dd, "level" + juce::String (t), -60.0f);
+    set (*dd, "time1", 200.0f);
+    set (*dd, "level1", 0.0f);
+    std::vector<float> l (24000, 0.0f), r (24000, 0.0f);
+    l[0] = r[0] = 1.0f;
+    const auto [ol, orr] = run (*dd, l, r);
+    size_t at = 0;
+    for (size_t i = 0; i < ol.size(); ++i)
+        if (std::abs (ol[i]) > std::abs (ol[at]))
+            at = i;
+    CHECK (std::abs ((int) at - 9600) <= 2);
+
+    auto sub = make ("subBass");
+    set (*sub, "dry", -60.0f);
+    set (*sub, "shape", 1.0f);
+    const auto [sl, sr] = run (*sub, sine (100.0, 1.0, 0.5f), sine (100.0, 1.0, 0.5f));
+    CHECK_THAT (frequencyOf (sl, 12000, 48000), Catch::Matchers::WithinAbs (50.0, 1.0));
+}
