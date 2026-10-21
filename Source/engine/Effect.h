@@ -40,6 +40,9 @@ public:
     /** True if it has a side-chain input to feed. */
     virtual bool acceptsSidechain() const { return false; }
 
+    /** Hands the block it just produced to anything watching it (audio thread): the window's analyzer. */
+    virtual void tapOutput (const float* /*left*/, const float* /*right*/, int /*numSamples*/) noexcept {}
+
     /** How many samples late this effect's output is (for delay compensation). */
     virtual int getLatencySamples() const { return 0; }
 

@@ -162,6 +162,41 @@ TEST_CASE ("Studio Compressor: every circuit turns a loud tone down; mix and aut
     CHECK_THAT (peakOf (pl, 12000), Catch::Matchers::WithinAbs (0.5, 0.01));
 }
 
+TEST_CASE ("Studio Compressor: circuits differ, the limiter holds its threshold, Listen plays the key", "[stockfx]")
+{
+    // The same settings sound different on each circuit (timing, detector, colour)
+    std::vector<float> peaks;
+    for (int model = 0; model < 7; ++model)
+    {
+        auto c = make ("studioComp");
+        set (*c, "model", (float) model);
+        set (*c, "threshold", -24.0f);
+        set (*c, "ratio", 5.0f);
+        const auto [l, r] = run (*c, sine (100.0, 0.5, 0.7f), sine (100.0, 0.5, 0.7f));
+        peaks.push_back (peakOf (l, 12000));
+    }
+    std::sort (peaks.begin(), peaks.end());
+    CHECK (peaks.back() - peaks.front() > 0.02f);
+
+    // The limiter: nothing over its threshold
+    auto lim = make ("studioComp");
+    set (*lim, "threshold", 0.0f);
+    set (*lim, "input", 12.0f);
+    set (*lim, "limiter", 1.0f);
+    set (*lim, "limThr", -6.0f);
+    const auto [ll, lr] = run (*lim, sine (200.0, 0.5, 0.9f), sine (200.0, 0.5, 0.9f));
+    CHECK (peakOf (ll) <= juce::Decibels::decibelsToGain (-6.0f) + 0.001f);
+
+    // Listen: the side chain filter's output (a high pass takes the low tone away)
+    auto listen = make ("studioComp");
+    set (*listen, "scFilter", 1.0f);
+    set (*listen, "scMode", 2.0f);
+    set (*listen, "scHpf", 2000.0f);
+    set (*listen, "listen", 1.0f);
+    const auto [nl, nr] = run (*listen, sine (60.0, 0.5, 0.5f), sine (60.0, 0.5, 0.5f));
+    CHECK (peakOf (nl, 12000) < 0.01f);
+}
+
 TEST_CASE ("Brickwall Limiter never goes over its ceiling, and reports its latency", "[stockfx]")
 {
     auto lim = make ("brickwall");

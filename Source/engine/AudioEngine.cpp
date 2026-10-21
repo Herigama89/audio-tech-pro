@@ -994,7 +994,10 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
 
             // The master chain (e.g. a limiter) on the sum of every track; the click comes after it.
             for (const auto& effect : graph->masterInserts)
+            {
                 effect->process (mixL, mixR, n);
+                effect->tapOutput (mixL, mixR, n);
+            }
 
             // Then the Master Bus Compressor, before the master fader: the user's
             // own plugin in console mode, or the built-in one.
@@ -1191,6 +1194,7 @@ void AudioEngine::printInputs (const PlaybackGraph& graph, const float* const* i
         {
             effect->setPosition (chunkPosition, chunkPlaying, chunkBpm);
             effect->process (l, r, n);
+            effect->tapOutput (l, r, n);
         }
         slotInputReady[(size_t) track.slot] = true;
     }
@@ -1553,6 +1557,7 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         {
             effect->setPosition (chunkPosition, chunkPlaying, chunkBpm);
             effect->process (tL, tR, n);
+            effect->tapOutput (tL, tR, n);
         }
 
     if (track.console.isActive())

@@ -93,7 +93,32 @@ public:
     /** What its window's meter shows (a compressor's gain reduction in dB, a pitch correction's cents). */
     virtual float displayValue() const noexcept { return 0.0f; }
 
-    static constexpr int maxParams = 16;
+    static constexpr int maxParams = 32;
+
+    //==============================================================================
+    // The analyzer's feed: while a window shows the spectrum, the last few thousand output samples (mono)
+    static constexpr int tapSize = 4096;
+    void setAnalyzerOn (bool on) noexcept   { tapOn.store (on, std::memory_order_relaxed); }
+    void tapOutput (const float* left, const float* right, int numSamples) noexcept override
+    {
+        if (! tapOn.load (std::memory_order_relaxed))
+            return;
+        auto at = tapPos.load (std::memory_order_relaxed);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            tap[(size_t) at].store (0.5f * (left[i] + (right != nullptr ? right[i] : left[i])), std::memory_order_relaxed);
+            at = (at + 1) & (tapSize - 1);
+        }
+        tapPos.store (at, std::memory_order_release);
+    }
+    /** The latest count samples, oldest first (message thread). */
+    void readTap (float* dest, int count) const noexcept
+    {
+        auto at = (tapPos.load (std::memory_order_acquire) - count) & (tapSize - 1);
+        for (int i = 0; i < count; ++i, at = (at + 1) & (tapSize - 1))
+            dest[i] = tap[(size_t) at].load (std::memory_order_relaxed);
+    }
+    double getSampleRate() const noexcept   { return sampleRate; }
 
 protected:
     const EffectInfo& info;
@@ -101,6 +126,9 @@ protected:
     double sampleRate = 44100.0;
     std::atomic<double> bpm { 120.0 };   // the song's tempo, for delays in time with it
     std::atomic<bool> playing { false };
+    std::atomic<bool> tapOn { false };
+    std::array<std::atomic<float>, tapSize> tap {};
+    std::atomic<int> tapPos { 0 };
 
     float value (int index) const noexcept { return values[(size_t) index].load (std::memory_order_relaxed); }
     int choice (int index) const noexcept  { return juce::roundToInt (value (index)); }

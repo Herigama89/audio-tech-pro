@@ -48,9 +48,26 @@ namespace riff::effectdesign
         bool showScale = false;                 // the knob's lowest and highest values under it (as Logic's newer plug-ins)
         bool lcdValues = false;                 // values in small dark windows under the knobs (older hardware-style faces)
         bool live = false;                      // a meter that follows the sound (gain reduction, correction)
+        bool analyzer = false;                  // a live spectrum of the output behind the curve (as Logic's EQs)
+        /** Whether a control applies with the current settings (e.g. a compressor circuit without a Knee); greyed out if not. */
+        std::function<bool (const juce::String& id, const EffectInfo&, const float* values)> enabled;
         /** Draws the face behind the controls: panels, titles, screens, meters. */
         std::function<void (juce::Graphics&, juce::Rectangle<int>, const EffectInfo&, const float* values, float live)> paint;
     };
+
+    /** The output's spectrum for the window being painted: dB at log-spaced points from 20 Hz to 20 kHz. */
+    struct Spectrum
+    {
+        static constexpr int points = 240;
+        std::array<float, points> db {};
+        bool valid = false;
+        static double frequencyOf (int point) noexcept { return 20.0 * std::pow (1000.0, (double) point / (points - 1)); }
+    };
+    /** Set by the window while its face paints (nullptr otherwise). */
+    const Spectrum* paintingSpectrum() noexcept;
+    void setPaintingSpectrum (const Spectrum*) noexcept;
+    /** Draws the spectrum into a screen (0 dB at the top, -84 dB at the bottom), x from a frequency. */
+    void drawSpectrum (juce::Graphics&, juce::Rectangle<float> screen, const std::function<float (double)>& xOf, juce::Colour colour);
 
     /** The hand-made face for an effect, or nullptr (it gets the standard face). */
     const Design* designFor (const juce::String& type);

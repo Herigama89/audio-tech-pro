@@ -187,6 +187,9 @@ public:
     /** Where a design's meter reads from (gain reduction, pitch correction): the running effect. */
     void setLiveValue (std::function<float()> source);
 
+    /** Where the analyzer reads the output from: fills the latest samples and gives the sample rate (0: none). */
+    void setAnalyzerSource (std::function<double (float* dest, int count)> source);
+
 private:
     struct Knob
     {
@@ -213,6 +216,11 @@ private:
     std::vector<std::function<void()>> refreshers;
     std::function<float()> liveValue;
     float liveShown = 0.0f;
+    std::function<double (float*, int)> analyzerSource;
+    effectdesign::Spectrum spectrum;
+    std::unique_ptr<juce::dsp::FFT> fft;
+    std::vector<float> fftData, window;
+    void updateSpectrum();
 
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { refresh(); }
     void refresh();

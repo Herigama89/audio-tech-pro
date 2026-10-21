@@ -39,22 +39,39 @@ namespace
     //==============================================================================
     // Studio Compressor (as Logic's Compressor)
     //==============================================================================
+    /** Each circuit's own panel and meter (the window changes with the circuit, as Logic's does). */
+    struct CompressorLook { juce::Colour top, bottom, meterFace, meterInk, text; const char* badge; };
+    CompressorLook compressorLook (int circuit)
+    {
+        switch (circuit)
+        {
+            case 0:  return { juce::Colour (0xff7d838b), juce::Colour (0xff535960), juce::Colour (0xffe3e5e6), juce::Colour (0xff1c1c1c), juce::Colours::white, "PLATINUM DIGITAL" };
+            case 2:  return { juce::Colour (0xff4b4f55), juce::Colour (0xff2b2e32), juce::Colour (0xffdcd5c3), juce::Colour (0xff1c1c1c), juce::Colour (0xffe6e6e6), "STUDIO FET" };
+            case 3:  return { juce::Colour (0xff2a2c2f), juce::Colour (0xff141517), juce::Colour (0xff121314), juce::Colour (0xffe9e9e9), juce::Colour (0xffd8d8d8), "CLASSIC VCA" };
+            case 4:  return { juce::Colour (0xff5d636a), juce::Colour (0xff3a3f45), juce::Colour (0xffece7d6), juce::Colour (0xff1c1c1c), juce::Colours::white, "VINTAGE VCA" };
+            case 5:  return { juce::Colour (0xff222325), juce::Colour (0xff0e0e0f), juce::Colour (0xfff2efe2), juce::Colour (0xff1a1a1a), juce::Colour (0xffcfd2d6), "VINTAGE FET" };
+            case 6:  return { juce::Colour (0xff9c9a92), juce::Colour (0xff75736c), juce::Colour (0xffeadfc2), juce::Colour (0xff1e1c18), juce::Colour (0xff1f1f1f), "VINTAGE OPTO" };
+            default: return { juce::Colour (0xff35537c), juce::Colour (0xff1f3352), juce::Colour (0xffd7dad8), juce::Colour (0xff222222), juce::Colours::white, "STUDIO VCA" };
+        }
+    }
+
     void paintCompressor (juce::Graphics& g, R bounds, const EffectInfo& info, const float* v, float gr)
     {
-        brushed (g, bounds, juce::Colour (0xff35537c), juce::Colour (0xff1f3352), 0.035f);
+        const auto circuit = juce::roundToInt (valueOf (info, v, "model", 1.0f));
+        const auto look = compressorLook (circuit);
+        brushed (g, bounds, look.top, look.bottom, 0.035f);
 
-        // The meter: a light face in a dark bezel, the needle showing the gain reduction
-        const RF bezel (110.0f, 78.0f, 540.0f, 206.0f);
-        g.setColour (juce::Colour (0xff101722));
+        // The meter: a face in a dark bezel, the needle showing the gain reduction
+        const RF bezel (130.0f, 78.0f, 540.0f, 206.0f);
+        g.setColour (juce::Colour (0xff101214));
         g.fillRect (bezel);
         g.setColour (juce::Colours::black);
         g.drawRect (bezel, 2.0f);
         auto face = bezel.reduced (16.0f, 12.0f);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xffd7dad8), face.getCentreX(), face.getY(), juce::Colour (0xffb5b9b8), face.getCentreX(), face.getBottom(), false));
+        g.setGradientFill (juce::ColourGradient (look.meterFace.brighter (0.05f), face.getCentreX(), face.getY(), look.meterFace.darker (0.12f), face.getCentreX(), face.getBottom(), false));
         g.fillRect (face);
         g.setColour (juce::Colours::black.withAlpha (0.25f));
         g.drawRect (face, 1.0f);
-        // The scale: an arc across the face, its pivot well below it (as a real VU)
         const juce::Point<float> pivot (face.getCentreX(), face.getBottom() + 250.0f);
         const auto arcRadius = 340.0f;
         const auto angleFor = [] (float db) { return juce::jmap (std::sqrt (juce::jlimit (0.0f, 50.0f, -db) / 50.0f), 0.0f, 1.0f, 0.6f, -0.6f); };
@@ -63,7 +80,7 @@ namespace
             g.reduceClipRegion (face.toNearestInt());
             juce::Path arc;
             arc.addCentredArc (pivot.x, pivot.y, arcRadius, arcRadius, 0.0f, angleFor (-50.0f), angleFor (0.0f), true);
-            g.setColour (juce::Colour (0xff222222));
+            g.setColour (look.meterInk);
             g.strokePath (arc, juce::PathStrokeType (1.8f));
             g.setFont (juce::FontOptions (22.0f));
             for (const auto db : { -50.0f, -40.0f, -30.0f, -25.0f, -20.0f, -15.0f, -10.0f, -8.0f, -6.0f, -5.0f, -4.0f, -3.0f, -2.0f, -1.0f, 0.0f })
@@ -77,38 +94,49 @@ namespace
                     g.drawText (db == 0.0f ? "0" : juce::String ((int) db), RF (at.x - 28.0f, at.y - 13.0f, 56.0f, 26.0f), juce::Justification::centred, false);
                 }
             }
-            // The needle: from below the face, up past the scale
             const auto needle = angleFor (-gr);
-            g.setColour (juce::Colour (0xff111111));
+            g.setColour (circuit == 3 ? juce::Colour (0xffff6a3a) : look.meterInk);
             g.drawLine ({ pivot.getPointOnCircumference (arcRadius - 150.0f, needle), pivot.getPointOnCircumference (arcRadius + 26.0f, needle) }, 2.6f);
         }
-        g.setColour (juce::Colour (0xff3a3d40));
+        g.setColour (look.meterInk.withAlpha (0.8f));
         g.setFont (juce::FontOptions (13.0f));
         g.drawText ("GAIN REDUCTION", face.removeFromBottom (26.0f), juce::Justification::centred, false);
+        title (g, R (130, 286, 540, 18), look.badge, look.text.withAlpha (0.55f), 12.0f);
 
-        // Labels, engraved white
-        const auto label = [&] (int x, int y, int w, const char* text) { title (g, R (x, y, w, 20), text, juce::Colours::white.withAlpha (0.92f), 15.5f); };
+        // Labels, engraved
+        const auto text = look.text.withAlpha (0.92f);
+        const auto label = [&] (int x, int y, int w, const char* t) { title (g, R (x, y, w, 20), t, text, 15.0f); };
+        label (15, 300, 130, "INPUT GAIN");
         label (155, 300, 130, "THRESHOLD");
         label (295, 300, 130, "RATIO");
         label (435, 300, 130, "MAKE UP");
-        label (568, 300, 100, "AUTO GAIN");
-        label (160, 440, 110, "KNEE");
-        label (300, 440, 110, "ATTACK");
-        label (440, 440, 110, "RELEASE");
-        label (690, 92, 110, "LIMITER");
-        label (800, 92, 110, "KEY FILTER");
-        label (690, 252, 110, "DISTORTION");
-        label (800, 252, 110, "OUTPUT GAIN");
-        label (745, 412, 110, "MIX");
-        // The limiter's lamp
+        label (570, 300, 170, "AUTO GAIN");
+        label (155, 440, 130, "KNEE");
+        label (295, 440, 130, "ATTACK");
+        label (435, 440, 130, "RELEASE");
+        label (690, 100, 120, "OUTPUT GAIN");
+        // The two side sections
+        g.setColour (juce::Colours::black.withAlpha (0.25f));
+        g.fillRect (830, 30, 1, bounds.getHeight() - 60);
+        g.fillRect (1070, 30, 1, bounds.getHeight() - 60);
+        title (g, R (835, 26, 230, 24), "SIDE CHAIN", text, 17.0f);
+        title (g, R (1075, 26, 220, 24), "OUTPUT", text, 17.0f);
+        label (845, 58, 200, "DETECTION");
+        label (850, 172, 95, "FILTER");
+        label (955, 172, 95, "LISTEN");
+        label (835, 300, 115, "FREQUENCY");
+        label (950, 300, 115, "Q");
+        label (892, 434, 115, "GAIN");
+        label (580, 462, 120, "AUTO RELEASE");
+        label (1080, 64, 100, "LIMITER");
+        label (1130, 138, 105, "THRESHOLD");
+        label (1080, 300, 100, "DISTORTION");
+        label (1185, 300, 100, "MIX");
         const auto limiterOn = valueOf (info, v, "limiter") > 0.5f;
         g.setColour (limiterOn ? juce::Colour (0xffff3b30) : juce::Colour (0xff5a1c1a));
-        g.fillEllipse (787.0f, 96.0f, 11.0f, 11.0f);
+        g.fillEllipse (1184.0f, 102.0f, 12.0f, 12.0f);
         g.setColour (juce::Colours::black.withAlpha (0.6f));
-        g.drawEllipse (787.0f, 96.0f, 11.0f, 11.0f, 1.0f);
-        // A line between the main and side controls
-        g.setColour (juce::Colours::black.withAlpha (0.25f));
-        g.fillRect (675, 78, 1, 450);
+        g.drawEllipse (1184.0f, 102.0f, 12.0f, 12.0f, 1.0f);
     }
 
     //==============================================================================
@@ -169,6 +197,8 @@ namespace
         }
         g.setColour (juce::Colours::white.withAlpha (0.5f));
         g.fillRect (screen.getX(), yOf (0.0), screen.getWidth(), 1.0f);
+        // The analyzer: the output's spectrum behind the curves
+        drawSpectrum (g, screen, xOf, juce::Colour (0xff7fb4e6));
 
         // Each band's own curve in its colour, then the whole curve over them
         juce::Graphics::ScopedSaveState clip (g);
@@ -561,8 +591,15 @@ namespace
                 g.setColour (juce::Colour (0xff0f1722));
                 g.fillRect (displayArea.expanded (10, 14).withRight (bounds.getRight()));
                 effectface::drawDisplay (g, displayArea.toFloat(), fx, v, modernGreen);
+                // (the analyzer over the display's screen, faint enough to read the curve through)
+                const auto screen = displayArea.toFloat().reduced (10.0f);
+                drawSpectrum (g, screen, [screen] (double f) { return screen.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * screen.getWidth(); },
+                              juce::Colour (0xff7fb4e6));
             }
         };
+        // The analyzer for the effects that shape the spectrum
+        // (where the display is a frequency response, so the spectrum lines up with it)
+        d.analyzer = info.response != nullptr && ! displayArea.isEmpty();
         return d;
     }
 
@@ -1165,26 +1202,50 @@ namespace
 
         {
             Design c;
-            c.width = 940; c.height = 560;
+            c.width = 1300; c.height = 570;
             c.knobs = KnobStyle::silver;
             c.label = juce::Colours::white; c.value = juce::Colours::white; c.accent = juce::Colour (0xff6ec6ff); c.track = juce::Colour (0xff1a2a42);
             c.valueAbove = false;
             c.live = true;
             c.paint = paintCompressor;
             c.controls = {
-                { "model", Kind::segmented, R (110, 16, 700, 46), "-" },
+                { "model", Kind::segmented, R (60, 16, 1180, 46), "-" },
+                { "input", Kind::knob, R (25, 322, 110, 110), "-" },
                 { "threshold", Kind::knob, R (165, 322, 110, 110), "-" },
                 { "ratio", Kind::knob, R (305, 322, 110, 110), "-" },
                 { "makeup", Kind::knob, R (445, 322, 110, 110), "-" },
-                { "autoGain", Kind::toggle, R (585, 345, 66, 34), "-" },
+                { "autoGain", Kind::segmented, R (585, 345, 150, 34), "-" },
                 { "knee", Kind::knob, R (175, 462, 90, 90), "-" },
                 { "attack", Kind::knob, R (315, 462, 90, 90), "-" },
                 { "release", Kind::knob, R (455, 462, 90, 90), "-" },
-                { "limiter", Kind::toggle, R (712, 118, 66, 34), "-" },
-                { "scHpf", Kind::knob, R (810, 114, 90, 84), "-" },
-                { "distortion", Kind::knob, R (690, 274, 110, 96), "-" },
-                { "output", Kind::knob, R (810, 274, 90, 90), "-" },
-                { "mix", Kind::knob, R (750, 434, 100, 100), "-" },
+                { "autoRelease", Kind::toggle, R (585, 485, 110, 34), "-" },
+                { "output", Kind::knob, R (695, 124, 110, 110), "-" },
+                { "detect", Kind::segmented, R (850, 82, 200, 32), "-" },
+                { "peakRms", Kind::segmented, R (850, 124, 200, 32), "-" },
+                { "scFilter", Kind::toggle, R (850, 196, 95, 32), "-" },
+                { "listen", Kind::toggle, R (955, 196, 95, 32), "-" },
+                { "scMode", Kind::segmented, R (845, 252, 215, 32), "-" },
+                { "scHpf", Kind::knob, R (845, 322, 95, 100), "-" },
+                { "scQ", Kind::knob, R (960, 322, 95, 100), "-" },
+                { "scGain", Kind::knob, R (902, 456, 95, 100), "-" },
+                { "limiter", Kind::toggle, R (1090, 92, 90, 32), "-" },
+                { "limThr", Kind::knob, R (1135, 160, 95, 100), "-" },
+                { "distortion", Kind::knob, R (1080, 322, 100, 100), "-" },
+                { "mix", Kind::knob, R (1190, 322, 95, 100), "-" },
+            };
+            c.enabled = [] (const juce::String& id, const EffectInfo& fx, const float* v)
+            {
+                // (the controls each circuit has; the side chain filter's settings only with the filter on)
+                const auto circuit = juce::roundToInt (valueOf (fx, v, "model", 1.0f));
+                if (id == "knee")        return circuit <= 2;
+                if (id == "attack")      return circuit != 3 && circuit != 6;
+                if (id == "release")     return circuit != 3;
+                if (id == "autoRelease") return circuit != 3 && circuit != 6;
+                if (id == "peakRms")     return circuit == 0;
+                if (id == "scMode" || id == "scHpf" || id == "scQ" || id == "scGain" || id == "listen")
+                    return valueOf (fx, v, "scFilter") > 0.5f;
+                if (id == "limThr")      return valueOf (fx, v, "limiter") > 0.5f;
+                return true;
             };
             d["studioComp"] = c;
         }
@@ -1208,6 +1269,7 @@ namespace
                 for (size_t row = 0; row < bands[(size_t) b].size(); ++row)
                     c.controls.push_back ({ bands[(size_t) b][row], Kind::field, R (column (b), 326 + (int) row * 30, w, 28), "-",
                                             b == 7 ? juce::Colour (0xffd0d4da) : bandColours[b] });
+            c.analyzer = true;
             d["channelEq"] = c;
             d["linearEq"] = c;
         }
@@ -1273,6 +1335,37 @@ namespace
         addHardwareDesigns (d);
         return d;
     }
+}
+
+namespace
+{
+    const Spectrum* currentSpectrum = nullptr;
+}
+const Spectrum* paintingSpectrum() noexcept           { return currentSpectrum; }
+void setPaintingSpectrum (const Spectrum* s) noexcept { currentSpectrum = s; }
+
+void drawSpectrum (juce::Graphics& g, juce::Rectangle<float> screen, const std::function<float (double)>& xOf, juce::Colour colour)
+{
+    const auto* sp = currentSpectrum;
+    if (sp == nullptr || ! sp->valid)
+        return;
+    const auto yOf = [screen] (float db) { return screen.getY() + juce::jlimit (0.0f, 1.0f, -db / 84.0f) * screen.getHeight(); };
+    juce::Path line, fill;
+    for (int k = 0; k < Spectrum::points; ++k)
+    {
+        const auto x = xOf (Spectrum::frequencyOf (k)), y = yOf (sp->db[(size_t) k]);
+        if (k == 0) { line.startNewSubPath (x, y); fill.startNewSubPath (x, screen.getBottom()); }
+        else line.lineTo (x, y);
+        fill.lineTo (x, y);
+    }
+    fill.lineTo (xOf (Spectrum::frequencyOf (Spectrum::points - 1)), screen.getBottom());
+    fill.closeSubPath();
+    juce::Graphics::ScopedSaveState clip (g);
+    g.reduceClipRegion (screen.toNearestInt());
+    g.setGradientFill (juce::ColourGradient (colour.withAlpha (0.32f), 0.0f, screen.getY(), colour.withAlpha (0.06f), 0.0f, screen.getBottom(), false));
+    g.fillPath (fill);
+    g.setColour (colour.withAlpha (0.75f));
+    g.strokePath (line, juce::PathStrokeType (1.2f));
 }
 
 const Design* designFor (const juce::String& type)

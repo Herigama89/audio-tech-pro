@@ -41,108 +41,189 @@ namespace
     };
 
     //==============================================================================
-    /** The studio compressor: one gain computer, seven circuits' characters (detector, timing, knee, colour). */
+    /**
+        The studio compressor (as Logic's Compressor): seven circuits, each with its own detector, timing,
+        knee, topology and colour, and the controls each circuit has (Vintage VCA's stepped ratios and times,
+        Vintage FET's ratio buttons, the opto's fixed attack and two-stage release, the classic VCA's
+        program-dependent timing). Side chain: Max or Sum, Peak or RMS, a filter (LP, BP, HP, ParEQ, HS)
+        with Listen. Output: a limiter with its threshold, Soft/Hard/Clip distortion, Mix.
+    */
     class StudioCompressor final : public DynamicsBase
     {
     public:
         using DynamicsBase::DynamicsBase;
-        enum Model { digital, studioVca, studioFet, vintageVca, vintageFet, vintageOpto, variMu };
+        enum Model { platinum, studioVca, studioFet, classicVca, vintageVca, vintageFet, vintageOpto };
+        enum Index { iModel, iThreshold, iRatio, iAttack, iRelease, iKnee, iMakeup, iAutoGain, iScFreq, iMix, iDistortion, iOutput,
+                     iLimiter, iLimThr, iInput, iAutoRelease, iDetect, iPeakRms, iScFilter, iScMode, iScQ, iScGain, iListen };
+
+        /** What a circuit makes of the Ratio, Attack and Release knobs (the vintage ones step). */
+        static float circuitRatio (int model, float ratio) noexcept
+        {
+            if (model == vintageVca)  return ratio < 3.0f ? 2.0f : ratio < 7.0f ? 4.0f : 10.0f;
+            if (model == vintageFet)  return ratio < 6.0f ? 4.0f : ratio < 10.0f ? 8.0f : ratio < 16.0f ? 12.0f : ratio < 25.0f ? 20.0f : 30.0f;   // (30: all buttons in)
+            if (model == vintageOpto) return 1.0f + (ratio - 1.0f) * 0.75f;
+            return ratio;
+        }
+        static float circuitAttack (int model, float ms) noexcept
+        {
+            if (model == vintageVca)
+            {
+                for (const auto step : { 0.1f, 0.3f, 1.0f, 3.0f, 10.0f })
+                    if (ms < step * 1.7f) return step;
+                return 30.0f;
+            }
+            if (model == vintageFet)  return juce::jmap (std::sqrt (juce::jlimit (0.0f, 200.0f, ms) / 200.0f), 0.02f, 0.8f);   // 20 µs to 800 µs
+            if (model == vintageOpto) return 10.0f;
+            return ms;
+        }
+        static float circuitRelease (int model, float ms) noexcept
+        {
+            if (model == vintageVca)
+            {
+                for (const auto step : { 100.0f, 300.0f, 600.0f })
+                    if (ms < step * 1.4f) return step;
+                return 1200.0f;
+            }
+            if (model == vintageFet)  return juce::jmap (std::sqrt (juce::jlimit (5.0f, 3000.0f, ms) / 3000.0f), 50.0f, 1100.0f);
+            return ms;
+        }
+        /** Which controls the circuit has (the others are greyed out in its window). */
+        static bool circuitHas (int model, const juce::String& id) noexcept
+        {
+            if (id == "knee")       return model == platinum || model == studioVca || model == studioFet;
+            if (id == "attack")     return model != vintageOpto && model != classicVca;
+            if (id == "release")    return model != classicVca;
+            if (id == "peakRms")    return model == platinum;
+            if (id == "autoRelease") return model != classicVca && model != vintageOpto;
+            return true;
+        }
 
         void prepare (double rate, int) override
         {
             sampleRate = preparedRate = rate;
-            envDb = rms = 0.0f;
+            envDb = rms = slowDb = 0.0f;
             heldDb = 0.0f;
+            lastGain = 1.0f;
             scFilter.reset();
-            lastHpf = -1.0f;
+            dcL = dcR = 0.0f;
+            lastScKey = -1.0f;
         }
 
         void process (float* l, float* r, int n) noexcept override
         {
-            const auto model = (Model) juce::jlimit (0, 6, choice (0));
-            const auto threshold = value (1);
-            auto ratio = std::max (1.0f, value (2));
-            auto attackMs = value (3), releaseMs = value (4);
-            auto knee = value (5) * 18.0f;
-            const auto autoGain = choice (7) == 1;
-            const auto hpf = value (8);
-            const auto mix = value (9) * 0.01f;
-            const auto distortion = choice (10);
-            const auto output = dbToGain (value (11));
-            const auto limit = choice (12) == 1;
+            const auto model = (Model) juce::jlimit (0, 6, choice (iModel));
+            const auto threshold = value (iThreshold);
+            const auto ratio = circuitRatio (model, std::max (1.0f, value (iRatio)));
+            const auto attackMs = circuitAttack (model, value (iAttack));
+            const auto releaseMs = circuitRelease (model, value (iRelease));
+            const auto autoRelease = choice (iAutoRelease) == 1 && circuitHas (model, "autoRelease");
+            const auto input = dbToGain (value (iInput));
+            const auto mix = value (iMix) * 0.01f;
+            const auto distortion = choice (iDistortion);
+            const auto output = dbToGain (value (iOutput));
+            const auto limit = choice (iLimiter) == 1;
+            const auto limitGain = dbToGain (value (iLimThr));
+            const auto sum = choice (iDetect) == 1;
+            const auto filterOn = choice (iScFilter) == 1;
+            const auto listen = choice (iListen) == 1;
 
-            // Each circuit's character
-            bool peakDetect = true;
-            float colour = 0.0f;
+            // Each circuit's detector, knee, topology and colour
+            bool rmsDetect = false, feedback = false;
+            float knee = value (iKnee) * 18.0f;
             switch (model)
             {
-                case digital:     break;
-                case studioVca:   peakDetect = false; colour = 0.02f; break;
-                case studioFet:   attackMs *= 0.25f; colour = 0.12f; break;
-                case vintageVca:  peakDetect = false; knee = std::max (knee, 10.0f); colour = 0.06f; break;
-                case vintageFet:  attackMs *= 0.1f; colour = 0.22f; break;
-                case vintageOpto: peakDetect = false; attackMs = std::max (attackMs, 10.0f); knee = std::max (knee, 12.0f); colour = 0.05f; break;
-                case variMu:      peakDetect = false; attackMs = std::max (attackMs, 5.0f); knee = std::max (knee, 14.0f); colour = 0.1f; break;
+                case platinum:    rmsDetect = choice (iPeakRms) == 1; break;
+                case studioVca:   rmsDetect = true; break;
+                case studioFet:   feedback = true; break;
+                case classicVca:  rmsDetect = true; knee = 6.0f; break;        // (its "over easy" knee)
+                case vintageVca:  rmsDetect = true; feedback = true; knee = 3.0f; break;
+                case vintageFet:  feedback = true; knee = ratio >= 30.0f ? 0.0f : 2.0f; break;
+                case vintageOpto: rmsDetect = true; feedback = true; knee = 14.0f; break;
             }
             const auto attack = coeffMs (attackMs, sampleRate);
-            const auto rmsCoeff = coeffMs (model == variMu ? 25.0 : 10.0, sampleRate);
-            auto makeup = value (6);
-            if (autoGain)
-                makeup += -0.5f * compressorGainDb (0.0f, threshold, ratio, knee);
-            if (hpf != lastHpf)
+            const auto rmsCoeff = coeffMs (model == vintageOpto ? 20.0 : model == classicVca ? 15.0 : 8.0, sampleRate);
+
+            // Auto gain: 0 dB brings the compressed level back to where 0 dB in would sit; -12 dB to -12 dB
+            auto makeup = value (iMakeup);
+            const auto autoGain = choice (iAutoGain);
+            if (autoGain > 0)
             {
-                if (hpf > 20.0f)
-                    scFilter.setHighPass (sampleRate, hpf, 0.707);
-                else
-                    scFilter.setIdentity();
-                lastHpf = hpf;
+                const auto reference = autoGain == 1 ? 0.0f : -12.0f;
+                makeup += -compressorGainDb (reference, threshold, ratio, knee) * (autoGain == 1 ? 0.5f : 1.0f);
             }
+            updateKeyFilter();
 
             for (int i = 0; i < n; ++i)
             {
-                const auto inL = l[i], inR = r[i];
-                const auto kl = keyL != nullptr ? keyL[i] : inL, kr = keyR != nullptr ? keyR[i] : inR;
-                // The key: both channels (linked), through the key filter when it's on
-                const auto key = hpf > 20.0f ? scFilter.process (0.5f * (kl + kr), 0) : std::max (std::abs (kl), std::abs (kr));
+                const auto inL = l[i] * input, inR = r[i] * input;
+                const auto external = keyL != nullptr;
+                auto kl = external ? keyL[i] : inL, kr = external ? keyR[i] : inR;
+                // Feedback circuits hear their own output (unless a side chain is routed in)
+                if (feedback && ! external)
+                {
+                    kl *= lastGain;
+                    kr *= lastGain;
+                }
+                if (filterOn)
+                {
+                    kl = scFilter.process (kl, 0) * scLevel;
+                    kr = scFilter.process (kr, 1) * scLevel;
+                }
+                if (listen)
+                {
+                    l[i] = kl;
+                    r[i] = kr;
+                    continue;
+                }
+                // Max: the louder channel decides; Sum: both together
+                const auto key = sum ? 0.5f * (std::abs (kl) + std::abs (kr)) : std::max (std::abs (kl), std::abs (kr));
                 float levelDb;
-                if (peakDetect)
-                    levelDb = gainToDb (std::abs (key));
-                else
+                if (rmsDetect)
                 {
                     rms = key * key + rmsCoeff * (rms - key * key);
                     levelDb = 10.0f * std::log10 (std::max (rms * 2.0f, 1.0e-12f));
                 }
+                else
+                    levelDb = gainToDb (key);
 
-                // Vari-mu: the ratio grows the harder it works
-                auto r2 = ratio;
-                if (model == variMu)
-                    r2 = 1.0f + (ratio - 1.0f) * juce::jlimit (0.2f, 1.0f, (levelDb - threshold) / 15.0f);
-                const auto target = -compressorGainDb (levelDb, threshold, r2, knee);
+                auto target = -compressorGainDb (levelDb, threshold, ratio, knee);
+                // All-buttons-in: the FET's ratio overshoots, a harder bite on loud peaks
+                if (model == vintageFet && ratio >= 30.0f && levelDb > threshold)
+                    target *= 1.15f;
 
-                // Opto: the longer and harder it's been working, the slower it lets go
+                // Release: auto release follows the material (fast on transients, slow on sustained);
+                // the opto's two-stage release (quick at first, slower the longer it's been working)
                 auto rel = releaseMs;
                 if (model == vintageOpto)
                 {
-                    heldDb = std::max (heldDb * 0.99995f, envDb);
-                    rel = releaseMs * (0.4f + juce::jlimit (0.0f, 4.0f, heldDb * 0.15f));
+                    heldDb = std::max (heldDb * 0.99997f, envDb);
+                    rel = envDb > heldDb * 0.5f ? 60.0f : releaseMs * (1.0f + juce::jlimit (0.0f, 10.0f, heldDb * 0.4f));
                 }
-                const auto coeff = target > envDb ? attack : coeffMs (rel, sampleRate);
+                if (autoRelease)
+                {
+                    slowDb = target + coeffMs (releaseMs * 4.0, sampleRate) * (slowDb - target);
+                    rel = (envDb - slowDb) > 3.0f ? releaseMs * 0.25f : releaseMs * 1.5f;
+                }
+                float att = attack;
+                if (model == classicVca)
+                {
+                    // Program-dependent: the further over, the faster it acts; releases at a steady 120 dB a second
+                    att = coeffMs (juce::jlimit (3.0f, 30.0f, 15.0f * 10.0f / std::max (1.0f, target - envDb)), sampleRate);
+                    rel = juce::jmax (8.0f, envDb / 120.0f * 1000.0f);
+                }
+                const auto coeff = target > envDb ? att : coeffMs (rel, sampleRate);
                 envDb = target + coeff * (envDb - target);
                 report (envDb);
 
-                const auto g = dbToGain (makeup - envDb);
-                auto a = inL * g, b = inR * g;
-                if (colour > 0.0f)
-                {
-                    // (more colour the harder it's working, as the circuits do)
-                    const auto c = colour * (1.0f + envDb * 0.05f);
-                    a = a + c * (saturate (a * 1.5f) / 1.5f - a);
-                    b = b + c * (saturate (b * 1.5f) / 1.5f - b);
-                }
+                const auto gain = dbToGain (-envDb);
+                lastGain = gain;
+                const auto g = gain * dbToGain (makeup);
+                auto a = colour (model, inL * g, envDb, dcL);
+                auto b = colour (model, inR * g, envDb, dcR);
                 switch (distortion)
                 {
-                    case 1: a = saturate (a * 1.4f) / 1.4f * 1.1f; b = saturate (b * 1.4f) / 1.4f * 1.1f; break;
-                    case 2: a = std::tanh (a * 2.5f) / 1.5f; b = std::tanh (b * 2.5f) / 1.5f; break;
+                    case 1: a = softClip (a); b = softClip (b); break;
+                    case 2: a = hardClip (a); b = hardClip (b); break;
                     case 3: a = juce::jlimit (-1.0f, 1.0f, a); b = juce::jlimit (-1.0f, 1.0f, b); break;
                     default: break;
                 }
@@ -152,9 +233,8 @@ namespace
                 b *= output;
                 if (limit)
                 {
-                    constexpr float ceiling = 0.966f;   // -0.3 dB
-                    a = std::abs (a) > ceiling * 0.8f ? std::copysign (ceiling * 0.8f + ceiling * 0.2f * saturate ((std::abs (a) - ceiling * 0.8f) / (ceiling * 0.2f)), a) : a;
-                    b = std::abs (b) > ceiling * 0.8f ? std::copysign (ceiling * 0.8f + ceiling * 0.2f * saturate ((std::abs (b) - ceiling * 0.8f) / (ceiling * 0.2f)), b) : b;
+                    a = limiter (a, limitGain);
+                    b = limiter (b, limitGain);
                 }
                 l[i] = a;
                 r[i] = b;
@@ -163,8 +243,85 @@ namespace
         }
 
     private:
-        float envDb = 0.0f, rms = 0.0f, heldDb = 0.0f, lastHpf = -1.0f;
+        float envDb = 0.0f, rms = 0.0f, heldDb = 0.0f, slowDb = 0.0f, lastGain = 1.0f;
+        float dcL = 0.0f, dcR = 0.0f;
+        float lastScKey = -1.0f, scLevel = 1.0f;
         Biquad scFilter;
+
+        void updateKeyFilter() noexcept
+        {
+            const auto mode = choice (iScMode);
+            const auto freq = juce::jlimit (20.0f, 20000.0f, value (iScFreq)), q = std::max (0.1f, value (iScQ)), gain = value (iScGain);
+            const auto key = (float) mode * 1.0e7f + freq * 10.0f + q * 1000.0f + gain;
+            if (key == lastScKey)
+                return;
+            lastScKey = key;
+            const auto f = std::min ((double) freq, sampleRate * 0.45);
+            scLevel = 1.0f;
+            switch (mode)
+            {
+                case 0:  scFilter.setLowPass (sampleRate, f, q); scLevel = dbToGain (gain); break;
+                case 1:  scFilter.setBandPass (sampleRate, f, q); scLevel = dbToGain (gain); break;
+                case 2:  scFilter.setHighPass (sampleRate, f, q); scLevel = dbToGain (gain); break;
+                case 3:  scFilter.setPeak (sampleRate, f, gain, q); break;
+                default: scFilter.setHighShelf (sampleRate, f, gain, q); break;
+            }
+        }
+
+        /**
+            Each circuit's colour, more as it works harder:
+              Platinum Digital  none
+              Studio VCA        a trace of odd harmonics
+              Studio FET        even-leaning, a forward midrange edge
+              Classic VCA       clean, slightly firm odd harmonics when pushed
+              Vintage VCA       a little odd-order "glue"
+              Vintage FET       crunchy, asymmetric, the most colour of all
+              Vintage Opto      warm tube-like, mostly second harmonic
+        */
+        static float colour (int model, float x, float workingDb, float& dc) noexcept
+        {
+            const auto work = 1.0f + juce::jlimit (0.0f, 20.0f, workingDb) * 0.06f;
+            float y = x;
+            switch (model)
+            {
+                case studioVca:   y = x + 0.015f * work * (std::tanh (x * 1.5f) / 1.5f - x) * 40.0f * std::abs (x); break;
+                case studioFet:   y = x + 0.06f * work * (x * std::abs (x)) + 0.03f * work * (x * x); break;
+                case classicVca:  y = x + 0.03f * work * (std::tanh (x * 2.0f) * 0.5f - x); break;
+                case vintageVca:  y = x + 0.05f * work * (std::tanh (x * 1.8f) / 1.8f - x) * 2.0f; break;
+                case vintageFet:
+                {
+                    const auto d = 1.0f + 0.25f * work;
+                    y = std::tanh (d * x + 0.12f * work * x * x) / d;
+                    break;
+                }
+                case vintageOpto: y = x + 0.08f * work * x * x - 0.02f * work * x * x * x; break;
+                default: return x;
+            }
+            // (even harmonics push a little DC: a slow high pass takes it out, as the transformers would)
+            dc += 0.0005f * (y - dc);
+            return y - dc;
+        }
+        /** Soft: rounds the signal off as it nears 0 dB. */
+        static float softClip (float x) noexcept
+        {
+            const auto ax = std::abs (x);
+            if (ax < 0.5f) return x;
+            return std::copysign (0.5f + 0.5f * std::tanh ((ax - 0.5f) * 2.0f), x);
+        }
+        /** Hard: a transistor stage, flat until near 0 dB, then abruptly limited. */
+        static float hardClip (float x) noexcept
+        {
+            const auto ax = std::abs (x);
+            if (ax < 0.85f) return x;
+            return std::copysign (0.85f + 0.15f * std::tanh ((ax - 0.85f) / 0.15f), x);
+        }
+        /** The output limiter: transparent below its threshold, a firm soft knee over it. */
+        static float limiter (float x, float ceiling) noexcept
+        {
+            const auto knee = ceiling * 0.85f, ax = std::abs (x);
+            if (ax <= knee) return x;
+            return std::copysign (knee + (ceiling - knee) * std::tanh ((ax - knee) / (ceiling - knee)), x);
+        }
     };
 
     //==============================================================================
@@ -534,19 +691,29 @@ const std::vector<StockEffect>& stockDynamicsEffects()
     static const std::vector<StockEffect> effects {
         { { "studioComp", "Studio Compressor", {
               { "model", "Circuit", "", 0.0f, 6.0f, 1.0f, 3.0f,
-                { "Clean Digital", "Studio VCA", "Studio FET", "Vintage VCA", "Vintage FET", "Vintage Opto", "Vari-Mu" } },
+                { "Platinum Digital", "Studio VCA", "Studio FET", "Classic VCA", "Vintage VCA", "Vintage FET", "Vintage Opto" } },
               { "threshold", "Threshold", dB, -60.0f, 0.0f, -20.0f, -20.0f },
               { "ratio", "Ratio", ":1", 1.0f, 30.0f, 4.0f, 4.0f },
               { "attack", "Attack", ms, 0.05f, 200.0f, 10.0f, 10.0f },
               { "release", "Release", ms, 5.0f, 3000.0f, 150.0f, 150.0f },
               { "knee", "Knee", "", 0.0f, 1.0f, 0.3f, 0.5f },
-              { "makeup", "Make Up", dB, 0.0f, 30.0f, 0.0f, 8.0f },
-              { "autoGain", "Auto Gain", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
-              { "scHpf", "Key Filter", hz, 20.0f, 500.0f, 20.0f, 100.0f },
+              { "makeup", "Make Up", dB, -30.0f, 30.0f, 0.0f, 0.0f },
+              { "autoGain", "Auto Gain", "", 0.0f, 2.0f, 0.0f, 1.0f, { "Off", "0 dB", "-12 dB" } },
+              { "scHpf", "Filter Freq", hz, 20.0f, 20000.0f, 1000.0f, 1000.0f },
               { "mix", "Mix", pc, 0.0f, 100.0f, 100.0f, 50.0f },
               { "distortion", "Distortion", "", 0.0f, 3.0f, 0.0f, 1.5f, { "Off", "Soft", "Hard", "Clip" } },
-              { "output", "Output", dB, -24.0f, 24.0f, 0.0f, 0.0f },
-              { "limiter", "Limiter", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } } }, "Dynamics" },
+              { "output", "Output Gain", dB, -30.0f, 30.0f, 0.0f, 0.0f },
+              { "limiter", "Limiter", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "limThr", "Limiter Threshold", dB, -20.0f, 0.0f, 0.0f, -6.0f },
+              { "input", "Input Gain", dB, -30.0f, 30.0f, 0.0f, 0.0f },
+              { "autoRelease", "Auto Release", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "detect", "Detection", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Max", "Sum" } },
+              { "peakRms", "Peak/RMS", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Peak", "RMS" } },
+              { "scFilter", "Filter", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "scMode", "Filter Mode", "", 0.0f, 4.0f, 2.0f, 2.0f, { "LP", "BP", "HP", "ParEQ", "HS" } },
+              { "scQ", "Q", "", 0.1f, 10.0f, 0.7f, 1.0f },
+              { "scGain", "Filter Gain", dB, -24.0f, 24.0f, 0.0f, 0.0f },
+              { "listen", "Listen", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } } }, "Dynamics" },
           make<StudioCompressor> },
 
         { { "multiband", "Multiband Compressor", {

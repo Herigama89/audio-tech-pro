@@ -49,9 +49,14 @@ public:
         auto project = model::createProject();
         auto track = model::addTrack (project, "FX", nullptr);
         auto chain = model::chainFor (project, track[ids::id].toString());
-        for (const auto& type : types)
+        for (const auto& spec : types)
         {
+            // ("type:id=value,id=value" sets parameters; the picture is named after the whole spec)
+            const auto type = spec.upToFirstOccurrenceOf (":", false, false);
             auto insert = model::addBuiltinInsert (chain, type, -1, nullptr);
+            for (const auto& pair : juce::StringArray::fromTokens (spec.fromFirstOccurrenceOf (":", false, false), ",", ""))
+                if (pair.contains ("="))
+                    insert.setProperty (juce::Identifier (pair.upToFirstOccurrenceOf ("=", false, false)), pair.fromFirstOccurrenceOf ("=", false, false).getFloatValue(), nullptr);
             if (type == "channelEq")
             {
                 insert.setProperty ("hpFreq", 50.0f, nullptr);
@@ -67,10 +72,24 @@ public:
             }
             EffectPanel panel (insert, um);
             panel.setLiveValue ([type] { return type == "pitchCorrection" ? 22.0f : 8.5f; });
+            panel.setAnalyzerSource ([] (float* dest, int count)
+            {
+                // (a stand-in for music: a few harmonics over a falling noise floor)
+                juce::Random random (1);
+                float lp = 0.0f;
+                for (int i = 0; i < count; ++i)
+                {
+                    lp += 0.08f * (random.nextFloat() * 2.0f - 1.0f - lp);
+                    dest[i] = 0.25f * lp;
+                    for (int h = 1; h <= 8; ++h)
+                        dest[i] += 0.2f / (float) h * std::sin (juce::MathConstants<float>::twoPi * 110.0f * (float) h * (float) i / 48000.0f);
+                }
+                return 48000.0;
+            });
             panel.setSize (panel.getWidth(), panel.getHeight());
             panel.resized();
             juce::MessageManager::getInstance()->runDispatchLoopUntil (120);
-            save (panel, "fx-" + type + ".png");
+            save (panel, "fx-" + spec.replaceCharacters (":=,", "_-_") + ".png");
         }
         return 0;
     }

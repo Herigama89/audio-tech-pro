@@ -3240,6 +3240,15 @@ void MainComponent::openInsertWindow (const juce::ValueTree& insert)
         auto* effect = effectRack.getBuiltIn (id);
         return effect != nullptr ? effect->displayValue() : 0.0f;
     });
+    host->panel.setAnalyzerSource ([this, id] (float* dest, int count)
+    {
+        auto* effect = effectRack.getBuiltIn (id);
+        if (effect == nullptr)
+            return 0.0;
+        effect->setAnalyzerOn (true);
+        effect->readTap (dest, std::min (count, BuiltInEffect::tapSize));
+        return effect->getSampleRate();
+    });
     auto window = std::make_unique<EditorWindow> (where + ": " + (info != nullptr ? info->name : juce::String ("Effect")),
                                                   host, false, closer);
     window->cascadeFrom (lastInsertWindow.getComponent());

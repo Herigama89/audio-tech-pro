@@ -408,8 +408,64 @@ void EffectPanel::setLiveValue (std::function<float()> source)
         startTimerHz (30);
 }
 
+void EffectPanel::setAnalyzerSource (std::function<double (float*, int)> source)
+{
+    analyzerSource = std::move (source);
+    if (design != nullptr && design->analyzer && analyzerSource != nullptr)
+        startTimerHz (30);
+}
+
+void EffectPanel::updateSpectrum()
+{
+    constexpr int order = 12, size = 1 << order;
+    if (fft == nullptr)
+    {
+        fft = std::make_unique<juce::dsp::FFT> (order);
+        fftData.assign ((size_t) size * 2, 0.0f);
+        window.resize ((size_t) size);
+        for (int i = 0; i < size; ++i)
+            window[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) (size - 1));
+    }
+    std::fill (fftData.begin(), fftData.end(), 0.0f);
+    const auto rate = analyzerSource (fftData.data(), size);
+    if (rate <= 0.0)
+    {
+        spectrum.valid = false;
+        return;
+    }
+    for (int i = 0; i < size; ++i)
+        fftData[(size_t) i] *= window[(size_t) i];
+    fft->performFrequencyOnlyForwardTransform (fftData.data(), true);
+    // Each point: the strongest bin around its frequency, in dB (a full-scale sine reads 0 dB); falls back gently
+    const auto binHz = rate / size;
+    for (int k = 0; k < effectdesign::Spectrum::points; ++k)
+    {
+        const auto f = effectdesign::Spectrum::frequencyOf (k);
+        const auto lo = juce::jlimit (1, size / 2 - 1, (int) (f * std::pow (1000.0, -0.5 / effectdesign::Spectrum::points) / binHz));
+        const auto hi = juce::jlimit (lo, size / 2 - 1, (int) std::ceil (f * std::pow (1000.0, 0.5 / effectdesign::Spectrum::points) / binHz));
+        float m = 0.0f;
+        if (hi - lo < 2)
+        {
+            // (low down, the bins are wider than the points: read between them)
+            const auto exact = juce::jlimit (1.0, size / 2.0 - 2.0, f / binHz);
+            const auto i = (int) exact;
+            const auto t = (float) (exact - i);
+            m = fftData[(size_t) i] + t * (fftData[(size_t) i + 1] - fftData[(size_t) i]);
+        }
+        else
+            for (int b = lo; b <= hi; ++b)
+                m = std::max (m, fftData[(size_t) b]);
+        const auto db = juce::Decibels::gainToDecibels (m / (size * 0.25f), -120.0f);
+        auto& shown = spectrum.db[(size_t) k];
+        shown = ! spectrum.valid ? db : db > shown ? db : shown - std::min (shown - db, 1.6f);
+    }
+    spectrum.valid = true;
+}
+
 void EffectPanel::timerCallback()
 {
+    if (analyzerSource != nullptr && design != nullptr && design->analyzer)
+        updateSpectrum();
     // The meter: quick to rise, easing back
     const auto now = liveValue != nullptr ? liveValue() : 0.0f;
     liveShown = std::abs (now) > std::abs (liveShown) ? now : liveShown + (now - liveShown) * 0.25f;
@@ -437,6 +493,23 @@ void EffectPanel::refresh()
         k->slider.updateText();
     for (auto& r : refreshers)
         r();
+    if (design != nullptr && design->enabled != nullptr && info != nullptr)
+    {
+        std::array<float, BuiltInEffect::maxParams> v {};
+        for (size_t i = 0; i < info->params.size(); ++i)
+            v[i] = (float) (double) insert.getProperty (juce::Identifier (info->params[i].id), info->params[i].defaultValue);
+        for (auto& placed : placedControls)
+        {
+            const auto on = design->enabled (placed.control.id, *info, v.data());
+            if (placed.component != nullptr)
+            {
+                placed.component->setEnabled (on);
+                placed.component->setAlpha (on ? 1.0f : 0.35f);
+            }
+            if (placed.label != nullptr)
+                placed.label->setAlpha (on ? 1.0f : 0.35f);
+        }
+    }
     if (design != nullptr)
         repaint();
     else if (! displayArea.isEmpty())
@@ -452,7 +525,9 @@ void EffectPanel::paint (juce::Graphics& g)
         std::array<float, BuiltInEffect::maxParams> v {};
         for (size_t i = 0; i < info->params.size(); ++i)
             v[i] = (float) (double) insert.getProperty (juce::Identifier (info->params[i].id), info->params[i].defaultValue);
+        effectdesign::setPaintingSpectrum (design->analyzer ? &spectrum : nullptr);
         design->paint (g, getLocalBounds(), *info, v.data(), liveShown);
+        effectdesign::setPaintingSpectrum (nullptr);
         return;
     }
 
