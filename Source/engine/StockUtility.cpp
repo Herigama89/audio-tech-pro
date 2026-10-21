@@ -498,7 +498,7 @@ const std::vector<StockEffect>& stockUtilityEffects()
         { { "denoiser", "Denoiser", {
               { "threshold", "Threshold", dB, -100.0f, -20.0f, -70.0f, -60.0f },
               { "reduction", "Reduction", dB, 0.0f, 40.0f, 15.0f, 15.0f },
-              { "smoothing", "Smoothing", pc, 0.0f, 100.0f, 50.0f, 50.0f } }, "Specialized" },
+              { "smoothing", "Smoothing", pc, 0.0f, 100.0f, 50.0f, 50.0f } }, "Legacy" },
           make<Denoiser> },
     };
     return effects;

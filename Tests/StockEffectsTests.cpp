@@ -1121,3 +1121,74 @@ TEST_CASE ("Room Simulator: its reverb time, freeze, both models", "[stockfx]")
         CHECK (peakOf (ol, 24000) > 0.01f);
     }
 }
+
+TEST_CASE ("Legacy effects: reverbs, silver dynamics, de-esser, grooveshifter, amps, speech", "[stockfx]")
+{
+    // The reverbs ring on after the sound stops
+    for (const auto* type : { "aVerb", "goldVerb" })
+    {
+        auto fx = make (type);
+        set (*fx, "mix", 100.0f);
+        auto tone = sine (440.0, 1.0, 0.5f);
+        std::fill (tone.begin() + 24000, tone.end(), 0.0f);
+        const auto [l, r] = run (*fx, tone, tone);
+        CHECK (peakOf (l, 26000) > 0.005f);
+        for (auto x : l) REQUIRE (std::isfinite (x));
+    }
+
+    // Silver Compressor brings a loud tone down; Silver Gate shuts a quiet one
+    auto comp = make ("silverComp");
+    set (*comp, "threshold", -30.0f);
+    set (*comp, "ratio", 10.0f);
+    const auto [cl, cr] = run (*comp, sine (300.0, 0.5, 0.9f), sine (300.0, 0.5, 0.9f));
+    CHECK (peakOf (cl, 12000) < 0.2f);
+    auto gate = make ("silverGate");
+    const auto [gl, gr] = run (*gate, sine (300.0, 0.5, 0.001f), sine (300.0, 0.5, 0.001f));
+    CHECK (peakOf (gl, 12000) < 0.00002f);
+
+    // The DeEsser takes a sibilant tone down, a low one hardly
+    const auto through = [] (float freq)
+    {
+        auto de = make ("deesserLegacy");
+        set (*de, "sensitivity", 100.0f);
+        set (*de, "strength", 30.0f);
+        const auto [l, r] = run (*de, sine (freq, 0.5, 0.5f), sine (freq, 0.5, 0.5f));
+        return peakOf (l, 12000);
+    };
+    CHECK (through (8000.0f) < 0.25f);
+    CHECK (through (300.0f) > 0.45f);
+
+    // Grooveshifter: at 50 % the sound passes (late by its grain); swing moves every other eighth later
+    auto straight = make ("grooveshifter");
+    straight->setPosition (0, false, 120.0);
+    set (*straight, "swing", 50.0f);
+    const auto latency = straight->getLatencySamples();
+    const auto [sl, sr] = run (*straight, sine (300.0, 1.0, 0.5f), sine (300.0, 1.0, 0.5f));
+    CHECK (peakOf (sl, 24000) > 0.4f);
+    CHECK (peakOf (sl, 24000) < 0.6f);
+    auto swung = make ("grooveshifter");
+    swung->setPosition (0, false, 120.0);
+    set (*swung, "swing", 75.0f);
+    std::vector<float> clicks (48000 * 2, 0.0f);
+    for (size_t at = 0; at < clicks.size(); at += 12000)   // eighths at 120 BPM
+        for (size_t k = 0; k < 200; ++k) clicks[at + k] = 0.8f * std::sin ((float) k * 0.3f) * (1.0f - (float) k / 200.0f);
+    const auto [wl, wr] = run (*swung, clicks, clicks);
+    const auto energyNear = [&] (size_t centre)
+    {
+        double e = 0.0;
+        for (size_t i = centre - 1500; i < centre + 1500; ++i) e += (double) wl[i] * wl[i];
+        return e;
+    };
+    // the second eighth (at 12000) is heard at 12000 + 6000, not at 12000
+    CHECK (energyNear (48000 + 12000 + 6000 + (size_t) latency) > 4.0 * energyNear (48000 + 12000 + (size_t) latency));
+
+    // The amps and Speech Enhancer play and stay finite
+    for (const auto* type : { "guitarAmpPro", "bassAmpLegacy", "speechEnhancer" })
+    {
+        auto fx = make (type);
+        const auto [l, r] = run (*fx, sine (110.0, 0.5, 0.5f), sine (110.0, 0.5, 0.5f));
+        for (auto x : l) REQUIRE (std::isfinite (x));
+        CHECK (peakOf (l, 12000) > 0.001f);
+        CHECK (peakOf (l) < 8.0f);
+    }
+}

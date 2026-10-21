@@ -9,7 +9,7 @@ namespace riff
 const juce::StringArray& effectCategories()
 {
     static const juce::StringArray categories { "EQ", "Dynamics", "Delay", "Reverb", "Modulation", "Distortion", "Filter",
-                                                "Amps and Pedals", "Pitch", "Imaging", "Metering", "Multi Effects", "Specialized", "Utility" };
+                                                "Amps and Pedals", "Pitch", "Imaging", "Metering", "Multi Effects", "Specialized", "Utility", "Legacy" };
     return categories;
 }
 
@@ -25,7 +25,7 @@ const std::vector<EffectInfo>& originalEffects()
             { "midGain",  "Mid",       " dB", -18.0f,  18.0f,    0.0f,    0.0f },
             { "midQ",     "Mid Q",     "",    0.2f,    10.0f,    1.0f,    1.2f },
             { "highFreq", "High Freq", " Hz", 1000.0f, 18000.0f, 8000.0f, 5000.0f },
-            { "highGain", "High",      " dB", -18.0f,  18.0f,    0.0f,    0.0f } }, "EQ" },
+            { "highGain", "High",      " dB", -18.0f,  18.0f,    0.0f,    0.0f } }, "Legacy" },
 
         { "compressor", "Compressor", {
             { "threshold", "Threshold", " dB", -60.0f, 0.0f,    -18.0f, -18.0f },
@@ -58,7 +58,7 @@ std::vector<const std::vector<StockEffect>*> stockFamilies()
 {
     return { &stockEqEffects(), &stockDynamicsEffects(), &stockDelayEffects(), &stockReverbEffects(),
              &stockModulationEffects(), &stockDistortionEffects(), &stockFilterEffects(), &stockAmpEffects(),
-             &stockPitchEffects(), &stockUtilityEffects(), &stockExtraEffects(), &stockPedalboardEffects(), &stockMeteringEffects(), &stockMultiEffects(), &stockRoomSimEffects() };
+             &stockPitchEffects(), &stockUtilityEffects(), &stockExtraEffects(), &stockPedalboardEffects(), &stockMeteringEffects(), &stockMultiEffects(), &stockRoomSimEffects(), &stockLegacyEffects() };
 }
 }
 

@@ -73,6 +73,7 @@ const std::vector<StockEffect>& stockPedalboardEffects();
 const std::vector<StockEffect>& stockMeteringEffects();
 const std::vector<StockEffect>& stockMultiEffects();
 const std::vector<StockEffect>& stockRoomSimEffects();
+const std::vector<StockEffect>& stockLegacyEffects();
 /** Step FX: how many steps each of its step modulators has room for. */
 inline constexpr int stepFxMaxSteps = 32;
 /** Pitch Correction's scales and chords: their names, and each one's notes from the root (12 flags). */
