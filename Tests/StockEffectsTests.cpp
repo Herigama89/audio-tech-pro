@@ -271,6 +271,7 @@ TEST_CASE ("Delays: the echo arrives on time, in ms or in time with the song", "
     set (*echo, "sync", 1.0f);
     set (*echo, "note", 9.0f);   // 1/4
     set (*echo, "mix", 100.0f);
+    set (*echo, "dry", 0.0f);
     set (*echo, "repeats", 0.0f);
     set (*echo, "colour", 0.0f);
     echo->setPosition (0, true, 120.0);
@@ -291,6 +292,35 @@ TEST_CASE ("Delays: the echo arrives on time, in ms or in time with the song", "
     const auto [sl, sr] = run (*sd, a, b);
     CHECK (sl[47] == 1.0f);
     CHECK (sr[10] == 1.0f);
+
+    // Tape Delay's Freeze holds the repeats with nothing new coming in
+    auto tape = make ("tapeDelay");
+    set (*tape, "sync", 0.0f);
+    set (*tape, "time", 100.0f);
+    set (*tape, "dry", 0.0f);
+    set (*tape, "mix", 100.0f);
+    set (*tape, "wow", 0.0f);
+    set (*tape, "flutter", 0.0f);
+    const auto [t1, t2] = run (*tape, sine (300.0, 0.3, 0.5f), sine (300.0, 0.3, 0.5f));
+    set (*tape, "freeze", 1.0f);
+    std::vector<float> silence (48000, 0.0f);
+    const auto [f1, f2] = run (*tape, silence, silence);
+    CHECK (peakOf (f1, 40000) > 0.1f);
+
+    // Stereo Delay, Ping Pong: the left echo comes back on the right
+    auto pp = make ("stereoDelay");
+    set (*pp, "sync", 0.0f);
+    set (*pp, "timeL", 100.0f);
+    set (*pp, "timeR", 100.0f);
+    set (*pp, "mix", 100.0f);
+    set (*pp, "routing", 5.0f);
+    set (*pp, "fbL", 80.0f);
+    set (*pp, "fbR", 80.0f);
+    std::vector<float> click (24000, 0.0f), none (24000, 0.0f);
+    click[0] = 1.0f;
+    const auto [pl, pr] = run (*pp, click, none);
+    CHECK (std::abs (pl[4800]) > 0.3f);   // (the mono sum, through the low and high cut)
+    CHECK (std::abs (pr[9600]) > 0.2f);
 }
 
 TEST_CASE ("Reverbs ring on after a click; tremolo moves the level; bitcrusher steps", "[stockfx]")

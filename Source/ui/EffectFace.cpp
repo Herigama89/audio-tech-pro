@@ -20,6 +20,39 @@ juce::Colour accentFor (const juce::String& category)
 }
 
 //==============================================================================
+std::vector<std::pair<Section, std::vector<int>>> resolveSections (const EffectInfo& info)
+{
+    std::vector<std::pair<Section, std::vector<int>>> out;
+    std::vector<bool> used (info.params.size(), false);
+    int next = 0;
+    for (const auto& section : sectionsFor (info))
+    {
+        std::vector<int> indices;
+        if (! section.ids.empty())
+        {
+            for (const auto& id : section.ids)
+                for (size_t i = 0; i < info.params.size(); ++i)
+                    if (info.params[i].id == id && ! used[i]) { indices.push_back ((int) i); used[i] = true; }
+        }
+        else
+            for (int k = 0; k < section.count; ++k)
+            {
+                while (next < (int) info.params.size() && used[(size_t) next]) ++next;
+                if (next >= (int) info.params.size()) break;
+                indices.push_back (next);
+                used[(size_t) next++] = true;
+            }
+        if (! indices.empty())
+            out.push_back ({ section, indices });
+    }
+    std::vector<int> rest;
+    for (size_t i = 0; i < used.size(); ++i)
+        if (! used[i]) rest.push_back ((int) i);
+    if (! rest.empty())
+        out.push_back ({ Section { "More", (int) rest.size() }, rest });
+    return out;
+}
+
 std::vector<Section> sectionsFor (const EffectInfo& info)
 {
     // EQs laid out by band (each band's knobs stacked)
@@ -46,10 +79,15 @@ std::vector<Section> sectionsFor (const EffectInfo& info)
         { "transient",    { { "Shape", 2 }, { "Timing", 2 }, { "Output", 1 } } },
         { "brickwall",    { { "Limiter", 4 } } },
         { "compressor",   { { "Compression", 5 } } },
-        { "stereoDelay",  { { "Time", 5 }, { "Feedback", 3 }, { "Tone", 2 }, { "Output", 2 } } },
-        { "tapeDelay",    { { "Time", 3 }, { "Feedback", 1 }, { "Tape", 2 }, { "Tone", 3 }, { "Output", 2 } } },
+        { "stereoDelay",  { { "Left", 0, false, { "inputL", "timeL", "noteL", "devL", "fbL", "fbPhaseL", "cross" } },
+                            { "Right", 0, false, { "inputR", "timeR", "noteR", "devR", "fbR", "fbPhaseR", "crossRL" } },
+                            { "Global", 0, false, { "routing", "sync", "crossPhase", "lowCut", "highCut" } },
+                            { "Output Mix", 0, false, { "outL", "outR", "width", "mix" } } } },
+        { "tapeDelay",    { { "Delay", 0, false, { "sync", "time", "note", "deviation" } }, { "Character", 0, false, { "smoothing", "clip", "spread", "head", "lowCut", "highCut" } },
+                            { "Feedback", 0, false, { "feedback", "freeze" } }, { "Modulation", 0, false, { "lfoRate", "wow", "flutterRate", "flutter" } },
+                            { "Output", 0, false, { "dry", "mix" } } } },
         { "modDelay",     { { "Delay", 2 }, { "Modulation", 3 }, { "Output", 1 } } },
-        { "echo",         { { "Time", 3 }, { "Echo", 2 }, { "Output", 1 } } },
+        { "echo",         { { "Time", 3 }, { "Echo", 2 }, { "Output", 0, false, { "dry", "mix" } } } },
         { "studioReverb", { { "Space", 4 }, { "Character", 3 }, { "Diffusion", 2 }, { "Output", 3 } } },
         { "plateReverb",  { { "Plate", 3 }, { "Tone", 3 }, { "Output", 3 } } },
         { "springReverb", { { "Tank", 4 }, { "Tone", 2 }, { "Output", 1 } } },

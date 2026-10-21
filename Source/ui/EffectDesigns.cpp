@@ -458,7 +458,7 @@ namespace
         const bool display = effectface::hasDisplay (info);
         const bool meter = info.category == "Dynamics";
         d.live = meter;
-        const auto sections = effectface::sectionsFor (info);
+        const auto sections = effectface::resolveSections (info);
 
         // Cells: a knob is 116 wide; a row of buttons as wide as its settings; a menu 170
         constexpr int cellH = 172, titleH = 52, gap = 14;
@@ -481,13 +481,13 @@ namespace
         const auto maxRow = 1480 - left - (display ? displayW : 0);
         struct Box { juce::String title; R area; };
         std::vector<Box> boxes;
-        int x = left + gap, y = 10, rowH = 0, index = 0, widest = 0;
-        for (const auto& section : sections)
+        int x = left + gap, y = 10, rowH = 0, widest = 0;
+        for (const auto& [section, indices] : sections)
         {
             // A section's cells, wrapping inside it when there are many
             std::vector<int> widths;
-            for (int k = 0; k < section.count && index + k < (int) info.params.size(); ++k)
-                widths.push_back (widthOf (index + k));
+            for (const auto i : indices)
+                widths.push_back (widthOf (i));
             if (widths.empty())
                 break;
             int lineW = 0, w = 0, lines = 1;
@@ -507,14 +507,14 @@ namespace
             boxes.push_back ({ section.title, R (x, y, w, h) });
             // Place the cells
             int cx = x + 10, cy = y + titleH;
-            for (size_t k = 0; k < widths.size(); ++k, ++index)
+            for (size_t k = 0; k < widths.size(); ++k)
             {
                 if (cx + widths[k] > x + w - 10 + 1)
                 {
                     cx = x + 10;
                     cy += cellH;
                 }
-                const auto& p = info.params[(size_t) index];
+                const auto& p = info.params[(size_t) indices[k]];
                 const auto cell = R (cx, cy, widths[k], cellH);
                 if (! p.isChoice())
                     d.controls.push_back ({ p.id, Kind::knob, cell.reduced (8, 0).withTrimmedBottom (6) });
@@ -1302,14 +1302,21 @@ namespace
                 { "sync", Kind::toggle, R (40, 104, 70, 34), "Tempo Sync" },
                 { "time", Kind::knob, R (140, 82, 130, 190), "Delay Time" },
                 { "note", Kind::dropdown, R (290, 104, 80, 30), "Note" },
-                { "drive", Kind::knob, R (420, 82, 120, 150), "Saturation" },
-                { "spread", Kind::knob, R (600, 82, 120, 150), "Spread" },
-                { "lowCut", Kind::knob, R (420, 240, 120, 140), "Low Cut" },
-                { "highCut", Kind::knob, R (600, 240, 120, 140), "High Cut" },
+                { "deviation", Kind::knob, R (285, 210, 90, 120), "Deviation" },
+                { "smoothing", Kind::knob, R (410, 70, 110, 112), "Smoothing" },
+                { "clip", Kind::knob, R (522, 70, 110, 112), "Clip Threshold" },
+                { "spread", Kind::knob, R (634, 70, 110, 112), "Spread" },
+                { "head", Kind::segmented, R (440, 212, 280, 30), "Tape Head Mode" },
+                { "lowCut", Kind::knob, R (440, 270, 110, 118), "Low Cut" },
+                { "highCut", Kind::knob, R (610, 270, 110, 118), "High Cut" },
                 { "feedback", Kind::knob, R (810, 82, 130, 170), "Feedback" },
-                { "wow", Kind::knob, R (150, 460, 130, 160), "Wow" },
-                { "flutter", Kind::knob, R (420, 460, 130, 160), "Flutter" },
-                { "mix", Kind::fader, R (850, 370, 60, 260), "Mix" },
+                { "freeze", Kind::toggle, R (830, 266, 90, 32), "=FREEZE" },
+                { "lfoRate", Kind::knob, R (50, 470, 130, 150), "LFO Rate" },
+                { "wow", Kind::knob, R (220, 470, 130, 150), "LFO Intensity" },
+                { "flutterRate", Kind::knob, R (400, 470, 130, 150), "Flutter Rate" },
+                { "flutter", Kind::knob, R (570, 470, 130, 150), "Flutter Intensity" },
+                { "dry", Kind::fader, R (795, 390, 60, 240), "Dry" },
+                { "mix", Kind::fader, R (895, 390, 60, 240), "Wet" },
             };
             d["tapeDelay"] = c;
         }

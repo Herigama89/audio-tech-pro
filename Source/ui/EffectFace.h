@@ -19,7 +19,11 @@ namespace riff::effectface
         juce::String title;
         int count = 0;
         bool vertical = false;   // (an EQ band: frequency, gain and Q stacked)
+        std::vector<juce::String> ids {};   // (named parameters, in place of the next count in order)
     };
+
+    /** Each section's parameter indices (by ids, or the next ones in order); any left over make a last section. */
+    std::vector<std::pair<Section, std::vector<int>>> resolveSections (const EffectInfo& info);
 
     /** The effect's controls in labelled groups, in parameter order. */
     std::vector<Section> sectionsFor (const EffectInfo& info);
