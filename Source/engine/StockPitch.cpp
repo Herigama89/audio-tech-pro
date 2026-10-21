@@ -22,7 +22,7 @@ namespace
         {
             sampleRate = rate;
             latency = (int) std::ceil (0.06 * rate);
-            maxPeriod = (int) (rate / 70.0);
+            maxPeriod = (int) (rate / (lowRange ? 40.0 : 70.0));
             size = 1;
             while (size < latency * 4 + 8192)
                 size <<= 1;
@@ -39,6 +39,14 @@ namespace
         }
 
         int getLatency() const noexcept { return latency; }
+
+        /** The Low pitch range: finds notes down to 40 Hz (deep voices, bass) instead of 70 Hz. */
+        void setLowRange (bool low) noexcept
+        {
+            lowRange = low;
+            maxPeriod = (int) (sampleRate / (low ? 40.0 : 70.0));
+        }
+        bool lowRange = false;
 
         /** The period found nearest an input time (0: unvoiced), and the MIDI note it is. */
         float periodAt (juce::int64 inputTime) const noexcept
@@ -184,7 +192,7 @@ namespace
                 const auto ratio = fixedPeriod > 0.0f ? pin / fixedPeriod : std::max (0.25f, ratioFor (pin));
                 step = fixedPeriod > 0.0f ? fixedPeriod : pin / ratio;
                 // Two-period grains, narrower when going up (as TD-PSOLA: twice the smaller period)
-                halfWidth = std::min (pin, step);
+                halfWidth = std::min (pin, step) * grainScale;
                 source = mark;
             }
             else
@@ -194,7 +202,8 @@ namespace
                 step = 256.0f;
                 halfWidth = 256.0f;
                 source = (double) analysisTime;
-                formant = 1.0f;
+                if (! processUnvoiced)
+                    formant = 1.0f;
             }
             const auto reach = (int) std::ceil (halfWidth);
             for (int k = -reach; k <= reach; ++k)
@@ -214,6 +223,10 @@ namespace
             synth += step;
         }
 
+    public:
+        float grainScale = 1.0f;          // (Vocal Transformer's Grain Size)
+        bool processUnvoiced = false;     // (its Formants: process always, or keep unvoiced sounds as they are)
+    private:
         double sampleRate = 48000.0, synth = 0.0, mark = 0.0;
         int latency = 2400, maxPeriod = 686, size = 0, mask = 0;
         juce::int64 time = 0, hopCount = 0;
@@ -237,44 +250,52 @@ namespace
         int getLatencySamples() const override { return psola.getLatency(); }
         float displayValue() const noexcept override { return shownCents.load (std::memory_order_relaxed); }
 
+        enum Index { iKey, iScale, iResponse, iDetune, iAmount, iBypassAll, iRange, iTolerance, iReference, iKbMode, iNote1, iBypass1 = iNote1 + 12 };
+
         void process (float* l, float* r, int n) noexcept override
         {
-            static const int scales[][12] {
-                { 1,1,1,1,1,1,1,1,1,1,1,1 }, { 1,0,1,0,1,1,0,1,0,1,0,1 }, { 1,0,1,1,0,1,0,1,1,0,1,0 },
-                { 1,0,1,0,1,0,0,1,0,1,0,0 }, { 1,0,0,1,0,1,0,1,0,0,1,0 }, { 1,0,1,1,0,1,0,1,1,0,0,1 } };
-            const auto key = choice (0), scale = juce::jlimit (0, 5, choice (1));
-            const auto response = std::max (1.0f, value (2));
-            const auto detune = value (3) * 0.01f;
-            const auto amount = value (4) * 0.01f;
+            const auto key = choice (iKey);
+            const auto* mask = pitchScaleMask (choice (iScale));
+            const auto response = std::max (1.0f, value (iResponse));
+            const auto detune = value (iDetune) * 0.01f;
+            const auto amount = choice (iBypassAll) == 1 ? 0.0f : value (iAmount) * 0.01f;
+            const auto tolerance = value (iTolerance) * 0.01f;
+            const auto reference = value (iReference) * 0.01f;
+            if ((choice (iRange) == 1) != psola.lowRange)
+                psola.setLowRange (choice (iRange) == 1);
             const auto rate = sampleRate;
             auto ratioFor = [&] (float period)
             {
-                const auto note = midiOfPeriod (period, rate);
-                // The nearest note that's in the key
-                const auto inKey = [&] (int m) { return scales[scale][((m - key) % 12 + 12) % 12] == 1; };
-                const auto nearest = (int) std::round (note);
-                auto target = (float) nearest;
-                for (int d = 0; d <= 6; ++d)
+                const auto note = midiOfPeriod (period, rate) - reference;
+                // In the scale (from the root), and not left out by Edit Scale
+                const auto inKey = [&] (int m)
                 {
-                    const int candidates[] { nearest - d, nearest + d };
-                    auto bestDistance = 99.0f;
-                    for (const auto m : candidates)
+                    const auto pc = (m % 12 + 12) % 12;
+                    return mask[((pc - key) % 12 + 12) % 12] == 1 && choice (iNote1 + pc) == 1;
+                };
+                const auto nearest = (int) std::round (note);
+                auto target = note;
+                auto bestDistance = 99.0f;
+                for (int d = 0; d <= 6 && bestDistance >= 99.0f; ++d)
+                    for (const auto m : { nearest - d, nearest + d })
                         if (inKey (m) && std::abs ((float) m - note) < bestDistance)
                         {
                             bestDistance = std::abs ((float) m - note);
                             target = (float) m;
                         }
-                    if (bestDistance < 99.0f)
-                        break;
-                }
-                const auto wanted = (target - note) * amount + detune;
+                // Bypass Notes: sung near one of those, left alone; Tolerance: close enough is left alone
+                const auto sungPc = ((nearest % 12) + 12) % 12;
+                auto wanted = (target - note) * amount;
+                if (choice (iBypass1 + sungPc) == 1 || std::abs (target - note) < tolerance)
+                    wanted = 0.0f;
+                wanted += detune;
                 // Response: how quickly the voice is pulled there (per grain, one period at a time)
                 const auto c = std::exp (-period / (response * 0.001f * (float) rate));
                 shift = wanted + c * (shift - wanted);
                 return std::pow (2.0f, shift / 12.0f);
             };
             psola.process (l, r, n, ratioFor, 1.0f, 0.0f);
-            shownCents.store ((shift - value (3) * 0.01f) * 100.0f, std::memory_order_relaxed);
+            shownCents.store ((shift - value (iDetune) * 0.01f) * 100.0f, std::memory_order_relaxed);
         }
     private:
         RealtimePsola psola;
@@ -297,15 +318,36 @@ namespace
         }
         int getLatencySamples() const override { return psola.getLatency(); }
 
+        enum Index { iPitch, iFormant, iMode, iRobotNote, iMix, iTracking, iGlide, iGrain, iFormants, iDetune };
+
         void process (float* l, float* r, int n) noexcept override
         {
-            const auto ratio = std::pow (2.0f, value (0) / 12.0f);
-            const auto formant = std::pow (2.0f, value (1) / 12.0f);
-            const bool robot = choice (2) == 1;
-            const auto robotNote = 36.0f + (float) choice (3);
-            const auto fixedPeriod = robot ? (float) (sampleRate / (440.0 * std::pow (2.0, (robotNote - 69.0f) / 12.0))) : 0.0f;
-            const auto mix = value (4) * 0.01f;
+            const auto pitch = value (iPitch) + value (iDetune) * 0.01f;
+            const auto formant = std::pow (2.0f, value (iFormant) / 12.0f);
+            const bool robot = choice (iMode) == 1;
+            const auto base = 36.0f + (float) choice (iRobotNote);
+            const auto tracking = value (iTracking) * 0.01f;
+            static const float grains[] { 1.0f, 0.6f, 1.0f, 1.6f };
+            psola.grainScale = grains[juce::jlimit (0, 3, choice (iGrain))];
+            psola.processUnvoiced = choice (iFormants) == 0;
+            const auto mix = value (iMix) * 0.01f;
             const auto latency = psola.getLatency();
+            const auto rate = sampleRate;
+            const auto glide = value (iGlide);
+            // Robotize: the melody follows the pitch base by Tracking (0 a monotone, 100 % as sung, -100 % turned upside down)
+            auto ratioFor = [&] (float period)
+            {
+                auto semis = pitch;
+                if (robot)
+                {
+                    const auto sung = midiOfPeriod (period, rate);
+                    semis = (base + (sung - base) * tracking) - sung + pitch;
+                }
+                // Glide: the change of pitch eased in over the glide time
+                const auto c = glide > 0.5f ? std::exp (-period / (glide * 0.001f * (float) rate)) : 0.0f;
+                glided = semis + c * (glided - semis);
+                return std::pow (2.0f, glided / 12.0f);
+            };
             for (int at = 0; at < n; at += 1024)
             {
                 const auto count = std::min (1024, n - at);
@@ -316,7 +358,7 @@ namespace
                     dryL[(size_t) i] = dryDelayL.readInt (latency + 1);
                     dryR[(size_t) i] = dryDelayR.readInt (latency + 1);
                 }
-                psola.process (l + at, r + at, count, [ratio] (float) { return ratio; }, formant, fixedPeriod);
+                psola.process (l + at, r + at, count, ratioFor, formant, 0.0f);
                 for (int i = 0; i < count; ++i)
                 {
                     l[at + i] = dryL[(size_t) i] * (1.0f - mix) + l[at + i] * mix;
@@ -328,6 +370,7 @@ namespace
         RealtimePsola psola;
         DelayLine dryDelayL, dryDelayR;
         std::array<float, 1024> dryL {}, dryR {};
+        float glided = 0.0f;
     };
 
     //==============================================================================
@@ -336,43 +379,124 @@ namespace
     {
     public:
         using BuiltInEffect::BuiltInEffect;
+        enum Index { iSemitones, iCents, iWindow, iMix, iDelay, iTiming, iCrossfade, iStereoLink, iLatencyComp };
+
         void prepare (double rate, int) override
         {
             sampleRate = preparedRate = rate;
             dl.prepare ((int) (0.25 * rate));
             dr.prepare ((int) (0.25 * rate));
+            dryL.prepare ((int) (0.25 * rate));
+            dryR.prepare ((int) (0.25 * rate));
             phase = 0.0;
+            tracked = 0.02;
+            lastSign = 0; lastCross = 0; counter = 0;
         }
+
+        /** Timing: Manual uses the Delay and Window as set; Drums, Speech and Vocals their own; Pitch Tracking a few periods of what comes in. */
+        double windowSamples() const noexcept
+        {
+            switch (choice (iTiming))
+            {
+                case 1:  return 0.020 * sampleRate;
+                case 2:  return 0.040 * sampleRate;
+                case 3:  return 0.080 * sampleRate;
+                case 4:  return juce::jlimit (0.008, 0.1, tracked * 3.0) * sampleRate;
+                default: return std::max (64.0, value (iWindow) * 0.001 * sampleRate);
+            }
+        }
+
+        int getLatencySamples() const override
+        {
+            return choice (iLatencyComp) == 1 ? juce::roundToInt (value (iDelay) * 0.001 * sampleRate + windowSamples() * 0.5) : 0;
+        }
+
         void process (float* l, float* r, int n) noexcept override
         {
-            const auto ratio = std::pow (2.0, (value (0) + value (1) * 0.01) / 12.0);
-            const auto windowSamples = std::max (64.0, value (2) * 0.001 * sampleRate);
-            const auto mix = value (3) * 0.01f;
-            const auto delayBase = value (4) * 0.001 * sampleRate;
-            const auto step = (1.0 - ratio) / windowSamples;   // the taps' sweep, as a fraction of the window per sample
+            const auto ratio = std::pow (2.0, (value (iSemitones) + value (iCents) * 0.01) / 12.0);
+            const auto window = windowSamples();
+            const auto mix = value (iMix) * 0.01f;
+            const auto delayBase = choice (iTiming) == 0 ? value (iDelay) * 0.001 * sampleRate : 0.0;
+            const auto crossfade = juce::jlimit (0.05f, 1.0f, value (iCrossfade) * 0.01f);
+            const auto invert = choice (iStereoLink) == 1;
+            const auto step = (1.0 - ratio) / window;   // the taps' sweep, as a fraction of the window per sample
+            const auto compensation = (float) getLatencySamples();
+            // (a window rising and falling over the crossfade's share of it, normalised by the two taps' sum)
+            const auto shape = [crossfade] (double p)
+            {
+                const auto edge = crossfade * 0.5;
+                return (float) juce::jlimit (0.0, 1.0, std::min (p / edge, (1.0 - p) / edge));
+            };
             for (int i = 0; i < n; ++i)
             {
+                // Pitch tracking: the time between upward zero crossings
+                ++counter;
+                const auto sign = l[i] + r[i] >= 0.0f ? 1 : -1;
+                if (sign > 0 && lastSign < 0)
+                {
+                    if (counter - lastCross > 16)
+                        tracked = tracked * 0.9 + 0.1 * ((counter - lastCross) / sampleRate);
+                    lastCross = counter;
+                }
+                lastSign = sign;
+
                 dl.push (l[i]);
                 dr.push (r[i]);
+                dryL.push (l[i]);
+                dryR.push (r[i]);
                 phase += step;
                 phase -= std::floor (phase);
                 const auto p2 = phase + 0.5 - std::floor (phase + 0.5);
-                const auto d1 = (float) (delayBase + 2.0 + phase * windowSamples), d2 = (float) (delayBase + 2.0 + p2 * windowSamples);
-                const auto w1 = (float) std::sin (juce::MathConstants<double>::pi * phase), w2 = (float) std::sin (juce::MathConstants<double>::pi * p2);
-                // (sin windows half a cycle apart: their squares add to one)
-                const auto a = dl.read (d1) * w1 * w1 + dl.read (d2) * w2 * w2;
-                const auto b = dr.read (d1) * w1 * w1 + dr.read (d2) * w2 * w2;
-                l[i] = l[i] * (1.0f - mix) + a * mix;
-                r[i] = r[i] * (1.0f - mix) + b * mix;
+                const auto d1 = (float) (delayBase + 2.0 + phase * window), d2 = (float) (delayBase + 2.0 + p2 * window);
+                const auto w1 = shape (phase), w2 = shape (p2);
+                const auto norm = 1.0f / std::max (0.001f, w1 + w2);
+                const auto a = (dl.read (d1) * w1 + dl.read (d2) * w2) * norm;
+                // Stereo Link Invert: the right side's taps half a sweep apart from the left's
+                float b;
+                if (invert)
+                {
+                    const auto q1 = phase + 0.25 - std::floor (phase + 0.25), q2 = q1 + 0.5 - std::floor (q1 + 0.5);
+                    const auto v1 = shape (q1), v2 = shape (q2);
+                    b = (dr.read ((float) (delayBase + 2.0 + q1 * window)) * v1 + dr.read ((float) (delayBase + 2.0 + q2 * window)) * v2) / std::max (0.001f, v1 + v2);
+                }
+                else
+                    b = (dr.read (d1) * w1 + dr.read (d2) * w2) * norm;
+                const auto drL = compensation >= 1.0f ? dryL.read (compensation) : l[i];
+                const auto drR = compensation >= 1.0f ? dryR.read (compensation) : r[i];
+                l[i] = drL * (1.0f - mix) + a * mix;
+                r[i] = drR * (1.0f - mix) + b * mix;
             }
         }
     private:
-        DelayLine dl, dr;
-        double phase = 0.0;
+        DelayLine dl, dr, dryL, dryR;
+        double phase = 0.0, tracked = 0.02;
+        int lastSign = 0;
+        juce::int64 lastCross = 0, counter = 0;
     };
 
     template <typename T>
     std::unique_ptr<BuiltInEffect> make (const EffectInfo& info) { return std::make_unique<T> (info); }
+}
+
+const std::vector<juce::String>& pitchScaleNames()
+{
+    static const std::vector<juce::String> names { "Chromatic", "Major", "Minor", "Major Pentatonic", "Minor Pentatonic", "Harmonic Minor",
+                                                   "Melodic Minor", "Dorian", "Phrygian", "Lydian", "Mixolydian", "Locrian", "Blues",
+                                                   "Whole Tone", "Diminished", "Major Chord", "Minor Chord", "Dominant 7", "Major 7", "Minor 7" };
+    return names;
+}
+
+const int* pitchScaleMask (int scale)
+{
+    static const int scales[][12] {
+        { 1,1,1,1,1,1,1,1,1,1,1,1 }, { 1,0,1,0,1,1,0,1,0,1,0,1 }, { 1,0,1,1,0,1,0,1,1,0,1,0 },
+        { 1,0,1,0,1,0,0,1,0,1,0,0 }, { 1,0,0,1,0,1,0,1,0,0,1,0 }, { 1,0,1,1,0,1,0,1,1,0,0,1 },
+        { 1,0,1,1,0,1,0,1,0,1,0,1 }, { 1,0,1,1,0,1,0,1,0,1,1,0 }, { 1,1,0,1,0,1,0,1,1,0,1,0 },
+        { 1,0,1,0,1,0,1,1,0,1,0,1 }, { 1,0,1,0,1,1,0,1,0,1,1,0 }, { 1,1,0,1,0,1,1,0,1,0,1,0 },
+        { 1,0,0,1,0,1,1,1,0,0,1,0 }, { 1,0,1,0,1,0,1,0,1,0,1,0 }, { 1,0,1,1,0,1,1,0,1,1,0,1 },
+        { 1,0,0,0,1,0,0,1,0,0,0,0 }, { 1,0,0,1,0,0,0,1,0,0,0,0 }, { 1,0,0,0,1,0,0,1,0,0,1,0 },
+        { 1,0,0,0,1,0,0,1,0,0,0,1 }, { 1,0,0,1,0,0,0,1,0,0,1,0 } };
+    return scales[juce::jlimit (0, 19, scale)];
 }
 
 const std::vector<StockEffect>& stockPitchEffects()
@@ -387,24 +511,50 @@ const std::vector<StockEffect>& stockPitchEffects()
     static const std::vector<StockEffect> effects {
         { { "pitchCorrection", "Pitch Correction", {
               { "key", "Key", "", 0.0f, 11.0f, 0.0f, 5.5f, keys },
-              { "scale", "Scale", "", 0.0f, 5.0f, 1.0f, 2.5f, { "Chromatic", "Major", "Minor", "Major Pentatonic", "Minor Pentatonic", "Harmonic Minor" } },
+              { "scale", "Scale/Chord", "", 0.0f, (float) pitchScaleNames().size() - 1.0f, 1.0f, 2.5f, pitchScaleNames() },
               { "response", "Response", ms, 1.0f, 400.0f, 40.0f, 50.0f },
               { "detune", "Detune", " cents", -50.0f, 50.0f, 0.0f, 0.0f },
-              { "amount", "Amount", pc, 0.0f, 100.0f, 100.0f, 50.0f } }, "Pitch" },
+              { "amount", "Amount", pc, 0.0f, 100.0f, 100.0f, 50.0f },
+              { "bypassAll", "Bypass All", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "range", "Pitch Range", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Normal", "Low" } },
+              { "tolerance", "Tolerance", " cents", 0.0f, 100.0f, 0.0f, 20.0f },
+              { "reference", "Reference", " cents", -50.0f, 50.0f, 0.0f, 0.0f },
+              { "kbMode", "Keyboard", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Edit Scale", "Bypass Notes" } },
+              { "n1", "C in Scale", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } }, { "n2", "C# in Scale", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "n3", "D in Scale", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } }, { "n4", "D# in Scale", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "n5", "E in Scale", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } }, { "n6", "F in Scale", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "n7", "F# in Scale", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } }, { "n8", "G in Scale", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "n9", "G# in Scale", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } }, { "n10", "A in Scale", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "n11", "A# in Scale", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } }, { "n12", "B in Scale", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "bp1", "Bypass C", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } }, { "bp2", "Bypass C#", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "bp3", "Bypass D", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } }, { "bp4", "Bypass D#", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "bp5", "Bypass E", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } }, { "bp6", "Bypass F", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "bp7", "Bypass F#", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } }, { "bp8", "Bypass G", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "bp9", "Bypass G#", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } }, { "bp10", "Bypass A", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "bp11", "Bypass A#", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } }, { "bp12", "Bypass B", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } } }, "Pitch" },
           make<PitchCorrection> },
         { { "vocalTransformer", "Vocal Transformer", {
               { "pitch", "Pitch", st, -24.0f, 24.0f, 0.0f, 0.0f },
               { "formant", "Formant", st, -12.0f, 12.0f, 0.0f, 0.0f },
               { "mode", "Mode", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Natural", "Robot" } },
-              { "robotNote", "Robot Note", "", 0.0f, 36.0f, 12.0f, 18.0f, robotNotes },
-              { "mix", "Mix", pc, 0.0f, 100.0f, 100.0f, 50.0f } }, "Pitch" },
+              { "robotNote", "Pitch Base", "", 0.0f, 36.0f, 12.0f, 18.0f, robotNotes },
+              { "mix", "Mix", pc, 0.0f, 100.0f, 100.0f, 50.0f },
+              { "tracking", "Tracking", pc, -100.0f, 100.0f, 0.0f, 0.0f },
+              { "glide", "Glide", ms, 0.0f, 500.0f, 0.0f, 50.0f },
+              { "grain", "Grain Size", "", 0.0f, 3.0f, 0.0f, 1.5f, { "Auto", "Small", "Normal", "Large" } },
+              { "formants", "Formants", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Process Always", "Keep Unvoiced" } },
+              { "detune", "Detune", " cents", -50.0f, 50.0f, 0.0f, 0.0f } }, "Pitch" },
           make<VocalTransformer> },
         { { "pitchShifter", "Pitch Shifter", {
               { "semitones", "Semitones", st, -24.0f, 24.0f, 0.0f, 0.0f },
               { "cents", "Cents", "", -100.0f, 100.0f, 0.0f, 0.0f },
               { "window", "Window", ms, 20.0f, 150.0f, 60.0f, 60.0f },
               { "mix", "Mix", pc, 0.0f, 100.0f, 100.0f, 50.0f },
-              { "delay", "Delay", ms, 0.0f, 100.0f, 0.0f, 20.0f } }, "Pitch" },
+              { "delay", "Delay", ms, 0.0f, 100.0f, 0.0f, 20.0f },
+              { "timing", "Timing", "", 0.0f, 4.0f, 0.0f, 2.0f, { "Manual", "Drums", "Speech", "Vocals", "Pitch Tracking" } },
+              { "crossfade", "Crossfade", pc, 5.0f, 100.0f, 100.0f, 50.0f },
+              { "stereoLink", "Stereo Link", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Normal", "Invert" } },
+              { "latencyComp", "Latency Comp", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } } }, "Pitch" },
           make<PitchShifter> },
     };
     return effects;

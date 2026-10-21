@@ -476,6 +476,25 @@ TEST_CASE ("Pitch: correction pulls a sharp note onto the key, the transformer a
     auto [cl, cr] = run (*pc, sine (452.0, 1.5, 0.4f), sine (452.0, 1.5, 0.4f));
     CHECK_THAT (frequencyOf (cl, 36000, 72000), Catch::Matchers::WithinAbs (440.0, 3.0));
 
+    // Bypass Notes: A left alone (452 Hz stays 452); Tolerance wide enough does the same
+    for (const auto* setting : { "bp10", "tolerance" })
+    {
+        INFO (setting);
+        auto by = make ("pitchCorrection");
+        set (*by, "scale", 0.0f);
+        set (*by, "response", 5.0f);
+        set (*by, setting, juce::String (setting) == "tolerance" ? 60.0f : 1.0f);
+        auto [bl, br] = run (*by, sine (452.0, 1.5, 0.4f), sine (452.0, 1.5, 0.4f));
+        CHECK_THAT (frequencyOf (bl, 36000, 72000), Catch::Matchers::WithinAbs (452.0, 3.0));
+    }
+    // Edit Scale: A left out, so 452 Hz goes to A# (466 Hz)
+    auto edited = make ("pitchCorrection");
+    set (*edited, "scale", 0.0f);
+    set (*edited, "response", 5.0f);
+    set (*edited, "n10", 0.0f);
+    auto [el, er] = run (*edited, sine (452.0, 1.5, 0.4f), sine (452.0, 1.5, 0.4f));
+    CHECK_THAT (frequencyOf (el, 36000, 72000), Catch::Matchers::WithinAbs (466.2, 4.0));
+
     // A voice-like buzz an octave up, a fifth up, and an octave down
     for (const auto [semitones, expected] : { std::pair { 12.0f, 440.0 }, std::pair { 7.0f, 329.6 }, std::pair { -12.0f, 110.0 } })
     {

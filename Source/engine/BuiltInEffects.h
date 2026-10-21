@@ -66,6 +66,9 @@ const std::vector<StockEffect>& stockPitchEffects();
 const std::vector<StockEffect>& stockUtilityEffects();
 const std::vector<StockEffect>& stockExtraEffects();
 const std::vector<StockEffect>& stockPedalboardEffects();
+/** Pitch Correction's scales and chords: their names, and each one's notes from the root (12 flags). */
+const std::vector<juce::String>& pitchScaleNames();
+const int* pitchScaleMask (int scale);
 /** The Pedalboard: a pedal type's three knob names. */
 std::vector<juce::String> pedalboardKnobNames (int type);
 

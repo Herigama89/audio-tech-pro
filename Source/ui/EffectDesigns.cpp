@@ -434,11 +434,14 @@ namespace
         const auto blue = juce::Colour (0xff4fb3e0);
 
         // The keyboard: the notes of the scale lit
-        static const int scales[][12] {
-            { 1,1,1,1,1,1,1,1,1,1,1,1 }, { 1,0,1,0,1,1,0,1,0,1,0,1 }, { 1,0,1,1,0,1,0,1,1,0,1,0 },
-            { 1,0,1,0,1,0,0,1,0,1,0,0 }, { 1,0,0,1,0,1,0,1,0,0,1,0 }, { 1,0,1,1,0,1,0,1,1,0,0,1 } };
-        const auto key = juce::roundToInt (valueOf (info, v, "key")), scale = juce::jlimit (0, 5, juce::roundToInt (valueOf (info, v, "scale", 1.0f)));
-        const auto inScale = [&] (int pc) { return scales[scale][((pc - key) % 12 + 12) % 12] == 1; };
+        const auto key = juce::roundToInt (valueOf (info, v, "key"));
+        const auto* mask = pitchScaleMask (juce::roundToInt (valueOf (info, v, "scale", 1.0f)));
+        // (in the scale and not left out by Edit Scale; Bypass Notes marked in orange)
+        const auto inScale = [&] (int pc)
+        {
+            return mask[((pc - key) % 12 + 12) % 12] == 1 && valueOf (info, v, ("n" + juce::String (pc + 1)).toRawUTF8(), 1.0f) > 0.5f;
+        };
+        const auto bypassed = [&] (int pc) { return valueOf (info, v, ("bp" + juce::String (pc + 1)).toRawUTF8()) > 0.5f; };
         const RF keys (250.0f, 120.0f, 480.0f, 200.0f);
         const auto whiteW = keys.getWidth() / 7.0f;
         static const int whites[] { 0, 2, 4, 5, 7, 9, 11 }, blacks[] { 1, 3, 6, 8, 10 };
@@ -450,6 +453,11 @@ namespace
             auto r = RF (keys.getX() + whiteW * (float) w, keys.getY(), whiteW - 3.0f, keys.getHeight());
             g.setColour (inScale (whites[w]) ? blue : juce::Colour (0xff2c3644));
             g.fillRoundedRectangle (r, 5.0f);
+            if (bypassed (whites[w]))
+            {
+                g.setColour (juce::Colour (0xffff9a3c));
+                g.drawRoundedRectangle (r.reduced (2.0f), 5.0f, 3.0f);
+            }
             g.setColour (inScale (whites[w]) ? juce::Colour (0xff0e2433) : juce::Colours::white.withAlpha (0.5f));
             g.drawText (names[whites[w]], r.removeFromBottom (26.0f), juce::Justification::centred, false);
         }
@@ -460,6 +468,11 @@ namespace
             g.fillRoundedRectangle (r.expanded (2.0f, 0.0f), 5.0f);
             g.setColour (inScale (blacks[b]) ? blue : juce::Colour (0xff222a35));
             g.fillRoundedRectangle (r, 5.0f);
+            if (bypassed (blacks[b]))
+            {
+                g.setColour (juce::Colour (0xffff9a3c));
+                g.drawRoundedRectangle (r.reduced (2.0f), 5.0f, 3.0f);
+            }
             g.setColour (inScale (blacks[b]) ? juce::Colour (0xff0e2433) : juce::Colours::white.withAlpha (0.5f));
             g.drawText (names[blacks[b]], r.removeFromBottom (26.0f), juce::Justification::centred, false);
         }
@@ -987,6 +1000,8 @@ namespace
         }
         g.setColour (juce::Colour (0xff3d4b58));
         g.fillRect (570, 26, 2, 300);
+        g.fillRect (20, 345, b.getWidth() - 40, 2);
+        title (g, R (24, 350, 300, 20), "EXTENDED", juce::Colour (0xff1d2833), 12.0f, juce::Justification::centredLeft);
     }
 
     void paintVocoder (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
@@ -1510,7 +1525,7 @@ namespace
         {
             // Vocal transformer: moulded blue-grey panel, chrome knobs, green readouts
             Design c;
-            c.width = 860; c.height = 350;
+            c.width = 860; c.height = 500;
             c.knobs = KnobStyle::chrome;
             c.label = juce::Colour (0xff1d2833); c.value = juce::Colour (0xffd9ff4a); c.accent = juce::Colour (0xffd9ff4a); c.track = juce::Colours::black;
             c.valueAbove = false;
@@ -1520,8 +1535,17 @@ namespace
                 { "formant", knob, R (70, 60, 160, 210), "Formant" },
                 { "pitch", knob, R (340, 60, 160, 210), "Pitch" },
                 { "mode", Kind::segmented, R (600, 70, 230, 34), "Mode" },
-                { "robotNote", Kind::dropdown, R (620, 170, 190, 30), "Robot Note" },
+                { "robotNote", Kind::dropdown, R (620, 170, 190, 30), "Pitch Base" },
                 { "mix", knob, R (650, 230, 130, 110), "Mix" },
+                { "tracking", knob, R (40, 380, 110, 110), "Tracking" },
+                { "glide", knob, R (170, 380, 110, 110), "Glide" },
+                { "grain", Kind::dropdown, R (310, 420, 130, 28), "Grain Size" },
+                { "formants", Kind::segmented, R (470, 420, 240, 28), "Formants" },
+                { "detune", knob, R (730, 380, 110, 110), "Detune" },
+            };
+            c.enabled = [] (const juce::String& id, const EffectInfo& fx, const float* v)
+            {
+                return (id != "tracking" && id != "robotNote") || valueOf (fx, v, "mode") > 0.5f;
             };
             d["vocalTransformer"] = c;
         }
@@ -1743,13 +1767,37 @@ namespace
             c.label = juce::Colours::white.withAlpha (0.6f); c.value = juce::Colour (0xff4fb3e0); c.accent = juce::Colour (0xff4fb3e0); c.track = juce::Colour (0xff141a22);
             c.live = true;
             c.paint = paintPitchCorrection;
+            c.pageParam = "kbMode";
             c.controls = {
                 { "key", Kind::dropdown, R (40, 52, 160, 30), "Root Note" },
-                { "scale", Kind::dropdown, R (40, 132, 190, 30), "Scale" },
-                { "response", Kind::knob, R (220, 420, 120, 160), "Response" },
-                { "amount", Kind::knob, R (390, 420, 120, 160), "Amount" },
-                { "detune", Kind::knob, R (760, 420, 120, 160), "Detune" },
+                { "scale", Kind::dropdown, R (40, 132, 190, 30), "Scale/Chord" },
+                { "bypassAll", Kind::toggle, R (40, 196, 160, 28), "=BYPASS ALL" },
+                { "range", Kind::segmented, R (40, 268, 180, 28), "Pitch Range" },
+                { "kbMode", Kind::segmented, R (290, 332, 400, 26), "-" },
+                { "response", Kind::knob, R (40, 420, 120, 160), "Response" },
+                { "tolerance", Kind::knob, R (210, 420, 120, 160), "Tolerance" },
+                { "amount", Kind::knob, R (380, 420, 120, 160), "Amount" },
+                { "reference", Kind::knob, R (620, 420, 120, 160), "Reference" },
+                { "detune", Kind::knob, R (770, 420, 120, 160), "Detune" },
             };
+            // The keyboard's keys: click to leave a note out of the scale (Edit Scale), or to bypass it (Bypass Notes)
+            {
+                const RF keys (250.0f, 120.0f, 480.0f, 200.0f);
+                const auto whiteW = keys.getWidth() / 7.0f;
+                const int whites[] { 0, 2, 4, 5, 7, 9, 11 }, blacks[] { 1, 3, 6, 8, 10 };
+                const float blackAt[] { 1.0f, 2.0f, 4.0f, 5.0f, 6.0f };
+                for (int page = 1; page <= 2; ++page)
+                {
+                    const juce::String prefix (page == 1 ? "n" : "bp");
+                    for (int w = 0; w < 7; ++w)
+                        c.controls.push_back ({ prefix + juce::String (whites[w] + 1), Kind::hotspot,
+                                                RF (keys.getX() + whiteW * (float) w, keys.getY(), whiteW - 3.0f, keys.getHeight()).toNearestInt(), "-", {}, page });
+                    for (int k = 0; k < 5; ++k)
+                        c.controls.push_back ({ prefix + juce::String (blacks[k] + 1), Kind::hotspot,
+                                                RF (keys.getX() + whiteW * blackAt[k] - whiteW * 0.33f - 1.5f, keys.getY(), whiteW * 0.66f, keys.getHeight() * 0.58f).toNearestInt(),
+                                                "-", {}, page });
+                }
+            }
             d["pitchCorrection"] = c;
         }
         {
