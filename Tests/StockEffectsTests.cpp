@@ -261,3 +261,127 @@ TEST_CASE ("Reverbs ring on after a click; tremolo moves the level; bitcrusher s
     std::set<float> levels (cl.begin(), cl.end());
     CHECK (levels.size() <= 5);
 }
+
+namespace
+{
+    /** A voice-like buzz: a pulse made of 30 harmonics. */
+    std::vector<float> buzz (double freq, double seconds, float amp)
+    {
+        std::vector<float> s ((size_t) (seconds * rate), 0.0f);
+        for (int h = 1; h <= 30 && freq * h < rate * 0.45; ++h)
+            for (size_t i = 0; i < s.size(); ++i)
+                s[i] += amp / (float) h * (float) std::cos (juce::MathConstants<double>::twoPi * freq * h * (double) i / rate);
+        return s;
+    }
+
+    /** Fundamental by autocorrelation (the strongest repeat between 50 and 1000 Hz). */
+    double fundamentalOf (const std::vector<float>& s, size_t from, size_t length)
+    {
+        const auto minLag = (int) (rate / 1000.0), maxLag = (int) (rate / 50.0);
+        double best = -1.0;
+        int bestLag = 0;
+        std::vector<double> corr ((size_t) maxLag + 2, 0.0);
+        for (int lag = minLag; lag <= maxLag + 1; ++lag)
+        {
+            double c = 0.0, e1 = 0.0, e2 = 0.0;
+            for (size_t i = from; i < from + length; ++i)
+            {
+                c += s[i] * s[i + (size_t) lag];
+                e1 += s[i] * s[i];
+                e2 += s[i + (size_t) lag] * s[i + (size_t) lag];
+            }
+            corr[(size_t) lag] = c / std::sqrt (std::max (1.0e-12, e1 * e2));
+        }
+        // The first lag that comes within 5% of the best (so an octave below isn't taken for it)
+        for (int lag = minLag; lag <= maxLag; ++lag)
+            best = std::max (best, corr[(size_t) lag]);
+        for (int lag = minLag + 1; lag <= maxLag; ++lag)
+            if (corr[(size_t) lag] > best * 0.95 && corr[(size_t) lag] >= corr[(size_t) lag - 1] && corr[(size_t) lag] >= corr[(size_t) lag + 1])
+            {
+                bestLag = lag;
+                break;
+            }
+        return bestLag > 0 ? rate / bestLag : 0.0;
+    }
+
+    /** Frequency from upward zero crossings over a stretch. */
+    double frequencyOf (const std::vector<float>& s, size_t from, size_t to)
+    {
+        int crossings = 0;
+        double first = -1.0, last = 0.0;
+        for (size_t i = from + 1; i < to; ++i)
+            if (s[i - 1] < 0.0f && s[i] >= 0.0f)
+            {
+                const auto t = (double) (i - 1) + s[i - 1] / (s[i - 1] - s[i]);
+                if (first < 0.0) first = t; else ++crossings;
+                last = t;
+            }
+        return crossings > 0 ? crossings / ((last - first) / rate) : 0.0;
+    }
+}
+
+TEST_CASE ("Pitch: correction pulls a sharp note onto the key, the transformer and shifter move it", "[stockfx]")
+{
+    // 452 Hz (A4 + 47 cents) comes out at 440 Hz
+    auto pc = make ("pitchCorrection");
+    set (*pc, "scale", 0.0f);   // chromatic
+    set (*pc, "response", 5.0f);
+    CHECK (pc->getLatencySamples() > 0);
+    auto [cl, cr] = run (*pc, sine (452.0, 1.5, 0.4f), sine (452.0, 1.5, 0.4f));
+    CHECK_THAT (frequencyOf (cl, 36000, 72000), Catch::Matchers::WithinAbs (440.0, 3.0));
+
+    // A voice-like buzz an octave up, a fifth up, and an octave down
+    for (const auto [semitones, expected] : { std::pair { 12.0f, 440.0 }, std::pair { 7.0f, 329.6 }, std::pair { -12.0f, 110.0 } })
+    {
+        INFO ("shift " << semitones);
+        auto vt = make ("vocalTransformer");
+        set (*vt, "pitch", semitones);
+        auto [vl, vr] = run (*vt, buzz (220.0, 1.5, 0.05f), buzz (220.0, 1.5, 0.05f));
+        CHECK_THAT (fundamentalOf (vl, 36000, 4800), Catch::Matchers::WithinRel (expected, 0.03));
+        CHECK (peakOf (vl, 36000) > 0.05f);
+    }
+
+    // The granular shifter: 7 semitones up
+    auto ps = make ("pitchShifter");
+    set (*ps, "semitones", 7.0f);
+    auto [sl, sr] = run (*ps, sine (300.0, 1.0, 0.4f), sine (300.0, 1.0, 0.4f));
+    CHECK_THAT (frequencyOf (sl, 12000, 48000), Catch::Matchers::WithinAbs (300.0 * std::pow (2.0, 7.0 / 12.0), 8.0));
+}
+
+TEST_CASE ("Utility and specialized: gain, oscillator, denoiser, vocoder", "[stockfx]")
+{
+    auto gain = make ("gain");
+    set (*gain, "invL", 1.0f);
+    set (*gain, "gain", -6.0f);
+    std::vector<float> ones (4800, 0.5f);
+    auto [gl, gr] = run (*gain, ones, ones);
+    CHECK_THAT (gl.back(), Catch::Matchers::WithinAbs (-0.25, 0.01));
+    CHECK_THAT (gr.back(), Catch::Matchers::WithinAbs (0.25, 0.01));
+
+    auto osc = make ("testOsc");
+    set (*osc, "level", -6.0f);
+    auto [ol, orr] = run (*osc, std::vector<float> (48000, 0.0f), std::vector<float> (48000, 0.0f));
+    CHECK_THAT (peakOf (ol), Catch::Matchers::WithinAbs (0.5, 0.01));
+    CHECK_THAT (frequencyOf (ol, 0, 48000), Catch::Matchers::WithinAbs (1000.0, 1.0));
+
+    // Denoiser: a loud tone passes; quiet noise is turned down
+    auto dn = make ("denoiser");
+    set (*dn, "threshold", -50.0f);
+    set (*dn, "reduction", 30.0f);
+    auto [tl, tr] = run (*dn, sine (1000.0, 1.0, 0.5f), sine (1000.0, 1.0, 0.5f));
+    CHECK (peakOf (tl, 24000) > 0.4f);
+    juce::Random random (9);
+    std::vector<float> hiss (48000);
+    for (auto& x : hiss) x = (random.nextFloat() * 2.0f - 1.0f) * 0.001f;
+    auto dn2 = make ("denoiser");
+    set (*dn2, "threshold", -50.0f);
+    set (*dn2, "reduction", 30.0f);
+    auto [nl, nr] = run (*dn2, hiss, hiss);
+    CHECK (peakOf (nl, 24000) < 0.0005f);
+
+    // Vocoder with its own saw: a voice-like input comes out
+    auto voc = make ("vocoder");
+    auto [vl, vr] = run (*voc, sine (300.0, 0.5, 0.3f), sine (300.0, 0.5, 0.3f));
+    CHECK (peakOf (vl, 12000) > 0.01f);
+}
+

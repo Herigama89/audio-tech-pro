@@ -61,6 +61,9 @@ const std::vector<StockEffect>& stockReverbEffects();
 const std::vector<StockEffect>& stockModulationEffects();
 const std::vector<StockEffect>& stockDistortionEffects();
 const std::vector<StockEffect>& stockFilterEffects();
+const std::vector<StockEffect>& stockAmpEffects();
+const std::vector<StockEffect>& stockPitchEffects();
+const std::vector<StockEffect>& stockUtilityEffects();
 
 /**
     Base for Riff's own effects. Parameter values are atomics written by the

@@ -68,6 +68,16 @@ std::vector<Section> sectionsFor (const EffectInfo& info)
         { "autoFilter",   { { "Filter", 3 }, { "LFO", 4 }, { "Envelope", 3 }, { "Output", 3 } } },
         { "autoWah",      { { "Wah", 4 }, { "Envelope", 2 }, { "Output", 2 } } },
         { "stepFilter",   { { "Steps", 8 }, { "Sequence", 5 }, { "Output", 1 } } },
+        { "guitarAmp",    { { "Amp", 1 }, { "Preamp", 1 }, { "Tone", 4 }, { "Power", 1 }, { "Cabinet", 2 }, { "Output", 2 } } },
+        { "bassAmp",      { { "Preamp", 1 }, { "Tone", 4 }, { "Power", 1 }, { "Cabinet", 2 }, { "DI", 2 }, { "Output", 2 } } },
+        { "pitchCorrection", { { "Scale", 2 }, { "Correction", 3 } } },
+        { "vocalTransformer", { { "Voice", 2 }, { "Robot", 2 }, { "Output", 1 } } },
+        { "pitchShifter", { { "Shift", 2 }, { "Grain", 1 }, { "Output", 2 } } },
+        { "stereoSpread", { { "Bands", 1 }, { "Intensity", 2 }, { "Range", 2 }, { "Output", 1 } } },
+        { "directionMixer", { { "Input", 1 }, { "Image", 2 }, { "Output", 1 } } },
+        { "gain",         { { "Level", 1 }, { "Phase", 2 }, { "Routing", 2 }, { "Balance", 1 } } },
+        { "testOsc",      { { "Signal", 2 }, { "Level", 1 }, { "Sweep", 1 }, { "Mode", 1 } } },
+        { "vocoder",      { { "Bands", 3 }, { "Envelope", 2 }, { "Formant", 1 }, { "Carrier", 2 }, { "Output", 2 } } },
     };
     if (const auto it = known.find (info.type); it != known.end())
         return it->second;
