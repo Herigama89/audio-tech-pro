@@ -946,6 +946,8 @@ namespace
         }
         g.setColour (juce::Colours::white.withAlpha (0.08f));
         g.fillRect (30, 300, b.getWidth() - 60, 1);
+        g.fillRect (30, 456, b.getWidth() - 60, 1);
+        g.fillRect (500, 470, 1, 110);
     }
 
     void paintStepFilter (juce::Graphics& g, R b, const EffectInfo&, const float*, float)
@@ -1087,6 +1089,7 @@ namespace
                 { "tone", knob, R (270, 110, 160, 200), "TONE" },
                 { "output", knob, R (450, 110, 160, 200), "OUTPUT" },
                 { "mix", knob, R (630, 110, 160, 200), "MIX" },
+                { "levelComp", Kind::toggle, R (360, 322, 140, 30), "=LEVEL COMP" },
             };
             d["distortion"] = c;
             d["fuzz"] = c;
@@ -1184,19 +1187,38 @@ namespace
         {
             // Saturator: purple, glowing waveforms round the Drive knob
             Design c;
-            c.width = 1000; c.height = 420;
+            c.width = 1000; c.height = 600;
             c.knobs = KnobStyle::dark;
             c.label = juce::Colour (0xffb9a8e0); c.value = juce::Colour (0xffffb04a); c.accent = juce::Colour (0xffffa03a); c.track = juce::Colour (0xff2a1f45);
             c.paint = paintSaturator;
             c.controls = {
                 { "model", Kind::dropdown, R (40, 40, 220, 34), "Model" },
-                { "drive", knob, R (420, 120, 160, 200), "Drive" },
-                { "tone", knob, R (600, 290, 120, 120), "-" },
-                { "mix", knob, R (730, 290, 120, 120), "-" },
-                { "output", knob, R (860, 290, 120, 120), "-" },
+                { "style", Kind::segmented, R (290, 42, 220, 30), "Style" },
+                { "drive", knob, R (420, 110, 160, 200), "Drive" },
+                { "bypassOn", Kind::toggle, R (40, 330, 150, 28), "=BYPASS BELOW" },
+                { "bypassFreq", knob, R (60, 368, 110, 110), "-" },
+                { "input", knob, R (600, 318, 120, 120), "Level In" },
+                { "mix", knob, R (730, 318, 120, 120), "Mix" },
+                { "output", knob, R (860, 318, 120, 120), "Level Out" },
+                // The cut filters along the bottom
+                { "lcOn", Kind::toggle, R (40, 500, 110, 28), "=LOW CUT" },
+                { "lcSlope", Kind::dropdown, R (40, 546, 110, 28), "-" },
+                { "lcFreq", knob, R (160, 470, 100, 120), "Freq" },
+                { "lcRes", knob, R (265, 470, 100, 120), "Resonance" },
+                { "lcPost", Kind::segmented, R (370, 520, 110, 28), "-" },
+                { "hcOn", Kind::toggle, R (520, 500, 110, 28), "=HIGH CUT" },
+                { "hcSlope", Kind::dropdown, R (520, 546, 110, 28), "-" },
+                { "hcFreq", knob, R (640, 470, 100, 120), "Freq" },
+                { "hcRes", knob, R (745, 470, 100, 120), "Resonance" },
+                { "hcPost", Kind::segmented, R (850, 520, 110, 28), "-" },
             };
-            for (auto& ctl : c.controls)
-                if (ctl.label == "-") ctl.label = {};
+            c.enabled = [] (const juce::String& id, const EffectInfo& fx, const float* v)
+            {
+                if (id == "bypassFreq") return valueOf (fx, v, "bypassOn") > 0.5f;
+                if (id.startsWith ("lc") && id != "lcOn") return valueOf (fx, v, "lcOn") > 0.5f;
+                if (id.startsWith ("hc") && id != "hcOn") return valueOf (fx, v, "hcOn") > 0.5f;
+                return true;
+            };
             d["saturator"] = c;
         }
         {
