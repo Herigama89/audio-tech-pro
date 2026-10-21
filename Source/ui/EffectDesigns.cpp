@@ -1,4 +1,5 @@
 #include "EffectDesigns.h"
+#include <numeric>
 #include "../engine/StockDsp.h"
 #include "EffectFace.h"
 
@@ -1727,6 +1728,192 @@ namespace
     }
 
     //==============================================================================
+    // Beat Breaker: the input across the pattern, the slices over it, the selected one's settings
+    //==============================================================================
+    constexpr int bbGlobals = 13, bbPerSlice = 10, bbSlices = 32;
+    const juce::Colour bbModeColours[] { juce::Colour (0xffff9a3c), juce::Colour (0xffff4fd8), juce::Colour (0xff3fd6ef), juce::Colour (0xffa77bff),
+                                         juce::Colour (0xffffde4a), juce::Colour (0xff5fe07a) };
+
+    void paintBeatBreaker (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
+    {
+        g.fillAll (juce::Colour (0xff17181b));
+        const auto slice = [v] (int k, int p) { return v[bbGlobals + k * bbPerSlice + p]; };
+        const auto mode = juce::jlimit (0, 5, juce::roundToInt (valueOf (info, v, "mode")));
+        const auto colour = bbModeColours[mode];
+        const auto count = juce::jlimit (1, bbSlices, juce::roundToInt (valueOf (info, v, "sliceCount", 7.0f)) + 1);
+        const auto selected = juce::roundToInt (valueOf (info, v, "selected"));
+        const double lengths[] { 1.0, 2.0, 4.0, 8.0, 16.0 };
+        const auto sixteenths = lengths[juce::jlimit (0, 4, juce::roundToInt (valueOf (info, v, "length", 2.0f)))] * 4.0;
+        const RF screen (20.0f, 60.0f, (float) b.getWidth() - 40.0f, 260.0f);
+        g.setColour (juce::Colour (0xff0d0e10));
+        g.fillRoundedRectangle (screen, 6.0f);
+        const auto xOf = [&] (double sixteenth) { return screen.getX() + (float) (sixteenth / sixteenths) * screen.getWidth(); };
+        // the grid: beats, sixteenths
+        for (int k = 0; k <= (int) sixteenths; ++k)
+        {
+            g.setColour (juce::Colours::white.withAlpha (k % 4 == 0 ? 0.12f : 0.04f));
+            g.fillRect (xOf (k), screen.getY(), 1.0f, screen.getHeight());
+        }
+        // the input, over the top
+        int readings = 0;
+        const auto* m = paintingMeters (readings);
+        const RF wave (screen.getX(), screen.getY() + 8.0f, screen.getWidth(), 70.0f);
+        if (readings >= 130)
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.22f));
+            for (int k = 0; k < 128; ++k)
+            {
+                const auto h = std::min (1.0f, std::sqrt (m[2 + k])) * wave.getHeight() * 0.5f;
+                g.fillRect (wave.getX() + wave.getWidth() * (float) k / 128.0f, wave.getCentreY() - h, wave.getWidth() / 128.0f - 1.0f, h * 2.0f);
+            }
+        }
+        // the slices, in output order
+        std::vector<int> order ((size_t) count);
+        std::iota (order.begin(), order.end(), 0);
+        std::sort (order.begin(), order.end(), [&] (int a, int c) { return slice (a, 0) < slice (c, 0); });
+        const RF lane (screen.getX(), screen.getY() + 90.0f, screen.getWidth(), screen.getHeight() - 104.0f);
+        for (size_t i = 0; i < order.size(); ++i)
+        {
+            const auto k = order[i];
+            const auto start = i == 0 ? 0.0 : (double) slice (k, 0);
+            const auto end = i + 1 < order.size() ? (double) slice (order[i + 1], 0) : sixteenths;
+            if (start >= sixteenths) continue;
+            const RF block (xOf (start) + 1.0f, lane.getY(), xOf (std::min (end, sixteenths)) - xOf (start) - 2.0f, lane.getHeight());
+            const auto isSelected = k == selected;
+            const auto isPlaying = readings >= 2 && juce::roundToInt (m[1]) == k;
+            g.setColour (colour.withAlpha (isPlaying ? 0.22f : 0.1f));
+            g.fillRoundedRectangle (block, 3.0f);
+            g.setColour (colour.withAlpha (isSelected ? 1.0f : 0.75f));
+            switch (mode)
+            {
+                case 0:
+                {
+                    // where it plays from (the input beat), and its speed as a line's slope
+                    const auto from = xOf (slice (k, 1));
+                    g.drawLine (from, wave.getBottom(), block.getX(), block.getY(), 1.0f);
+                    const auto speed = slice (k, 2) / 400.0f;
+                    g.drawLine (block.getX(), block.getCentreY() + block.getHeight() * 0.4f * speed, block.getRight(), block.getCentreY() - block.getHeight() * 0.4f * speed, 2.0f);
+                    break;
+                }
+                case 1:
+                {
+                    const auto n = juce::roundToInt (slice (k, 4)) + 1;
+                    for (int r = 0; r < n; ++r)
+                        g.fillRoundedRectangle (RF (block.getX() + block.getWidth() * (float) r / (float) n + 1.0f, block.getY() + 6.0f, block.getWidth() / (float) n - 2.0f, block.getHeight() - 12.0f), 2.0f);
+                    break;
+                }
+                case 2: case 3:
+                {
+                    const auto t = mode == 2 ? std::log (slice (k, 5) / 20.0f) / std::log (1000.0f) : slice (k, 6) / 100.0f;
+                    g.fillRoundedRectangle (block.withTop (block.getBottom() - block.getHeight() * juce::jlimit (0.02f, 1.0f, t)), 2.0f);
+                    break;
+                }
+                case 4:
+                {
+                    const auto level = juce::jlimit (0.0f, 1.0f, (slice (k, 7) + 60.0f) / 66.0f);
+                    const auto sl = slice (k, 8) / 100.0f;
+                    const auto startLevel = level * (sl >= 0.0f ? 1.0f - sl : 1.0f), endLevel = level * (sl >= 0.0f ? 1.0f : 1.0f + sl);
+                    juce::Path p;
+                    p.startNewSubPath (block.getX(), block.getBottom());
+                    p.lineTo (block.getX(), block.getBottom() - block.getHeight() * startLevel);
+                    p.lineTo (block.getRight(), block.getBottom() - block.getHeight() * endLevel);
+                    p.lineTo (block.getRight(), block.getBottom());
+                    p.closeSubPath();
+                    g.fillPath (p);
+                    break;
+                }
+                default:
+                {
+                    const auto pn = slice (k, 9) / 100.0f;
+                    const auto cx = block.getCentreX() + pn * block.getWidth() * 0.45f;
+                    g.fillEllipse (cx - 6.0f, block.getCentreY() - 6.0f, 12.0f, 12.0f);
+                    g.fillRect (block.getCentreX(), block.getCentreY() - 0.5f, cx - block.getCentreX(), 1.0f);
+                    break;
+                }
+            }
+            if (isSelected)
+            {
+                g.setColour (juce::Colours::white);
+                g.drawRoundedRectangle (block.expanded (1.0f), 3.0f, 1.4f);
+            }
+            g.setColour (juce::Colours::white.withAlpha (isSelected ? 0.95f : 0.5f));
+            g.setFont (juce::FontOptions (11.0f));
+            g.drawText (juce::String (k + 1), RF (block.getX(), lane.getBottom() + 1.0f, std::max (14.0f, block.getWidth()), 12.0f), juce::Justification::centredLeft, false);
+        }
+        if (readings >= 1)
+        {
+            const auto x = screen.getX() + m[0] * screen.getWidth();
+            g.setColour (juce::Colours::white.withAlpha (0.8f));
+            g.fillRect (x, screen.getY(), 1.5f, screen.getHeight());
+        }
+        // the selected slice's settings: their names
+        const char* names[] { "Slice", "Output Beat", "Input Beat", "Speed", "Curve", "Repeat", "Cutoff", "Resonance", "Volume", "Slope", "Pan" };
+        const int xs[] { 20, 120, 220, 320, 420, 520, 620, 720, 820, 920, 1000 };
+        for (int k = 0; k < 11; ++k)
+            smallLabel (g, R (xs[k], 334, 96, 14), names[k]);
+        multiPanel (g, R (12, 398, b.getWidth() - 24, 190), colour, true);
+        smallLabel (g, R (24, 406, 120, 14), "PATTERNS");
+        smallLabel (g, R (24, 488, 120, 14), "GLOBAL");
+    }
+
+    /** Beat Breaker's built-in patterns and its randomize, as parameter values (set by the window). */
+    void beatBreakerPattern (int pattern, const EffectInfo& fx, const float* v, const std::function<void (const juce::String&, float)>& set)
+    {
+        const auto put = [&] (int k, const char* what, float value)
+        {
+            const auto id = juce::String (what) + juce::String (k + 1);
+            if (std::abs (valueOf (fx, v, id.toRawUTF8()) - value) > 1.0e-4f)
+                set (id, value);
+        };
+        set ("sliceCount", 7.0f);
+        set ("length", 2.0f);
+        const int shuffle[] { 0, 6, 4, 2, 8, 14, 12, 10 };
+        for (int k = 0; k < bbSlices; ++k)
+        {
+            const auto out = (float) (k * 2 % 64);
+            auto in = out, speed = 100.0f, curve = 0.0f, repeat = 0.0f, cutoff = 20000.0f, reso = 0.0f, volume = 0.0f, slope = 0.0f, pan = 0.0f;
+            if (k < 8)
+                switch (pattern)
+                {
+                    case 1: if (k == 2 || k == 3) repeat = 3.0f; if (k == 7) { repeat = 7.0f; in = 12.0f; } break;
+                    case 2: if (k >= 4) { speed = -100.0f; in = out + 2.0f; } break;
+                    case 3: in = (float) k; speed = 50.0f; break;
+                    case 4: in = (float) (k * 4 % 16); speed = 200.0f; break;
+                    case 5: if (k >= 5) { in = 10.0f + (float) (k - 5) * 0.75f; speed = 100.0f - (float) (k - 4) * 25.0f; curve = -50.0f; slope = -40.0f; } break;
+                    case 6: if (k % 2 == 1) volume = -60.0f; break;
+                    case 7: in = (float) shuffle[k]; break;
+                    case 8: cutoff = 300.0f * std::pow (20000.0f / 300.0f, (float) k / 7.0f); reso = 40.0f; break;
+                    case 9: pan = k % 2 == 0 ? -80.0f : 80.0f; break;
+                    default: break;
+                }
+            put (k, "out", out); put (k, "in", in); put (k, "speed", speed); put (k, "curve", curve); put (k, "repeat", repeat);
+            put (k, "cutoff", cutoff); put (k, "reso", reso); put (k, "volume", volume); put (k, "slope", slope); put (k, "pan", pan);
+        }
+    }
+
+    void beatBreakerRandomize (int mode, bool all, const EffectInfo& fx, const float* v, const std::function<void (const juce::String&, float)>& set)
+    {
+        juce::Random random;
+        const auto count = juce::roundToInt (valueOf (fx, v, "sliceCount", 7.0f)) + 1;
+        for (int k = 0; k < count; ++k)
+        {
+            const auto n = juce::String (k + 1);
+            const auto on = [&] (int m) { return all || mode == m; };
+            if (on (0))
+            {
+                const float speeds[] { 100.0f, 100.0f, 100.0f, -100.0f, 50.0f, 200.0f };
+                set ("in" + n, (float) (random.nextInt (8) * 2));
+                set ("speed" + n, speeds[random.nextInt (6)]);
+            }
+            if (on (1)) set ("repeat" + n, random.nextInt (3) == 0 ? (float) random.nextInt (4) : 0.0f);
+            if (on (2)) set ("cutoff" + n, 400.0f * std::pow (50.0f, random.nextFloat()));
+            if (on (3)) set ("reso" + n, random.nextFloat() * 70.0f);
+            if (on (4)) { set ("volume" + n, -random.nextFloat() * 12.0f); set ("slope" + n, (random.nextFloat() * 2.0f - 1.0f) * 60.0f); }
+            if (on (5)) set ("pan" + n, (random.nextFloat() * 2.0f - 1.0f) * 80.0f);
+        }
+    }
+
+    //==============================================================================
     // Delay Designer: the taps on a timeline, the selected tap's parameters below, the master section
     //==============================================================================
     void paintDelayDesigner (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
@@ -2797,6 +2984,60 @@ namespace
             c.graphs.push_back ({ R (20, 62, 380, 380), { { "padAX", "padAY", {}, {} } }, 0, true });
             c.graphs.push_back ({ R (700, 62, 380, 380), { { "padBX", "padBY", {}, {} } }, 0, true });
             d["remixFx"] = c;
+        }
+        {
+            // Beat Breaker
+            const auto drop = Kind::dropdown, toggle = Kind::toggle, field = Kind::field;
+            const auto ink = juce::Colour (0xffe9e9ea);
+            Design c;
+            c.width = 1100; c.height = 600;
+            c.knobs = KnobStyle::dark;
+            c.label = juce::Colours::white.withAlpha (0.6f); c.value = juce::Colour (0xffff9a3c); c.accent = juce::Colour (0xffff9a3c); c.track = juce::Colour (0xff121316);
+            c.paint = paintBeatBreaker;
+            c.meters = true;
+            c.pageParam = "selected";
+            c.controls = {
+                { "mode", Kind::segmented, R (20, 16, 540, 28), "-" },
+                { "randomize", toggle, R (580, 16, 110, 28), "=RANDOMIZE" },
+                { "randomAll", toggle, R (700, 16, 110, 28), "=RANDOM ALL" },
+                { "length", drop, R (840, 16, 110, 28), "-", ink },
+                { "selected", drop, R (20, 352, 90, 28), "-", ink },
+                { "pattern", Kind::segmented, R (24, 424, 940, 30), "-" },
+                { "patternOff", toggle, R (976, 424, 100, 30), "=OFF" },
+                { "sliceCount", drop, R (24, 516, 120, 28), "-", ink },
+                { "bypassOn", toggle, R (170, 516, 130, 28), "=BYPASS BELOW" },
+                { "bypassFreq", field, R (306, 516, 100, 28), "-", ink },
+                { "declick", Kind::knob, R (700, 488, 110, 100), "De-click" },
+                { "mix", Kind::knob, R (860, 488, 110, 100), "Mix" },
+            };
+            for (int k = 0; k < bbSlices; ++k)
+            {
+                const auto n = juce::String (k + 1);
+                const auto page = k + 1;
+                const std::pair<const char*, int> fields[] { { "out", 120 }, { "in", 220 }, { "speed", 320 }, { "curve", 420 }, { "repeat", 520 },
+                                                             { "cutoff", 620 }, { "reso", 720 }, { "volume", 820 }, { "slope", 920 }, { "pan", 1000 } };
+                for (const auto& [what, x] : fields)
+                    c.controls.push_back ({ what + n, juce::String (what) == "repeat" ? drop : field, R (x, 352, 90, 28), "-", ink, page });
+            }
+            // Patterns and randomize: written into the slices' parameters
+            c.learn = [] (const float*, int, const EffectInfo& fx, const float* v, const std::function<void (const juce::String&, float)>& set)
+            {
+                const auto pattern = juce::roundToInt (valueOf (fx, v, "pattern"));
+                if (pattern != juce::roundToInt (valueOf (fx, v, "patternLoaded")))
+                {
+                    set ("patternLoaded", (float) pattern);
+                    beatBreakerPattern (pattern, fx, v, set);
+                }
+                const auto mode = juce::roundToInt (valueOf (fx, v, "mode"));
+                if (valueOf (fx, v, "randomize") > 0.5f) { beatBreakerRandomize (mode, false, fx, v, set); set ("randomize", 0.0f); }
+                if (valueOf (fx, v, "randomAll") > 0.5f) { beatBreakerRandomize (mode, true, fx, v, set); set ("randomAll", 0.0f); }
+            };
+            c.enabled = [] (const juce::String& id, const EffectInfo& fx, const float* v)
+            {
+                if (id == "bypassFreq") return valueOf (fx, v, "bypassOn") > 0.5f;
+                return true;
+            };
+            d["beatBreaker"] = c;
         }
         {
             // Match EQ

@@ -1018,3 +1018,41 @@ TEST_CASE ("Remix FX: gater, tape stop, repeater, reverse", "[stockfx]")
     const auto [vl, vr] = run (*rev, sine (300.0, 1.0, 0.5f), sine (300.0, 1.0, 0.5f));
     for (auto x : vl) REQUIRE (std::isfinite (x));
 }
+
+TEST_CASE ("Beat Breaker: straight is transparent, slices replay and reverse", "[stockfx]")
+{
+    // The default pattern (each slice playing from where it sits) passes the sound through
+    auto bb = make ("beatBreaker");
+    bb->setPosition (0, false, 120.0);
+    set (*bb, "declick", 0.0f);
+    auto input = sine (220.0, 3.0, 0.5f);
+    const auto [ol, orr] = run (*bb, input, input);
+    float worst = 0.0f;
+    for (size_t i = 0; i < ol.size(); ++i)
+        worst = std::max (worst, std::abs (ol[i] - input[i]));
+    CHECK (worst < 1.0e-3f);
+
+    // Slice 2 (from the 2nd sixteenth) plays the start of the pattern again: a click at the top comes back 1/8 later
+    auto rep = make ("beatBreaker");
+    rep->setPosition (0, false, 120.0);
+    set (*rep, "declick", 0.0f);
+    set (*rep, "in2", 0.0f);
+    std::vector<float> click (48000 * 2, 0.0f);
+    click[0] = 1.0f;
+    const auto [cl, cr] = run (*rep, click, click);
+    const auto eighth = (size_t) (0.25 * rate * 0.5 * 2.0);   // 1/8 at 120 BPM = 0.25 s
+    CHECK (std::abs (cl[eighth]) > 0.9f);
+
+    // Speed -100 %: a rising ramp in the slice comes out falling
+    auto rev = make ("beatBreaker");
+    rev->setPosition (0, false, 120.0);
+    set (*rev, "declick", 0.0f);
+    set (*rev, "sliceCount", 0.0f);   // one slice, the whole pattern
+    set (*rev, "speed1", -100.0f);
+    set (*rev, "in1", 32.0f);         // from the middle of the (4 beat) pattern: the 2nd half of the pattern before, backwards
+    std::vector<float> ramp (48000 * 4);
+    for (size_t i = 0; i < ramp.size(); ++i) ramp[i] = (float) (i % 96000) / 96000.0f;
+    const auto [rl, rr] = run (*rev, ramp, ramp);
+    CHECK (rl[96000 + 1000] > rl[96000 + 20000]);
+    for (auto x : rl) REQUIRE (std::isfinite (x));
+}

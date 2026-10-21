@@ -1289,6 +1289,220 @@ namespace
         return p;
     }
 
+    //==============================================================================
+    // Beat Breaker
+    //==============================================================================
+    /** Beat Breaker: the incoming audio, a pattern long, played back in slices - each from its own place in the
+        input, at its own speed (backwards too), repeated, filtered, faded and panned. */
+    class BeatBreaker final : public BuiltInEffect
+    {
+    public:
+        enum Global { length, declick, bypassOn, bypassFreq, mix, mode, selected, sliceCount, pattern, patternLoaded, patternOff, randomize, randomAll, globals };
+        enum Slice { outBeat, inBeat, speed, curve, repeat, cutoff, reso, volume, slope, pan, perSlice };
+        static constexpr int maxSlices = 32;
+        static int index (int slice, Slice p) noexcept { return globals + slice * perSlice + (int) p; }
+        static constexpr double lengthBeats[] { 1.0, 2.0, 4.0, 8.0, 16.0 };
+
+        using BuiltInEffect::BuiltInEffect;
+
+        void prepare (double rate, int) override
+        {
+            sampleRate = preparedRate = rate;
+            for (auto& h : history) h.assign ((size_t) (34.0 * rate), 0.0f);
+            written = 0;
+            for (auto& f : filters) f.reset();
+            for (auto& c : bypass) c.reset();
+            freeBeats = 0.0;
+        }
+
+        /** 0: the playhead (0..1 of the pattern), 1: the slice playing, 2-129: the input's level across the pattern. */
+        int readMeters (float* dest, int capacity) const noexcept override
+        {
+            if (capacity < 130)
+                return 0;
+            dest[0] = playhead.load (std::memory_order_relaxed);
+            dest[1] = (float) playingSlice.load (std::memory_order_relaxed);
+            for (size_t k = 0; k < 128; ++k)
+                dest[2 + k] = overview[k].load (std::memory_order_relaxed);
+            return 130;
+        }
+
+        void process (float* l, float* r, int n) noexcept override
+        {
+            std::array<float, maxParams> v;
+            for (size_t i = 0; i < info.params.size(); ++i)
+                v[i] = values[i].load (std::memory_order_relaxed);
+            const auto tempo = std::max (20.0, bpm.load (std::memory_order_relaxed));
+            const auto beatSamples = 60.0 / tempo * sampleRate;
+            const auto patternBeats = lengthBeats[juce::jlimit (0, 4, juce::roundToInt (v[length]))];
+            const auto patternSamples = patternBeats * beatSamples;
+            const auto size = (juce::int64) history[0].size();
+            const auto isPlaying = playing.load (std::memory_order_relaxed);
+            auto beat = isPlaying ? (double) position.load (std::memory_order_relaxed) / beatSamples : freeBeats;
+            const auto wet = v[mix] * 0.01f;
+            const auto off = v[patternOff] > 0.5f;
+            const auto fadeSamples = std::max (1.0, v[declick] * 0.01 * 0.012 * sampleRate);
+            const auto splitting = v[bypassOn] > 0.5f;
+            if (splitting)
+                for (auto& c : bypass) c.set (v[bypassFreq], sampleRate);
+
+            // The slices in order of where they start in the output
+            const auto count = juce::jlimit (1, maxSlices, juce::roundToInt (v[sliceCount]) + 1);
+            std::array<int, maxSlices> order {};
+            for (int k = 0; k < count; ++k) order[(size_t) k] = k;
+            std::sort (order.begin(), order.begin() + count, [&v] (int a, int b) { return v[(size_t) index (a, outBeat)] < v[(size_t) index (b, outBeat)]; });
+            const auto sixteenth = 0.25;   // (slice starts are in sixteenths)
+
+            for (int i = 0; i < n; ++i)
+            {
+                // Record
+                const auto at = written % size;
+                history[0][(size_t) at] = l[i];
+                history[1][(size_t) at] = r[i];
+                const auto inPattern = std::fmod (std::max (0.0, beat), patternBeats);
+                const auto cycleStart = (double) written - inPattern * beatSamples;
+                float a = l[i], b = r[i];
+                if (! off)
+                {
+                    // Which slice: the last to start at or before here
+                    int slot = 0;
+                    for (int k = 0; k < count; ++k)
+                        if (v[(size_t) index (order[(size_t) k], outBeat)] * sixteenth <= inPattern + 1.0e-9)
+                            slot = k;
+                    const auto s = order[(size_t) slot];
+                    const auto start = slot == 0 ? 0.0 : (double) v[(size_t) index (s, outBeat)] * sixteenth;   // (the first plays from the top)
+                    const auto end = slot + 1 < count ? (double) v[(size_t) index (order[(size_t) slot + 1], outBeat)] * sixteenth : patternBeats;
+                    const auto sliceBeats = std::max (1.0e-3, std::min (end, patternBeats) - start);
+                    // Repeats: the slice's first part again and again
+                    const auto repeats = juce::jlimit (1, 8, juce::roundToInt (v[(size_t) index (s, repeat)]) + 1);
+                    const auto part = sliceBeats / repeats;
+                    const auto within = std::fmod (inPattern - start, part);
+                    const auto x = within / part;   // 0..1 through this repeat
+                    // Time: from the input beat, at the slice's speed (curved)
+                    const auto spd = v[(size_t) index (s, speed)] * 0.01;
+                    const auto bend = std::pow (2.0, v[(size_t) index (s, curve)] / 50.0);
+                    const auto source = (double) v[(size_t) index (s, inBeat)] * sixteenth + spd * part * std::pow (x, bend);
+                    auto readPos = cycleStart + source * beatSamples;
+                    while (readPos > (double) written + 1.0e-3)
+                        readPos -= patternSamples;   // (not heard yet: the pattern before's)
+                    readPos = std::max (readPos, (double) (written - size + 2));
+                    a = read (0, readPos, size);
+                    b = read (1, readPos, size);
+                    // De-click: a short fade at each edge
+                    const auto fromEdge = std::min (within * beatSamples, (part - within) * beatSamples);
+                    auto gain = v[declick] > 0.0f ? (float) std::min (1.0, (fromEdge + 1.0) / fadeSamples) : 1.0f;
+                    // Volume: level and slope across the slice
+                    const auto sl = v[(size_t) index (s, slope)] * 0.01f;
+                    gain *= dbToGain (v[(size_t) index (s, volume)]) * (sl >= 0.0f ? 1.0f - sl + sl * (float) x : 1.0f + sl * (float) x);
+                    if (v[(size_t) index (s, volume)] <= -59.9f) gain = 0.0f;
+                    // Cutoff and resonance
+                    const auto cut = v[(size_t) index (s, cutoff)];
+                    if (cut < 19900.0f)
+                    {
+                        if (s != filterSlice || std::abs (cut - filterCut) > 0.5f)
+                        {
+                            for (auto& f : filters) f.set (cut, 0.6 + v[(size_t) index (s, reso)] * 0.01 * 9.0, sampleRate);
+                            filterSlice = s;
+                            filterCut = cut;
+                        }
+                        float lo, band, hi;
+                        filters[0].tick (a, lo, band, hi); a = lo;
+                        filters[1].tick (b, lo, band, hi); b = lo;
+                    }
+                    // Pan
+                    const auto pn = v[(size_t) index (s, pan)] * 0.01f;
+                    a *= gain * (pn > 0.0f ? 1.0f - pn : 1.0f);
+                    b *= gain * (pn < 0.0f ? 1.0f + pn : 1.0f);
+                    if (i == 0)
+                        playingSlice.store (s, std::memory_order_relaxed);
+                }
+                if (splitting)
+                {
+                    // (below the frequency: the dry signal)
+                    float dl, dh, pl, ph;
+                    bypass[0].split (l[i], 0, dl, dh);
+                    bypass[1].split (a, 0, pl, ph);
+                    float el, eh, ql, qh;
+                    bypass[2].split (r[i], 0, el, eh);
+                    bypass[3].split (b, 0, ql, qh);
+                    a = dl + ph;
+                    b = el + qh;
+                }
+                l[i] += (a - l[i]) * wet;
+                r[i] += (b - r[i]) * wet;
+                // The overview: the input's level in 128 bins across the pattern
+                const auto bin = (size_t) juce::jlimit (0, 127, (int) (inPattern / patternBeats * 128.0));
+                const auto level = std::max (std::abs (history[0][(size_t) at]), std::abs (history[1][(size_t) at]));
+                if (bin != lastBin) { overview[bin].store (level, std::memory_order_relaxed); lastBin = bin; }
+                else if (level > overview[bin].load (std::memory_order_relaxed)) overview[bin].store (level, std::memory_order_relaxed);
+                beat += 1.0 / beatSamples;
+                ++written;
+            }
+            playhead.store ((float) (std::fmod (std::max (0.0, beat), patternBeats) / patternBeats), std::memory_order_relaxed);
+            freeBeats = beat;
+        }
+
+    private:
+        float read (int ch, double at, juce::int64 size) const noexcept
+        {
+            const auto base = (juce::int64) std::floor (at);
+            const auto frac = (float) (at - (double) base);
+            const auto& h = history[(size_t) ch];
+            const auto i0 = (size_t) (((base % size) + size) % size), i1 = (size_t) ((((base + 1) % size) + size) % size);
+            return h[i0] + frac * (h[i1] - h[i0]);
+        }
+
+        std::array<std::vector<float>, 2> history;
+        juce::int64 written = 0;
+        std::array<Svf, 2> filters;
+        int filterSlice = -1;
+        float filterCut = -1.0f;
+        std::array<Crossover, 4> bypass;
+        double freeBeats = 0.0;
+        size_t lastBin = 0;
+        std::atomic<float> playhead { 0.0f };
+        std::atomic<int> playingSlice { 0 };
+        std::array<std::atomic<float>, 128> overview {};
+    };
+
+    std::vector<ParamInfo> beatBreakerParams()
+    {
+        std::vector<juce::String> slices, counts, repeats, patterns { "Straight", "Stutter", "Reverse", "Halftime", "Double", "Tape Stop", "Gated", "Shuffle", "Filter Sweep", "Ping Pong" };
+        for (int k = 1; k <= BeatBreaker::maxSlices; ++k) { slices.push_back (juce::String (k)); counts.push_back (juce::String (k)); }
+        for (int k = 1; k <= 8; ++k) repeats.push_back (juce::String (k));
+        std::vector<ParamInfo> p {
+            { "length", "Length", "", 0.0f, 4.0f, 2.0f, 2.0f, { "1 Beat", "2 Beats", "4 Beats", "8 Beats", "16 Beats" } },
+            { "declick", "De-click", " %", 0.0f, 100.0f, 30.0f, 50.0f },
+            { "bypassOn", "Bypass Below", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff },
+            { "bypassFreq", "Bypass Below Freq", " Hz", 20.0f, 500.0f, 120.0f, 120.0f },
+            { "mix", "Mix", " %", 0.0f, 100.0f, 100.0f, 50.0f },
+            { "mode", "Edit Mode", "", 0.0f, 5.0f, 0.0f, 2.5f, { "Time", "Repeat", "Cutoff", "Resonance", "Volume", "Pan" } },
+            { "selected", "Slice", "", 0.0f, (float) BeatBreaker::maxSlices - 1.0f, 0.0f, 15.5f, slices },
+            { "sliceCount", "Slices", "", 0.0f, (float) BeatBreaker::maxSlices - 1.0f, 7.0f, 15.5f, counts },
+            { "pattern", "Pattern", "", 0.0f, (float) patterns.size() - 1.0f, 0.0f, 4.5f, patterns },
+            { "patternLoaded", "Pattern Loaded", "", 0.0f, 100.0f, 0.0f, 50.0f },
+            { "patternOff", "Pattern Off", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff },
+            { "randomize", "Randomize", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff },
+            { "randomAll", "Randomize All", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff },
+        };
+        for (int k = 0; k < BeatBreaker::maxSlices; ++k)
+        {
+            const auto n = juce::String (k + 1), name = "Slice " + n + " ";
+            const auto start = (float) (k * 2 % 64);
+            p.push_back ({ "out" + n, name + "Output Beat", " /16", 0.0f, 63.0f, start, 32.0f });
+            p.push_back ({ "in" + n, name + "Input Beat", " /16", 0.0f, 63.0f, start, 32.0f });
+            p.push_back ({ "speed" + n, name + "Speed", " %", -400.0f, 400.0f, 100.0f, 0.0f });
+            p.push_back ({ "curve" + n, name + "Speed Curve", "", -100.0f, 100.0f, 0.0f, 0.0f });
+            p.push_back ({ "repeat" + n, name + "Repeat", "", 0.0f, 7.0f, 0.0f, 3.5f, repeats });
+            p.push_back ({ "cutoff" + n, name + "Cutoff", " Hz", 20.0f, 20000.0f, 20000.0f, 1000.0f });
+            p.push_back ({ "reso" + n, name + "Resonance", " %", 0.0f, 100.0f, 0.0f, 50.0f });
+            p.push_back ({ "volume" + n, name + "Volume", " dB", -60.0f, 6.0f, 0.0f, -12.0f });
+            p.push_back ({ "slope" + n, name + "Volume Slope", " %", -100.0f, 100.0f, 0.0f, 0.0f });
+            p.push_back ({ "pan" + n, name + "Pan", " %", -100.0f, 100.0f, 0.0f, 0.0f });
+        }
+        return p;
+    }
+
     template <typename T>
     std::unique_ptr<BuiltInEffect> make (const EffectInfo& info) { return std::make_unique<T> (info); }
 }
@@ -1299,6 +1513,7 @@ const std::vector<StockEffect>& stockMultiEffects()
         { { "phatFx", "Phat FX", phatParams(), "Multi Effects" }, make<PhatFx> },
         { { "stepFx", "Step FX", stepParams(), "Multi Effects" }, make<StepFx> },
         { { "remixFx", "Remix FX", remixParams(), "Multi Effects" }, make<RemixFx> },
+        { { "beatBreaker", "Beat Breaker", beatBreakerParams(), "Multi Effects" }, make<BeatBreaker> },
     };
     return effects;
 }
