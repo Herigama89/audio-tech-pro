@@ -901,10 +901,10 @@ namespace
         textured (g, panel, juce::Colour (0xff2a2a2b), juce::Colour (0xff18181a), 0.08f);
         g.setColour (juce::Colours::black);
         g.drawRect (panel, 2);
-        title (g, R (40, 34, 480, 22), "-  MIC PROCESSING  -", juce::Colour (0xffd8c9a6), 13.0f);
-        title (g, R (40, 214, 480, 22), "-  MOTOR  -", juce::Colour (0xffd8c9a6), 13.0f);
+        title (g, R (40, 34, 600, 22), "-  MIC PROCESSING  -", juce::Colour (0xffd8c9a6), 13.0f);
+        title (g, R (40, 214, 600, 22), "-  MOTOR  -", juce::Colour (0xffd8c9a6), 13.0f);
         // The cabinet on the right
-        const RF cab ((float) b.getWidth() - 360.0f, 60.0f, 300.0f, 380.0f);
+        const RF cab ((float) b.getWidth() - 360.0f, 50.0f, 300.0f, 320.0f);
         g.setColour (juce::Colour (0xff121214));
         g.fillRect (cab.expanded (10.0f, 20.0f));
         wood (g, cab.reduced (40.0f, 30.0f).toNearestInt(), juce::Colour (0xff8a4a22));
@@ -914,7 +914,7 @@ namespace
             g.fillRoundedRectangle (box.getX() + 30.0f, box.getY() + 40.0f + (float) k * 22.0f, box.getWidth() - 60.0f, 8.0f, 3.0f);
         g.drawRect (box, 2.0f);
         const auto speed = juce::roundToInt (valueOf (info, v, "speed"));
-        title (g, R ((int) cab.getX(), (int) cab.getBottom() - 6, (int) cab.getWidth(), 22), speed == 1 ? "FAST" : speed == 2 ? "BRAKE" : "SLOW", juce::Colour (0xffd8c9a6), 14.0f);
+        title (g, R ((int) cab.getX(), (int) cab.getBottom() + 8, (int) cab.getWidth(), 22), speed == 2 ? "FAST" : speed == 1 ? "BRAKE" : "SLOW", juce::Colour (0xffd8c9a6), 14.0f);
     }
 
     void paintSaturator (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
@@ -1157,19 +1157,27 @@ namespace
         {
             // Rotary cabinet: wood, a dark control panel, the cabinet drawn on the right
             Design c;
-            c.width = 940; c.height = 520;
+            c.width = 1100; c.height = 560;
             c.knobs = KnobStyle::black;
             c.label = juce::Colour (0xffd8c9a6); c.value = juce::Colour (0xffd8c9a6); c.accent = juce::Colour (0xffd8c9a6); c.track = juce::Colours::black;
             c.valueAbove = false;
             c.paint = paintRotary;
             c.controls = {
-                { "doppler", knob, R (50, 64, 120, 140), "DOPPLER" },
-                { "balance", knob, R (200, 64, 120, 140), "HORN/DRUM" },
-                { "width", knob, R (350, 64, 120, 140), "MIC WIDTH" },
-                { "accel", knob, R (50, 244, 120, 140), "ACCELERATION" },
-                { "fast", knob, R (200, 244, 120, 140), "MAX RATE" },
-                { "drive", knob, R (350, 244, 120, 140), "DRIVE" },
-                { "speed", Kind::segmented, R (90, 404, 330, 36), "-" },
+                { "distance", knob, R (40, 64, 110, 130), "DISTANCE" },
+                { "angle", knob, R (160, 64, 110, 130), "ANGLE" },
+                { "balance", knob, R (280, 64, 110, 130), "HORN/DRUM" },
+                { "width", knob, R (400, 64, 110, 130), "HORN WIDTH" },
+                { "drumWidth", knob, R (520, 64, 110, 130), "DRUM WIDTH" },
+                { "accel", knob, R (40, 244, 110, 130), "ACCELERATION" },
+                { "fast", knob, R (160, 244, 110, 130), "MAX RATE" },
+                { "doppler", knob, R (280, 244, 110, 130), "DOPPLER" },
+                { "drive", knob, R (400, 244, 110, 130), "DRIVE" },
+                { "motor", Kind::dropdown, R (525, 290, 120, 28), "MOTOR" },
+                { "upperMic", Kind::dropdown, R (40, 425, 150, 28), "UPPER MIC" },
+                { "lowerMic", Kind::dropdown, R (205, 425, 150, 28), "LOWER MIC" },
+                { "micPos", Kind::segmented, R (370, 425, 150, 28), "MIC POSITION" },
+                { "speed", Kind::segmented, R (535, 425, 240, 32), "ROTATION" },
+                { "cabinet", Kind::dropdown, R (800, 425, 250, 28), "CABINET" },
             };
             d["rotary"] = c;
         }

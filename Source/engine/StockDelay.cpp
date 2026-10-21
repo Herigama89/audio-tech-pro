@@ -214,36 +214,83 @@ namespace
     };
 
     //==============================================================================
-    /** A short modulated delay: chorus at 10-30 ms, flanger at 1-5 ms with feedback. */
+    /**
+        Modulation Delay (as Logic's): a short delay swept by two LFOs (left and right rates, or linked,
+        mixed), with feedback; De-Warble keeps the pitch steady (the sweep moves between two fixed taps
+        instead of bending the delay), Constant Mod keeps the sweep's width the same at any rate, D-Mode's
+        spatial filtering; stereo phase and its distribution, a low/high cut filter, volume modulation, mix.
+    */
     class ModulationDelay final : public BuiltInEffect
     {
     public:
         using BuiltInEffect::BuiltInEffect;
+        enum Index { iTime, iFeedback, iRate, iDepth, iPhase, iMix, iDeWarble, iConstant, iDMode, iRate2, iLink, iLfoMix,
+                     iDistribution, iFilter, iLowCut, iHighCut, iVolume };
 
         void prepare (double rate, int) override
         {
             sampleRate = preparedRate = rate;
             dl.prepare ((int) (0.12 * rate));
             dr.prepare ((int) (0.12 * rate));
+            for (auto* f : { &lowL, &lowR, &highL, &highR, &dL, &dR }) f->reset();
             lastL = lastR = 0.0f;
         }
 
         void process (float* l, float* r, int n) noexcept override
         {
-            const auto base = value (0) * 0.001f * (float) sampleRate;
-            const auto feedback = value (1) * 0.01f;
-            const auto rate = value (2), depth = value (3) * 0.01f * std::min (base, 0.02f * (float) sampleRate);
-            const auto phase = value (4) / 360.0f;
-            const auto mix = value (5) * 0.01f;
+            const auto base = std::max (1.0f, value (iTime) * 0.001f * (float) sampleRate);
+            const auto feedback = value (iFeedback) * 0.01f;
+            const auto rate1 = value (iRate), rate2 = choice (iLink) == 1 ? rate1 : value (iRate2);
+            auto depth = value (iDepth) * 0.01f * std::min (base, 0.02f * (float) sampleRate);
+            if (choice (iConstant) == 1)
+                depth *= (float) juce::jlimit (0.05, 1.0, 1.0 / std::max (0.05f, 0.5f * (rate1 + rate2)));   // (the pitch swing held as the rate rises)
+            const auto lfoMix = value (iLfoMix) * 0.01f;
+            const auto distribution = choice (iDistribution);
+            const auto phase = value (iPhase) / 360.0 * (distribution == 1 ? 0.5 : 1.0) + (distribution == 2 ? 0.29 : 0.0);
+            const auto mix = value (iMix) * 0.01f;
+            const auto deWarble = choice (iDeWarble) == 1, dMode = choice (iDMode) == 1, filter = choice (iFilter) == 1;
+            const auto volume = value (iVolume) * 0.01f;
+            for (auto* f : { &lowL, &lowR }) f->setLowPass (value (iLowCut), sampleRate);
+            for (auto* f : { &highL, &highR }) f->setLowPass (value (iHighCut), sampleRate);
+            for (auto* f : { &dL, &dR }) f->setLowPass (400.0, sampleRate);
 
             for (int i = 0; i < n; ++i)
             {
-                const auto ml = lfo.peek (0.0), mr = lfo.peek (phase);
-                lfo.next (rate, sampleRate);
-                const auto el = dl.read (std::max (1.0f, base + ml * depth * 0.5f + depth * 0.5f));
-                const auto er = dr.read (std::max (1.0f, base + mr * depth * 0.5f + depth * 0.5f));
+                // Left follows LFO 1, right LFO 2, blended by the LFO mix
+                const auto m1l = lfo1.peek (0.0), m1r = lfo1.peek (phase), m2l = lfo2.peek (0.0), m2r = lfo2.peek (phase);
+                lfo1.next (rate1, sampleRate);
+                lfo2.next (rate2, sampleRate);
+                const auto ml = m1l * (1.0f - lfoMix) + m2l * lfoMix;
+                const auto mr = m1r * (1.0f - lfoMix) + m2r * lfoMix;
+                float el, er;
+                if (deWarble)
+                {
+                    // Two fixed taps crossfaded by the LFO: the colour moves, the pitch doesn't
+                    const auto xl = 0.5f + 0.5f * ml, xr = 0.5f + 0.5f * mr;
+                    el = dl.read (base) * (1.0f - xl) + dl.read (base + depth) * xl;
+                    er = dr.read (base) * (1.0f - xr) + dr.read (base + depth) * xr;
+                }
+                else
+                {
+                    el = dl.read (std::max (1.0f, base + ml * depth * 0.5f + depth * 0.5f));
+                    er = dr.read (std::max (1.0f, base + mr * depth * 0.5f + depth * 0.5f));
+                }
+                if (filter)
+                {
+                    el = highL.lowPass (lowL.highPass (el));
+                    er = highR.lowPass (lowR.highPass (er));
+                }
                 dl.push (l[i] + el * feedback);
                 dr.push (r[i] + er * feedback);
+                if (dMode)
+                {
+                    const auto hl = dL.highPass (el), hr = dR.highPass (er);
+                    el -= 0.35f * hr;
+                    er -= 0.35f * hl;
+                }
+                // Volume modulation: the LFO moves the effect's level too
+                el *= 1.0f - volume * (0.5f - 0.5f * ml);
+                er *= 1.0f - volume * (0.5f - 0.5f * mr);
                 l[i] = l[i] * (1.0f - mix * 0.5f) + el * mix;
                 r[i] = r[i] * (1.0f - mix * 0.5f) + er * mix;
             }
@@ -251,7 +298,8 @@ namespace
 
     private:
         DelayLine dl, dr;
-        Lfo lfo;
+        Lfo lfo1, lfo2;
+        OnePole lowL, lowR, highL, highR, dL, dR;
         float lastL = 0.0f, lastR = 0.0f;
     };
 
@@ -398,12 +446,23 @@ const std::vector<StockEffect>& stockDelayEffects()
           make<TapeDelay> },
 
         { { "modDelay", "Modulation Delay", {
-              { "time", "Delay", ms, 0.5f, 50.0f, 12.0f, 10.0f },
+              { "time", "Time", ms, 0.5f, 50.0f, 12.0f, 10.0f },
               { "feedback", "Feedback", pc, -95.0f, 95.0f, 0.0f, 0.0f },
-              { "rate", "Rate", hz, 0.02f, 10.0f, 0.5f, 1.0f },
-              { "depth", "Depth", pc, 0.0f, 100.0f, 40.0f, 50.0f },
-              { "phase", "Stereo Phase", juce::String (juce::CharPointer_UTF8 ("\xc2\xb0")), 0.0f, 180.0f, 90.0f, 90.0f },
-              { "mix", "Mix", pc, 0.0f, 100.0f, 50.0f, 50.0f } }, "Delay" },
+              { "rate", "LFO 1 Rate", hz, 0.02f, 10.0f, 0.5f, 1.0f },
+              { "depth", "Mod Intensity", pc, 0.0f, 100.0f, 40.0f, 50.0f },
+              { "phase", "Phase", juce::String (juce::CharPointer_UTF8 ("\xc2\xb0")), -180.0f, 180.0f, 90.0f, 0.0f },
+              { "mix", "Output Mix", pc, 0.0f, 100.0f, 50.0f, 50.0f },
+              { "deWarble", "De-Warble", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "constant", "Constant Mod", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "dMode", "D-Mode", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "rate2", "LFO 2 Rate", hz, 0.02f, 10.0f, 0.6f, 1.0f },
+              { "link", "Link L & R", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "lfoMix", "LFO Mix", pc, 0.0f, 100.0f, 0.0f, 50.0f },
+              { "distribution", "Distribution", "", 0.0f, 2.0f, 0.0f, 1.0f, { "Circular", "Left/Right", "Random" } },
+              { "filter", "Filter", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "lowCut", "Low Cut", hz, 20.0f, 2000.0f, 80.0f, 200.0f },
+              { "highCut", "High Cut", hz, 1000.0f, 20000.0f, 12000.0f, 6000.0f },
+              { "volume", "Volume Mod", pc, 0.0f, 100.0f, 0.0f, 50.0f } }, "Delay" },
           make<ModulationDelay> },
 
         { { "echo", "Echo", {

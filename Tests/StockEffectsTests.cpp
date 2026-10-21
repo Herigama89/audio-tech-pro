@@ -557,3 +557,27 @@ TEST_CASE ("Delay Designer's taps and Sub Bass's octave", "[stockfx]")
     const auto [sl, sr] = run (*sub, sine (100.0, 1.0, 0.5f), sine (100.0, 1.0, 0.5f));
     CHECK_THAT (frequencyOf (sl, 12000, 48000), Catch::Matchers::WithinAbs (50.0, 1.0));
 }
+
+TEST_CASE ("Ringshifter shifts every frequency by the same amount; Scanner Vibrato and Rotor Cabinet play", "[stockfx]")
+{
+    // 1 kHz shifted up 200 Hz (not a pitch shift: every partial moves by 200 Hz)
+    auto shift = make ("ringMod");
+    set (*shift, "mode", 0.0f);
+    set (*shift, "freq", 200.0f);
+    set (*shift, "mix", 100.0f);
+    const auto [sl, sr] = run (*shift, sine (1000.0, 1.0, 0.5f), sine (1000.0, 1.0, 0.5f));
+    CHECK_THAT (frequencyOf (sl, 4800, 48000), Catch::Matchers::WithinAbs (1200.0, 5.0));
+    // Dual: the right goes down
+    set (*shift, "mode", 1.0f);
+    const auto [dl, dr] = run (*shift, sine (1000.0, 1.0, 0.5f), sine (1000.0, 1.0, 0.5f));
+    CHECK_THAT (frequencyOf (dr, 4800, 48000), Catch::Matchers::WithinAbs (800.0, 5.0));
+
+    for (const auto* type : { "scannerVibrato", "rotary", "ensemble", "microphaser" })
+    {
+        INFO (type);
+        auto e = make (type);
+        const auto [l, r] = run (*e, sine (440.0, 0.5, 0.5f), sine (440.0, 0.5, 0.5f));
+        CHECK (peakOf (l, 12000) > 0.05f);
+        CHECK (peakOf (l, 12000) < 2.0f);
+    }
+}
