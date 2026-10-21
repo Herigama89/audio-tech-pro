@@ -235,6 +235,7 @@ namespace
         using BuiltInEffect::BuiltInEffect;
         void prepare (double rate, int) override { sampleRate = preparedRate = rate; psola.prepare (rate); shift = 0.0f; }
         int getLatencySamples() const override { return psola.getLatency(); }
+        float displayValue() const noexcept override { return shownCents.load (std::memory_order_relaxed); }
 
         void process (float* l, float* r, int n) noexcept override
         {
@@ -273,10 +274,12 @@ namespace
                 return std::pow (2.0f, shift / 12.0f);
             };
             psola.process (l, r, n, ratioFor, 1.0f, 0.0f);
+            shownCents.store ((shift - value (3) * 0.01f) * 100.0f, std::memory_order_relaxed);
         }
     private:
         RealtimePsola psola;
         float shift = 0.0f;
+        std::atomic<float> shownCents { 0.0f };
     };
 
     //==============================================================================

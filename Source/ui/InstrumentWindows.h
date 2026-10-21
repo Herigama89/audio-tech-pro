@@ -1,5 +1,6 @@
 #pragma once
 #include "EffectFace.h"
+#include "EffectDesigns.h"
 
 #include <JuceHeader.h>
 #include "Theme.h"
@@ -173,7 +174,8 @@ private:
 
 /** Knobs for one of Riff's built-in effects, bound (undoably) to its INSERT node. */
 class EffectPanel final : public juce::Component,
-                          private juce::ValueTree::Listener
+                          private juce::ValueTree::Listener,
+                          private juce::Timer
 {
 public:
     EffectPanel (juce::ValueTree insert, juce::UndoManager& um);
@@ -182,6 +184,9 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
 
+    /** Where a design's meter reads from (gain reduction, pitch correction): the running effect. */
+    void setLiveValue (std::function<float()> source);
+
 private:
     struct Knob
     {
@@ -189,6 +194,25 @@ private:
         MenuSlider slider;
         juce::Label label;
     };
+    Knob* addKnob (const ParamInfo& p);
+    void buildDesign (const EffectInfo& info);
+    void timerCallback() override;
+
+    // A hand-made face (Logic-style) for some effects
+    struct Placed
+    {
+        effectdesign::Control control;
+        juce::Component* component = nullptr;
+        juce::Label* label = nullptr;
+    };
+    const effectdesign::Design* design = nullptr;
+    std::unique_ptr<effectdesign::DesignLook> designLook;
+    std::vector<Placed> placedControls;
+    juce::OwnedArray<juce::Component> extras;
+    juce::OwnedArray<juce::Label> extraLabels;
+    std::vector<std::function<void()>> refreshers;
+    std::function<float()> liveValue;
+    float liveShown = 0.0f;
 
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { refresh(); }
     void refresh();

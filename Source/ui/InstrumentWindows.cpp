@@ -146,7 +146,14 @@ EffectPanel::EffectPanel (juce::ValueTree i, juce::UndoManager& um)
 {
     const auto* info = findBuiltInEffect (insert[ids::effect].toString());
     look = std::make_unique<effectface::FaceLook> (effectface::accentFor (info != nullptr ? info->category : juce::String()));
-    setLookAndFeel (look.get());
+    design = info != nullptr ? effectdesign::designFor (info->type) : nullptr;
+    if (design != nullptr)
+    {
+        designLook = std::make_unique<effectdesign::DesignLook> (*design);
+        setLookAndFeel (designLook.get());
+    }
+    else
+        setLookAndFeel (look.get());
     bypassButton.setColour (juce::ToggleButton::textColourId, juce::Colours::white.withAlpha (0.8f));
     bypassButton.setColour (juce::ToggleButton::tickColourId, look->accent);
 
@@ -157,85 +164,251 @@ EffectPanel::EffectPanel (juce::ValueTree i, juce::UndoManager& um)
     };
     addAndMakeVisible (bypassButton);
 
-    if (info != nullptr)
-    {
+    if (info != nullptr && design != nullptr)
+        buildDesign (*info);
+    else if (info != nullptr)
         for (const auto& p : info->params)
-        {
-            auto* k = knobs.add (new Knob());
-            k->id = p.id;
-
-            k->slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-            k->slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 68, 17);
-            if (p.isChoice())
-            {
-                // A switch (circuit, mode, note value...): the knob steps through its settings, shown by name
-                k->slider.setRange (p.min, p.max, 1.0);
-                k->slider.textFromValueFunction = [p] (double v) { return p.text ((float) v); };
-                k->slider.valueFromTextFunction = [p] (const juce::String& t)
-                {
-                    for (size_t c = 0; c < p.choices.size(); ++c)
-                        if (p.choices[c].equalsIgnoreCase (t.trim()))
-                            return (double) c;
-                    return (double) p.defaultValue;
-                };
-                k->slider.setMouseDragSensitivity (juce::jmax (60, (int) p.choices.size() * 18));
-            }
-            else
-            {
-                k->slider.setRange (p.min, p.max, 0.0);
-                if (p.midPoint > p.min && p.midPoint < p.max)
-                    k->slider.setSkewFactorFromMidPoint (p.midPoint);
-                k->slider.setNumDecimalPlacesToDisplay (p.max > 100.0f ? 0 : (p.max > 10.0f ? 1 : 2));
-                k->slider.setTextValueSuffix (p.suffix);
-            }
-            k->slider.setDoubleClickReturnValue (true, p.defaultValue);
-            k->slider.updateText();   // (a switch shows its setting's name from the start)
-            // Touch, Latch or Write while playing: the knob is written as automation too.
-            const auto owner = [this] { return insert.getParent()[ids::owner].toString(); };
-            const auto param = [this, k] { return model::insertParam (insert[ids::id].toString(), k->id); };
-            k->slider.onDragStart = [this, k, owner, param, name = p.name]
-            {
-                undoManager.beginNewTransaction (name);
-                if (auto* w = AutomationWriter::current())
-                    w->begin (owner(), param(), k->slider.getValue());
-            };
-            k->slider.onDragEnd = [k, owner, param] { juce::ignoreUnused (k); if (auto* w = AutomationWriter::current()) w->end (owner(), param()); };
-            k->slider.onValueChange = [this, k, owner, param]
-            {
-                if (auto* w = AutomationWriter::current())
-                    w->move (owner(), param(), k->slider.getValue());
-                insert.setProperty (juce::Identifier (k->id), k->slider.getValue(), &undoManager);
-            };
-            k->slider.onMenu = [this, k, owner, param, name = juce::String (p.name), def = (double) p.defaultValue]
-            {
-                const auto info2 = findBuiltInEffect (insert[ids::effect].toString());
-                controlmenu::Target t;
-                t.project = insert.getParent().getParent().getParent();
-                t.owner = owner();
-                t.param = param();
-                t.name = (info2 != nullptr ? info2->name + " " : juce::String()) + name;
-                t.um = &undoManager;
-                t.value = [k] { return k->slider.getValue(); };
-                t.reset = [k, def] { k->slider.setValue (def, juce::sendNotificationSync); };
-                controlmenu::show (k->slider, t);
-            };
-            addAndMakeVisible (k->slider);
-
-            k->label.setText (p.name, juce::dontSendNotification);
-            k->label.setFont (juce::FontOptions (11.5f));
-            k->label.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.75f));
-            k->label.setJustificationType (juce::Justification::centred);
-            addAndMakeVisible (k->label);
-        }
-    }
+            addKnob (p);
 
     insert.addListener (this);
     refresh();
-    setSize (faceWidth, layoutFace (false));
+    if (design != nullptr)
+    {
+        bypassButton.setVisible (false);   // (the window's bar above has Bypass)
+        setSize (design->width, design->height);
+    }
+    else
+        setSize (faceWidth, layoutFace (false));
+}
+
+EffectPanel::Knob* EffectPanel::addKnob (const ParamInfo& p)
+{
+    auto* k = knobs.add (new Knob());
+    k->id = p.id;
+
+    k->slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+    k->slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 68, 17);
+    if (p.isChoice())
+    {
+        // A switch (circuit, mode, note value...): the knob steps through its settings, shown by name
+        k->slider.setRange (p.min, p.max, 1.0);
+        k->slider.textFromValueFunction = [p] (double v) { return p.text ((float) v); };
+        k->slider.valueFromTextFunction = [p] (const juce::String& t)
+        {
+            for (size_t c = 0; c < p.choices.size(); ++c)
+                if (p.choices[c].equalsIgnoreCase (t.trim()))
+                    return (double) c;
+            return (double) p.defaultValue;
+        };
+        k->slider.setMouseDragSensitivity (juce::jmax (60, (int) p.choices.size() * 18));
+    }
+    else
+    {
+        k->slider.setRange (p.min, p.max, 0.0);
+        if (p.midPoint > p.min && p.midPoint < p.max)
+            k->slider.setSkewFactorFromMidPoint (p.midPoint);
+        k->slider.setNumDecimalPlacesToDisplay (p.max > 100.0f ? 0 : (p.max > 10.0f ? 1 : 2));
+        k->slider.setTextValueSuffix (p.suffix);
+    }
+    k->slider.setDoubleClickReturnValue (true, p.defaultValue);
+    k->slider.updateText();   // (a switch shows its setting's name from the start)
+    // Touch, Latch or Write while playing: the knob is written as automation too.
+    const auto owner = [this] { return insert.getParent()[ids::owner].toString(); };
+    const auto param = [this, k] { return model::insertParam (insert[ids::id].toString(), k->id); };
+    k->slider.onDragStart = [this, k, owner, param, name = p.name]
+    {
+        undoManager.beginNewTransaction (name);
+        if (auto* w = AutomationWriter::current())
+            w->begin (owner(), param(), k->slider.getValue());
+    };
+    k->slider.onDragEnd = [k, owner, param] { juce::ignoreUnused (k); if (auto* w = AutomationWriter::current()) w->end (owner(), param()); };
+    k->slider.onValueChange = [this, k, owner, param]
+    {
+        if (auto* w = AutomationWriter::current())
+            w->move (owner(), param(), k->slider.getValue());
+        insert.setProperty (juce::Identifier (k->id), k->slider.getValue(), &undoManager);
+    };
+    k->slider.onMenu = [this, k, owner, param, name = juce::String (p.name), def = (double) p.defaultValue]
+    {
+        const auto info2 = findBuiltInEffect (insert[ids::effect].toString());
+        controlmenu::Target t;
+        t.project = insert.getParent().getParent().getParent();
+        t.owner = owner();
+        t.param = param();
+        t.name = (info2 != nullptr ? info2->name + " " : juce::String()) + name;
+        t.um = &undoManager;
+        t.value = [k] { return k->slider.getValue(); };
+        t.reset = [k, def] { k->slider.setValue (def, juce::sendNotificationSync); };
+        controlmenu::show (k->slider, t);
+    };
+    addAndMakeVisible (k->slider);
+
+    k->label.setText (p.name, juce::dontSendNotification);
+    k->label.setFont (juce::FontOptions (11.5f));
+    k->label.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.75f));
+    k->label.setJustificationType (juce::Justification::centred);
+    addAndMakeVisible (k->label);
+    return k;
+}
+
+void EffectPanel::buildDesign (const EffectInfo& info)
+{
+    const auto paramOf = [&info] (const juce::String& id) -> const ParamInfo*
+    {
+        for (const auto& p : info.params)
+            if (p.id == id)
+                return &p;
+        return nullptr;
+    };
+    const auto setValue = [this] (const juce::String& id, const juce::String& undoName, float value)
+    {
+        undoManager.beginNewTransaction (undoName);
+        insert.setProperty (juce::Identifier (id), value, &undoManager);
+    };
+    const auto current = [this, paramOf] (const juce::String& id)
+    {
+        const auto* p = paramOf (id);
+        return (float) (double) insert.getProperty (juce::Identifier (id), p != nullptr ? p->defaultValue : 0.0f);
+    };
+
+    for (const auto& c : design->controls)
+    {
+        const auto* p = paramOf (c.id);
+        if (p == nullptr)
+            continue;
+        Placed placed;
+        placed.control = c;
+        const auto labelText = c.label == "-" ? juce::String() : c.label.isNotEmpty() ? c.label : p->name;
+        if (labelText.isNotEmpty())
+        {
+            auto* l = extraLabels.add (new juce::Label ({}, labelText));
+            l->setFont (juce::FontOptions (15.0f));
+            // (a control's own colour, for one that sits on a different background, e.g. on a screen)
+            const bool ownColour = c.kind != effectdesign::Kind::field && ! c.colour.isTransparent();
+            l->setColour (juce::Label::textColourId, ownColour ? c.colour : design->label);
+            l->setJustificationType (juce::Justification::centred);
+            l->setInterceptsMouseClicks (false, false);
+            addAndMakeVisible (l);
+            placed.label = l;
+        }
+
+        switch (c.kind)
+        {
+            case effectdesign::Kind::knob:
+            case effectdesign::Kind::field:
+            case effectdesign::Kind::fader:
+            {
+                auto* k = addKnob (*p);
+                k->label.setVisible (false);
+                if (c.kind == effectdesign::Kind::field)
+                {
+                    k->slider.getProperties().set ("field", true);
+                    k->slider.getProperties().set ("colour", c.colour.toString());
+                    k->slider.setSliderStyle (juce::Slider::RotaryVerticalDrag);
+                    k->slider.setTextBoxStyle (juce::Slider::TextBoxBelow, true, c.bounds.getWidth(), c.bounds.getHeight());
+                    k->slider.setMouseDragSensitivity (300);
+                }
+                else if (c.kind == effectdesign::Kind::fader)
+                {
+                    k->slider.setSliderStyle (juce::Slider::LinearVertical);
+                    k->slider.setTextBoxStyle (juce::Slider::TextBoxAbove, false, c.bounds.getWidth() + 30, 24);
+                }
+                else if (design->valueAbove)
+                    k->slider.setTextBoxStyle (juce::Slider::TextBoxAbove, false, c.bounds.getWidth(), 24);
+                else
+                {
+                    k->slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+                    k->slider.setPopupDisplayEnabled (true, true, this);
+                }
+                k->slider.lookAndFeelChanged();
+                placed.component = &k->slider;
+                break;
+            }
+            case effectdesign::Kind::segmented:
+            {
+                auto* row = new juce::Component();
+                extras.add (row);
+                const auto count = (int) p->choices.size();
+                for (int n = 0; n < count; ++n)
+                {
+                    auto* b = new juce::TextButton (p->choices[(size_t) n]);
+                    b->setRadioGroupId (1000 + extras.size());
+                    b->setWantsKeyboardFocus (false);
+                    b->onClick = [setValue, id = c.id, n, name = p->name] { setValue (id, name, (float) n); };
+                    row->addAndMakeVisible (b);
+                    extras.add (b);
+                }
+                addAndMakeVisible (row);
+                refreshers.push_back ([row, current, id = c.id]
+                {
+                    const auto selected = juce::roundToInt (current (id));
+                    for (int n = 0; n < row->getNumChildComponents(); ++n)
+                        if (auto* b = dynamic_cast<juce::Button*> (row->getChildComponent (n)))
+                            b->setToggleState (n == selected, juce::dontSendNotification);
+                });
+                placed.component = row;
+                break;
+            }
+            case effectdesign::Kind::toggle:
+            {
+                auto* b = new juce::TextButton();
+                extras.add (b);
+                b->setWantsKeyboardFocus (false);
+                const auto onText = p->choices.size() > 1 ? p->choices.back() : juce::String ("ON");
+                const auto offText = p->choices.size() > 1 ? p->choices.front() : juce::String ("OFF");
+                b->onClick = [setValue, current, id = c.id, name = p->name] { setValue (id, name, current (id) > 0.5f ? 0.0f : 1.0f); };
+                addAndMakeVisible (b);
+                refreshers.push_back ([b, current, id = c.id, onText, offText]
+                {
+                    const auto on = current (id) > 0.5f;
+                    b->setToggleState (on, juce::dontSendNotification);
+                    b->setButtonText ((on ? onText : offText).toUpperCase());
+                });
+                placed.component = b;
+                break;
+            }
+            case effectdesign::Kind::dropdown:
+            {
+                auto* box = new juce::ComboBox();
+                extras.add (box);
+                for (size_t n = 0; n < p->choices.size(); ++n)
+                    box->addItem (p->choices[n], (int) n + 1);
+                box->getProperties().set ("centred", c.bounds.getHeight() >= 38);
+                box->setWantsKeyboardFocus (false);
+                box->onChange = [box, setValue, current, id = c.id, name = p->name]
+                {
+                    const auto chosen = (float) (box->getSelectedId() - 1);
+                    if (box->getSelectedId() > 0 && chosen != current (id))
+                        setValue (id, name, chosen);
+                };
+                addAndMakeVisible (box);
+                refreshers.push_back ([box, current, id = c.id] { box->setSelectedId (juce::roundToInt (current (id)) + 1, juce::dontSendNotification); });
+                placed.component = box;
+                break;
+            }
+        }
+        placedControls.push_back (placed);
+    }
+}
+
+void EffectPanel::setLiveValue (std::function<float()> source)
+{
+    liveValue = std::move (source);
+    if (design != nullptr && design->live && liveValue != nullptr)
+        startTimerHz (30);
+}
+
+void EffectPanel::timerCallback()
+{
+    // The meter: quick to rise, easing back
+    const auto now = liveValue != nullptr ? liveValue() : 0.0f;
+    liveShown = std::abs (now) > std::abs (liveShown) ? now : liveShown + (now - liveShown) * 0.25f;
+    repaint();
 }
 
 EffectPanel::~EffectPanel()
 {
+    stopTimer();
     setLookAndFeel (nullptr);
     insert.removeListener (this);
 }
@@ -245,12 +418,18 @@ void EffectPanel::refresh()
     const auto* info = findBuiltInEffect (insert[ids::effect].toString());
     bypassButton.setToggleState ((bool) insert[ids::bypass], juce::dontSendNotification);
 
-    for (int i = 0; i < knobs.size() && info != nullptr; ++i)
-        knobs[i]->slider.setValue (insert.getProperty (juce::Identifier (knobs[i]->id), info->params[(size_t) i].defaultValue),
-                                   juce::dontSendNotification);
+    if (info != nullptr)
+        for (auto* k : knobs)
+            for (const auto& p : info->params)
+                if (p.id == k->id)
+                    k->slider.setValue (insert.getProperty (juce::Identifier (k->id), p.defaultValue), juce::dontSendNotification);
     for (auto* k : knobs)
         k->slider.updateText();
-    if (! displayArea.isEmpty())
+    for (auto& r : refreshers)
+        r();
+    if (design != nullptr)
+        repaint();
+    else if (! displayArea.isEmpty())
         repaint (displayArea);
 }
 
@@ -258,6 +437,14 @@ void EffectPanel::paint (juce::Graphics& g)
 {
     const auto* info = findBuiltInEffect (insert[ids::effect].toString());
     const auto accent = look->accent;
+    if (design != nullptr && info != nullptr)
+    {
+        std::array<float, BuiltInEffect::maxParams> v {};
+        for (size_t i = 0; i < info->params.size(); ++i)
+            v[i] = (float) (double) insert.getProperty (juce::Identifier (info->params[i].id), info->params[i].defaultValue);
+        design->paint (g, getLocalBounds(), *info, v.data(), liveShown);
+        return;
+    }
 
     // The face: brushed dark metal, a title bar with the effect's name and family
     g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2b3038), 0.0f, 0.0f, juce::Colour (0xff1a1d22), 0.0f, (float) getHeight(), false));
@@ -388,7 +575,28 @@ int EffectPanel::layoutFace (bool apply)
 
 void EffectPanel::resized()
 {
-    layoutFace (true);
+    if (design == nullptr)
+    {
+        layoutFace (true);
+        return;
+    }
+    for (auto& placed : placedControls)
+    {
+        auto bounds = placed.control.bounds;
+        const bool above = placed.control.kind == effectdesign::Kind::knob || placed.control.kind == effectdesign::Kind::fader;
+        if (placed.label != nullptr)
+            placed.label->setBounds (above ? bounds.removeFromTop (22) : bounds.withY (bounds.getY() - 24).withHeight (22).expanded (20, 0));
+        if (placed.component == nullptr)
+            continue;
+        placed.component->setBounds (bounds);
+        if (placed.control.kind == effectdesign::Kind::segmented)
+        {
+            auto row = placed.component->getLocalBounds();
+            const auto count = placed.component->getNumChildComponents();
+            for (int n = 0; n < count; ++n)
+                placed.component->getChildComponent (n)->setBounds (row.removeFromLeft (row.getWidth() / (count - n)).reduced (2, 0));
+        }
+    }
 }
 
 } // namespace riff

@@ -41,6 +41,40 @@ class SnapshotTool
 public:
     explicit SnapshotTool (juce::File outputFolder) : out (std::move (outputFolder)) {}
 
+    /** Just the stock effects' windows (quick: snapshots fx <folder> [types...]). */
+    int effectsOnly (const juce::StringArray& types)
+    {
+        out.createDirectory();
+        juce::UndoManager um;
+        auto project = model::createProject();
+        auto track = model::addTrack (project, "FX", nullptr);
+        auto chain = model::chainFor (project, track[ids::id].toString());
+        for (const auto& type : types)
+        {
+            auto insert = model::addBuiltinInsert (chain, type, -1, nullptr);
+            if (type == "channelEq")
+            {
+                insert.setProperty ("hpFreq", 50.0f, nullptr);
+                insert.setProperty ("lsGain", -2.0f, nullptr);
+                insert.setProperty ("p1Freq", 330.0f, nullptr);
+                insert.setProperty ("p1Gain", 3.0f, nullptr);
+                insert.setProperty ("p1Q", 1.8f, nullptr);
+                insert.setProperty ("p2Freq", 2060.0f, nullptr);
+                insert.setProperty ("p2Gain", 2.0f, nullptr);
+                insert.setProperty ("p2Q", 2.0f, nullptr);
+                insert.setProperty ("p3Freq", 7100.0f, nullptr);
+                insert.setProperty ("p3Gain", 2.0f, nullptr);
+            }
+            EffectPanel panel (insert, um);
+            panel.setLiveValue ([type] { return type == "pitchCorrection" ? 22.0f : 8.5f; });
+            panel.setSize (panel.getWidth(), panel.getHeight());
+            panel.resized();
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (120);
+            save (panel, "fx-" + type + ".png");
+        }
+        return 0;
+    }
+
     /** Imports an audio file the way the Import command does, timing each step (to find hangs). */
     int importTest (const juce::File& file)
     {
@@ -1421,6 +1455,15 @@ int main (int argc, char* argv[])
     juce::LookAndFeel::setDefaultLookAndFeel (&look);
     const auto folder = (argc > 1 && juce::String (argv[1]) != "--import") ? juce::File (juce::String (argv[1]))
                                  : juce::File::getCurrentWorkingDirectory().getChildFile ("snapshots");
+    if (argc > 2 && juce::String (argv[1]) == "fx")
+    {
+        juce::StringArray types;
+        for (int a = 3; a < argc; ++a)
+            types.add (argv[a]);
+        const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).effectsOnly (types);
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        return r;
+    }
     const auto result = (argc > 2 && juce::String (argv[1]) == "--import")
                        ? riff::SnapshotTool (juce::File::getCurrentWorkingDirectory()).importTest (juce::File (juce::String (argv[2])))
                        : riff::SnapshotTool (folder).run();

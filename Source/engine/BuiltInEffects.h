@@ -90,6 +90,9 @@ public:
         playing.store (isPlaying, std::memory_order_relaxed);
     }
 
+    /** What its window's meter shows (a compressor's gain reduction in dB, a pitch correction's cents). */
+    virtual float displayValue() const noexcept { return 0.0f; }
+
     static constexpr int maxParams = 16;
 
 protected:

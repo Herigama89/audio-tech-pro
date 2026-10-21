@@ -3213,10 +3213,12 @@ void MainComponent::openInsertWindow (const juce::ValueTree& insert)
 
     // A built-in effect: its knobs, under the same Pin / Bypass / Side Chain keys.
     const auto* info = findBuiltInEffect (insert[ids::effect].toString());
+    auto* running = effectRack.getBuiltIn (id);
+    const bool sidechain = running != nullptr ? running->acceptsSidechain() : insert[ids::effect].toString() == "compressor";
     struct Host final : juce::Component
     {
-        Host (juce::ValueTree i, juce::ValueTree p, juce::UndoManager& um)
-            : bar (i, p, um, i[ids::effect].toString() == "compressor"), panel (i, um)
+        Host (juce::ValueTree i, juce::ValueTree p, juce::UndoManager& um, bool sidechainKey)
+            : bar (i, p, um, sidechainKey), panel (i, um)
         {
             addAndMakeVisible (bar);
             addAndMakeVisible (panel);
@@ -3231,8 +3233,15 @@ void MainComponent::openInsertWindow (const juce::ValueTree& insert)
         InsertBar bar;
         EffectPanel panel;
     };
+    auto* host = new Host (insert, project, undoManager, sidechain);
+    host->panel.setLiveValue ([this, id]
+    {
+        // (looked up each time: the effect may be rebuilt while the window is open)
+        auto* effect = effectRack.getBuiltIn (id);
+        return effect != nullptr ? effect->displayValue() : 0.0f;
+    });
     auto window = std::make_unique<EditorWindow> (where + ": " + (info != nullptr ? info->name : juce::String ("Effect")),
-                                                  new Host (insert, project, undoManager), false, closer);
+                                                  host, false, closer);
     window->cascadeFrom (lastInsertWindow.getComponent());
     window->setPinned (EditorWindow::pinByDefault);
     lastInsertWindow = window.get();

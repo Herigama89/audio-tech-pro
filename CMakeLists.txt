@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
 endif()
 
-project(AudioTechPro VERSION 0.77.0 LANGUAGES C CXX)
+project(AudioTechPro VERSION 0.78.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -236,6 +236,7 @@ set(RIFF_UI_SOURCES
     Source/ui/PianoRoll.cpp
     Source/ui/InstrumentWindows.cpp
     Source/ui/EffectFace.cpp
+    Source/ui/EffectDesigns.cpp
     Source/ui/Mixer.cpp
     Source/ui/ConsoleStripWindow.cpp
     Source/ui/EventList.cpp

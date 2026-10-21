@@ -17,6 +17,7 @@ namespace
     public:
         using BuiltInEffect::BuiltInEffect;
         float takeGainReductionDb() noexcept override { return meter.exchange (0.0f); }
+        float displayValue() const noexcept override { return display.load (std::memory_order_relaxed); }
         void setSidechain (const float* left, const float* right) noexcept override { keyL = left; keyR = right != nullptr ? right : left; }
         bool acceptsSidechain() const override { return true; }
 
@@ -28,13 +29,14 @@ namespace
         void publish() noexcept
         {
             meter.store (std::max (meter.load (std::memory_order_relaxed), peak), std::memory_order_relaxed);
+            display.store (peak, std::memory_order_relaxed);
             peak = 0.0f;
         }
         const float* keyL = nullptr;
         const float* keyR = nullptr;
 
     private:
-        std::atomic<float> meter { 0.0f };
+        std::atomic<float> meter { 0.0f }, display { 0.0f };
         float peak = 0.0f;
     };
 
