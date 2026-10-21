@@ -1056,6 +1056,28 @@ namespace
         title (g, R (690, b.getHeight() - 48, 100, 30), "Out", juce::Colours::white.withAlpha (0.7f), 13.0f, juce::Justification::centredRight);
     }
 
+    //==============================================================================
+    // Formant Filterbank (as EVOC 20 Filterbank): blue-grey metal, two rows of band faders
+    //==============================================================================
+    void paintFormantBank (juce::Graphics& g, R b, const EffectInfo&, const float*, float)
+    {
+        textured (g, b, juce::Colour (0xff9db2c2), juce::Colour (0xff6f8597), 0.07f);
+        const auto ink = juce::Colour (0xff1c2a36);
+        title (g, R (20, 8, 400, 26), "FORMANT FILTER", ink, 17.0f, juce::Justification::centredLeft);
+        for (const auto y : { 100, 270 })
+        {
+            g.setColour (juce::Colour (0xff1a2530));
+            g.fillRoundedRectangle (RF (60.0f, (float) y - 6.0f, 900.0f, 160.0f), 8.0f);
+        }
+        title (g, R (20, 100, 40, 150), "A", juce::Colour (0xff59b8ff), 26.0f);
+        title (g, R (20, 270, 40, 150), "B", juce::Colour (0xff6ef2a2), 26.0f);
+        g.setColour (juce::Colour (0xff2b3a48));
+        g.fillRect (990, 50, 2, 390);
+        g.fillRect (20, 450, b.getWidth() - 40, 2);
+        title (g, R (20, 458, 300, 22), "MODULATION", ink, 15.0f, juce::Justification::centredLeft);
+        title (g, R (b.getWidth() - 330, 458, 300, 22), "OUTPUT", ink, 15.0f, juce::Justification::centredRight);
+    }
+
     void addHardwareDesigns (std::map<juce::String, Design>& d)
     {
         const auto knob = Kind::knob;
@@ -1547,6 +1569,40 @@ namespace
             c.controls.push_back ({ "output", Kind::field, R (790, 632, 200, 30), "-", juce::Colours::white });
             c.graphs.push_back ({ R (30, 24, 1160 - 130, 220), { { "x1", {}, {}, {} }, { "x2", {}, {}, {} }, { "x3", {}, {}, {} } }, 0 });
             d["multiband"] = c;
+        }
+        {
+            // Formant Filterbank: bank A and bank B, twenty faders each
+            Design c;
+            c.width = 1240; c.height = 620;
+            c.knobs = KnobStyle::chrome;
+            c.label = juce::Colour (0xff1d2833); c.value = juce::Colour (0xff58ff9a); c.accent = juce::Colour (0xff58ff9a); c.track = juce::Colours::black;
+            c.valueAbove = false;
+            c.lcdValues = true;
+            c.paint = paintFormantBank;
+            for (int k = 0; k < 20; ++k)
+            {
+                c.controls.push_back ({ "a" + juce::String (k + 1), Kind::fader, R (70 + k * 44, 100, 34, 148), "-", juce::Colour (0xff59b8ff) });
+                c.controls.push_back ({ "b" + juce::String (k + 1), Kind::fader, R (70 + k * 44, 270, 34, 148), "-", juce::Colour (0xff6ef2a2) });
+            }
+            c.controls.push_back ({ "low", Kind::field, R (60, 52, 140, 26), "-", juce::Colour (0xff1c2a36) });
+            c.controls.push_back ({ "high", Kind::field, R (820, 52, 140, 26), "-", juce::Colour (0xff1c2a36) });
+            c.controls.push_back ({ "bands", Kind::dropdown, R (430, 52, 120, 28), "Bands" });
+            c.controls.push_back ({ "lowest", Kind::segmented, R (220, 52, 190, 28), "Lowest" });
+            c.controls.push_back ({ "highest", Kind::segmented, R (580, 52, 190, 28), "Highest" });
+            c.controls.push_back ({ "fade", Kind::fader, R (1010, 100, 50, 320), "Fade A/B" });
+            c.controls.push_back ({ "shift", Kind::knob, R (1090, 70, 130, 130), "Formant Shift" });
+            c.controls.push_back ({ "resonance", Kind::knob, R (1090, 240, 130, 130), "Resonance" });
+            c.controls.push_back ({ "slope", Kind::segmented, R (1090, 410, 130, 28), "Slope" });
+            c.controls.push_back ({ "shiftLfo", Kind::knob, R (20, 500, 100, 110), "Shift LFO" });
+            c.controls.push_back ({ "shiftRate", Kind::knob, R (130, 500, 100, 110), "Rate" });
+            c.controls.push_back ({ "shiftWave", Kind::dropdown, R (240, 540, 130, 28), "Wave" });
+            c.controls.push_back ({ "fadeLfo", Kind::knob, R (400, 500, 100, 110), "Fade LFO" });
+            c.controls.push_back ({ "fadeRate", Kind::knob, R (510, 500, 100, 110), "Rate" });
+            c.controls.push_back ({ "fadeWave", Kind::dropdown, R (620, 540, 130, 28), "Wave" });
+            c.controls.push_back ({ "overdrive", Kind::toggle, R (800, 540, 120, 28), "=OVERDRIVE" });
+            c.controls.push_back ({ "width", Kind::knob, R (950, 500, 100, 110), "Stereo Width" });
+            c.controls.push_back ({ "level", Kind::knob, R (1080, 500, 100, 110), "Level" });
+            d["formantBank"] = c;
         }
         addHardwareDesigns (d);
         return d;

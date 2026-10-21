@@ -617,3 +617,29 @@ TEST_CASE ("Dynamics: ducker, upward expander, adaptive limiter, multipressor so
     const auto [fl, fr] = run (*multi, sine (80.0, 0.5, 0.1f), sine (80.0, 0.5, 0.1f));
     CHECK_THAT (peakOf (fl, 12000), Catch::Matchers::WithinAbs (0.1, 0.02));
 }
+
+TEST_CASE ("Filters: AutoFilter 4-pole slopes, Fuzz-Wah, Spectral Gate and the Formant Filterbank play", "[stockfx]")
+{
+    // A steeper low pass takes more off an octave above the cutoff
+    float last = 1.0f;
+    for (const auto type : { 3.0f, 4.0f, 6.0f })
+    {
+        auto f = make ("autoFilter");
+        set (*f, "type", type);
+        set (*f, "cutoff", 500.0f);
+        set (*f, "resonance", 0.0f);
+        set (*f, "lfoOn", 0.0f);
+        const auto [l, r] = run (*f, sine (2000.0, 0.5, 0.5f), sine (2000.0, 0.5, 0.5f));
+        const auto peak = peakOf (l, 12000);
+        CHECK (peak < last);
+        last = peak;
+    }
+    for (const auto* type : { "fuzzWah", "spectralGate", "formantBank" })
+    {
+        INFO (type);
+        auto e = make (type);
+        const auto [l, r] = run (*e, sine (700.0, 0.5, 0.5f), sine (700.0, 0.5, 0.5f));
+        CHECK (peakOf (l, 12000) > 0.005f);
+        CHECK (peakOf (l, 12000) < 4.0f);
+    }
+}
