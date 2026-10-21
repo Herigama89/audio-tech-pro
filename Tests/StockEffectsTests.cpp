@@ -581,3 +581,39 @@ TEST_CASE ("Ringshifter shifts every frequency by the same amount; Scanner Vibra
         CHECK (peakOf (l, 12000) < 2.0f);
     }
 }
+
+TEST_CASE ("Dynamics: ducker, upward expander, adaptive limiter, multipressor solo", "[stockfx]")
+{
+    // Ducker: a loud key turns it down
+    auto duck = make ("noiseGate");
+    set (*duck, "gateMode", 1.0f);
+    set (*duck, "threshold", -30.0f);
+    set (*duck, "range", -20.0f);
+    const auto [dl, dr] = run (*duck, sine (500.0, 0.5, 0.5f), sine (500.0, 0.5, 0.5f));
+    CHECK (peakOf (dl, 12000) < 0.06f);
+
+    // Upward expander: above the threshold, louder
+    auto up = make ("expander");
+    set (*up, "threshold", -30.0f);
+    set (*up, "ratio", 2.0f);
+    set (*up, "autoGain", 0.0f);
+    set (*up, "knee", 0.0f);
+    const auto [ul, ur] = run (*up, sine (500.0, 0.5, 0.1f), sine (500.0, 0.5, 0.1f));   // -20 dB in: 10 dB over
+    CHECK (peakOf (ul, 12000) > 0.25f);
+
+    // Adaptive limiter: never over its ceiling
+    auto adaptive = make ("adaptiveLimiter");
+    set (*adaptive, "gain", 12.0f);
+    set (*adaptive, "ceiling", -1.0f);
+    const auto [al, ar] = run (*adaptive, sine (200.0, 0.5, 0.9f), sine (200.0, 0.5, 0.9f));
+    CHECK (peakOf (al) <= juce::Decibels::decibelsToGain (-1.0f) + 1.0e-5f);
+
+    // Multipressor: soloing the high band takes the low tone away
+    auto multi = make ("multiband");
+    set (*multi, "b4Solo", 1.0f);
+    const auto [ml, mr] = run (*multi, sine (80.0, 0.5, 0.5f), sine (80.0, 0.5, 0.5f));
+    CHECK (peakOf (ml, 12000) < 0.02f);
+    set (*multi, "b4Solo", 0.0f);
+    const auto [fl, fr] = run (*multi, sine (80.0, 0.5, 0.1f), sine (80.0, 0.5, 0.1f));
+    CHECK_THAT (peakOf (fl, 12000), Catch::Matchers::WithinAbs (0.1, 0.02));
+}

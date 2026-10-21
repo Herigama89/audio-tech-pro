@@ -72,12 +72,22 @@ std::vector<Section> sectionsFor (const EffectInfo& info)
 
     static const std::map<juce::String, std::vector<Section>> known {
         { "studioComp",   { { "Circuit", 1 }, { "Compression", 5 }, { "Gain", 2 }, { "Side Chain", 1 }, { "Output", 4 } } },
-        { "multiband",    { { "Crossover", 2 }, { "Low", 2 }, { "Mid", 2 }, { "High", 2 }, { "Timing", 2 }, { "Band Gains", 3 }, { "Output", 1 } } },
-        { "deesser",      { { "Detector", 3 }, { "Mode", 2 } } },
-        { "noiseGate",    { { "Gate", 6 }, { "Side Chain", 2 } } },
-        { "expander",     { { "Expansion", 6 }, { "Output", 1 } } },
+        { "multiband",    { { "Crossovers", 0, false, { "x1", "x2", "x3" } },
+                            { "Low", 0, false, { "b1On", "b1Solo", "b1Thr", "b1Ratio", "b1ExpThr", "b1ExpRatio", "b1ExpRed", "b1Rms", "b1Attack", "b1Release", "b1Gain" } },
+                            { "Low Mid", 0, false, { "b2On", "b2Solo", "b2Thr", "b2Ratio", "b2ExpThr", "b2ExpRatio", "b2ExpRed", "b2Rms", "b2Attack", "b2Release", "b2Gain" } },
+                            { "High Mid", 0, false, { "b3On", "b3Solo", "b3Thr", "b3Ratio", "b3ExpThr", "b3ExpRatio", "b3ExpRed", "b3Rms", "b3Attack", "b3Release", "b3Gain" } },
+                            { "High", 0, false, { "b4On", "b4Solo", "b4Thr", "b4Ratio", "b4ExpThr", "b4ExpRatio", "b4ExpRed", "b4Rms", "b4Attack", "b4Release", "b4Gain" } },
+                            { "Output", 0, false, { "autoGain", "lookahead", "output" } } } },
+        { "deesser",      { { "Detection", 0, false, { "detect", "threshold", "freq", "shape" } }, { "Reduction", 0, false, { "range", "mode", "listen" } } } },
+        { "noiseGate",    { { "Gate", 0, false, { "gateMode", "threshold", "range", "hysteresis" } }, { "Timing", 0, false, { "attack", "hold", "release", "lookahead" } },
+                            { "Side Chain", 0, false, { "filter", "filterType", "hp", "lp", "monitor" } } } },
+        { "expander",     { { "Expansion", 0, false, { "direction", "threshold", "ratio", "knee", "range" } }, { "Timing", 0, false, { "attack", "release", "peakRms" } },
+                            { "Output", 0, false, { "output", "autoGain", "clip" } } } },
+        { "enveloper",    { { "Attack", 0, false, { "threshold", "attackGain", "attackTime" } }, { "Release", 0, false, { "releaseGain", "releaseTime" } },
+                            { "Output", 0, false, { "lookahead", "out" } } } },
+        { "adaptiveLimiter", { { "Limiter", 5 } } },
         { "transient",    { { "Shape", 2 }, { "Timing", 2 }, { "Output", 1 } } },
-        { "brickwall",    { { "Limiter", 4 } } },
+        { "brickwall",    { { "Limiter", 0, false, { "gain", "ceiling", "release", "lookahead" } }, { "Mode", 0, false, { "algorithm", "softKnee", "truePeak", "mode" } } } },
         { "compressor",   { { "Compression", 5 } } },
         { "stereoDelay",  { { "Left", 0, false, { "inputL", "timeL", "noteL", "devL", "fbL", "fbPhaseL", "cross" } },
                             { "Right", 0, false, { "inputR", "timeR", "noteR", "devR", "fbR", "fbPhaseR", "crossRL" } },
@@ -288,13 +298,42 @@ void drawDisplay (juce::Graphics& g, juce::Rectangle<float> area, const EffectIn
         return;
     }
 
+    if (info.type == "multiband")
+    {
+        // Multipressor: the four bands between their crossovers, each band's make-up gain as a bar
+        grid (g, a, 10, 4);
+        const auto xOf = [a] (double f) { return a.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * a.getWidth(); };
+        const float edges[] { 20.0f, valueOf (info, v, "x1", 150.0f), valueOf (info, v, "x2", 1000.0f), valueOf (info, v, "x3", 5000.0f), 20000.0f };
+        const juce::Colour colours[] { juce::Colour (0xffff9a3c), juce::Colour (0xffe7d94a), juce::Colour (0xff3ddc6a), juce::Colour (0xff4f9bff) };
+        for (int b = 0; b < 4; ++b)
+        {
+            const auto id = "b" + juce::String (b + 1);
+            const auto on = valueOf (info, v, (id + "On").toRawUTF8(), 1.0f) > 0.5f;
+            const auto gainDb = valueOf (info, v, (id + "Gain").toRawUTF8(), 0.0f);
+            const auto x0 = xOf (edges[b]), x1 = xOf (edges[b + 1]);
+            const auto y = a.getCentreY() - gainDb / 24.0f * a.getHeight() * 0.5f;
+            g.setColour (colours[b].withAlpha (on ? 0.22f : 0.06f));
+            g.fillRect (juce::Rectangle<float> (x0, std::min (y, a.getCentreY()), x1 - x0, std::abs (y - a.getCentreY()) + 2.0f));
+            g.setColour (colours[b].withAlpha (on ? 1.0f : 0.35f));
+            g.fillRect (x0 + 2.0f, y - 1.5f, x1 - x0 - 4.0f, 3.0f);
+            if (b > 0)
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.5f));
+                g.fillRect (x0 - 1.0f, a.getY(), 2.0f, a.getHeight());
+            }
+        }
+        caption (g, area, juce::String ((int) edges[1]) + " / " + juce::String ((int) edges[2]) + " / " + juce::String ((int) edges[3]) + " Hz");
+        return;
+    }
+
     if (c == "Dynamics")
     {
         // In against out, -60..0 dB, with the threshold marked
         grid (g, a, 6, 6);
         g.setColour (juce::Colours::white.withAlpha (0.12f));
         g.drawLine (a.getX(), a.getBottom(), a.getRight(), a.getY(), 1.0f);
-        const bool isGate = info.type == "noiseGate", isExpander = info.type == "expander", isLimiter = info.type == "brickwall";
+        const bool isGate = info.type == "noiseGate", isExpander = info.type == "expander", isLimiter = info.type == "brickwall" || info.type == "adaptiveLimiter";
+        const bool upward = isExpander && valueOf (info, v, "direction", 0.0f) < 0.5f;
         const auto threshold = has (info, "threshold") ? valueOf (info, v, "threshold", -20.0f)
                              : has (info, "midThr") ? valueOf (info, v, "midThr", -20.0f)
                              : isLimiter ? valueOf (info, v, "ceiling", -0.3f) : -20.0f;
@@ -312,8 +351,12 @@ void drawDisplay (juce::Graphics& g, juce::Rectangle<float> area, const EffectIn
             float out;
             if (isGate)
                 out = in < threshold ? in + range : in;
+            else if (upward)
+                out = in > threshold ? in + std::min (24.0f, (in - threshold) * (ratio - 1.0f)) : in;
             else if (isExpander)
                 out = in < threshold ? in + std::max (range, (in - threshold) * (ratio - 1.0f)) : in;
+            else if (info.type == "enveloper")
+                out = in;
             else if (isLimiter)
                 out = std::min (in + valueOf (info, v, "gain", 0.0f), threshold);
             else

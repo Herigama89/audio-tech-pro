@@ -656,6 +656,9 @@ namespace
         // The analyzer for the effects that shape the spectrum
         // (where the display is a frequency response, so the spectrum lines up with it)
         d.analyzer = info.response != nullptr && ! displayArea.isEmpty();
+        // (the Multipressor's crossovers can be dragged in its display)
+        if (info.type == "multiband" && ! displayArea.isEmpty())
+            d.graphs.push_back ({ displayArea.reduced (10, 8), { { "x1", {}, {}, {} }, { "x2", {}, {}, {} }, { "x3", {}, {}, {} } }, 0 });
         return d;
     }
 
@@ -1014,6 +1017,43 @@ namespace
         g.setColour (juce::Colour (0xff2b3a48));
         g.fillRect (700, 20, 2, b.getHeight() - 40);
         title (g, R (712, 14, 160, 20), "OUTPUT", juce::Colour (0xff1c2a36), 14.0f);
+    }
+
+    //==============================================================================
+    // Multipressor (as Logic's): the band display on top, each band's settings in its own column below
+    //==============================================================================
+    const juce::Colour multiColours[] { juce::Colour (0xffff9a3c), juce::Colour (0xffe7d94a), juce::Colour (0xff3ddc6a), juce::Colour (0xff4f9bff) };
+    const char* multiRows[] { "Comp Threshold", "Comp Ratio", "Exp Threshold", "Exp Ratio", "Exp Reduction", "Peak/RMS", "Attack", "Release", "Gain Make-up" };
+
+    void paintMultipressor (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float gr)
+    {
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2c3e57), 0.0f, 0.0f, juce::Colour (0xff1c2a3d), 0.0f, (float) b.getBottom(), false));
+        g.fillRect (b);
+        effectface::drawDisplay (g, RF (20.0f, 16.0f, (float) b.getWidth() - 110.0f, 236.0f), info, v, juce::Colour (0xff8fe39a));
+        // The reduction meter at the right of the display
+        const RF meter ((float) b.getWidth() - 70.0f, 26.0f, 26.0f, 216.0f);
+        g.setColour (juce::Colour (0xff0b0d10));
+        g.fillRect (meter);
+        g.setColour (juce::Colour (0xff8fe39a));
+        g.fillRect (meter.withHeight (meter.getHeight() * juce::jlimit (0.0f, 1.0f, gr / 30.0f)));
+        title (g, R ((int) meter.getX() - 20, 4, 66, 18), "GR", juce::Colours::white.withAlpha (0.6f), 12.0f);
+        // Band titles, row names
+        const char* names[] { "LOW", "LOW MID", "HIGH MID", "HIGH" };
+        for (int k = 0; k < 4; ++k)
+            title (g, R (190 + k * 240, 268, 220, 22), names[k], multiColours[k], 16.0f);
+        g.setFont (juce::FontOptions (13.0f));
+        for (int row = 0; row < 9; ++row)
+        {
+            g.setColour (juce::Colours::white.withAlpha (row % 2 == 0 ? 0.035f : 0.0f));
+            g.fillRect (20, 338 + row * 30, b.getWidth() - 40, 30);
+            g.setColour (juce::Colours::white.withAlpha (0.7f));
+            g.drawText (multiRows[row], R (24, 338 + row * 30, 160, 30), juce::Justification::centredLeft, false);
+        }
+        g.setColour (juce::Colours::white.withAlpha (0.1f));
+        g.fillRect (20, b.getHeight() - 58, b.getWidth() - 40, 1);
+        title (g, R (24, b.getHeight() - 46, 160, 30), "OUTPUT", juce::Colour (0xffa9dcf2), 15.0f, juce::Justification::centredLeft);
+        title (g, R (330, b.getHeight() - 48, 100, 30), "Lookahead", juce::Colours::white.withAlpha (0.7f), 13.0f, juce::Justification::centredRight);
+        title (g, R (690, b.getHeight() - 48, 100, 30), "Out", juce::Colours::white.withAlpha (0.7f), 13.0f, juce::Justification::centredRight);
     }
 
     void addHardwareDesigns (std::map<juce::String, Design>& d)
@@ -1483,6 +1523,30 @@ namespace
                 { "detune", Kind::knob, R (760, 420, 120, 160), "Detune" },
             };
             d["pitchCorrection"] = c;
+        }
+        {
+            // Multipressor: display on top, a column per band
+            Design c;
+            c.width = 1160; c.height = 680;
+            c.knobs = KnobStyle::dark;
+            c.label = juce::Colours::white.withAlpha (0.7f); c.value = juce::Colour (0xff8fe39a); c.accent = juce::Colour (0xff8fe39a); c.track = juce::Colour (0xff17263a);
+            c.live = true;
+            c.paint = paintMultipressor;
+            const char* fields[] { "Thr", "Ratio", "ExpThr", "ExpRatio", "ExpRed", "Rms", "Attack", "Release", "Gain" };
+            for (int b = 0; b < 4; ++b)
+            {
+                const auto id = "b" + juce::String (b + 1);
+                const auto x = 190 + b * 240;
+                c.controls.push_back ({ id + "On", Kind::toggle, R (x + 20, 298, 85, 28), "=ON" });
+                c.controls.push_back ({ id + "Solo", Kind::toggle, R (x + 115, 298, 85, 28), "=SOLO" });
+                for (int row = 0; row < 9; ++row)
+                    c.controls.push_back ({ id + fields[row], Kind::field, R (x, 339 + row * 30, 220, 28), "-", multiColours[b] });
+            }
+            c.controls.push_back ({ "autoGain", Kind::toggle, R (190, 632, 120, 30), "=AUTO GAIN" });
+            c.controls.push_back ({ "lookahead", Kind::field, R (430, 632, 200, 30), "-", juce::Colours::white });
+            c.controls.push_back ({ "output", Kind::field, R (790, 632, 200, 30), "-", juce::Colours::white });
+            c.graphs.push_back ({ R (30, 24, 1160 - 130, 220), { { "x1", {}, {}, {} }, { "x2", {}, {}, {} }, { "x3", {}, {}, {} } }, 0 });
+            d["multiband"] = c;
         }
         addHardwareDesigns (d);
         return d;
