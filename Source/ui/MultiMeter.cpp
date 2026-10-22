@@ -83,7 +83,7 @@ MultiMeterPanel::MultiMeterPanel (AudioEngine& e) : engine (e)
     const char* modeNames[] { "RMS Slow", "RMS Fast", "Peak" };
     for (int i = 0; i < 3; ++i)
         segment (modeButtons[i], modeNames[i], 103, [this, i] { mode = (Mode) i; });
-    modeButtons[2].setToggleState (true, juce::dontSendNotification);
+    modeButtons[1].setToggleState (true, juce::dontSendNotification);   // RMS Fast: the balance of the mix, not its moment-to-moment swings
 
     auto combo = [this] (juce::ComboBox& box, const juce::StringArray& items, int selected, std::function<void (int)> onPick)
     {
@@ -96,9 +96,9 @@ MultiMeterPanel::MultiMeterPanel (AudioEngine& e) : engine (e)
     const juce::StringArray rates { "3 dB/s", "6 dB/s", "11.8 dB/s", "20 dB/s", "40 dB/s" };
     const juce::StringArray holds { "2 s", "4 s", "6 s", juce::String::fromUTF8 ("\xe2\x88\x9e") };
     combo (bandsBox, { "31", "63" }, 1, [this] (int i) { bands = i == 0 ? 31 : 63; bandDb.clear(); });
-    combo (tiltBox, bands::tiltNames(), 2, [this] (int i) { tilt = bands::tiltSlope (i); repaint(); });
-    tiltBox.setTooltip ("Tilt: lifts the bars by this much per octave above 1 kHz (and lowers them below), so a balanced mix "
-                        "reads level across the range. Off: the bands' raw power (pink noise flat).");
+    combo (tiltBox, [] { auto names = bands::tiltNames(); for (auto& n : names) n = n.replace ("/oct", ""); return names; }(), bands::defaultTilt, [this] (int i) { tilt = bands::tiltSlope (i); repaint(); });
+    tiltBox.setTooltip ("Tilt: lifts the bars by this much per octave above 1 kHz (and lowers them below). 4.5 dB/oct: a balanced "
+                        "mix reads level across the range. 3 dB/oct: pink noise reads level. 0: as a plain FFT analyzer.");
     combo (analyzerReturnBox, rates, 2, [this] (int i) { analyzerReturn = returnRateFor (i); });
     combo (analyzerPeakBox, holds, 1, [this] (int i) { analyzerPeakSeconds = holdSecondsFor (i); });
     combo (levelBox, { "Peak", "RMS", "Peak & RMS" }, 2, [this] (int i) { levelMode = (LevelMode) i; });
@@ -447,7 +447,7 @@ void MultiMeterPanel::paintAnalyzer (juce::Graphics& g, juce::Rectangle<int> are
     {
         const auto x0 = xOf ((float) bands::edge (b, bands));
         const auto x1 = xOf ((float) bands::edge (b + 1, bands));
-        const auto lift = (float) bands::tiltDb (bands::centre (b, bands), tilt);
+        const auto lift = (float) bands::displayOffsetDb (bands::centre (b, bands), tilt);
         const auto bar = juce::Rectangle<float>::leftTopRightBottom (x0 + 1.0f, juce::jmax (r.getY(), yOf (bandDb[(size_t) b] + lift)), x1 - 1.0f, r.getBottom());
         g.setColour (barColour());
         g.fillRect (bar);

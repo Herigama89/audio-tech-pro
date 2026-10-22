@@ -63,7 +63,7 @@ private:
     int bands = 63;                        // 31 (1/3 octave) or 63 (1/6 octave)
     std::vector<float> bandDb, bandPower, bandPeak, bandHoldTime;
     Detection detection = Detection::mono;
-    Mode mode = Mode::peak;
+    Mode mode = Mode::rmsFast;
     float analyzerReturn = 11.8f;          // dB a second the bars fall back
     float analyzerPeakSeconds = 4.0f;      // how long a peak mark stays (<= 0: for ever)
     bool analyzerHold = false;
@@ -89,7 +89,7 @@ private:
     juce::TextButton detectionButtons[4], modeButtons[3];
     juce::ComboBox bandsBox, analyzerReturnBox, analyzerPeakBox, levelBox, levelPeakBox, levelReturnBox;
     juce::ComboBox tiltBox;   // dB per octave about 1 kHz, so a balanced mix reads level
-    double tilt = 3.0;
+    double tilt = 4.5;
     juce::TextButton analyzerHoldButton { "Hold" }, analyzerResetButton { "Reset" }, levelHoldButton { "Hold" }, levelResetButton { "Reset" };
 
     juce::Rectangle<int> displayArea, metersArea, correlationArea, controlsArea, topLabel, rangeLabel;

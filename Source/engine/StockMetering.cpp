@@ -259,6 +259,7 @@ namespace
             write = 0;
             ringAt.store (0);
             shown.fill (-120.0f);
+            average.fill (0.0f);
             lastRead = 0.0;
         }
 
@@ -288,9 +289,15 @@ namespace
             const auto dt = lastRead > 0.0 ? juce::jlimit (0.0, 0.5, now - lastRead) : 0.0;
             lastRead = now;
             const auto fall = (float) dt * (value (0) > 0.5f ? 6.0f : 20.0f);
+            // Each band's power averaged over about 300 ms first (as T-RackS's and Logic's RMS analyzers): a
+            // narrow low band's spectrum swings far more from one moment to the next than a wide high one's,
+            // and riding those swings would make the lows read loud.
+            const auto smooth = dt > 0.0 ? (float) (1.0 - std::exp (-dt / 0.3)) : 1.0f;
             for (int b = 0; b < bands; ++b)
             {
-                const auto db = juce::jmax (-120.0f, 10.0f * std::log10 (power[(size_t) b] + 1.0e-13f));
+                auto& a = average[(size_t) b];
+                a += (power[(size_t) b] - a) * smooth;
+                const auto db = juce::jmax (-120.0f, 10.0f * std::log10 (a + 1.0e-13f));
                 auto& s = shown[(size_t) b];
                 s = db > s ? db : juce::jmax (db, s - fall);
                 dest[b] = s;
@@ -328,7 +335,7 @@ namespace
     private:
         std::array<std::atomic<float>, fftSize> ring {};
         std::atomic<int> ringAt { 0 };
-        mutable std::array<float, bands> shown {};
+        mutable std::array<float, bands> shown {}, average {};
         mutable double lastRead = 0.0;
         double lr = 0.0, ll = 0.0, rr = 0.0;
         int write = 0;
@@ -689,7 +696,7 @@ const std::vector<StockEffect>& stockMeteringEffects()
         { { "multiMeter", "MultiMeter", {
               { "peakHold", "Peak Hold", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff },
               { "view", "View", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Analyzer", "Goniometer" } },
-              { "tilt", "Tilt", "", 0.0f, 4.0f, 2.0f, 2.0f, { "Off", "1.5 dB/oct", "3 dB/oct", "4.5 dB/oct", "6 dB/oct" } } }, "Metering" }, make<MultiMeter> },
+              { "tilt", "Tilt", "", 0.0f, 4.0f, 3.0f, 3.0f, { "0 dB/oct", "1.5 dB/oct", "3 dB/oct", "4.5 dB/oct", "6 dB/oct" } } }, "Metering" }, make<MultiMeter> },
         { { "tuner", "Tuner", { { "reference", "Reference", " Hz", 415.0f, 466.0f, 440.0f, 440.0f } }, "Metering" }, make<Tuner> },
         { { "bpmCounter", "BPM Counter", {}, "Metering" }, make<BpmCounter> },
         { { "masteringAssistant", "Mastering Assistant", {

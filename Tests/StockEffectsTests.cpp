@@ -1,3 +1,5 @@
+#include <complex>
+#include "engine/BandAnalysis.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "../Source/engine/BuiltInEffects.h"
@@ -1231,6 +1233,50 @@ TEST_CASE ("MultiMeter: equal octaves; pink noise reads flat, a tone in its band
         highest = std::max (highest, m[(size_t) b]);
     }
     CHECK (highest - lowest < 4.0f);
+
+    // On screen (as T-RackS and Logic): at 3 dB/oct pink noise reads level; at 0 it falls 3 dB an octave, as an FFT
+    auto shownAt = [&] (int b, double slope) { return m[(size_t) b] + (float) riff::bands::displayOffsetDb (riff::bands::centre (b, 31), slope); };
+    CHECK (std::abs (shownAt (27, 3.0) - shownAt (7, 3.0)) < 3.0f);
+    CHECK_THAT (shownAt (7, 0.0) - shownAt (27, 0.0), Catch::Matchers::WithinAbs (3.0103 * 20.0 / 3.0, 3.0));
+
+    // A mix's average balance (falling 4.5 dB an octave, made in the frequency domain): level on screen at the
+    // default tilt, 4.5 dB/oct, from 40 Hz to 16 kHz
+    {
+        constexpr int order = 17, size = 1 << order;
+        std::vector<float> spec ((size_t) size * 2, 0.0f);
+        juce::Random r (5);
+        std::vector<std::complex<float>> bins ((size_t) size);
+        for (int k = 1; k < size / 2; ++k)
+        {
+            const auto hz = (double) k * 48000.0 / size;
+            const auto amp = (float) std::pow (hz / 1000.0, -0.75);   // power falls 4.5 dB an octave
+            const auto phase = r.nextFloat() * juce::MathConstants<float>::twoPi;
+            bins[(size_t) k] = std::polar (amp, phase);
+            bins[(size_t) (size - k)] = std::conj (bins[(size_t) k]);
+        }
+        std::vector<std::complex<float>> timeDomain ((size_t) size);
+        juce::dsp::FFT (order).perform (bins.data(), timeDomain.data(), true);
+        std::vector<float> mixL ((size_t) size);
+        float peak = 0.0f;
+        for (int i = 0; i < size; ++i) peak = std::max (peak, std::abs (timeDomain[(size_t) i].real()));
+        for (int i = 0; i < size; ++i) mixL[(size_t) i] = timeDomain[(size_t) i].real() / peak * 0.5f;
+        auto mm2 = make ("multiMeter");
+        run (*mm2, mixL, mixL);
+        std::array<float, BuiltInEffect::meterCapacity> mixM {};
+        mm2->readMeters (mixM.data(), (int) mixM.size());
+        auto shownAt = [&] (int b) { return mixM[(size_t) b] + (float) riff::bands::displayOffsetDb (riff::bands::centre (b, 31), riff::bands::tiltSlope (riff::bands::defaultTilt)); };
+        float lo = 1000.0f, hi = -1000.0f, lows = 0.0f, highs = 0.0f;
+        for (int b = 11; b <= 29; ++b)
+        {
+            lo = std::min (lo, shownAt (b));
+            hi = std::max (hi, shownAt (b));
+            highs += shownAt (b) / 19.0f;
+        }
+        CHECK (hi - lo < 3.0f);
+        for (int b = 3; b <= 10; ++b)   // (one moment's spectrum: the narrow low bands swing; their average doesn't)
+            lows += shownAt (b) / 8.0f;
+        CHECK (std::abs (lows - highs) < 4.0f);
+    }
 
     // A 1 kHz tone: loudest in the band holding 1 kHz (b = 17: 932 - 1166 Hz)
     auto tone = make ("multiMeter");

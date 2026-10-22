@@ -36,6 +36,51 @@
 namespace riff
 {
 
+/** Something with a mix's balance for the analyzers' pictures: noise falling 4.5 dB an octave (as a mix does,
+    on average) from 30 Hz up, with a bass line, a kick, a voice-like tone and its harmonics. Stereo, 48 kHz. */
+static juce::AudioBuffer<float> mixLike (int seconds = 4)
+{
+    constexpr int order = 16, size = 1 << order;
+    const auto length = 48000 * seconds;
+    juce::AudioBuffer<float> mix (2, length);
+    juce::dsp::FFT fft (order);
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        juce::Random r (11 + ch);
+        for (int at = 0; at < length; at += size)
+        {
+            std::vector<std::complex<float>> bins ((size_t) size), time ((size_t) size);
+            for (int k = 1; k < size / 2; ++k)
+            {
+                const auto hz = (double) k * 48000.0 / size;
+                const auto amp = (float) (std::pow (hz / 1000.0, -0.75) * (hz < 30.0 ? std::pow (hz / 30.0, 2.0) : 1.0));
+                bins[(size_t) k] = std::polar (amp, r.nextFloat() * juce::MathConstants<float>::twoPi);
+                bins[(size_t) (size - k)] = std::conj (bins[(size_t) k]);
+            }
+            fft.perform (bins.data(), time.data(), true);
+            double sum = 0.0;
+            for (const auto& v : time)
+                sum += (double) v.real() * v.real();
+            const auto gain = 0.08f / (float) std::sqrt (sum / size + 1.0e-30);   // about -22 dB RMS
+            for (int i = 0; i < size && at + i < length; ++i)
+                mix.setSample (ch, at + i, time[(size_t) i].real() * gain);
+        }
+    }
+    for (int i = 0; i < length; ++i)
+    {
+        const auto t = (double) i / 48000.0;
+        const auto beat = std::fmod (t, 0.5);
+        const auto kick = (float) (0.35 * std::exp (-beat * 18.0) * std::sin (juce::MathConstants<double>::twoPi * (50.0 + 60.0 * std::exp (-beat * 30.0)) * beat));
+        const auto bass = (float) (0.06 * std::sin (juce::MathConstants<double>::twoPi * 82.4 * t));
+        float voice = 0.0f;
+        for (int h = 1; h <= 10; ++h)
+            voice += (float) (0.03 / h * std::sin (juce::MathConstants<double>::twoPi * 220.0 * h * t + h));
+        mix.addSample (0, i, kick + bass + voice);
+        mix.addSample (1, i, kick + bass + 0.8f * voice);
+    }
+    return mix;
+}
+
 class SnapshotTool
 {
 public:
@@ -79,19 +124,19 @@ public:
                 for (size_t p = 0; p < params.size(); ++p)
                     running->setParameter ((int) p, (float) (double) insert.getProperty (juce::Identifier (params[p].id), params[p].defaultValue));
                 running->setPosition (0, true, 120.0);
-                juce::Random random (3);
+                static const auto music = mixLike();
                 std::vector<float> a (512), b (512);
-                double t = 0.0;
-                for (int block = 0; block < 48000 * 4 / 512; ++block)
+                for (int block = 0; block < music.getNumSamples() / 512; ++block)
                 {
-                    for (int i = 0; i < 512; ++i, t += 1.0 / 48000.0)
-                    {
-                        const auto beat = std::fmod (t, 0.5) < 0.05 ? 0.6f : 0.0f;
-                        const auto tone = 0.2f * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * t) + 0.1f * (float) std::sin (juce::MathConstants<double>::twoPi * 330.0 * t);
-                        a[(size_t) i] = tone + beat * (random.nextFloat() - 0.5f) + 0.02f * (random.nextFloat() - 0.5f);
-                        b[(size_t) i] = 0.8f * a[(size_t) i] + 0.05f * (random.nextFloat() - 0.5f);
-                    }
+                    std::copy_n (music.getReadPointer (0, block * 512), 512, a.begin());
+                    std::copy_n (music.getReadPointer (1, block * 512), 512, b.begin());
                     running->process (a.data(), b.data(), 512);
+                    if (type == "multiMeter" && block % 8 == 7)   // (the window reads it as it plays)
+                    {
+                        std::array<float, BuiltInEffect::meterCapacity> m {};
+                        juce::Thread::sleep (10);
+                        running->readMeters (m.data(), (int) m.size());
+                    }
                 }
             }
             EffectPanel panel (insert, um);
@@ -150,6 +195,24 @@ public:
     }
 
     /** Just the mixer (with the bus compressor shown, tape on the first track and the master): for quick looks. */
+    int meterOnly()
+    {
+        out.createDirectory();
+        MainComponent main (false);
+        main.setSize (1440, 920);
+        main.applyTheme ({});
+        pump (main, 50);
+        MultiMeterPanel meter (main.engine);
+        const auto mix = mixLike();
+        for (int block = 0; block < 90; ++block)
+        {
+            meter.take (mix.getReadPointer (0, block * 1600), mix.getReadPointer (1, block * 1600), 1600);
+            pump (main, 20);
+        }
+        save (meter, "multimeter.png");
+        return 0;
+    }
+
     int mixerOnly()
     {
         out.createDirectory();
@@ -1116,29 +1179,10 @@ public:
 
             // The MultiMeter, fed a second of a stereo mix
             MultiMeterPanel meter (main.engine);
-            juce::AudioBuffer<float> mix (2, 48000);
-            {
-                // A mix-like sound: pinkish noise (more lows), a bass note, a vocal-ish tone, some air
-                juce::Random rnd (7);
-                float b0 = 0, b1 = 0, b2 = 0, b0r = 0, b1r = 0, b2r = 0;
-                for (int i = 0; i < mix.getNumSamples(); ++i)
-                {
-                    const auto t = (float) i / 48000.0f;
-                    auto pink = [&rnd] (float& x0, float& x1, float& x2)
-                    {
-                        const auto w = rnd.nextFloat() * 2.0f - 1.0f;
-                        x0 = 0.99765f * x0 + w * 0.0990460f; x1 = 0.96300f * x1 + w * 0.2965164f; x2 = 0.57000f * x2 + w * 1.0526913f;
-                        return (x0 + x1 + x2 + w * 0.1848f) * 0.05f;
-                    };
-                    const auto bass = 0.25f * std::sin (juce::MathConstants<float>::twoPi * 55.0f * t);
-                    const auto tone = 0.08f * std::sin (juce::MathConstants<float>::twoPi * 440.0f * t) + 0.05f * std::sin (juce::MathConstants<float>::twoPi * 3100.0f * t);
-                    mix.setSample (0, i, bass + tone + pink (b0, b1, b2));
-                    mix.setSample (1, i, bass + 0.8f * tone + pink (b0r, b1r, b2r));
-                }
-            }
+            const auto mix = mixLike();
             for (int block = 0; block < 90; ++block)
             {
-                meter.take (mix.getReadPointer (0, (block * 1600) % 46000), mix.getReadPointer (1, (block * 1600) % 46000), 1600);
+                meter.take (mix.getReadPointer (0, block * 1600), mix.getReadPointer (1, block * 1600), 1600);
                 pump (main, 20);
             }
             save (meter, "multimeter.png");
@@ -1153,7 +1197,7 @@ public:
                 meter.resized();
                 for (int block = 0; block < 10; ++block)
                 {
-                    meter.take (mix.getReadPointer (0, (block * 1600) % 46000), mix.getReadPointer (1, (block * 1600) % 46000), 1600);
+                    meter.take (mix.getReadPointer (0, block * 1600), mix.getReadPointer (1, block * 1600), 1600);
                     pump (main, 20);
                 }
                 save (meter, "multimeter-xenon.png");
@@ -1226,7 +1270,7 @@ public:
                 meter.resized();
                 for (int block = 0; block < 10; ++block)
                 {
-                    meter.take (mix.getReadPointer (0, (block * 1600) % 46000), mix.getReadPointer (1, (block * 1600) % 46000), 1600);
+                    meter.take (mix.getReadPointer (0, block * 1600), mix.getReadPointer (1, block * 1600), 1600);
                     pump (main, 20);
                 }
                 save (meter, "multimeter-own-theme.png");
@@ -1556,6 +1600,12 @@ int main (int argc, char* argv[])
         for (int a = 3; a < argc; ++a)
             types.add (argv[a]);
         const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).effectsOnly (types);
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        return r;
+    }
+    if (argc > 2 && juce::String (argv[1]) == "meter")
+    {
+        const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).meterOnly();
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         return r;
     }

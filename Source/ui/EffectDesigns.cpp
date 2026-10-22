@@ -1356,7 +1356,7 @@ namespace
         if (! goniometer)
         {
             // Equal octaves across (20 - 200 Hz as wide as 2 - 20 kHz); 0 to -60 dB up the side; the tilt about 1 kHz
-            const auto slope = bands::tiltSlope (juce::roundToInt (valueOf (info, v, "tilt", 2.0f)));
+            const auto slope = bands::tiltSlope (juce::roundToInt (valueOf (info, v, "tilt", 3.0f)));
             const auto plot = screen.reduced (34.0f, 10.0f).withTrimmedBottom (18.0f).withTrimmedRight (-24.0f);
             const auto xOf = [plot] (double hz) { return plot.getX() + (float) bands::position (hz) * plot.getWidth(); };
             const auto yOf = [plot] (float db) { return plot.getY() + plot.getHeight() * juce::jlimit (0.0f, 1.0f, -db / 60.0f); };
@@ -1379,13 +1379,13 @@ namespace
             for (int k = 0; k < 31; ++k)
             {
                 const auto x0 = xOf (bands::edge (k, 31)) + 1.0f, x1 = xOf (bands::edge (k + 1, 31)) - 1.0f;
-                const auto db = meterAt (k, -120.0f) + (float) bands::tiltDb (bands::centre (k, 31), slope);
+                const auto db = meterAt (k, -120.0f) + (float) bands::displayOffsetDb (bands::centre (k, 31), slope);
                 const auto top = yOf (db);
                 g.setGradientFill (juce::ColourGradient (juce::Colour (0xffffd84a), 0.0f, plot.getY(), juce::Colour (0xff3ddc6a), 0.0f, plot.getBottom(), false));
                 g.fillRect (RF::leftTopRightBottom (x0, top, x1, plot.getBottom()));
             }
             g.setColour (juce::Colours::white.withAlpha (0.45f));
-            g.drawText ("Tilt " + bands::tiltNames()[juce::roundToInt (valueOf (info, v, "tilt", 2.0f))], RF (plot.getRight() - 120.0f, plot.getY(), 116.0f, 14.0f),
+            g.drawText ("Tilt " + bands::tiltNames()[juce::roundToInt (valueOf (info, v, "tilt", 3.0f))], RF (plot.getRight() - 120.0f, plot.getY(), 116.0f, 14.0f),
                         juce::Justification::centredRight, false);
         }
         else
