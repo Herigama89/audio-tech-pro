@@ -61,14 +61,18 @@ jobs:
           sudo apt-get install -y -qq ninja-build libasound2-dev libfreetype6-dev libfontconfig1-dev libx11-dev libxrandr-dev \
             libxinerama-dev libxcursor-dev libxcomposite-dev libgl1-mesa-dev libcurl4-openssl-dev libgtk-3-dev libwebkit2gtk-4.0-dev
           cmake -B build-check -G Ninja -DCMAKE_BUILD_TYPE=Release -DRIFF_BUILD_STEMCHECK=ON -DRIFF_BUILD_TESTS=OFF
-          cmake --build build-check --target StemCheck
+          cmake --build build-check --target StemCheck 2>&1 | tee build.log || true
+          if [ ! -x build-check/StemCheck_artefacts/Release/StemCheck ]; then
+            grep -E "error|undefined reference" build.log | head -20 | while read -r line; do echo "::error::$line"; done
+            exit 1
+          fi
       - name: Check against Demucs itself
         run: |
           python Tools/stems/make_test_mix.py mix.wav
           ./build-check/StemCheck_artefacts/Release/StemCheck runtime/libonnxruntime.so models/htdemucs.onnx mix.wav out4
-          python Tools/stems/reference_check.py htdemucs out4 mix.wav
+          python Tools/stems/reference_check.py htdemucs out4 mix.wav 2>&1 | tee check4.log || { tail -20 check4.log | while read -r line; do echo "::error::$line"; done; exit 1; }
           ./build-check/StemCheck_artefacts/Release/StemCheck runtime/libonnxruntime.so models/htdemucs_6s.onnx mix.wav out6
-          python Tools/stems/reference_check.py htdemucs_6s out6 mix.wav
+          python Tools/stems/reference_check.py htdemucs_6s out6 mix.wav 2>&1 | tee check6.log || { tail -20 check6.log | while read -r line; do echo "::error::$line"; done; exit 1; }
       - name: Publish
         uses: softprops/action-gh-release@v2
         with:
