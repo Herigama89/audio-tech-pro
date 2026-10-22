@@ -1591,6 +1591,7 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         if (side != nullptr && side->sourceSlot != track.slot)
             effect->setSidechain (slotOutput (side->sourceSlot, 0), slotOutput (side->sourceSlot, 1));
         effect->process (tL, tR, n);
+        effect->tapOutput (tL, tR, n);   // (for its window's analyzer, while one is open)
         if (side != nullptr)
             effect->setSidechain (nullptr, nullptr);
     }
