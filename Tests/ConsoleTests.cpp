@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "engine/ConsolePlugins.h"
+#include "engine/TapeSaturation.h"
+#include "engine/MasterBusCompressor.h"
 
 using namespace riff;
 using Catch::Matchers::WithinAbs;
@@ -139,4 +141,99 @@ TEST_CASE ("Console mode matches strip knobs to the channel strip's parameters",
     CHECK (console::matchStripParameter (S::dynamics, { "Gate Threshold", "Threshold" }) == 1);
     CHECK (console::matchStripParameter (S::eqIn, { "EQ" }) == 0);
     CHECK (console::matchStripParameter (S::hmf, { "HF Gain", "LMF Gain" }) == -1);
+}
+
+namespace
+{
+    /** The level of one frequency in a signal (Goertzel), as an amplitude. */
+    double toneLevel (const std::vector<float>& s, double freq, double rate, size_t from)
+    {
+        const auto w = juce::MathConstants<double>::twoPi * freq / rate;
+        const auto coeff = 2.0 * std::cos (w);
+        double q1 = 0.0, q2 = 0.0;
+        for (size_t i = from; i < s.size(); ++i)
+        {
+            const auto q0 = coeff * q1 - q2 + s[i];
+            q2 = q1;
+            q1 = q0;
+        }
+        const auto n = (double) (s.size() - from);
+        return 2.0 * std::sqrt (std::max (0.0, q1 * q1 + q2 * q2 - coeff * q1 * q2)) / n;
+    }
+    std::vector<float> testSine (double freq, float amp, int samples, double rate = 48000.0)
+    {
+        std::vector<float> s ((size_t) samples);
+        for (size_t i = 0; i < s.size(); ++i)
+            s[i] = amp * (float) std::sin (juce::MathConstants<double>::twoPi * freq * (double) i / rate);
+        return s;
+    }
+}
+
+TEST_CASE ("Tape saturation: unity when quiet, rounds the peaks, harmonics, the head bump", "[console]")
+{
+    TapeSaturator tape;
+    tape.prepare (48000.0);
+    TapeSaturator::Settings s;
+    s.enabled = true;
+    s.drive = 1.0f;
+    tape.setSettings (s);
+
+    // Quiet: through at (about) unity
+    auto l = testSine (1000.0, 0.01f, 48000), r = l;
+    tape.process (l.data(), r.data(), (int) l.size());
+    CHECK_THAT (toneLevel (l, 1000.0, 48000.0, 4800), Catch::Matchers::WithinRel (0.01, 0.12));
+
+    // Loud: the peaks held down, with harmonics (3rd from the saturation, 2nd from its asymmetry)
+    tape.reset();
+    auto ll = testSine (1000.0, 0.9f, 48000), rr = ll;
+    tape.process (ll.data(), rr.data(), (int) ll.size());
+    const auto fundamental = toneLevel (ll, 1000.0, 48000.0, 4800);
+    CHECK (fundamental < 0.6);
+    CHECK (toneLevel (ll, 3000.0, 48000.0, 4800) > fundamental * 0.01);
+    CHECK (toneLevel (ll, 2000.0, 48000.0, 4800) > fundamental * 0.001);
+    for (auto x : ll) REQUIRE (std::isfinite (x));
+
+    // Off: untouched
+    s.enabled = false;
+    tape.setSettings (s);
+    auto ol = testSine (1000.0, 0.9f, 4800), orr = ol;
+    const auto copy = ol;
+    tape.process (ol.data(), orr.data(), (int) ol.size());
+    CHECK (ol == copy);
+
+    // The head bump: higher and lower at 15 ips than at 30
+    TapeSaturator::Settings slow, fast;
+    slow.enabled = fast.enabled = true;
+    slow.speed = 0;
+    fast.speed = 1;
+    CHECK (TapeSaturator::responseDb (slow, 55.0) > 1.5);
+    CHECK (TapeSaturator::responseDb (fast, 100.0) > 1.0);
+    CHECK (TapeSaturator::responseDb (slow, 18000.0) < TapeSaturator::responseDb (fast, 18000.0));
+}
+
+TEST_CASE ("Master Bus Compressor's Color: harmonics and grit, level kept", "[console]")
+{
+    const auto runWith = [] (bool color, float grit, float amp)
+    {
+        MasterBusCompressor c;
+        MasterBusCompressor::Settings s;
+        s.enabled = true;
+        s.thresholdDb = 0.0f;   // (no compression: the colour alone)
+        s.color = color;
+        s.grit = grit;
+        c.setSettings (s);
+        c.prepare (48000.0);
+        auto l = testSine (500.0, amp, 48000), r = l;
+        c.process (l.data(), r.data(), (int) l.size());
+        return l;
+    };
+    const auto clean = runWith (false, 0.0f, 0.5f);
+    const auto warm = runWith (true, 0.0f, 0.5f);
+    const auto gritty = runWith (true, 1.0f, 0.5f);
+    CHECK (toneLevel (clean, 1000.0, 48000.0, 4800) < 1.0e-4);
+    CHECK (toneLevel (warm, 1000.0, 48000.0, 4800) > 0.002);                                       // even harmonics
+    CHECK (toneLevel (gritty, 1500.0, 48000.0, 4800) > toneLevel (warm, 1500.0, 48000.0, 4800) * 2.0);   // grit: more odd ones
+    // the level stays about the same at low levels
+    const auto quiet = runWith (true, 0.3f, 0.02f);
+    CHECK_THAT (toneLevel (quiet, 500.0, 48000.0, 4800), Catch::Matchers::WithinRel (0.02, 0.15));
 }

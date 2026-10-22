@@ -256,6 +256,46 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     inputSlot.setVisible (! isMaster() && ! isVca());
     outputSlot.setVisible (! isVca());
 
+    // The tape machine: TAPE in or out, Drive dragged; right-click for the speed
+    look::key (tapeKey, look::Key::console);
+    tapeKey.setClickingTogglesState (false);
+    tapeKey.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffd9822b));
+    tapeKey.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
+    tapeKey.setWantsKeyboardFocus (false);
+    tapeKey.setTooltip ("Tape: runs this channel through an analog tape machine (saturation, the low-end bump, the softened top). "
+                        "Right-click for the tape speed.");
+    tapeKey.addMouseListener (this, false);
+    tapeKey.onClick = [this]
+    {
+        if (juce::ModifierKeys::getCurrentModifiers().isPopupMenu())
+            return;
+        owner.getUndoManager().beginNewTransaction ("Tape");
+        const auto on = ! (bool) tapeTree().getProperty (tapeId ("On"), false);
+        if (isMaster())
+            project.setProperty (tapeId ("On"), on, &owner.getUndoManager());
+        else
+            for (auto t2 : acting())
+                t2.setProperty ("tapeOn", on, &owner.getUndoManager());
+    };
+    addAndMakeVisible (tapeKey);
+    tapeKey.setVisible (! isVca());
+    tapeDrive.setRange (0.0, 100.0, 1.0);
+    tapeDrive.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v)) + "%"; };
+    tapeDrive.setDoubleClickReturnValue (true, 35.0);
+    tapeDrive.setTooltip ("Tape drive: how hard the channel hits the tape. Drag up or down; double-click for 35%.");
+    tapeDrive.onDragStart = [this] { owner.getUndoManager().beginNewTransaction ("Tape drive"); };
+    tapeDrive.onValueChange = [this]
+    {
+        if (isMaster())
+            project.setProperty (tapeId ("Drive"), tapeDrive.getValue(), &owner.getUndoManager());
+        else
+            for (auto t2 : acting())
+                t2.setProperty ("tapeDrive", tapeDrive.getValue(), &owner.getUndoManager());
+    };
+    tapeDrive.onRightClick = [this] (const juce::MouseEvent&) { showTapeMenu(); };
+    addAndMakeVisible (tapeDrive);
+    tapeDrive.setVisible (! isVca());
+
     for (int i = 0; i < maxInserts; ++i)
     {
         auto* b = slots.add (new juce::TextButton());
@@ -858,6 +898,11 @@ void ChannelStrip::setSelected (bool shouldBeSelected)
 
 void ChannelStrip::mouseDown (const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu() && e.eventComponent == &tapeKey)
+    {
+        showTapeMenu();
+        return;
+    }
     // Right-click anywhere in the console section (knobs, lamps, the metal around them).
     if (! e.mods.isPopupMenu() || isMaster())
         return;
@@ -1068,6 +1113,7 @@ void ChannelStrip::showSendMenu (int index)
 
 void ChannelStrip::refresh()
 {
+    updateTape();
     // Console mode or the built-in strip?
     if (! isMaster())
     {
@@ -1366,7 +1412,7 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
 juce::Rectangle<int> ChannelStrip::faderArea() const
 {
     // Below the sends, above the level display and the name plate.
-    const auto top = topSection() + 6 + 2 * ioRow + insertRows() * insertRowHeight + 6 + sendRows() * sendRowHeight + ioRow + 4 + automationRow
+    const auto top = topSection() + 6 + 2 * ioRow + insertRows() * insertRowHeight + 6 + sendRows() * sendRowHeight + ioRow + tapeRow + 4 + automationRow
                    + (theme::stripVu() && ! isVca() ? vuBand : 0);
     return { 0, top, getWidth(), getHeight() - nameHeight - 22 - top };
 }
@@ -1809,6 +1855,13 @@ void ChannelStrip::resized()
         area.removeFromTop (2);
     }
     outputSlot.setBounds (area.removeFromTop (15));
+    area.removeFromTop (2);
+    {
+        auto row = area.removeFromTop (tapeRow - 3);
+        tapeKey.setBounds (row.removeFromLeft (row.getWidth() / 2 + 2));
+        row.removeFromLeft (2);
+        tapeDrive.setBounds (row);
+    }
 
     // Fader on the left, the scale, then the meter; the level box under the meter (as in the picture)
     const auto fa = faderArea();
@@ -1828,6 +1881,49 @@ void ChannelStrip::resized()
         automationButton.setBounds (row);
         updateAutomationButton();
     }
+}
+
+void ChannelStrip::updateTape()
+{
+    const auto tree = tapeTree();
+    if (! tree.isValid())
+        return;
+    tapeKey.setToggleState ((bool) tree.getProperty (tapeId ("On"), false), juce::dontSendNotification);
+    const auto speed = (int) tree.getProperty (tapeId ("Speed"), 1);
+    tapeKey.setButtonText (speed == 0 ? "TAPE 15" : "TAPE");
+    if (! tapeDrive.isMouseButtonDown())
+        tapeDrive.setValue ((double) tree.getProperty (tapeId ("Drive"), 35.0), juce::dontSendNotification);
+    tapeDrive.setAlpha (tapeKey.getToggleState() ? 1.0f : 0.5f);
+}
+
+void ChannelStrip::showTapeMenu()
+{
+    const auto tree = tapeTree();
+    const auto speed = (int) tree.getProperty (tapeId ("Speed"), 1);
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Tape");
+    menu.addItem (1, "In", true, (bool) tree.getProperty (tapeId ("On"), false));
+    menu.addSeparator();
+    menu.addItem (2, "30 ips (tight lows, open top)", true, speed == 1);
+    menu.addItem (3, "15 ips (bigger bump, rounder top)", true, speed == 0);
+    menu.addSeparator();
+    menu.addItem (4, "Drive: Reset to 35%");
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&tapeKey), [this] (int chosen)
+    {
+        if (chosen == 0)
+            return;
+        auto& um = owner.getUndoManager();
+        um.beginNewTransaction ("Tape");
+        juce::Array<juce::ValueTree> trees;
+        if (isMaster()) trees.add (project); else trees = acting();
+        for (auto t2 : trees)
+        {
+            const auto id = [&] (const char* what) { return juce::Identifier ((isMaster() ? juce::String ("masterTape") : juce::String ("tape")) + what); };
+            if (chosen == 1) t2.setProperty (id ("On"), ! (bool) t2.getProperty (id ("On"), false), &um);
+            if (chosen == 2 || chosen == 3) t2.setProperty (id ("Speed"), chosen == 2 ? 1 : 0, &um);
+            if (chosen == 4) t2.setProperty (id ("Drive"), 35.0, &um);
+        }
+    });
 }
 
 bool ChannelStrip::canRecord() const
@@ -1926,6 +2022,25 @@ MasterBusCompressorPanel::MasterBusCompressorPanel (juce::UndoManager& um, Audio
     setup (mix, ids::busCompMix, look::Knob::cream, 0.0, 1.0, 0.01,
            [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + "% wet"; }, "Mix");
 
+    setup (grit, "busCompGrit", look::Knob::red, 0.0, 1.0, 0.01,
+           [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + "%"; }, "Grit");
+    grit.setDoubleClickReturnValue (true, 0.3);
+    grit.setTooltip ("Grit: how hard the colour circuit is driven - from warm weight to a gritty, pushed edge");
+
+    look::key (colorButton, look::Key::cream);
+    colorButton.getProperties().set ("channelKey", true);
+    colorButton.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
+    colorButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffc8452f));
+    colorButton.setWantsKeyboardFocus (false);
+    colorButton.setTooltip ("Color: the console's saturation - its VCA and output transformers driven, for colour and grit "
+                            "(set how much with Grit)");
+    colorButton.onClick = [this]
+    {
+        undoManager.beginNewTransaction ("Master Bus Compressor colour");
+        MasterBusCompressor::setInProject (project, "busCompColor", ! MasterBusCompressor::fromProject (project).color, &undoManager);
+    };
+    addAndMakeVisible (colorButton);
+
     threshold.setDoubleClickReturnValue (true, -10.0);
     makeup.setDoubleClickReturnValue (true, 0.0);
     mix.setDoubleClickReturnValue (true, 1.0);
@@ -1994,7 +2109,9 @@ void MasterBusCompressorPanel::refresh()
     release.setValue (s.release, juce::dontSendNotification);
     ratio.setValue (s.ratio, juce::dontSendNotification);
     mix.setValue (s.mix, juce::dontSendNotification);
+    grit.setValue (s.grit, juce::dontSendNotification);
     inButton.setToggleState (s.enabled, juce::dontSendNotification);
+    colorButton.setToggleState (s.color, juce::dontSendNotification);
 
     // A plugin in use: its name on the chooser; the built-in knobs rest.
     juce::String name;
@@ -2008,9 +2125,10 @@ void MasterBusCompressorPanel::refresh()
     }
     chooseButton.setButtonText ((name.isNotEmpty() ? name : juce::String ("Built-in")) + juce::String::fromUTF8 (" \xe2\x96\xbe"));
     openButton.setVisible (name.isNotEmpty());
-    for (auto* k : { &threshold, &makeup, &attack, &release, &ratio, &mix })
+    for (auto* k : { &threshold, &makeup, &attack, &release, &ratio, &mix, &grit })
         k->setEnabled (name.isEmpty());
     inButton.setEnabled (name.isEmpty());
+    colorButton.setEnabled (name.isEmpty());
     resized();
     repaint();
 }
@@ -2045,7 +2163,7 @@ void MasterBusCompressorPanel::paint (juce::Graphics& g)
     g.drawText ("COMPRESSOR", juce::Rectangle<int> (0, vu.getBottom() + 21, getWidth(), 15), juce::Justification::centred, false);
 
     // The control box
-    const auto box = juce::Rectangle<int> (10, threshold.getY() - 10, getWidth() - 20, mix.getBottom() + 34 - (threshold.getY() - 10)).toFloat();
+    const auto box = juce::Rectangle<int> (10, threshold.getY() - 10, getWidth() - 20, grit.getBottom() + 34 - (threshold.getY() - 10)).toFloat();
     g.setColour (theme::consoleShade.darker (0.06f));
     g.fillRoundedRectangle (box, 8.0f);
     g.setColour (theme::consoleDark);
@@ -2108,6 +2226,12 @@ void MasterBusCompressorPanel::resized()
         auto row = area.removeFromTop (rowHeight);
         l->setBounds (column (row, true).withY (row.getY()));
         r->setBounds (column (row, false).withY (row.getY()));
+    }
+    {
+        // The colour circuit: the Grit knob, the COLOR key beside it
+        auto row = area.removeFromTop (rowHeight);
+        grit.setBounds (column (row, true).withY (row.getY()));
+        colorButton.setBounds (row.withTrimmedLeft (row.getWidth() / 2).withSizeKeepingCentre (64, 26).withY (row.getY() + 10));
     }
 
     area.removeFromTop (30);

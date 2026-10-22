@@ -866,6 +866,9 @@ void AudioEngine::prepare (double newSampleRate, int)
 
     for (auto& console : consoles)
         console.prepare (newSampleRate);
+    for (auto& tape : tapes)
+        tape.prepare (newSampleRate);
+    masterTape.prepare (newSampleRate);
 
     clickLength = (int) (newSampleRate * 0.035);
     clickSamplesLeft = 0;
@@ -1020,6 +1023,13 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
             {
                 busComp.setSettings (graph->busComp);
                 busComp.process (mixL, mixR, n);
+            }
+
+            // The master's tape machine
+            if (graph->masterTape.enabled)
+            {
+                masterTape.setSettings (graph->masterTape);
+                masterTape.process (mixL, mixR, n);
             }
 
             const bool countingIn = isRecordingNow && position < recordStart;
@@ -1594,6 +1604,14 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         effect->tapOutput (tL, tR, n);   // (for its window's analyzer, while one is open)
         if (side != nullptr)
             effect->setSidechain (nullptr, nullptr);
+    }
+
+    // Tape saturation: the channel (or bus) through its tape machine
+    if (track.tape.enabled && ! suspended)
+    {
+        auto& tape = tapes[(size_t) track.slot];
+        tape.setSettings (track.tape);
+        tape.process (tL, tR, n);
     }
 
     // How long it's been quiet in and out (the plug-ins rest after a second of it)

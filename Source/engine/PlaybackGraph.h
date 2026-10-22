@@ -5,6 +5,7 @@
 #include "Effect.h"
 #include "MasterBusCompressor.h"
 #include "ConsoleChannel.h"
+#include "TapeSaturation.h"
 #include "../model/TempoMap.h"
 #include <vector>
 
@@ -122,6 +123,7 @@ struct PlaybackGraph
         bool receivesLiveMidi = false;            // the track your MIDI keyboard plays
 
         ConsoleChannel::Settings console;               // the strip's EQ and Dynamics, before the inserts
+        TapeSaturator::Settings tape;                   // tape saturation, after the inserts
         std::vector<std::shared_ptr<Effect>> stripPlugins;  // console mode: the user's channel strip plugin, instead of `console`
         std::vector<std::shared_ptr<Effect>> inserts;   // in order, bypassed ones left out
 
@@ -170,6 +172,7 @@ struct PlaybackGraph
     std::vector<std::shared_ptr<Effect>> masterInserts;
     Curve masterVolumeAutomation;
     MasterBusCompressor::Settings busComp;
+    TapeSaturator::Settings masterTape;   // the master's tape, after the bus compressor
     std::vector<std::shared_ptr<Effect>> busCompPlugins;   // console mode: the user's own bus compressor, instead of busComp
 
     int directDelay = 0;        // extra delay for tracks heard directly, matching the slowest bus

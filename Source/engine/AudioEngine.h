@@ -479,6 +479,8 @@ private:
     std::array<TrackState, PlaybackGraph::maxTracks> trackStates;
     juce::SmoothedValue<float> masterGain;
     MasterBusCompressor busComp;
+    TapeSaturator masterTape;
+    std::array<TapeSaturator, PlaybackGraph::maxTracks> tapes;
     std::array<ConsoleChannel, PlaybackGraph::maxTracks> consoles;
     std::atomic<int> analyzerSlot { -1 };
     std::atomic<bool> masterTapOn { false };

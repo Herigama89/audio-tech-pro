@@ -149,6 +149,38 @@ public:
         return 0;
     }
 
+    /** Just the mixer (with the bus compressor shown, tape on the first track and the master): for quick looks. */
+    int mixerOnly()
+    {
+        out.createDirectory();
+        audioFolder = out.getChildFile ("demo-audio");
+        audioFolder.createDirectory();
+        MainComponent main (false);
+        main.setSize (1440, 920);
+        buildDemoProject (main);
+        main.project.setProperty ("mixerBusComp", true, nullptr);
+        main.project.setProperty ("busCompOn", true, nullptr);
+        main.project.setProperty ("busCompColor", true, nullptr);
+        main.project.setProperty ("masterTapeOn", true, nullptr);
+        if (auto t0 = main.project.getChild (0); t0.isValid())
+        {
+            t0.setProperty ("tapeOn", true, nullptr);
+            t0.setProperty ("tapeDrive", 60.0, nullptr);
+        }
+        if (const auto side = juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_ZONES", {}); side.isNotEmpty())
+            main.project.setProperty ("mixerBusZone", side, nullptr);
+        main.player.rebuildNow();
+        main.showMixer();
+        main.mixer.relayoutStrips();
+        for (int i = 0; i < 20; ++i)
+        {
+            main.mixer.setMasterLevels (0.7f, 0.6f);
+            pump (main, 15);
+        }
+        save (main, "mixer-only.png");
+        return 0;
+    }
+
     int run()
     {
         out.createDirectory();
@@ -1505,6 +1537,12 @@ int main (int argc, char* argv[])
         for (int a = 3; a < argc; ++a)
             types.add (argv[a]);
         const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).effectsOnly (types);
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        return r;
+    }
+    if (argc > 2 && juce::String (argv[1]) == "mixer")
+    {
+        const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).mixerOnly();
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         return r;
     }

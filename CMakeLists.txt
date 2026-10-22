@@ -112,6 +112,7 @@ set(RIFF_CORE_SOURCES
     Source/engine/EffectRack.cpp
     Source/engine/MasterBusCompressor.cpp
     Source/engine/ConsoleChannel.cpp
+    Source/engine/TapeSaturation.cpp
     Source/engine/ConsolePlugins.cpp
     Source/engine/Resampler.cpp
 )

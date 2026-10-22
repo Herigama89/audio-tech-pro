@@ -14,6 +14,8 @@ MasterBusCompressor::Settings MasterBusCompressor::fromProject (const juce::Valu
     s.release     = juce::jlimit (0, (int) releasesS.size() - 1, (int) project.getProperty (ids::busCompRelease, s.release));
     s.makeupDb    = juce::jlimit (0.0f, maxMakeupDb, (float) project.getProperty (ids::busCompMakeup, s.makeupDb));
     s.mix         = juce::jlimit (0.0f, 1.0f, (float) project.getProperty (ids::busCompMix, s.mix));
+    s.color       = project.getProperty ("busCompColor", s.color);
+    s.grit        = juce::jlimit (0.0f, 1.0f, (float) (double) project.getProperty ("busCompGrit", s.grit));
     return s;
 }
 
@@ -26,6 +28,9 @@ void MasterBusCompressor::prepare (double newSampleRate)
 {
     sampleRate = newSampleRate > 0.0 ? newSampleRate : 48000.0;
     wetStep = (float) (1.0 / (0.02 * sampleRate));   // the IN switch fades over 20 ms
+    // (the output transformer: a little weight in the lows, the very top eased)
+    transformerLow.setPeak (sampleRate, 70.0, 0.8, 0.8);
+    transformerTop.setLowPass (sampleRate, std::min (24000.0, sampleRate * 0.45), 0.6);
     reset();
 }
 
@@ -34,7 +39,34 @@ void MasterBusCompressor::reset() noexcept
     envelopeDb = 0.0f;
     sustained = 0.0f;
     wet = settings.enabled ? 1.0f : 0.0f;
+    colorAmount = settings.enabled && settings.color ? 1.0f : 0.0f;
+    satPrev = {};
+    satPrevIntegral = {};
+    transformerLow.reset();
+    transformerTop.reset();
     meterGainReduction.store (0.0f);
+}
+
+float MasterBusCompressor::colorStage (float x, int channel, float drive, float bias, float grit) noexcept
+{
+    // Into the VCA and transformer: tanh with a bias (even harmonics), anti-aliased by its antiderivative
+    const auto u = x * drive + bias;
+    const auto au = std::abs (u);
+    const auto integral = au > 12.0f ? au - 0.69314718f : std::log (std::cosh (u));
+    auto& prev = satPrev[(size_t) channel];
+    auto& prevIntegral = satPrevIntegral[(size_t) channel];
+    float y = std::abs (u - prev) < 1.0e-4f ? std::tanh (0.5f * (u + prev)) : (integral - prevIntegral) / (u - prev);
+    prev = u;
+    prevIntegral = integral;
+    y -= std::tanh (bias);
+    // Grit: odd harmonics on top, the sound of the stage being pushed (a squarer curve, blended in)
+    if (grit > 0.0f)
+    {
+        const auto hard = y * (1.5f - 0.5f * y * y);   // (a cubic: firmer than tanh near the top)
+        y += (juce::jlimit (-1.0f, 1.0f, hard) - y) * grit;
+    }
+    y = transformerTop.process (transformerLow.process (y, channel), channel);
+    return y / drive;
 }
 
 float MasterBusCompressor::coefficient (float seconds) const noexcept
@@ -56,6 +88,10 @@ void MasterBusCompressor::process (float* left, float* right, int numSamples) no
     const auto sustainCoef = coefficient (1.0f);
     const auto makeup = juce::Decibels::decibelsToGain (s.makeupDb);
     const auto wetTarget = s.enabled ? 1.0f : 0.0f;
+    const auto colorTarget = s.enabled && s.color ? 1.0f : 0.0f;
+    // Colour alone: about 4 dB into the stage; Grit drives it up to 16 dB harder
+    const auto drive = juce::Decibels::decibelsToGain (4.0f + s.grit * 12.0f);
+    const auto bias = 0.12f;
 
     float peakReduction = 0.0f;
 
@@ -92,8 +128,16 @@ void MasterBusCompressor::process (float* left, float* right, int numSamples) no
         const auto amount = wet * s.mix;              // how much of the compressed signal
         const auto g = 1.0f + amount * (gain - 1.0f);
 
-        left[i] = l * g;
-        right[i] = r * g;
+        auto outL = l * g, outR = r * g;
+        colorAmount = colorTarget > colorAmount ? juce::jmin (colorTarget, colorAmount + wetStep) : juce::jmax (colorTarget, colorAmount - wetStep);
+        if (colorAmount > 0.0f)
+        {
+            const auto cl = colorStage (outL, 0, drive, bias, s.grit), cr = colorStage (outR, 1, drive, bias, s.grit);
+            outL += (cl - outL) * colorAmount;
+            outR += (cr - outR) * colorAmount;
+        }
+        left[i] = outL;
+        right[i] = outR;
 
         peakReduction = juce::jmax (peakReduction, envelopeDb * wet);
     }

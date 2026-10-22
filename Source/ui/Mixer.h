@@ -89,10 +89,11 @@ public:
     static constexpr int automationRow = 18;
     static constexpr int ioRow = 17;   // the Input slot (above the inserts) and the Output slot (below the sends)
     static constexpr int vuBand = 38;   // Themes > Strip VU meters: the amber VU at the top of each strip
+    static constexpr int tapeRow = 18;  // the tape machine: TAPE key and its Drive, under the Output slot
     static int minimumHeightFor (bool console, int inserts, int sends)
     {
         return (console ? topHeight : compactTopHeight) + 6 + 2 * ioRow + inserts * insertRowHeight + 6 + sends * sendRowHeight
-             + ioRow + automationRow + 100 + 20 + nameHeight + (theme::stripVu() ? vuBand : 0);
+             + ioRow + tapeRow + automationRow + 100 + 20 + nameHeight + (theme::stripVu() ? vuBand : 0);
     }
 
     /** Without the console section (EQ and Dynamics hidden, as in Logic): number, EQ/DYN tags, pan, mute and solo. */
@@ -153,6 +154,13 @@ private:
     strip::DisplaySlider panKnob;
     juce::TextButton inputSlot, outputSlot;   // Logic's Input and Output slots
     juce::TextButton settingSlot { "Setting" };   // Logic's Setting button: copy, paste, reset, patches
+    // Tape saturation (every channel, bus and the master, as on a console that runs everything through tape)
+    juce::TextButton tapeKey { "TAPE" };
+    strip::DisplaySlider tapeDrive;
+    juce::ValueTree tapeTree() const { return isMaster() ? project : track; }
+    juce::Identifier tapeId (const char* what) const { return juce::Identifier ((isMaster() ? juce::String ("masterTape") : juce::String ("tape")) + what); }
+    void showTapeMenu();
+    void updateTape();
     float grShown = 0.0f;
     juce::Rectangle<int> grArea() const;
     void showInputMenu();
@@ -234,8 +242,9 @@ private:
     juce::ValueTree project;
 
     GainReductionMeter vu;
-    juce::Slider threshold, makeup, attack, release, ratio, mix;
+    juce::Slider threshold, makeup, attack, release, ratio, mix, grit;
     juce::TextButton inButton { "IN" };
+    juce::TextButton colorButton { "COLOR" };   // the console's colour and grit: its VCA and transformers driven
 
     struct Caption { juce::Slider* knob; juce::String name; std::function<juce::String (double)> text; };
     std::vector<Caption> captions;

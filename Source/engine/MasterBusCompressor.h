@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include <array>
 #include <atomic>
+#include "BuiltInEffects.h"
 
 namespace riff
 {
@@ -39,6 +40,8 @@ public:
         int release = autoRelease;
         float makeupDb = 0.0f;
         float mix = 1.0f;       // 0 = dry, 1 = fully compressed
+        bool color = false;     // the console's colour: its VCA and transformers driven (even harmonics, weight)
+        float grit = 0.3f;      // 0..1: how hard (more drive, odd harmonics, the edge of clipping)
 
         bool operator== (const Settings&) const = default;
     };
@@ -79,6 +82,12 @@ private:
     float wetStep = 0.0f;
 
     std::atomic<float> meterGainReduction { 0.0f };
+
+    // The colour circuit: drive, saturation (anti-aliased) and the transformer's low end
+    float colorAmount = 0.0f;     // smoothed COLOR switch
+    std::array<float, 2> satPrev {}, satPrevIntegral {};
+    Biquad transformerLow, transformerTop;
+    float colorStage (float x, int channel, float drive, float bias, float grit) noexcept;
 };
 
 } // namespace riff
