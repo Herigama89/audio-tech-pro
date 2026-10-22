@@ -413,6 +413,7 @@ private:
     bool audioInPane() const { return audioPane != nullptr && audioPane->isVisible(); }
     juce::Component& paneEditor() { return audioInPane() ? static_cast<juce::Component&> (*audioPane) : pianoRoll; }
     MixerPanel mixer { undoManager, engine, player, effectRack };
+    InterfaceControl interfaceControl;   // the interface's preamps from the strips (after the mixer: it goes first)
 
     /** The mixer or the editor in a window of its own (Logic's Mixer and Piano Roll windows): resizable, anywhere. */
     struct DetachedWindow final : juce::DocumentWindow

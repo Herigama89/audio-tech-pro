@@ -171,6 +171,25 @@ public:
             main.project.setProperty ("mixerBusZone", side, nullptr);
         main.player.rebuildNow();
         main.showMixer();
+        // The interface's preamps, from a real captured state (Tests/data/ucnet), with 48 V on input 1 and 32 dB of gain
+        if (juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_PREAMP", {}).isNotEmpty())
+        {
+            juce::MemoryBlock rx;
+            juce::File (juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_PREAMP", {})).loadFileAsData (rx);
+            ucnet::Decoder d;
+            for (const auto& m : d.feed (rx.getData(), rx.getSize()))
+                if (m.code == "ZM")
+                {
+                    auto tree = ucnet::parseState (m);
+                    if (auto* ch1 = tree["children"]["line"]["children"]["ch1"]["values"].getDynamicObject())
+                    {
+                        ch1->setProperty ("48v", 1.0);
+                        ch1->setProperty ("preampgain", 32.0 / 75.0);
+                    }
+                    main.interfaceControl.preview (tree);
+                }
+            pump (main, 100);
+        }
         main.mixer.relayoutStrips();
         for (int i = 0; i < 20; ++i)
         {

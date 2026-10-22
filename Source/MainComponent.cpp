@@ -335,6 +335,9 @@ MainComponent::MainComponent (bool openAudioDevice)
     canvas.onOpenPianoRoll = [this] (juce::ValueTree region) { openPianoRoll (region); };
     canvas.onSplit = [this] { splitAtPlayhead(); };
     mixer.onLayoutChanged = [this] { inspector.resized(); };
+    mixer.setInterfaceControl (&interfaceControl);
+    if (openAudioDevice)
+        interfaceControl.start();   // (looks for the interface's control service; quietly, again every few seconds, if it isn't there)
     inspector.onTrackMenu = [this] (juce::ValueTree t, juce::Component& target) { showInspectorTrackMenu (t, target); };
     inspector.onNewTrack = [this] (int kind) { commandManager.invokeDirectly (kind == 0 ? commands::newAudioTrack : commands::newInstrumentTrack, false); };
 

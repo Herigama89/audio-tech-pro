@@ -256,6 +256,34 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     inputSlot.setVisible (! isMaster() && ! isVca());
     outputSlot.setVisible (! isVca());
 
+    // The interface's preamp: 48 V and the gain (right-click: high-pass, pad, Auto Gain)
+    look::key (phantomKey, look::Key::console);
+    phantomKey.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffd8352d));
+    phantomKey.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
+    phantomKey.setWantsKeyboardFocus (false);
+    phantomKey.setTooltip ("48 V phantom power for this input's preamp, on the interface itself");
+    phantomKey.onClick = [this]
+    {
+        if (auto* ic = owner.getInterfaceControl())
+        {
+            const auto on = ! ic->preamp (preampChannels().getFirst()).phantom;
+            for (const auto ch : preampChannels())
+                ic->setPhantom (ch, on);
+        }
+    };
+    addChildComponent (phantomKey);
+    preampGain.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v)) + " dB"; };
+    preampGain.setTooltip ("The interface's preamp gain for this input: drag up or down. Right-click for the high-pass filter, "
+                           "the pad and Auto Gain.");
+    preampGain.onValueChange = [this]
+    {
+        if (auto* ic = owner.getInterfaceControl())
+            for (const auto ch : preampChannels())
+                ic->setGain (ch, (float) preampGain.getValue());
+    };
+    preampGain.onRightClick = [this] (const juce::MouseEvent&) { showPreampMenu(); };
+    addChildComponent (preampGain);
+
     // The tape machine: TAPE in or out, Drive dragged; right-click for the speed
     look::key (tapeKey, look::Key::console);
     tapeKey.setClickingTogglesState (false);
@@ -1120,6 +1148,7 @@ void ChannelStrip::showSendMenu (int index)
 void ChannelStrip::refresh()
 {
     updateTape();
+    updatePreamp();
     // Console mode or the built-in strip?
     if (! isMaster())
     {
@@ -1334,6 +1363,12 @@ void ChannelStrip::itemDropped (const SourceDetails& details)
 
 void ChannelStrip::paintOverChildren (juce::Graphics& g)
 {
+    // The input clipped at the preamp: a red frame round its gain
+    if (preampClipped && preampGain.isVisible())
+    {
+        g.setColour (juce::Colours::red);
+        g.drawRoundedRectangle (preampGain.getBounds().toFloat().reduced (0.5f), 2.0f, 1.5f);
+    }
     if (! juce::isPositiveAndBelow (dropSlot, slots.size()))
         return;
     const auto r = slots[dropSlot]->getBounds().toFloat().expanded (1.0f);
@@ -1418,7 +1453,7 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
 juce::Rectangle<int> ChannelStrip::faderArea() const
 {
     // Below the sends, above the level display and the name plate.
-    const auto top = topSection() + 6 + 2 * ioRow + insertRows() * insertRowHeight + 6 + sendRows() * sendRowHeight + ioRow + tapeRow + 4 + automationRow
+    const auto top = topSection() + 6 + 2 * ioRow + preampRow() + insertRows() * insertRowHeight + 6 + sendRows() * sendRowHeight + ioRow + tapeRow + 4 + automationRow
                    + (theme::stripVu() && ! isVca() ? vuBand : 0);
     return { 0, top, getWidth(), getHeight() - nameHeight - 22 - top };
 }
@@ -1837,6 +1872,14 @@ void ChannelStrip::resized()
         inputSlot.setBounds (row);
     }
     area.removeFromTop (2);
+    if (preampRow() > 0)
+    {
+        auto row = area.removeFromTop (preampRow() - 3);
+        phantomKey.setBounds (row.removeFromLeft (28));
+        row.removeFromLeft (2);
+        preampGain.setBounds (row);
+        area.removeFromTop (3);
+    }
     for (int i = 0; i < slots.size(); ++i)
     {
         if (i < insertRows())
@@ -1887,6 +1930,63 @@ void ChannelStrip::resized()
         automationButton.setBounds (row);
         updateAutomationButton();
     }
+}
+
+juce::Array<int> ChannelStrip::preampChannels() const
+{
+    juce::Array<int> channels;
+    if (isMaster() || isVca() || ! track.isValid() || model::isBusTrack (track) || model::isInstrumentTrack (track)
+        || track[ids::inputTrack].toString().isNotEmpty())
+        return channels;
+    const int first = (int) track.getProperty (ids::input, 0) + 1;
+    channels.add (first);
+    if ((bool) track.getProperty (ids::inputStereo, false))
+        channels.add (first + 1);
+    return channels;
+}
+
+void ChannelStrip::updatePreamp()
+{
+    auto* ic = owner.getInterfaceControl();
+    const auto channels = preampChannels();
+    const auto p = ic != nullptr && ic->isConnected() && ! channels.isEmpty() ? ic->preamp (channels.getFirst()) : InterfaceControl::Preamp {};
+    const auto show = preampRow() > 0 && p.present;
+    phantomKey.setVisible (show);
+    preampGain.setVisible (show);
+    if (! show)
+        return;
+    phantomKey.setToggleState (p.phantom, juce::dontSendNotification);
+    if (preampGain.getMinimum() != p.minDb || preampGain.getMaximum() != p.maxDb)
+        preampGain.setRange (p.minDb, p.maxDb, 1.0);
+    if (! preampGain.isMouseButtonDown())
+        preampGain.setValue (p.gainDb, juce::dontSendNotification);
+    if (std::exchange (preampClipped, p.clip) != p.clip)
+        repaint();
+    preampGain.setAlpha (p.autoGain ? 0.6f : 1.0f);
+    juce::String tip = "Input " + juce::String (channels.getFirst()) + (channels.size() > 1 ? "-" + juce::String (channels.getLast()) : juce::String()) + " preamp";
+    if (p.highPass) tip << " - High-pass on";
+    if (p.pad) tip << " - Pad on";
+    if (p.autoGain) tip << " - Auto Gain";
+    if (p.clip) tip << " - CLIPPED";
+    phantomKey.setTooltip (tip + ". 48 V phantom power.");
+}
+
+void ChannelStrip::showPreampMenu()
+{
+    auto* ic = owner.getInterfaceControl();
+    const auto channels = preampChannels();
+    if (ic == nullptr || channels.isEmpty())
+        return;
+    const auto p = ic->preamp (channels.getFirst());
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Input " + juce::String (channels.getFirst()) + " Preamp");
+    menu.addItem ("48 V Phantom Power", true, p.phantom, [ic, channels, on = ! p.phantom] { for (const auto c : channels) ic->setPhantom (c, on); });
+    menu.addItem ("High-Pass Filter", p.hasHighPass, p.highPass, [ic, channels, on = ! p.highPass] { for (const auto c : channels) ic->setHighPass (c, on); });
+    menu.addItem ("Pad", p.hasPad, p.pad, [ic, channels, on = ! p.pad] { for (const auto c : channels) ic->setPad (c, on); });
+    menu.addItem ("Auto Gain (play your loudest part)", p.hasAutoGain, p.autoGain, [ic, channels, on = ! p.autoGain] { for (const auto c : channels) ic->setAutoGain (c, on); });
+    menu.addSeparator();
+    menu.addItem ("Gain: 0 dB", [ic, channels] { for (const auto c : channels) ic->setGain (c, 0.0f); });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&preampGain));
 }
 
 void ChannelStrip::updateTape()
@@ -2908,6 +3008,30 @@ void MixerPanel::resized()
     }
     layOutComments (stripW, stripHeight);
     repaint();
+}
+
+void MixerPanel::setInterfaceControl (InterfaceControl* control)
+{
+    interfaceControl = control;
+    if (control == nullptr)
+        return;
+    control->onChange = [this]
+    {
+        // Connected or gone: the preamp rows appear or go (every strip's layout); otherwise just the values
+        const auto shown = interfaceControl != nullptr && interfaceControl->isConnected();
+        if (shown != ChannelStrip::preampRows)
+        {
+            ChannelStrip::preampRows = shown;
+            for (auto* s : strips) s->refresh();
+            for (auto* s : extraStrips) s->refresh();
+            relayoutStrips();
+            if (onLayoutChanged)
+                onLayoutChanged();
+            return;
+        }
+        for (auto* s : strips) s->refresh();
+        for (auto* s : extraStrips) s->refresh();
+    };
 }
 
 juce::String MixerPanel::zoneOf (const juce::ValueTree& project, const juce::ValueTree& track)

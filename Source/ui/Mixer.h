@@ -11,6 +11,7 @@
 #include "../engine/AudioEngine.h"
 #include "../engine/ProjectPlayer.h"
 #include "../engine/AutomationWriter.h"
+#include "../engine/InterfaceControl.h"
 
 namespace riff
 {
@@ -90,9 +91,12 @@ public:
     static constexpr int ioRow = 17;   // the Input slot (above the inserts) and the Output slot (below the sends)
     static constexpr int vuBand = 38;   // Themes > Strip VU meters: the amber VU at the top of each strip
     static constexpr int tapeRow = 18;  // the tape machine: TAPE key and its Drive, under the Output slot
+    static constexpr int preampRowHeight = 18;   // the interface's preamp (48V, gain), under the Input slot, when it's connected
+    static inline bool preampRows = false;
+    static int preampRow() { return preampRows ? preampRowHeight : 0; }
     static int minimumHeightFor (bool console, int inserts, int sends)
     {
-        return (console ? topHeight : compactTopHeight) + 6 + 2 * ioRow + inserts * insertRowHeight + 6 + sends * sendRowHeight
+        return (console ? topHeight : compactTopHeight) + 6 + 2 * ioRow + preampRow() + inserts * insertRowHeight + 6 + sends * sendRowHeight
              + ioRow + tapeRow + automationRow + 100 + 20 + nameHeight + (theme::stripVu() ? vuBand : 0);
     }
 
@@ -161,6 +165,13 @@ private:
     juce::Identifier tapeId (const char* what) const { return juce::Identifier ((isMaster() ? juce::String ("masterTape") : juce::String ("tape")) + what); }
     void showTapeMenu();
     void updateTape();
+    // The interface's preamp for this channel's input (Logic's Audio Device Controls)
+    juce::TextButton phantomKey { "48V" };
+    strip::DisplaySlider preampGain;
+    juce::Array<int> preampChannels() const;   // the interface's input numbers (1-based) this channel records
+    void updatePreamp();
+    void showPreampMenu();
+    bool preampClipped = false;
     float grShown = 0.0f;
     juce::Rectangle<int> grArea() const;
     void showInputMenu();
@@ -339,6 +350,10 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
 
+    /** The interface's preamps, when its control service is there: the strips show them under their Input slots. */
+    void setInterfaceControl (InterfaceControl* control);
+    InterfaceControl* getInterfaceControl() const noexcept { return interfaceControl; }
+
     /** Console mode's bus compressor face (shown instead of the built-in one when a UA plugin is available). */
     BusCompConsolePanel& getConsolePanel() noexcept { return consolePanel; }
     MasterBusCompressorPanel& getBusCompPanel() noexcept { return busComp; }
@@ -423,7 +438,8 @@ private:
     static constexpr int commentsHeight = 46;
     static constexpr int zoneGap = 6;
     std::pair<int, int> zoneEdges {};
-    bool zonesChanged = false;   // where the left zone ends and the right one begins (0: none)
+    bool zonesChanged = false;
+    InterfaceControl* interfaceControl = nullptr;   // where the left zone ends and the right one begins (0: none)
     juce::OwnedArray<juce::TextEditor> commentBoxes;
     void layOutComments (int stripW, int top);
     juce::OwnedArray<ChannelStrip> strips;
