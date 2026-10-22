@@ -199,6 +199,7 @@ private:
 
     /** The selected tracks an edit here goes to (this one alone if it isn't selected). */
     juce::Array<juce::ValueTree> acting() const;
+    void showZoneMenu();
     void showControlMenu (juce::Slider& control, const juce::String& param, const juce::String& name,
                           std::function<void()> reset, const juce::String& learn = {});
     strip::Fader fader;
@@ -363,6 +364,12 @@ public:
     bool showsConsole() const { return (bool) project.getProperty ("mixerConsole", false); }
     bool showsBusComp() const { return (bool) project.getProperty ("mixerBusComp", false); }
 
+    /** Mixer zones (as Cubase's): "left" or "right" - pinned there, outside the scrolling strips - or empty (with the tracks).
+        A channel's own choice (its mixerZone) first; buses and summing stacks follow the mixer's mixerBusZone. */
+    static juce::String zoneOf (const juce::ValueTree& project, const juce::ValueTree& track);
+    /** Pins tracks to a zone ("left", "right") or back with the tracks ("none"), undoably. */
+    void setZone (const juce::Array<juce::ValueTree>& tracks, const juce::String& zone);
+
 private:
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& p) override { touched (tree, p, false); }
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree&) override        { changed (parent); }
@@ -394,6 +401,8 @@ private:
     juce::TextButton busCompButton { "Bus Comp" };
     juce::TextButton automixButton { "Automix" }; // show the Master Bus Compressor beside the master
     juce::TextButton commentsButton { "Comments" };   // the notes boxes under the strips, on or off
+    juce::TextButton zonesButton { "Zones" };   // where the buses (and any channel you pin) sit: left, right or with the tracks
+    void showZonesMenu();
     float stripScale() const;
     juce::Array<juce::PluginDescription> stripCandidates;
     int syncCounter = 0;
@@ -412,6 +421,9 @@ public:
 private:
     bool showComments = false;
     static constexpr int commentsHeight = 46;
+    static constexpr int zoneGap = 6;
+    std::pair<int, int> zoneEdges {};
+    bool zonesChanged = false;   // where the left zone ends and the right one begins (0: none)
     juce::OwnedArray<juce::TextEditor> commentBoxes;
     void layOutComments (int stripW, int top);
     juce::OwnedArray<ChannelStrip> strips;

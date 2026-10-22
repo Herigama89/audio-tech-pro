@@ -114,3 +114,23 @@ TEST_CASE ("Selecting several tracks; hidden tracks", "[view]")
     t.showHiddenTracks = true;
     CHECK (t.heightOf (1) == TimelineState::trackHeight);
 }
+
+
+TEST_CASE ("Mixer zones: buses follow the mixer's choice, a channel's own choice wins", "[view]")
+{
+    auto project = model::createProject();
+    auto vox = model::addTrack (project, "Vox", nullptr);
+    auto verb = model::addTrack (project, "Verb", nullptr, -1, model::busKind);
+
+    CHECK (model::mixerZoneOf (project, vox).isEmpty());
+    CHECK (model::mixerZoneOf (project, verb).isEmpty());
+
+    project.setProperty ("mixerBusZone", "right", nullptr);
+    CHECK (model::mixerZoneOf (project, verb) == "right");
+    CHECK (model::mixerZoneOf (project, vox).isEmpty());   // (only buses follow it)
+
+    vox.setProperty ("mixerZone", "left", nullptr);
+    verb.setProperty ("mixerZone", "none", nullptr);
+    CHECK (model::mixerZoneOf (project, vox) == "left");
+    CHECK (model::mixerZoneOf (project, verb).isEmpty());   // brought back with the tracks
+}

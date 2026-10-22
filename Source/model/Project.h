@@ -300,6 +300,10 @@ namespace riff::model
     // --- Buses and sends --------------------------------------------------------
     bool isBusTrack (const juce::ValueTree& track);
 
+    /** The mixer zone a channel sits in (as Cubase's): "left", "right", or empty (with the tracks, scrolling).
+        Its own mixerZone first ("none": with the tracks); buses and summing stacks follow the project's mixerBusZone. */
+    juce::String mixerZoneOf (const juce::ValueTree& project, const juce::ValueTree& track);
+
     /** Whether playing `track` into the track `targetId` would come back round to it (a bus into itself, through others). */
     /** Cubase-style ARA Extensions: whether some of the track's regions are marked for its ARA plugin
         (then only those are the plugin's, the rest play as usual; otherwise the plugin takes every region). */

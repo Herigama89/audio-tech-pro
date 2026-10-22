@@ -2582,4 +2582,22 @@ juce::ValueTree load (const juce::File& file, juce::String& error)
     return fromJson (file.loadFileAsString(), file, error);
 }
 
+juce::String mixerZoneOf (const juce::ValueTree& project, const juce::ValueTree& track)
+{
+    if (! track.isValid())
+        return {};
+    const auto own = track.getProperty ("mixerZone").toString();
+    if (own == "left" || own == "right")
+        return own;
+    if (own == "none")
+        return {};
+    if (isBusTrack (track))
+    {
+        const auto buses = project.getProperty ("mixerBusZone").toString();
+        if (buses == "left" || buses == "right")
+            return buses;
+    }
+    return {};
+}
+
 } // namespace riff::model

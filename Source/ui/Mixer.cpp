@@ -903,6 +903,12 @@ void ChannelStrip::mouseDown (const juce::MouseEvent& e)
         showTapeMenu();
         return;
     }
+    // The name plate: which zone of the mixer the channel sits in
+    if (e.mods.isPopupMenu() && ! isMaster() && e.eventComponent == this && e.y >= getHeight() - nameHeight - 4)
+    {
+        showZoneMenu();
+        return;
+    }
     // Right-click anywhere in the console section (knobs, lamps, the metal around them).
     if (! e.mods.isPopupMenu() || isMaster())
         return;
@@ -1926,6 +1932,21 @@ void ChannelStrip::showTapeMenu()
     });
 }
 
+void ChannelStrip::showZoneMenu()
+{
+    const auto zone = MixerPanel::zoneOf (project, track);
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Mixer Zone");
+    menu.addItem (1, "Left Zone", true, zone == "left");
+    menu.addItem (2, "Right Zone", true, zone == "right");
+    menu.addItem (3, "With the Tracks", true, zone.isEmpty());
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [this] (int chosen)
+    {
+        if (chosen > 0)
+            owner.setZone (acting(), chosen == 1 ? "left" : chosen == 2 ? "right" : "none");
+    });
+}
+
 bool ChannelStrip::canRecord() const
 {
     return ! isMaster() && ! isVca() && track.isValid() && ! model::isBusTrack (track);
@@ -2337,6 +2358,12 @@ MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p,
     };
     addAndMakeVisible (commentsButton);
 
+    zonesButton.setTooltip ("Zones: put the buses and summing channels on the left or right side of the mixer, where they stay "
+                            "while the tracks scroll (right-click any channel's name for its own zone)");
+    zonesButton.setWantsKeyboardFocus (false);
+    zonesButton.onClick = [this] { showZonesMenu(); };
+    addAndMakeVisible (zonesButton);
+
     title.setText ("Mixer", juce::dontSendNotification);
     title.setFont (juce::FontOptions (13.0f, juce::Font::bold));
     title.setColour (juce::Label::textColourId, theme::text);
@@ -2420,6 +2447,8 @@ void MixerPanel::changed (const juce::ValueTree& parent)
 
 void MixerPanel::touched (const juce::ValueTree& tree, const juce::Identifier& property, bool structural)
 {
+    if (property.toString() == "mixerZone" || property.toString() == "mixerBusZone")
+        zonesChanged = true;
     if (tree == project)
     {
         if (property == ids::masterGain)
@@ -2525,6 +2554,8 @@ void MixerPanel::refreshConsoleBox()
 
 void MixerPanel::handleAsyncUpdate()
 {
+    if (std::exchange (zonesChanged, false))
+        resized();
     const bool all = std::exchange (refreshAll, false) || needsRebuild;
     const auto owners = std::exchange (dirtyOwners, {});
 
@@ -2597,7 +2628,7 @@ void MixerPanel::setSelectedTracks (const juce::StringArray& trackIds, const juc
         s->setSelected (trackIds.contains (id) || id == trackId);
 
         // Scroll the main one into view.
-        if (id == trackId)
+        if (id == trackId && s->getParentComponent() == &stripHolder)   // (one in a zone is always in view)
         {
             const auto x = s->getX(), right = s->getRight();
             const auto viewX = viewport.getViewPositionX(), viewW = viewport.getViewWidth();
@@ -2754,6 +2785,16 @@ void MixerPanel::paint (juce::Graphics& g)
     else
         g.fillAll (frame);
 
+    // The zones' edges: a dark gap with a light line, as a console's frame between sections
+    for (const auto x : { zoneEdges.first, zoneEdges.second })
+        if (x > 0)
+        {
+            g.setColour (juce::Colours::black.withAlpha (0.55f));
+            g.fillRect (x, headerHeight, zoneGap, getHeight() - headerHeight);
+            g.setColour (juce::Colours::white.withAlpha (0.12f));
+            g.fillRect (x + zoneGap / 2, headerHeight, 1, getHeight() - headerHeight);
+        }
+
     const auto header = getLocalBounds().removeFromTop (headerHeight).toFloat();
     g.setGradientFill (juce::ColourGradient (theme::toolbar.brighter (0.1f), 0.0f, 0.0f, theme::toolbarDark, 0.0f, header.getBottom(), false));
     g.fillRect (header);
@@ -2782,6 +2823,8 @@ void MixerPanel::resized()
     automixButton.setBounds (header.removeFromLeft (70));
     header.removeFromLeft (6);
     commentsButton.setBounds (header.removeFromLeft (80));
+    header.removeFromLeft (6);
+    zonesButton.setBounds (header.removeFromLeft (64));
 
     // Narrow strips are the same strips, drawn smaller.
     const auto scale = stripScale();
@@ -2816,16 +2859,109 @@ void MixerPanel::resized()
     else if (busComp.isVisible())
         busComp.setBounds (content.removeFromRight (MasterBusCompressorPanel::panelWidth));
 
+    // The zones: the left one's strips at the left, the right one's beside the master; the rest scroll between them.
+    juce::Array<ChannelStrip*> left, middle, right;
+    for (auto* s : strips)
+    {
+        const auto zone = zoneOf (project, s->getTrack());
+        (zone == "left" ? left : zone == "right" ? right : middle).add (s);
+    }
+    const auto anyZone = ! left.isEmpty() || ! right.isEmpty();
+    const auto zoneHeight = content.getHeight() - (anyZone && middle.size() * stripW > content.getWidth() - (left.size() + right.size()) * stripW - 2 * zoneGap
+                                                   ? viewport.getScrollBarThickness() : 0);
+    const auto zoneStripHeight = zoneHeight - (showComments ? commentsHeight : 0);
+    zoneEdges = {};
+    if (! right.isEmpty())
+    {
+        content.removeFromRight (zoneGap);
+        auto zone = content.removeFromRight (right.size() * stripW);
+        zoneEdges.second = zone.getX() - zoneGap;
+        for (auto* s : right)
+        {
+            if (s->getParentComponent() != &body) body.addAndMakeVisible (s);
+            place (*s, zone.removeFromLeft (stripW).withHeight (zoneStripHeight));
+        }
+    }
+    if (! left.isEmpty())
+    {
+        auto zone = content.removeFromLeft (left.size() * stripW);
+        content.removeFromLeft (zoneGap);
+        zoneEdges.first = zone.getRight();
+        for (auto* s : left)
+        {
+            if (s->getParentComponent() != &body) body.addAndMakeVisible (s);
+            place (*s, zone.removeFromLeft (stripW).withHeight (zoneStripHeight));
+        }
+    }
+
     viewport.setBounds (content);
 
-    const auto wide = strips.size() * stripW > content.getWidth();
+    const auto wide = middle.size() * stripW > content.getWidth();
     const auto height = content.getHeight() - (wide ? viewport.getScrollBarThickness() : 0);
-    stripHolder.setSize (juce::jmax (content.getWidth(), strips.size() * stripW), height);
+    stripHolder.setSize (juce::jmax (content.getWidth(), middle.size() * stripW), height);
 
     const auto stripHeight = stripHolder.getHeight() - (showComments ? commentsHeight : 0);
-    for (int i = 0; i < strips.size(); ++i)
-        place (*strips[i], { i * stripW, 0, stripW, stripHeight });
+    for (int i = 0; i < middle.size(); ++i)
+    {
+        if (middle[i]->getParentComponent() != &stripHolder) stripHolder.addAndMakeVisible (middle[i]);
+        place (*middle[i], { i * stripW, 0, stripW, stripHeight });
+    }
     layOutComments (stripW, stripHeight);
+    repaint();
+}
+
+juce::String MixerPanel::zoneOf (const juce::ValueTree& project, const juce::ValueTree& track)
+{
+    return model::mixerZoneOf (project, track);
+}
+
+void MixerPanel::setZone (const juce::Array<juce::ValueTree>& tracks, const juce::String& zone)
+{
+    undoManager.beginNewTransaction ("Mixer zone");
+    for (auto t : tracks)
+        t.setProperty ("mixerZone", zone, &undoManager);
+}
+
+void MixerPanel::showZonesMenu()
+{
+    const auto buses = project.getProperty ("mixerBusZone").toString();
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Buses and summing channels");
+    menu.addItem (1, "Left Zone", true, buses == "left");
+    menu.addItem (2, "Right Zone", true, buses == "right");
+    menu.addItem (3, "With the Tracks", true, buses != "left" && buses != "right");
+    menu.addSeparator();
+    juce::Array<juce::ValueTree> selected;
+    for (const auto& id : selectedTrackIds)
+        if (auto t = model::findById (project, id); t.isValid())
+            selected.add (t);
+    menu.addSectionHeader ("Selected channels");
+    menu.addItem (4, "Move to Left Zone", ! selected.isEmpty());
+    menu.addItem (5, "Move to Right Zone", ! selected.isEmpty());
+    menu.addItem (6, "Move Back with the Tracks", ! selected.isEmpty());
+    menu.addSeparator();
+    menu.addItem (7, "Reset All Zones");
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&zonesButton), [this, selected] (int chosen)
+    {
+        switch (chosen)
+        {
+            case 1: case 2: case 3:
+                undoManager.beginNewTransaction ("Mixer zones");
+                project.setProperty ("mixerBusZone", chosen == 1 ? "left" : chosen == 2 ? "right" : "", &undoManager);
+                break;
+            case 4: setZone (selected, "left"); break;
+            case 5: setZone (selected, "right"); break;
+            case 6: setZone (selected, "none"); break;
+            case 7:
+                undoManager.beginNewTransaction ("Reset mixer zones");
+                project.setProperty ("mixerBusZone", "", &undoManager);
+                for (auto t : project)
+                    if (t.hasType (ids::TRACK) && t.hasProperty ("mixerZone"))
+                        t.removeProperty ("mixerZone", &undoManager);
+                break;
+            default: break;
+        }
+    });
 }
 
 void MixerPanel::layOutComments (int stripW, int top)
@@ -2904,7 +3040,12 @@ void MixerPanel::layOutComments (int stripW, int top)
     {
         auto* box = commentBoxes[i];
         auto track = strips[i]->getTrack();
-        box->setBounds (i * stripW + 1, top + 2, stripW - 2, commentsHeight - 4);
+        // (under its strip, wherever that is: scrolling with the tracks or in a zone)
+        if (auto* parent = strips[i]->getParentComponent(); parent != nullptr && box->getParentComponent() != parent)
+            parent->addAndMakeVisible (box);
+        juce::ignoreUnused (top);
+        const auto under = strips[i]->getBoundsInParent();
+        box->setBounds (under.getX() + 1, under.getBottom() + 2, stripW - 2, commentsHeight - 4);
         if (! box->hasKeyboardFocus (true))
             box->setText (track[ids::comment].toString(), juce::dontSendNotification);
         box->setTooltip (track[ids::name].toString() + ": your notes on this track. Double-click to write; the Comments key in the header hides them.");
