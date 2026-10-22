@@ -363,6 +363,21 @@ void EffectRack::syncAra (const juce::ValueTree& project)
                 }
 }
 
+juce::String EffectRack::captureState (const juce::String& insertId)
+{
+    if (auto it = entries.find (insertId); it != entries.end())
+        if (auto* plugin = dynamic_cast<PluginEffect*> (it->second.effect.get()))
+            return plugin->getStateBase64();
+    return {};
+}
+
+void EffectRack::applyState (const juce::String& insertId, const juce::String& base64)
+{
+    if (auto it = entries.find (insertId); it != entries.end())
+        if (auto* plugin = dynamic_cast<PluginEffect*> (it->second.effect.get()))
+            plugin->setStateBase64 (base64);
+}
+
 juce::AudioPluginInstance* EffectRack::getPlugin (const juce::String& insertId)
 {
     auto it = entries.find (insertId);

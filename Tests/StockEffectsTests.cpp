@@ -1204,3 +1204,41 @@ TEST_CASE ("Legacy effects: reverbs, silver dynamics, de-esser, grooveshifter, a
         CHECK (peakOf (l) < 8.0f);
     }
 }
+
+TEST_CASE ("MultiMeter: equal octaves; pink noise reads flat, a tone in its band", "[stockfx]")
+{
+    // Pink noise (Paul Kellet's filter): the same power in every third octave
+    auto mm = make ("multiMeter");
+    juce::Random random (9);
+    float b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    std::vector<float> l (48000 * 2);
+    for (auto& x : l)
+    {
+        const auto white = random.nextFloat() * 2.0f - 1.0f;
+        b0 = 0.99886f * b0 + white * 0.0555179f; b1 = 0.99332f * b1 + white * 0.0750759f; b2 = 0.96900f * b2 + white * 0.1538520f;
+        b3 = 0.86650f * b3 + white * 0.3104856f; b4 = 0.55000f * b4 + white * 0.5329522f; b5 = -0.7616f * b5 - white * 0.0168980f;
+        x = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362f) * 0.05f;
+        b6 = white * 0.115926f;
+    }
+    run (*mm, l, l);
+    std::array<float, BuiltInEffect::meterCapacity> m {};
+    mm->readMeters (m.data(), (int) m.size());
+    // (bands: 20 Hz * 1000^(b/31); 5 = 61 Hz .. 27 = 10 kHz)
+    float lowest = 1000.0f, highest = -1000.0f;
+    for (int b = 5; b <= 27; ++b)
+    {
+        lowest = std::min (lowest, m[(size_t) b]);
+        highest = std::max (highest, m[(size_t) b]);
+    }
+    CHECK (highest - lowest < 4.0f);
+
+    // A 1 kHz tone: loudest in the band holding 1 kHz (b = 17: 932 - 1166 Hz)
+    auto tone = make ("multiMeter");
+    run (*tone, sine (1000.0, 1.0, 0.5f), sine (1000.0, 1.0, 0.5f));
+    tone->readMeters (m.data(), (int) m.size());
+    int loudest = 0;
+    for (int b = 0; b < 31; ++b)
+        if (m[(size_t) b] > m[(size_t) loudest]) loudest = b;
+    CHECK (loudest == 17);
+    CHECK_THAT (m[17], Catch::Matchers::WithinAbs (20.0 * std::log10 (0.5), 1.0));   // (a full-scale sine reads 0 dB, as the MM window's)
+}

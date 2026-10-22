@@ -1,3 +1,4 @@
+#include "../engine/BandAnalysis.h"
 #include "MultiMeter.h"
 #include "Theme.h"
 
@@ -95,6 +96,9 @@ MultiMeterPanel::MultiMeterPanel (AudioEngine& e) : engine (e)
     const juce::StringArray rates { "3 dB/s", "6 dB/s", "11.8 dB/s", "20 dB/s", "40 dB/s" };
     const juce::StringArray holds { "2 s", "4 s", "6 s", juce::String::fromUTF8 ("\xe2\x88\x9e") };
     combo (bandsBox, { "31", "63" }, 1, [this] (int i) { bands = i == 0 ? 31 : 63; bandDb.clear(); });
+    combo (tiltBox, bands::tiltNames(), 2, [this] (int i) { tilt = bands::tiltSlope (i); repaint(); });
+    tiltBox.setTooltip ("Tilt: lifts the bars by this much per octave above 1 kHz (and lowers them below), so a balanced mix "
+                        "reads level across the range. Off: the bands' raw power (pink noise flat).");
     combo (analyzerReturnBox, rates, 2, [this] (int i) { analyzerReturn = returnRateFor (i); });
     combo (analyzerPeakBox, holds, 1, [this] (int i) { analyzerPeakSeconds = holdSecondsFor (i); });
     combo (levelBox, { "Peak", "RMS", "Peak & RMS" }, 2, [this] (int i) { levelMode = (LevelMode) i; });
@@ -280,21 +284,15 @@ void MultiMeterPanel::analyse (double seconds)
         std::fill (fftData.begin() + fftSize, fftData.end(), 0.0f);
         fft.performFrequencyOnlyForwardTransform (fftData.data(), true);
 
-        const auto binHz = (float) rate / (float) fftSize;
+        // Bands log-spaced from 20 Hz to 20 kHz (equal octaves), each the spectrum integrated over exactly its range
+        const auto binHz = rate / (double) fftSize;
         const auto norm = 4.0f / ((float) fftSize * windowPower);
-        for (int b = 0; b < bands; ++b)
-        {
-            // Bands log-spaced from 20 Hz to 20 kHz
-            const auto lo = 20.0f * std::pow (1000.0f, (float) b / (float) bands);
-            const auto hi = 20.0f * std::pow (1000.0f, (float) (b + 1) / (float) bands);
-            auto k0 = (int) std::ceil (lo / binHz), k1 = (int) std::floor (hi / binHz);
-            if (k1 < k0)
-                k0 = k1 = juce::roundToInt (std::sqrt (lo * hi) / binHz);   // narrower than a bin: the bin it's in
-            float e = 0.0f;
-            for (int k = juce::jmax (1, k0); k <= juce::jmin (fftSize / 2 - 1, k1); ++k)
-                e += fftData[(size_t) k] * fftData[(size_t) k];
-            power[(size_t) b] = juce::jmax (power[(size_t) b], e * norm);
-        }
+        for (int k = 0; k < fftSize / 2; ++k)
+            fftData[(size_t) k] = fftData[(size_t) k] * fftData[(size_t) k] * norm;
+        std::vector<float> these;
+        bands::integrate (fftData.data(), fftSize / 2, binHz, bands, these);
+        for (size_t b = 0; b < (size_t) bands; ++b)
+            power[b] = juce::jmax (power[b], these[b]);
     };
     switch (detection)
     {
@@ -380,7 +378,8 @@ void MultiMeterPanel::paint (juce::Graphics& g)
         const auto modes = modeButtons[0].getBounds().getUnion (modeButtons[2].getBounds());
         g.drawText ("Mode", modes.translated (0, -22).withHeight (20), juce::Justification::centred, false);
     }
-    caption ("Analyzer Bands", bandsBox);
+    caption ("Bands", bandsBox);
+    caption ("Tilt", tiltBox);
     caption ("Return Rate", analyzerReturnBox);
     caption ("Peak", analyzerPeakBox);
     caption ("Level", levelBox);
@@ -414,8 +413,8 @@ void MultiMeterPanel::paintAnalyzer (juce::Graphics& g, juce::Rectangle<int> are
     g.drawText (juce::String ((int) range) + " dB", rangeLabel, juce::Justification::centredLeft, false);
 
     const auto yOf = [r, this] (float db) { return r.getY() + r.getHeight() * (top - db) / range; };
-    const auto lowHz = 16.0f, highHz = 20000.0f;
-    const auto xOf = [r, lowHz, highHz] (float hz) { return r.getX() + r.getWidth() * std::log (hz / lowHz) / std::log (highHz / lowHz); };
+    // Every octave the same width: 20 - 200 Hz as wide as 2 - 20 kHz
+    const auto xOf = [r] (float hz) { return r.getX() + r.getWidth() * (float) bands::position (hz); };
 
     // The grid: dB every 5, frequencies by octave
     g.setFont (juce::FontOptions (12.0f));
@@ -428,13 +427,13 @@ void MultiMeterPanel::paintAnalyzer (juce::Graphics& g, juce::Rectangle<int> are
         g.setColour (theme::dimText);
         g.drawText (juce::String (db), left.withY (y - 7.0f).withHeight (14.0f), juce::Justification::centredLeft, false);
     }
-    for (const auto hz : { 16.0f, 31.0f, 62.0f, 125.0f, 250.0f, 500.0f, 1000.0f, 2000.0f, 4000.0f, 8000.0f, 16000.0f })
+    for (const auto hz : { 20.0f, 40.0f, 80.0f, 160.0f, 315.0f, 630.0f, 1250.0f, 2500.0f, 5000.0f, 10000.0f, 20000.0f })
     {
         const auto x = xOf (hz);
         g.setColour (gridColour());
         g.drawVerticalLine ((int) x, r.getY(), r.getBottom());
         g.setColour (theme::dimText);
-        const auto label = hz >= 1000.0f ? juce::String ((int) (hz / 1000.0f)) + " k" : juce::String ((int) hz);
+        const auto label = hz >= 1000.0f ? juce::String (hz / 1000.0f, hz < 10000.0f && std::fmod (hz, 1000.0f) > 0.0f ? 1 : 0) + " k" : juce::String ((int) hz);
         g.drawText (label, juce::Rectangle<float> (x - 24.0f, bottom.getY() + 2.0f, 48.0f, 18.0f), juce::Justification::centred, false);
     }
     g.drawText ("Hz", bottom.withLeft (r.getRight() - 4.0f).withWidth (30.0f), juce::Justification::centredLeft, false);
@@ -446,15 +445,16 @@ void MultiMeterPanel::paintAnalyzer (juce::Graphics& g, juce::Rectangle<int> are
     g.reduceClipRegion (r.toNearestInt());
     for (int b = 0; b < bands; ++b)
     {
-        const auto x0 = xOf (20.0f * std::pow (1000.0f, (float) b / (float) bands));
-        const auto x1 = xOf (20.0f * std::pow (1000.0f, (float) (b + 1) / (float) bands));
-        const auto bar = juce::Rectangle<float>::leftTopRightBottom (x0 + 1.0f, juce::jmax (r.getY(), yOf (bandDb[(size_t) b])), x1 - 1.0f, r.getBottom());
+        const auto x0 = xOf ((float) bands::edge (b, bands));
+        const auto x1 = xOf ((float) bands::edge (b + 1, bands));
+        const auto lift = (float) bands::tiltDb (bands::centre (b, bands), tilt);
+        const auto bar = juce::Rectangle<float>::leftTopRightBottom (x0 + 1.0f, juce::jmax (r.getY(), yOf (bandDb[(size_t) b] + lift)), x1 - 1.0f, r.getBottom());
         g.setColour (barColour());
         g.fillRect (bar);
         if (bandPeak[(size_t) b] > bandDb[(size_t) b] + 0.5f)
         {
             g.setColour (peakColour().withAlpha (0.9f));
-            g.fillRect (juce::Rectangle<float> (x0 + 1.0f, yOf (bandPeak[(size_t) b]) - 1.0f, x1 - x0 - 2.0f, 2.0f));
+            g.fillRect (juce::Rectangle<float> (x0 + 1.0f, yOf (bandPeak[(size_t) b] + lift) - 1.0f, x1 - x0 - 2.0f, 2.0f));
         }
     }
 }
@@ -679,7 +679,13 @@ void MultiMeterPanel::resized()
             b.setBounds (row2.removeFromLeft (w));
     }
     auto middle = c.removeFromLeft ((int) (c.getWidth() * 0.55f));
-    bandsBox.setBounds (middle.removeFromTop (rowH + 24).withTrimmedTop (24).withSizeKeepingCentre (130, rowH));
+    {
+        auto row = middle.removeFromTop (rowH + 24).withTrimmedTop (24);
+        auto pair = row.withSizeKeepingCentre (juce::jmin (row.getWidth(), 210), rowH);
+        bandsBox.setBounds (pair.removeFromLeft (80));
+        pair.removeFromLeft (10);
+        tiltBox.setBounds (pair);
+    }
     middle.removeFromTop (16);
     analyzerReturnBox.setBounds (middle.removeFromTop (rowH + 24).withTrimmedTop (24).withSizeKeepingCentre (150, rowH));
     analyzerPeakBox.setBounds (c.removeFromTop (rowH + 24).withTrimmedTop (24).withSizeKeepingCentre (100, rowH));
@@ -708,7 +714,7 @@ void MultiMeterPanel::resized()
         b->setColour (juce::TextButton::textColourOffId, theme::text.withAlpha (0.85f));
         b->setColour (juce::TextButton::textColourOnId, valueColour());
     }
-    for (auto* box : { &bandsBox, &analyzerReturnBox, &analyzerPeakBox, &levelBox, &levelPeakBox, &levelReturnBox })
+    for (auto* box : { &bandsBox, &tiltBox, &analyzerReturnBox, &analyzerPeakBox, &levelBox, &levelPeakBox, &levelReturnBox })
     {
         box->setColour (juce::ComboBox::backgroundColourId, juce::Colours::transparentBlack);
         box->setColour (juce::ComboBox::outlineColourId, juce::Colours::transparentBlack);

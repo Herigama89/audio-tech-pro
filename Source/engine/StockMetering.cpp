@@ -1,3 +1,4 @@
+#include "BandAnalysis.h"
 #include "StockDsp.h"
 
 /*
@@ -250,35 +251,62 @@ namespace
     {
     public:
         using BuiltInEffect::BuiltInEffect;
-        static constexpr int bands = 31, points = 256;
+        static constexpr int bands = 31, points = 256, fftOrder = 13, fftSize = 1 << fftOrder;
         void prepare (double rate, int) override
         {
             sampleRate = preparedRate = rate;
-            for (int b = 0; b < bands; ++b)
-            {
-                const auto f = std::min (20.0 * std::pow (2.0, b / 3.0), rate * 0.45);
-                filters[(size_t) b].setBandPass (rate, f, 4.32);
-                filters[(size_t) b].reset();
-            }
-            env.fill (0.0f);
             lr = ll = rr = 0.0;
             write = 0;
+            ringAt.store (0);
+            shown.fill (-120.0f);
+            lastRead = 0.0;
         }
-        int readMeters (float* dest, int capacity) const noexcept override { return out.copy (dest, capacity); }
+
+        /** The bands are worked out here, when the window reads them: the latest fftSize samples' spectrum,
+            integrated over each third octave (equal octaves, as the MM window's). */
+        int readMeters (float* dest, int capacity) const noexcept override
+        {
+            const auto n = out.copy (dest, capacity);
+            if (capacity < bands)
+                return n;
+            std::vector<float> data ((size_t) fftSize * 2, 0.0f);
+            const auto at = ringAt.load (std::memory_order_acquire);
+            for (int i = 0; i < fftSize; ++i)
+            {
+                const auto w = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) (fftSize - 1));
+                data[(size_t) i] = ring[(size_t) ((at + i) & (fftSize - 1))].load (std::memory_order_relaxed) * w;
+            }
+            juce::dsp::FFT fft (fftOrder);
+            fft.performFrequencyOnlyForwardTransform (data.data(), true);
+            const auto norm = 4.0f / ((float) fftSize * (float) fftSize * 0.375f);   // (Hann's power)
+            for (int k = 0; k < fftSize / 2; ++k)
+                data[(size_t) k] = data[(size_t) k] * data[(size_t) k] * norm;
+            std::vector<float> power;
+            bands::integrate (data.data(), fftSize / 2, sampleRate / fftSize, bands, power);
+            // Ballistics: up at once, down at the return rate (Peak Hold: slower)
+            const auto now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+            const auto dt = lastRead > 0.0 ? juce::jlimit (0.0, 0.5, now - lastRead) : 0.0;
+            lastRead = now;
+            const auto fall = (float) dt * (value (0) > 0.5f ? 6.0f : 20.0f);
+            for (int b = 0; b < bands; ++b)
+            {
+                const auto db = juce::jmax (-120.0f, 10.0f * std::log10 (power[(size_t) b] + 1.0e-13f));
+                auto& s = shown[(size_t) b];
+                s = db > s ? db : juce::jmax (db, s - fall);
+                dest[b] = s;
+            }
+            return n;
+        }
+
         void process (float* l, float* r, int n) noexcept override
         {
-            const auto release = coeffMs (choice (0) == 1 ? 1500.0 : 300.0, sampleRate);   // (Peak hold: slow fall)
             const auto c = (double) coeffMs (300.0, sampleRate);
             float pl = 0.0f, pr = 0.0f;
+            auto at = ringAt.load (std::memory_order_relaxed);
             for (int i = 0; i < n; ++i)
             {
-                const auto m = 0.5f * (l[i] + r[i]);
-                for (int b = 0; b < bands; ++b)
-                {
-                    const auto y = std::abs (filters[(size_t) b].process (m, 0));
-                    auto& e = env[(size_t) b];
-                    e = y > e ? y : y + release * (e - y);
-                }
+                ring[(size_t) at].store (0.5f * (l[i] + r[i]), std::memory_order_relaxed);
+                at = (at + 1) & (fftSize - 1);
                 lr = l[i] * r[i] + c * (lr - l[i] * r[i]);
                 ll = l[i] * l[i] + c * (ll - l[i] * l[i]);
                 rr = r[i] * r[i] + c * (rr - r[i] * r[i]);
@@ -292,15 +320,16 @@ namespace
                     write = (write + 1) % points;
                 }
             }
-            for (int b = 0; b < bands; ++b)
-                out.set ((size_t) b, gainToDb (env[(size_t) b] * 2.0f));
+            ringAt.store (at, std::memory_order_release);
             out.set (bands, ll * rr > 1.0e-12 ? (float) juce::jlimit (-1.0, 1.0, lr / std::sqrt (ll * rr)) : 0.0f);
             out.set (bands + 1, gainToDb (pl));
             out.set (bands + 2, gainToDb (pr));
         }
     private:
-        std::array<Biquad, bands> filters;
-        std::array<float, bands> env {};
+        std::array<std::atomic<float>, fftSize> ring {};
+        std::atomic<int> ringAt { 0 };
+        mutable std::array<float, bands> shown {};
+        mutable double lastRead = 0.0;
         double lr = 0.0, ll = 0.0, rr = 0.0;
         int write = 0;
         juce::uint32 counter = 0;
@@ -659,7 +688,8 @@ const std::vector<StockEffect>& stockMeteringEffects()
         { { "correlationMeter", "Correlation Meter", {}, "Metering" }, make<CorrelationMeter> },
         { { "multiMeter", "MultiMeter", {
               { "peakHold", "Peak Hold", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff },
-              { "view", "View", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Analyzer", "Goniometer" } } }, "Metering" }, make<MultiMeter> },
+              { "view", "View", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Analyzer", "Goniometer" } },
+              { "tilt", "Tilt", "", 0.0f, 4.0f, 2.0f, 2.0f, { "Off", "1.5 dB/oct", "3 dB/oct", "4.5 dB/oct", "6 dB/oct" } } }, "Metering" }, make<MultiMeter> },
         { { "tuner", "Tuner", { { "reference", "Reference", " Hz", 415.0f, 466.0f, 440.0f, 440.0f } }, "Metering" }, make<Tuner> },
         { { "bpmCounter", "BPM Counter", {}, "Metering" }, make<BpmCounter> },
         { { "masteringAssistant", "Mastering Assistant", {

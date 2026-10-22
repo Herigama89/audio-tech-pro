@@ -128,6 +128,11 @@ public:
 
     juce::AudioPluginInstance* getPlugin (const juce::String& insertId);
 
+    /** A running plug-in's state now (base64), for a preset; empty if it isn't a plug-in or isn't loaded. */
+    juce::String captureState (const juce::String& insertId);
+    /** Puts a state (a preset's) into the running plug-in. */
+    void applyState (const juce::String& insertId, const juce::String& base64);
+
     /** Tests: makes a plugin insert use the given effect, as if it had loaded. */
     void injectForTesting (const juce::ValueTree& insert, std::shared_ptr<Effect> effect, double sampleRate)
     {

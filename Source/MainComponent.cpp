@@ -1,3 +1,4 @@
+#include "ui/InsertBar.h"
 #include "MainComponent.h"
 #include "ui/PluginHostPanel.h"
 #include "ui/Skin.h"
@@ -438,6 +439,9 @@ MainComponent::MainComponent (bool openAudioDevice)
         };
     }
     effectRack.onLoadError = [this] (const juce::String& error) { showError ("Plugin problem", error); };
+    // Presets in the plug-in windows: the running plug-in's state in, a preset's state out
+    InsertBar::captureState = [this] (const juce::ValueTree& insert) { return effectRack.captureState (insert[ids::id].toString()); };
+    InsertBar::applyState = [this] (const juce::ValueTree& insert, const juce::String& state) { effectRack.applyState (insert[ids::id].toString(), state); };
     effectRack.onEffectReplaced = [this] (const juce::String& insertId) { editorWindows.erase (insertId); };
     mixer.onOpenInsert = [this] (juce::ValueTree insert) { openInsertWindow (insert); };
     mixer.onCopyInsertToSelected = [this] (juce::ValueTree insert) { copyInsertToSelected (insert); };

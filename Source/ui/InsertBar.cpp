@@ -2,6 +2,7 @@
 #include "InstrumentWindows.h"
 #include "Theme.h"
 #include "../model/Project.h"
+#include "../model/Presets.h"
 
 namespace riff
 {
@@ -61,8 +62,103 @@ InsertBar::InsertBar (juce::ValueTree i, juce::ValueTree p, juce::UndoManager& u
     };
     sideButton.setEnabled (sidechainable);
 
+    presetButton.setTooltip ("Presets: save this plug-in's settings, load one, or Set as Default so every new one starts that way");
+    presetButton.onClick = [this] { showPresetMenu(); };
+    previousButton.setTooltip ("The previous preset");
+    nextButton.setTooltip ("The next preset");
+    previousButton.onClick = [this] { stepPreset (-1); };
+    nextButton.onClick = [this] { stepPreset (1); };
+    for (auto* b : { &presetButton, &previousButton, &nextButton })
+    {
+        b->setWantsKeyboardFocus (false);
+        addAndMakeVisible (b);
+    }
+
     insert.addListener (this);
     refresh();
+}
+
+juce::String InsertBar::currentState() const
+{
+    return captureState != nullptr ? captureState (insert) : juce::String();
+}
+
+void InsertBar::loadPreset (const juce::String& name)
+{
+    undoManager.beginNewTransaction ("Load Preset " + name);
+    juce::String state;
+    const auto ok = name == "Default" ? presets::applyDefault (insert, &undoManager, &state)
+                                      : presets::load (insert, name, &undoManager, &state);
+    if (ok && state.isNotEmpty() && applyState != nullptr)
+        applyState (insert, state);
+}
+
+void InsertBar::stepPreset (int direction)
+{
+    const auto names = presets::list (insert);
+    if (names.isEmpty())
+        return;
+    const auto at = names.indexOf (insert["presetName"].toString());
+    const auto next = at < 0 ? (direction > 0 ? 0 : names.size() - 1) : (at + direction + names.size()) % names.size();
+    loadPreset (names[next]);
+}
+
+void InsertBar::showPresetMenu()
+{
+    const auto names = presets::list (insert);
+    const auto current = insert["presetName"].toString();
+    const auto plugin = presets::displayNameOf (insert);
+    juce::PopupMenu menu;
+    menu.addItem ("Save Preset...", [this]
+    {
+        auto* box = new juce::AlertWindow ("Save Preset", "A name for these settings:", juce::MessageBoxIconType::NoIcon);
+        box->addTextEditor ("name", insert["presetName"].toString().isNotEmpty() && insert["presetName"].toString() != "Default"
+                                        && insert["presetName"].toString() != "Factory Default" ? insert["presetName"].toString() : juce::String());
+        box->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        box->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        box->enterModalState (true, juce::ModalCallbackFunction::create ([this, box] (int result)
+        {
+            const auto name = box->getTextEditorContents ("name").trim();
+            if (result == 1 && name.isNotEmpty())
+            {
+                if (presets::save (insert, name, currentState()))
+                    insert.setProperty ("presetName", name, nullptr);
+            }
+        }), true);
+    });
+    menu.addItem ("Set as Default for " + plugin, [this]
+    {
+        presets::saveDefault (insert, currentState());
+        insert.setProperty ("presetName", "Default", nullptr);
+    });
+    menu.addItem ("Load Default", presets::hasDefault (insert), false, [this] { loadPreset ("Default"); });
+    menu.addItem ("Clear Default (start from the factory settings)", presets::hasDefault (insert), false, [this] { presets::clearDefault (insert); });
+    if (insert[ids::kind].toString() != model::pluginKind)
+        menu.addItem ("Reset to Factory Default", [this]
+        {
+            undoManager.beginNewTransaction ("Reset " + presets::displayNameOf (insert));
+            presets::resetToFactory (insert, &undoManager);
+        });
+    menu.addSeparator();
+    if (names.isEmpty())
+        menu.addItem ("(no presets saved yet)", false, false, [] {});
+    for (const auto& n : names)
+        menu.addItem (n, true, n == current, [this, n] { loadPreset (n); });
+    if (! names.isEmpty())
+    {
+        juce::PopupMenu remove;
+        for (const auto& n : names)
+            remove.addItem (n, [this, n] { presets::remove (insert, n); });
+        menu.addSeparator();
+        menu.addSubMenu ("Delete Preset", remove);
+    }
+    menu.addItem ("Show Presets Folder", [this]
+    {
+        auto folder = presets::root().getChildFile (presets::keyOf (insert));
+        folder.createDirectory();
+        folder.revealToUser();
+    });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&presetButton));
 }
 
 InsertBar::~InsertBar()
@@ -102,6 +198,8 @@ void InsertBar::refresh()
         pinButton.setToggleState (window->isPinned(), juce::dontSendNotification);
     const auto source = model::findById (project, insert[ids::sidechain].toString());
     sideButton.setButtonText ("Side Chain: " + (source.isValid() ? source[ids::name].toString() : juce::String ("None")));
+    const auto preset = insert["presetName"].toString();
+    presetButton.setButtonText ((preset.isNotEmpty() ? preset : juce::String ("Preset")) + juce::String::fromUTF8 (" \xe2\x96\xbe"));
     sideButton.setToggleState (source.isValid(), juce::dontSendNotification);
 }
 
@@ -117,6 +215,12 @@ void InsertBar::resized()
         printButton.setBounds (area.removeFromLeft (60));
         area.removeFromLeft (6);
     }
+    previousButton.setBounds (area.removeFromLeft (22));
+    area.removeFromLeft (2);
+    presetButton.setBounds (area.removeFromLeft (150));
+    area.removeFromLeft (2);
+    nextButton.setBounds (area.removeFromLeft (22));
+    area.removeFromLeft (6);
     sideButton.setBounds (area);
 }
 

@@ -904,3 +904,49 @@ TEST_CASE ("Dragging an insert: to another slot, onto another channel, or copied
     um.undo();
     CHECK (model::insertAtSlot (model::findChain (project, bId), 2) == moved);
 }
+
+#include "model/Presets.h"
+
+TEST_CASE ("Presets: save and load an insert's settings; a Default every new one starts from", "[model]")
+{
+    auto project = model::createProject();
+    auto track = model::addTrack (project, "Vox", nullptr);
+    auto chain = model::chainFor (project, track[ids::id].toString());
+    auto comp = model::addBuiltinInsert (chain, "studioComp", -1, nullptr);
+    comp.setProperty ("threshold", -24.0, nullptr);
+    comp.setProperty ("ratio", 6.0, nullptr);
+
+    REQUIRE (presets::save (comp, "Vocal Squeeze"));
+    CHECK (presets::list (comp).contains ("Vocal Squeeze"));
+
+    comp.setProperty ("threshold", -3.0, nullptr);
+    juce::UndoManager um;
+    REQUIRE (presets::load (comp, "Vocal Squeeze", &um));
+    CHECK ((double) comp["threshold"] == -24.0);
+    CHECK (comp["presetName"].toString() == "Vocal Squeeze");
+    CHECK (comp[ids::effect].toString() == "studioComp");   // (what it is stays)
+    um.undo();
+    CHECK ((double) comp["threshold"] == -3.0);
+
+    // Set as Default: the next new one of it starts there; others don't
+    comp.setProperty ("threshold", -18.0, nullptr);
+    REQUIRE (presets::saveDefault (comp));
+    auto next = model::addBuiltinInsert (chain, "studioComp", -1, nullptr);
+    CHECK ((double) next["threshold"] == -18.0);
+    CHECK ((double) next["ratio"] == 6.0);
+    auto other = model::addBuiltinInsert (chain, "channelEq", -1, nullptr);
+    CHECK (! other.hasProperty ("threshold"));
+    REQUIRE (presets::clearDefault (comp));
+    CHECK (! model::addBuiltinInsert (chain, "studioComp", -1, nullptr).hasProperty ("threshold"));
+
+    // A plug-in's preset is its state
+    auto plug = model::addPluginInsert (chain, "<PLUGIN name=\"Pro-Q\" format=\"VST3\" manufacturer=\"Maker\"/>", -1, nullptr);
+    REQUIRE (presets::save (plug, "Bright", "c3RhdGU="));
+    juce::String state;
+    REQUIRE (presets::load (plug, "Bright", nullptr, &state));
+    CHECK (state == "c3RhdGU=");
+    CHECK (plug[ids::pluginState].toString() == "c3RhdGU=");
+
+    CHECK (presets::remove (comp, "Vocal Squeeze"));
+    CHECK (! presets::list (comp).contains ("Vocal Squeeze"));
+}

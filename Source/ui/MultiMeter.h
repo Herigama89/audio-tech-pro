@@ -88,6 +88,8 @@ private:
     bool goniometer = false;
     juce::TextButton detectionButtons[4], modeButtons[3];
     juce::ComboBox bandsBox, analyzerReturnBox, analyzerPeakBox, levelBox, levelPeakBox, levelReturnBox;
+    juce::ComboBox tiltBox;   // dB per octave about 1 kHz, so a balanced mix reads level
+    double tilt = 3.0;
     juce::TextButton analyzerHoldButton { "Hold" }, analyzerResetButton { "Reset" }, levelHoldButton { "Hold" }, levelResetButton { "Reset" };
 
     juce::Rectangle<int> displayArea, metersArea, correlationArea, controlsArea, topLabel, rangeLabel;

@@ -1,3 +1,4 @@
+#include "Presets.h"
 #include "Project.h"
 #include <map>
 #include <algorithm>
@@ -1765,6 +1766,7 @@ juce::ValueTree addBuiltinInsert (juce::ValueTree chain, const juce::String& eff
     insert.setProperty (ids::kind, builtinKind, nullptr);
     insert.setProperty (ids::effect, effectType, nullptr);
     insert.setProperty (ids::bypass, false, nullptr);
+    presets::applyDefault (insert, nullptr);   // (your Default for it, if you set one)
     chain.addChild (insert, index, um);
     return insert;
 }
@@ -1776,6 +1778,7 @@ juce::ValueTree addPluginInsert (juce::ValueTree chain, const juce::String& desc
     insert.setProperty (ids::kind, pluginKind, nullptr);
     insert.setProperty (ids::pluginDescription, descriptionXml, nullptr);
     insert.setProperty (ids::bypass, false, nullptr);
+    presets::applyDefault (insert, nullptr);
     chain.addChild (insert, index, um);
     return insert;
 }

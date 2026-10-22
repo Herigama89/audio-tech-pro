@@ -89,6 +89,7 @@ set(RIFF_CORE_SOURCES
     Source/engine/AudioSuite.cpp
     Source/engine/AraHost.cpp
     Source/model/Project.cpp
+    Source/model/Presets.cpp
     Source/model/Automix.cpp
     Source/model/NoteTools.cpp
     Source/engine/PitchCorrect.cpp

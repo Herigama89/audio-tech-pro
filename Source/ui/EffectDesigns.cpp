@@ -1,3 +1,4 @@
+#include "../engine/BandAnalysis.h"
 #include "EffectDesigns.h"
 #include <numeric>
 #include "../engine/StockDsp.h"
@@ -1354,16 +1355,38 @@ namespace
         g.fillRoundedRectangle (screen, 6.0f);
         if (! goniometer)
         {
-            const auto w = (screen.getWidth() - 20.0f) / 31.0f;
-            for (int k = 0; k < 31; ++k)
-                meterBar (g, RF (screen.getX() + 10.0f + (float) k * w, screen.getY() + 10.0f, w - 3.0f, screen.getHeight() - 30.0f), meterAt (k), -100.0f);
+            // Equal octaves across (20 - 200 Hz as wide as 2 - 20 kHz); 0 to -60 dB up the side; the tilt about 1 kHz
+            const auto slope = bands::tiltSlope (juce::roundToInt (valueOf (info, v, "tilt", 2.0f)));
+            const auto plot = screen.reduced (34.0f, 10.0f).withTrimmedBottom (18.0f).withTrimmedRight (-24.0f);
+            const auto xOf = [plot] (double hz) { return plot.getX() + (float) bands::position (hz) * plot.getWidth(); };
+            const auto yOf = [plot] (float db) { return plot.getY() + plot.getHeight() * juce::jlimit (0.0f, 1.0f, -db / 60.0f); };
             g.setFont (juce::FontOptions (10.0f));
-            for (int k = 0; k < 31; k += 3)
+            for (int db = 0; db >= -60; db -= 10)
             {
-                const auto f = 20.0 * std::pow (2.0, k / 3.0);
-                g.setColour (juce::Colours::white.withAlpha (0.5f));
-                g.drawText (f >= 1000.0 ? juce::String (f / 1000.0, 1) + "k" : juce::String ((int) f), RF (screen.getX() + 10.0f + (float) k * w - 8.0f, screen.getBottom() - 18.0f, w + 16.0f, 14.0f), juce::Justification::centred, false);
+                g.setColour (juce::Colours::white.withAlpha (db == 0 ? 0.18f : 0.07f));
+                g.fillRect (plot.getX(), yOf ((float) db), plot.getWidth(), 1.0f);
+                g.setColour (juce::Colours::white.withAlpha (0.45f));
+                g.drawText (juce::String (db), RF (screen.getX() + 2.0f, yOf ((float) db) - 7.0f, 28.0f, 14.0f), juce::Justification::centredRight, false);
             }
+            for (const auto hz : { 20.0, 40.0, 80.0, 160.0, 315.0, 630.0, 1250.0, 2500.0, 5000.0, 10000.0, 20000.0 })
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.07f));
+                g.fillRect (xOf (hz), plot.getY(), 1.0f, plot.getHeight());
+                g.setColour (juce::Colours::white.withAlpha (0.5f));
+                g.drawText (hz >= 1000.0 ? juce::String (hz / 1000.0, hz < 10000.0 && std::fmod (hz, 1000.0) > 0.0 ? 1 : 0) + "k" : juce::String ((int) hz),
+                            RF (xOf (hz) - 20.0f, plot.getBottom() + 3.0f, 40.0f, 14.0f), juce::Justification::centred, false);
+            }
+            for (int k = 0; k < 31; ++k)
+            {
+                const auto x0 = xOf (bands::edge (k, 31)) + 1.0f, x1 = xOf (bands::edge (k + 1, 31)) - 1.0f;
+                const auto db = meterAt (k, -120.0f) + (float) bands::tiltDb (bands::centre (k, 31), slope);
+                const auto top = yOf (db);
+                g.setGradientFill (juce::ColourGradient (juce::Colour (0xffffd84a), 0.0f, plot.getY(), juce::Colour (0xff3ddc6a), 0.0f, plot.getBottom(), false));
+                g.fillRect (RF::leftTopRightBottom (x0, top, x1, plot.getBottom()));
+            }
+            g.setColour (juce::Colours::white.withAlpha (0.45f));
+            g.drawText ("Tilt " + bands::tiltNames()[juce::roundToInt (valueOf (info, v, "tilt", 2.0f))], RF (plot.getRight() - 120.0f, plot.getY(), 116.0f, 14.0f),
+                        juce::Justification::centredRight, false);
         }
         else
         {
@@ -2834,7 +2857,8 @@ namespace
                                                                    { "reset", Kind::toggle, R (300, 350, 120, 28), "=RESET" } });
             meter ("correlationMeter", 460, 140, paintCorrelation, {});
             meter ("multiMeter", 820, 400, paintMultiMeter, { { "view", Kind::segmented, R (20, 12, 260, 28), "-" },
-                                                             { "peakHold", Kind::toggle, R (300, 12, 120, 28), "=PEAK HOLD" } });
+                                                             { "peakHold", Kind::toggle, R (300, 12, 120, 28), "=PEAK HOLD" },
+                                                             { "tilt", Kind::dropdown, R (440, 12, 140, 28), "-", juce::Colours::white } });
             meter ("tuner", 520, 400, paintTuner, { { "reference", Kind::field, R (160, 368, 200, 26), "-", juce::Colours::white } });
             meter ("bpmCounter", 320, 150, paintBpmCounter, {});
             Design m;
