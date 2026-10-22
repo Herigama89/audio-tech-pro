@@ -78,6 +78,8 @@ jobs:
         with:
           tag_name: stem-models-v1
           name: Stem separation models
+          prerelease: true
+          make_latest: false
           body: |
             Files the app downloads the first time you split stems: Demucs v4 (Meta AI, MIT licence) as ONNX -
             htdemucs (vocals, drums, bass, other) and htdemucs_6s (adds guitar and piano) - and ONNX Runtime
