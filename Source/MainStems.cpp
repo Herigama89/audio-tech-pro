@@ -236,7 +236,7 @@ void MainComponent::splitToStems()
     auto* window = new juce::AlertWindow ("Split to Stems",
         "Separates " + juce::String ((int) pieces.size()) + (pieces.size() == 1 ? " region" : " regions")
             + " into stems, each on a new track under its own, lined up with it; the original is muted. "
-              "It all happens on this computer (a few seconds of work per minute of audio)."
+              "It all happens on this computer: it takes up to about as long as the audio plays (less on a recent Mac)."
             + (firstTime ? "\n\nThe first time, the separation model and its runtime are downloaded (about 250 MB) and kept for next time."
                          : juce::String()),
         juce::MessageBoxIconType::NoIcon);

@@ -148,10 +148,9 @@ void InterfaceControl::start()
 
 void InterfaceControl::stop()
 {
-    signalThreadShouldExit();
-    if (socket != nullptr)
-        socket->close();
-    stopThread (3000);
+    // Only the thread touches the socket (closing it from here raced with its reads: a crash on Windows).
+    // It notices within a few tens of milliseconds, says goodbye to the service and closes it.
+    stopThread (5000);
 }
 
 juce::Array<int> InterfaceControl::defaultPorts()

@@ -418,7 +418,9 @@ juce::String downloadFile (const juce::URL& url, const juce::File& dest, const s
         return "Couldn't create " + dest.getParentDirectory().getFullPathName();
     const auto temp = dest.getSiblingFile (dest.getFileName() + ".part");
     temp.deleteFile();
+    juce::String error;
     {
+        // closed before anything is deleted or moved (Windows can't delete an open file)
         juce::FileOutputStream out (temp);
         if (! out.openedOk())
             return "Couldn't write " + temp.getFullPathName();
@@ -428,33 +430,25 @@ juce::String downloadFile (const juce::URL& url, const juce::File& dest, const s
         for (;;)
         {
             const auto n = stream->read (chunk, 1 << 16);
-            if (n < 0)
-                return "The download was cut off.";
+            if (n < 0) { error = "The download was cut off."; break; }
             if (n == 0)
                 break;
-            if (! out.write (chunk, (size_t) n))
-                return "Couldn't write " + temp.getFullPathName() + " (is the disk full?)";
+            if (! out.write (chunk, (size_t) n)) { error = "Couldn't write " + temp.getFullPathName() + " (is the disk full?)"; break; }
             done += n;
-            if (progress && ! progress (total > 0 ? (float) ((double) done / (double) total) : 0.0f))
-            {
-                out.flush();
-                temp.deleteFile();
-                return "cancelled";
-            }
+            if (progress && ! progress (total > 0 ? (float) ((double) done / (double) total) : 0.0f)) { error = "cancelled"; break; }
             if (stream->isExhausted())
                 break;
         }
         out.flush();
-        if (total > 0 && done != total)
-        {
-            temp.deleteFile();
-            return "The download was cut off.";
-        }
-        if (done < 1024)
-        {
-            temp.deleteFile();
-            return "The download was empty.";
-        }
+        if (error.isEmpty() && total > 0 && done != total)
+            error = "The download was cut off.";
+        if (error.isEmpty() && done < 1024)
+            error = "The download was empty.";
+    }
+    if (error.isNotEmpty())
+    {
+        temp.deleteFile();
+        return error;
     }
     dest.deleteFile();
     if (! temp.moveFileTo (dest))
