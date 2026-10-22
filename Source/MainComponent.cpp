@@ -1,5 +1,6 @@
 #include "ui/InsertBar.h"
 #include "MainComponent.h"
+#include "ui/PluginWindowKeys.h"
 #include "ui/PluginHostPanel.h"
 #include "ui/Skin.h"
 #include "import/ProjectImport.h"
@@ -559,6 +560,24 @@ MainComponent::MainComponent (bool openAudioDevice)
         commandManager.getKeyMappings()->restoreFromXml (*xml);
 
     addKeyListener (commandManager.getKeyMappings());
+    EditorWindow::appKeys = commandManager.getKeyMappings();
+   #if JUCE_MAC
+    // The space bar in plugin windows, even when the plugin's own view has the keyboard
+    watchPluginWindowKeys ([safe = juce::Component::SafePointer<MainComponent> (this)] (void* view, bool typing)
+    {
+        if (safe == nullptr || typing || dynamic_cast<juce::TextEditor*> (juce::Component::getCurrentlyFocusedComponent()) != nullptr)
+            return false;
+        for (int i = 0; i < juce::ComponentPeer::getNumPeers(); ++i)
+            if (auto* peer = juce::ComponentPeer::getPeer (i); peer != nullptr && peer->getNativeHandle() == view)
+            {
+                if (dynamic_cast<EditorWindow*> (&peer->getComponent()) == nullptr)
+                    return false;   // (the main window: its own keys)
+                safe->commandManager.invokeDirectly (commands::play, true);
+                return true;
+            }
+        return false;
+    });
+   #endif
     commandManager.getKeyMappings()->addChangeListener (this);
     setApplicationCommandManagerToWatch (&commandManager);
 
@@ -834,6 +853,10 @@ MainComponent::~MainComponent()
     assistant.reset();
     assistantTools.reset();
     assistantTransport.reset();
+   #if JUCE_MAC
+    stopWatchingPluginWindowKeys();
+   #endif
+    EditorWindow::appKeys = nullptr;
     commandManager.getKeyMappings()->removeChangeListener (this);
     removeKeyListener (commandManager.getKeyMappings());
 
@@ -1840,6 +1863,7 @@ void MainComponent::showSignatureMenu()
             });
         keys.addSeparator();
     }
+    keys.addItem ("Detect Song Key...", [this] { detectSongKey(); });
     menu.addSeparator();
     menu.addSubMenu ("Key: " + model::keyName (project), keys);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&signatureLabel));

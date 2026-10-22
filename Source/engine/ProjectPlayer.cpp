@@ -246,6 +246,7 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         t.volume  = (float) (double) track.getProperty (ids::volume, 1.0);
         t.console = ConsoleChannel::fromTrack (track);
         t.tape    = TapeSaturator::fromTrack (track);
+        t.preamp  = PreampSaturator::fromTrack (track);
         t.pan     = (float) juce::jlimit (-1.0, 1.0, (double) track.getProperty (ids::pan, 0.0));
         t.audible = ! (bool) track[ids::mute] && ! model::vcaMutes (project, track) && (! anySolo || soloed (track));
         t.vcaGain = (float) model::vcaGainOf (project, track);

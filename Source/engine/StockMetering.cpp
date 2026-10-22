@@ -251,53 +251,35 @@ namespace
     {
     public:
         using BuiltInEffect::BuiltInEffect;
-        static constexpr int bands = 31, points = 256, fftOrder = 13, fftSize = 1 << fftOrder;
+        static constexpr int bands = 31, points = 256;
         void prepare (double rate, int) override
         {
             sampleRate = preparedRate = rate;
             lr = ll = rr = 0.0;
             write = 0;
-            ringAt.store (0);
+            bank.prepare (rate, bands);
+            mono.assign (8192, 0.0f);
             shown.fill (-120.0f);
-            average.fill (0.0f);
             lastRead = 0.0;
         }
 
-        /** The bands are worked out here, when the window reads them: the latest fftSize samples' spectrum,
-            integrated over each third octave (equal octaves, as the MM window's). */
+        /** The bands: each third octave's own peak since the last read (a band-pass filter per band, as Logic's
+            MultiMeter and a hardware analyzer), up at once and falling back at the return rate. */
         int readMeters (float* dest, int capacity) const noexcept override
         {
             const auto n = out.copy (dest, capacity);
             if (capacity < bands)
                 return n;
-            std::vector<float> data ((size_t) fftSize * 2, 0.0f);
-            const auto at = ringAt.load (std::memory_order_acquire);
-            for (int i = 0; i < fftSize; ++i)
-            {
-                const auto w = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) (fftSize - 1));
-                data[(size_t) i] = ring[(size_t) ((at + i) & (fftSize - 1))].load (std::memory_order_relaxed) * w;
-            }
-            juce::dsp::FFT fft (fftOrder);
-            fft.performFrequencyOnlyForwardTransform (data.data(), true);
-            const auto norm = 4.0f / ((float) fftSize * (float) fftSize * 0.375f);   // (Hann's power)
-            for (int k = 0; k < fftSize / 2; ++k)
-                data[(size_t) k] = data[(size_t) k] * data[(size_t) k] * norm;
-            std::vector<float> power;
-            bands::integrate (data.data(), fftSize / 2, sampleRate / fftSize, bands, power);
-            // Ballistics: up at once, down at the return rate (Peak Hold: slower)
+            std::array<float, bands> peak {};
+            std::array<double, bands> squares {};
+            bank.take (peak.data(), squares.data());
             const auto now = juce::Time::getMillisecondCounterHiRes() * 0.001;
             const auto dt = lastRead > 0.0 ? juce::jlimit (0.0, 0.5, now - lastRead) : 0.0;
             lastRead = now;
-            const auto fall = (float) dt * (value (0) > 0.5f ? 6.0f : 20.0f);
-            // Each band's power averaged over about 300 ms first (as T-RackS's and Logic's RMS analyzers): a
-            // narrow low band's spectrum swings far more from one moment to the next than a wide high one's,
-            // and riding those swings would make the lows read loud.
-            const auto smooth = dt > 0.0 ? (float) (1.0 - std::exp (-dt / 0.3)) : 1.0f;
+            const auto fall = (float) dt * (value (0) > 0.5f ? 6.0f : 11.8f);
             for (int b = 0; b < bands; ++b)
             {
-                auto& a = average[(size_t) b];
-                a += (power[(size_t) b] - a) * smooth;
-                const auto db = juce::jmax (-120.0f, 10.0f * std::log10 (a + 1.0e-13f));
+                const auto db = juce::jmax (-120.0f, juce::Decibels::gainToDecibels (peak[(size_t) b], -120.0f));
                 auto& s = shown[(size_t) b];
                 s = db > s ? db : juce::jmax (db, s - fall);
                 dest[b] = s;
@@ -309,11 +291,16 @@ namespace
         {
             const auto c = (double) coeffMs (300.0, sampleRate);
             float pl = 0.0f, pr = 0.0f;
-            auto at = ringAt.load (std::memory_order_relaxed);
+            for (int done = 0; done < n;)
+            {
+                const auto chunk = std::min (n - done, (int) mono.size());
+                for (int i = 0; i < chunk; ++i)
+                    mono[(size_t) i] = 0.5f * (l[done + i] + r[done + i]);
+                bank.process (mono.data(), chunk);
+                done += chunk;
+            }
             for (int i = 0; i < n; ++i)
             {
-                ring[(size_t) at].store (0.5f * (l[i] + r[i]), std::memory_order_relaxed);
-                at = (at + 1) & (fftSize - 1);
                 lr = l[i] * r[i] + c * (lr - l[i] * r[i]);
                 ll = l[i] * l[i] + c * (ll - l[i] * l[i]);
                 rr = r[i] * r[i] + c * (rr - r[i] * r[i]);
@@ -327,15 +314,14 @@ namespace
                     write = (write + 1) % points;
                 }
             }
-            ringAt.store (at, std::memory_order_release);
             out.set (bands, ll * rr > 1.0e-12 ? (float) juce::jlimit (-1.0, 1.0, lr / std::sqrt (ll * rr)) : 0.0f);
             out.set (bands + 1, gainToDb (pl));
             out.set (bands + 2, gainToDb (pr));
         }
     private:
-        std::array<std::atomic<float>, fftSize> ring {};
-        std::atomic<int> ringAt { 0 };
-        mutable std::array<float, bands> shown {}, average {};
+        mutable bands::FilterBank bank;
+        std::vector<float> mono;
+        mutable std::array<float, bands> shown {};
         mutable double lastRead = 0.0;
         double lr = 0.0, ll = 0.0, rr = 0.0;
         int write = 0;
@@ -696,7 +682,7 @@ const std::vector<StockEffect>& stockMeteringEffects()
         { { "multiMeter", "MultiMeter", {
               { "peakHold", "Peak Hold", "", 0.0f, 1.0f, 0.0f, 0.5f, onOff },
               { "view", "View", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Analyzer", "Goniometer" } },
-              { "tilt", "Tilt", "", 0.0f, 4.0f, 3.0f, 3.0f, { "0 dB/oct", "1.5 dB/oct", "3 dB/oct", "4.5 dB/oct", "6 dB/oct" } } }, "Metering" }, make<MultiMeter> },
+              { "tilt", "Tilt", "", 0.0f, 4.0f, 0.0f, 0.0f, { "Off", "1.5 dB/oct", "3 dB/oct", "4.5 dB/oct", "6 dB/oct" } } }, "Metering" }, make<MultiMeter> },
         { { "tuner", "Tuner", { { "reference", "Reference", " Hz", 415.0f, 466.0f, 440.0f, 440.0f } }, "Metering" }, make<Tuner> },
         { { "bpmCounter", "BPM Counter", {}, "Metering" }, make<BpmCounter> },
         { { "masteringAssistant", "Mastering Assistant", {

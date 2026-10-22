@@ -61,7 +61,7 @@ static juce::AudioBuffer<float> mixLike (int seconds = 4)
             double sum = 0.0;
             for (const auto& v : time)
                 sum += (double) v.real() * v.real();
-            const auto gain = 0.08f / (float) std::sqrt (sum / size + 1.0e-30);   // about -22 dB RMS
+            const auto gain = 0.2f / (float) std::sqrt (sum / size + 1.0e-30);   // about -14 dB RMS: a loud master
             for (int i = 0; i < size && at + i < length; ++i)
                 mix.setSample (ch, at + i, time[(size_t) i].real() * gain);
         }
@@ -71,7 +71,7 @@ static juce::AudioBuffer<float> mixLike (int seconds = 4)
         const auto t = (double) i / 48000.0;
         const auto beat = std::fmod (t, 0.5);
         const auto kick = (float) (0.35 * std::exp (-beat * 18.0) * std::sin (juce::MathConstants<double>::twoPi * (50.0 + 60.0 * std::exp (-beat * 30.0)) * beat));
-        const auto bass = (float) (0.06 * std::sin (juce::MathConstants<double>::twoPi * 82.4 * t));
+        const auto bass = (float) (0.3 * std::sin (juce::MathConstants<double>::twoPi * 82.4 * t));
         float voice = 0.0f;
         for (int h = 1; h <= 10; ++h)
             voice += (float) (0.03 / h * std::sin (juce::MathConstants<double>::twoPi * 220.0 * h * t + h));
@@ -229,6 +229,11 @@ public:
         {
             t0.setProperty ("tapeOn", true, nullptr);
             t0.setProperty ("tapeDrive", 60.0, nullptr);
+        }
+        if (auto t1 = main.project.getChild (1); t1.isValid())
+        {
+            t1.setProperty ("preOn", true, nullptr);
+            t1.setProperty ("preGain", 18.0, nullptr);
         }
         if (const auto side = juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_ZONES", {}); side.isNotEmpty())
             main.project.setProperty ("mixerBusZone", side, nullptr);

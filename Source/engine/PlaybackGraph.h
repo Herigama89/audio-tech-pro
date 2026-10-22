@@ -6,6 +6,7 @@
 #include "MasterBusCompressor.h"
 #include "ConsoleChannel.h"
 #include "TapeSaturation.h"
+#include "PreampSaturation.h"
 #include "../model/TempoMap.h"
 #include <vector>
 
@@ -124,6 +125,7 @@ struct PlaybackGraph
 
         ConsoleChannel::Settings console;               // the strip's EQ and Dynamics, before the inserts
         TapeSaturator::Settings tape;                   // tape saturation, after the inserts
+        PreampSaturator::Settings preamp;               // the analog preamp: first, before the EQ and the inserts
         std::vector<std::shared_ptr<Effect>> stripPlugins;  // console mode: the user's channel strip plugin, instead of `console`
         std::vector<std::shared_ptr<Effect>> inserts;   // in order, bypassed ones left out
 

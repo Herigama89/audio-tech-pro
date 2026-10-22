@@ -105,9 +105,23 @@ void PitchEditor::setupInspector()
     scaleModeBox.setTooltip ("Scale Quantize: the scale (with Song key: the project's own)");
     timeQButton.setTooltip ("Time Quantize the selected notes (or all), by the Strength");
     scaleQButton.setTooltip ("Scale Quantize the selected notes (or all): each onto the nearest note of the scale");
+    scaleLockButton.setClickingTogglesState (true);
+    scaleLockButton.setToggleState (keepScale, juce::dontSendNotification);
+    scaleLockButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff3d8bd9));
+    scaleLockButton.setTooltip ("Keep in Scale: notes stay on the scale's notes - dragging, the arrow keys, Transpose and Pitch Correction "
+                                "go only to notes of the key and scale chosen above; turning it on moves notes outside the scale onto it");
+    scaleLockButton.onClick = [this]
+    {
+        keepScale = scaleLockButton.getToggleState();
+        if (keepScale && scaleNotes().empty())
+            status.setText ("Keep in Scale: choose a key above", juce::dontSendNotification);
+        if (scaleLocked())
+            commit ("Keep in Scale");
+    };
+    scaleKeyBox.onChange = scaleModeBox.onChange = [this] { if (scaleLocked()) commit ("Keep in Scale"); };
     timeQButton.onClick = [this] { quantizeTime(); };
     scaleQButton.onClick = [this] { quantizeScale(); };
-    for (auto* c : std::initializer_list<juce::Component*> { &timeGridBox, &scaleKeyBox, &scaleModeBox, &timeQButton, &scaleQButton })
+    for (auto* c : std::initializer_list<juce::Component*> { &timeGridBox, &scaleKeyBox, &scaleModeBox, &timeQButton, &scaleQButton, &scaleLockButton })
     {
         c->setWantsKeyboardFocus (false);
         addAndMakeVisible (c);
@@ -409,6 +423,8 @@ void PitchEditor::commit (const juce::String& undoName)
 {
     if (! ready)
         return;
+    if (scaleLocked())
+        pitchcorrect::keepInScale (edits, analysis, scaleNotes());
     const auto text = pitchcorrect::toString (edits);
     const auto segments = analysis.notes.size() == original.notes.size() && pitchcorrect::segmentsToString (analysis) == pitchcorrect::segmentsToString (original)
                               ? juce::String() : pitchcorrect::segmentsToString (analysis);
@@ -991,6 +1007,8 @@ void PitchEditor::resized()
         r.removeFromLeft (4);
         scaleModeBox.setBounds (r);
     }
+    panel.removeFromTop (4);
+    scaleLockButton.setBounds (panel.removeFromTop (row));
     panel.removeFromTop (10);
     for (auto [name, slider] : { std::pair { "Pitch Correction", &correctionSlider }, std::pair { "Gain", &gainSlider },
                                  std::pair { "Pitch Drift", &driftSlider }, std::pair { "Vibrato", &vibratoSlider }, std::pair { "Formant Shift", &formantSlider } })
@@ -1090,8 +1108,10 @@ void PitchEditor::showFunctionsMenu()
     m.addItem ("Scale Quantize (Q)", [this] { quantizeScale(); });
     m.addItem ("Time Quantize (Q)", [this] { quantizeTime(); });
     m.addSeparator();
-    m.addItem ("Transpose Up a Semitone", [this] { setForTargets ([] (auto& e) { e.shift += 1.0; }, "Transpose"); });
-    m.addItem ("Transpose Down a Semitone", [this] { setForTargets ([] (auto& e) { e.shift -= 1.0; }, "Transpose"); });
+    m.addItem (scaleLocked() ? "Transpose Up to the Next Note in Scale" : "Transpose Up a Semitone",
+               [this] { keyPressed (juce::KeyPress (juce::KeyPress::upKey)); });
+    m.addItem (scaleLocked() ? "Transpose Down to the Next Note in Scale" : "Transpose Down a Semitone",
+               [this] { keyPressed (juce::KeyPress (juce::KeyPress::downKey)); });
     m.addItem ("Transpose Up an Octave", [this] { setForTargets ([] (auto& e) { e.shift += 12.0; }, "Transpose"); });
     m.addItem ("Transpose Down an Octave", [this] { setForTargets ([] (auto& e) { e.shift -= 12.0; }, "Transpose"); });
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&functionsMenu));
@@ -1275,7 +1295,9 @@ void PitchEditor::mouseDrag (const juce::MouseEvent& e)
     {
         const auto semitones = dy / ((double) rollArea().getHeight() / (highMidi - lowMidi));
         const auto from = pitchcorrect::centreAfter (analysis.notes[(size_t) dragNote], edits[(size_t) dragNote]);
-        dragShift = e.mods.isAltDown() ? std::round (semitones * 100.0) / 100.0 : std::round (from + semitones) - from;
+        dragShift = e.mods.isAltDown() ? std::round (semitones * 100.0) / 100.0
+                  : scaleLocked() ? pitchcorrect::nearestInScale (from + semitones, scaleNotes()) - std::round (from)   // (by whole semitones, onto the scale)
+                                  : std::round (from + semitones) - from;
         dragReadout = juce::MidiMessage::getMidiNoteName (juce::roundToInt (from + dragShift), true, true, 3)
                       + (e.mods.isAltDown() ? "  " + juce::String (juce::roundToInt (dragShift * 100.0)) + " cents" : juce::String());
         liveDirty = true;
@@ -1378,6 +1400,20 @@ bool PitchEditor::keyPressed (const juce::KeyPress& key)
     if (key.isKeyCode (juce::KeyPress::upKey) || key.isKeyCode (juce::KeyPress::downKey))
     {
         const auto dir = key.isKeyCode (juce::KeyPress::upKey) ? 1.0 : -1.0;
+        if (scaleLocked() && ! fine)
+        {
+            // to the scale's next note up or down
+            const auto scale = scaleNotes();
+            for (const auto i : targets())
+            {
+                const auto now = analysis.notes[(size_t) i].centre + edits[(size_t) i].shift;
+                const auto semitone = (int) std::lround (now);
+                edits[(size_t) i].shift += pitchcorrect::nextInScale (semitone, (int) dir, scale) - semitone;
+            }
+            commit ("Pitch to the Next Note in Scale");
+            refreshInspector();
+            return true;
+        }
         setForTargets ([dir, fine] (auto& e) { e.shift += dir * (fine ? 0.1 : 1.0); }, fine ? "Pitch by Cents" : "Pitch by a Semitone");
         return true;
     }

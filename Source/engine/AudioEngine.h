@@ -4,6 +4,7 @@
 #include <atomic>
 #include <array>
 #include "PlaybackGraph.h"
+#include "RenderThreads.h"
 #include "LatencyMeasure.h"
 #include "DelayLine.h"
 #include "BuiltInEffects.h"
@@ -34,6 +35,11 @@ class AudioEngine final : private juce::AudioIODeviceCallback,
                           private juce::Timer
 {
 public:
+    /** How many extra cores process tracks alongside the audio thread: -1 as suits this computer (the default),
+        0 just the audio thread. Takes effect when the audio device next starts. */
+    void setRenderThreads (int count) noexcept { wantedRenderThreads.store (count); }
+    int getRenderThreads() const noexcept { return renderThreads.workers(); }
+
     AudioEngine();
     ~AudioEngine() override;
 
@@ -382,10 +388,22 @@ private:
     void renderChunk (const PlaybackGraph& graph, const float* const* inputs, int numInputs, int inputOffset,
                       float* mixL, float* mixR, int numSamples, bool playingNow,
                       bool resetNotes, bool withLiveMidi) noexcept;
-    void collectNotes (const PlaybackGraph::Track& track, juce::int64 from, juce::int64 to) noexcept;
+    /** One thread's scratch space for rendering a track (each render thread has its own). */
+    struct Scratch
+    {
+        juce::AudioBuffer<float> track, region, stream;
+        juce::MidiBuffer midi;
+    };
+    void collectNotes (const PlaybackGraph::Track& track, juce::int64 from, juce::int64 to, juce::MidiBuffer& into) noexcept;
+    /** A track up to and through its fader (into its slot's output); false when there's nothing for it to send on. */
+    bool processTrack (const PlaybackGraph::Track& track, const float* const* inputs, int numInputs, int inputOffset,
+                       int numSamples, bool playingNow, bool resetNotes, bool withLiveMidi, Scratch& scratch) noexcept;
+    /** Then its sends and its output: into the buses, the interface's other outputs or the mix (in the song's order). */
+    void routeTrack (const PlaybackGraph::Track& track, int inputOffset, float* outL, float* outR, int numSamples) noexcept;
     void renderTrack (const PlaybackGraph::Track& track, const float* const* inputs, int numInputs, int inputOffset,
                       float* outL, float* outR, int numSamples, bool playingNow,
                       bool resetNotes, bool withLiveMidi) noexcept;
+    static bool canRunInParallel (const PlaybackGraph::Track& track) noexcept;
     void recordChunk (const float* const* inputs, int numInputs, int inputOffset, int numSamples, bool fromTracks = false) noexcept;
     void renderClick (const PlaybackGraph& graph, float* mixL, float* mixR, int numSamples) noexcept;
     void renderMeasurement (const float* const* inputs, int numInputs,
@@ -437,7 +455,7 @@ private:
     std::array<MidiEventRecord, recordFifoSize> recordEvents {};
     std::vector<MidiEventRecord> recordedMidi;   // message thread
 
-    juce::MidiBuffer liveMidi, trackMidi;        // audio thread scratch, pre-sized
+    juce::MidiBuffer liveMidi;                   // audio thread scratch, pre-sized
     juce::int64 expectedPosition = 0;
     bool wasPlaying = false;
     std::unique_ptr<juce::MidiDeviceListConnection> midiDeviceListener;
@@ -450,7 +468,16 @@ private:
     int measurePos = 0, measureInput = 0;
 
     // --- Audio-thread state (sized in prepare) --------------------------------
-    juce::AudioBuffer<float> trackBuffer, regionBuffer, mixBuffer, silence, directBuffer, busBuffer;
+    juce::AudioBuffer<float> mixBuffer, silence, directBuffer, busBuffer;
+    std::vector<std::unique_ptr<Scratch>> scratches;   // [0] the audio thread's, then one per render thread
+    juce::AudioBuffer<float> preFaderOutputs;          // tracks with pre-fader sends: their sound before the fader, by slot
+    std::array<bool, PlaybackGraph::maxTracks> preFaderReady {};
+    // Several cores: tracks processed in parallel by these, then routed in order
+    RenderThreads renderThreads;
+    std::atomic<int> wantedRenderThreads { -1 };   // -1: as many as suit this computer
+    int startedRenderThreads = -2;
+    std::vector<int> parallelTracks;               // this chunk's tracks done in parallel (indices into the graph's), pre-sized
+    std::array<bool, PlaybackGraph::maxTracks + 64> routeAfter {};
 public:
     static constexpr int maxHardwareOutputs = 64;
 private:
@@ -465,7 +492,6 @@ private:
         return juce::isPositiveAndBelow (slot, PlaybackGraph::maxTracks) && slot * 2 + 1 < slotOutputs.getNumChannels()
                    ? slotOutputs.getReadPointer (slot * 2 + channel) : silence.getReadPointer (channel);
     }
-    juce::AudioBuffer<float> streamBuffer;   // a streamed file's audio for one block
     std::array<std::unique_ptr<DelayLine>, PlaybackGraph::maxTracks> trackDelays;
     std::unique_ptr<DelayLine> directDelayLine;
     struct TrackState
@@ -481,6 +507,7 @@ private:
     MasterBusCompressor busComp;
     TapeSaturator masterTape;
     std::array<TapeSaturator, PlaybackGraph::maxTracks> tapes;
+    std::array<PreampSaturator, PlaybackGraph::maxTracks> preamps;
     std::array<ConsoleChannel, PlaybackGraph::maxTracks> consoles;
     std::atomic<int> analyzerSlot { -1 };
     std::atomic<bool> masterTapOn { false };

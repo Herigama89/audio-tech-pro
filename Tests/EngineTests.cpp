@@ -2637,3 +2637,67 @@ TEST_CASE ("Stems: downloads land whole, and mixes reach 44.1 kHz in tune", "[st
     CHECK (worst < 0.01);
     dir.deleteRecursively();
 }
+
+TEST_CASE ("Several cores: tracks processed in parallel make exactly the mix one core makes", "[engine][parallel]")
+{
+    auto renderWith = [] (int threads)
+    {
+        RoutingFixture f;
+        f.engine.setRenderThreads (threads);
+        f.engine.prepare (48000.0, 512);
+        // Eight tracks of different noise, each with its own effects; two buses fed before and after the fader
+        auto busA = model::addTrack (f.project, "Verb", nullptr, -1, model::busKind);
+        auto busB = model::addTrack (f.project, "Parallel", nullptr, -1, model::busKind);
+        model::addBuiltinInsert (model::chainFor (f.project, busA[ids::id]), "compressor", 0, nullptr);
+        for (int t = 0; t < 8; ++t)
+        {
+            const auto file = f.temp.dir.getChildFile ("noise" + juce::String (t) + ".wav");
+            {
+                juce::Random r (100 + t);
+                juce::AudioBuffer<float> data (2, 96000);
+                for (int c = 0; c < 2; ++c)
+                    for (int i = 0; i < 96000; ++i)
+                        data.setSample (c, i, (r.nextFloat() - 0.5f) * 0.3f);
+                std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
+                juce::WavAudioFormat wav;
+                auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (48000.0).withNumChannels (2).withBitsPerSample (32)
+                                                               .withSampleFormat (juce::AudioFormatWriterOptions::SampleFormat::floatingPoint));
+                writer->writeFromAudioSampleBuffer (data, 0, 96000);
+            }
+            auto track = f.audioTrack ("T" + juce::String (t), file);
+            track.setProperty (ids::volume, 0.3 + 0.08 * t, nullptr);
+            track.setProperty (ids::pan, -0.8 + 0.2 * t, nullptr);
+            auto chain = model::chainFor (f.project, track[ids::id]);
+            model::addBuiltinInsert (chain, t % 2 == 0 ? "compressor" : "channelEq", 0, nullptr);
+            auto send = model::addSend (chain, (t % 3 == 0 ? busB : busA)[ids::id], 0.4, nullptr);
+            if (t % 3 == 0)
+                send.setProperty (ids::pre, true, nullptr);
+        }
+        f.router.setProject (f.project);
+        f.engine.play();
+        std::vector<float> out;
+        juce::AudioBuffer<float> block (2, 64);
+        for (int done = 0; done < 48000; done += 64)
+        {
+            f.engine.render (nullptr, 0, block.getArrayOfWritePointers(), 2, 64);   // (a small buffer)
+            out.insert (out.end(), block.getReadPointer (0), block.getReadPointer (0) + 64);
+            out.insert (out.end(), block.getReadPointer (1), block.getReadPointer (1) + 64);
+        }
+        return std::pair { out, f.engine.getRenderThreads() };
+    };
+    const auto [one, none] = renderWith (0);
+    const auto [many, workers] = renderWith (3);
+    CHECK (none == 0);
+    CHECK (workers == 3);
+    REQUIRE (one.size() == many.size());
+    float loudest = 0.0f;
+    size_t differing = 0;
+    for (size_t i = 0; i < one.size(); ++i)
+    {
+        loudest = std::max (loudest, std::abs (one[i]));
+        if (one[i] != many[i])
+            ++differing;
+    }
+    CHECK (loudest > 0.05f);
+    CHECK (differing == 0);
+}

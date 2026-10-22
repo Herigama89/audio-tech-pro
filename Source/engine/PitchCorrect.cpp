@@ -522,6 +522,59 @@ void correct (std::vector<NoteEdit>& edits, const Analysis& analysis, const std:
 }
 
 //==============================================================================
+int nearestInScale (double pitch, const std::vector<int>& scale)
+{
+    const auto r = (int) std::lround (pitch);
+    if (scale.empty())
+        return r;
+    const auto in = [&scale] (int n) { return std::find (scale.begin(), scale.end(), ((n % 12) + 12) % 12) != scale.end(); };
+    if (in (r))
+        return r;
+    for (int d = 1; d <= 12; ++d)
+    {
+        // the nearer side first (to the sung pitch); ties go up
+        const auto up = r + d, down = r - d;
+        const auto upFirst = std::abs ((double) up - pitch) <= std::abs ((double) down - pitch);
+        if (upFirst ? in (up) : in (down)) return upFirst ? up : down;
+        if (upFirst ? in (down) : in (up)) return upFirst ? down : up;
+    }
+    return r;
+}
+
+int nextInScale (int semitone, int dir, const std::vector<int>& scale)
+{
+    const auto step = dir >= 0 ? 1 : -1;
+    if (scale.empty())
+        return semitone + step;
+    for (int d = 1; d <= 12; ++d)
+    {
+        const auto n = semitone + step * d;
+        if (std::find (scale.begin(), scale.end(), ((n % 12) + 12) % 12) != scale.end())
+            return n;
+    }
+    return semitone + step;
+}
+
+bool keepInScale (std::vector<NoteEdit>& edits, const Analysis& analysis, const std::vector<int>& scale)
+{
+    if (scale.empty())
+        return false;
+    edits.resize (analysis.notes.size());
+    bool moved = false;
+    for (size_t i = 0; i < analysis.notes.size(); ++i)
+    {
+        const auto now = analysis.notes[i].centre + edits[i].shift;
+        const auto semitone = (int) std::lround (now);
+        const auto target = nearestInScale (now, scale);
+        if (target != semitone)
+        {
+            edits[i].shift += target - semitone;
+            moved = true;
+        }
+    }
+    return moved;
+}
+
 double centreAfter (const Note& note, const NoteEdit& edit)
 {
     const auto moved = note.centre + edit.shift;

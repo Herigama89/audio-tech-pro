@@ -19,7 +19,6 @@ AudioEngine::AudioEngine()
 
     diskThread.startThread (juce::Thread::Priority::high);
     liveMidi.ensureSize (8192);
-    trackMidi.ensureSize (32768);
     prepare (44100.0, 2048);
     startTimer (250);
 }
@@ -774,6 +773,8 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
     // Some drivers deliver blocks larger than advertised, so allocate generously;
     // render() also processes in chunks if a block is bigger still.
     prepare (device->getCurrentSampleRate(), juce::jmax (device->getCurrentBufferSizeSamples(), 2048));
+    // The render threads work to the device's deadline with the audio thread (macOS: its audio workgroup)
+    renderThreads.setWorkgroup (device->getWorkgroup());
 
     // The callback hands over only the outputs that are switched on, packed together: where each one lands
     setActiveOutputs (device->getActiveOutputChannels());
@@ -790,6 +791,7 @@ void AudioEngine::setActiveOutputs (const juce::BigInteger& active)
 void AudioEngine::audioDeviceStopped()
 {
     deviceRunning.store (false);
+    renderThreads.setWorkgroup ({});
 }
 
 void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputChannelData, int numInputChannels,
@@ -828,9 +830,32 @@ void AudioEngine::prepare (double newSampleRate, int)
 
     sampleRate.store (newSampleRate);
 
-    trackBuffer.setSize (2, maxBlockSize);
-    regionBuffer.setSize (2, maxBlockSize);
-    streamBuffer.setSize (2, maxBlockSize * 8 + 4 * resampler::halfWidth + 16);   // up to 8x the session's rate
+    // The render threads (the machine's other cores) and every thread's scratch space
+    {
+        const auto wanted = wantedRenderThreads.load();
+        const auto workers = wanted < 0 ? RenderThreads::suggestedWorkers() : wanted;
+        if (workers != startedRenderThreads)
+        {
+            renderThreads.start (workers, newSampleRate, 256);
+            startedRenderThreads = workers;
+        }
+        if ((int) scratches.size() != workers + 1)
+        {
+            scratches.clear();
+            for (int i = 0; i <= workers; ++i)
+            {
+                auto s = std::make_unique<Scratch>();
+                s->track.setSize (2, maxBlockSize);
+                s->region.setSize (2, maxBlockSize);
+                s->stream.setSize (2, maxBlockSize * 8 + 4 * resampler::halfWidth + 16);   // up to 8x the session's rate
+                s->midi.ensureSize (32768);
+                scratches.push_back (std::move (s));
+            }
+        }
+        parallelTracks.reserve (PlaybackGraph::maxTracks + 64);
+    }
+    preFaderOutputs.setSize (PlaybackGraph::maxTracks * 2, maxBlockSize);
+    preFaderReady.fill (false);
     mixBuffer.setSize (2, maxBlockSize);
     directBuffer.setSize (2, maxBlockSize);
     busBuffer.setSize (PlaybackGraph::maxBuses * 2, maxBlockSize);
@@ -868,6 +893,8 @@ void AudioEngine::prepare (double newSampleRate, int)
         console.prepare (newSampleRate);
     for (auto& tape : tapes)
         tape.prepare (newSampleRate);
+    for (auto& pre : preamps)
+        pre.prepare (newSampleRate);
     masterTape.prepare (newSampleRate);
 
     clickLength = (int) (newSampleRate * 0.035);
@@ -1210,7 +1237,7 @@ void AudioEngine::printInputs (const PlaybackGraph& graph, const float* const* i
     }
 }
 
-void AudioEngine::collectNotes (const PlaybackGraph::Track& track, juce::int64 from, juce::int64 to) noexcept
+void AudioEngine::collectNotes (const PlaybackGraph::Track& track, juce::int64 from, juce::int64 to, juce::MidiBuffer& trackMidi) noexcept
 {
     // Controllers and pitch bend.
     for (const auto& region : track.regions)
@@ -1291,9 +1318,65 @@ void AudioEngine::renderChunk (const PlaybackGraph& graph, const float* const* i
         }
     };
 
-    for (const auto& track : graph.tracks)
-        if (! track.isBus)
-            timed (track, dL, dR);
+    // The tracks: on several cores when there are a few that don't depend on each other (each processed through
+    // its fader in parallel, then routed in the song's order, so the mix is exactly what one core would make)
+    parallelTracks.clear();
+    if (renderThreads.workers() > 0 && scratches.size() > 1)
+        for (int i = 0; i < (int) graph.tracks.size() && i < (int) routeAfter.size(); ++i)
+        {
+            const auto& track = graph.tracks[(size_t) i];
+            routeAfter[(size_t) i] = false;
+            if (! track.isBus && canRunInParallel (track) && (int) parallelTracks.size() < (int) parallelTracks.capacity())
+                parallelTracks.push_back (i);
+        }
+
+    if (parallelTracks.size() >= 2)
+    {
+        struct Context
+        {
+            AudioEngine* engine;
+            const PlaybackGraph* graph;
+            const float* const* inputs;
+            int numInputs, inputOffset, n;
+            bool playingNow, resetNotes, withLiveMidi;
+        } context { this, &graph, inputs, numInputs, inputOffset, n, playingNow, resetNotes, withLiveMidi };
+
+        renderThreads.run ((int) parallelTracks.size(), [] (void* p, int job, int thread) noexcept
+        {
+            auto& x = *static_cast<Context*> (p);
+            auto& e = *x.engine;
+            const auto index = e.parallelTracks[(size_t) job];
+            const auto& track = x.graph->tracks[(size_t) index];
+            const auto t0 = juce::Time::getHighResolutionTicks();
+            e.routeAfter[(size_t) index] = e.processTrack (track, x.inputs, x.numInputs, x.inputOffset, x.n, x.playingNow, x.resetNotes,
+                                                           x.withLiveMidi, *e.scratches[(size_t) juce::jmin (thread, (int) e.scratches.size() - 1)]);
+            if (juce::isPositiveAndBelow (track.slot, PlaybackGraph::maxTracks))
+            {
+                e.trackTicks[(size_t) track.slot].fetch_add (juce::Time::getHighResolutionTicks() - t0, std::memory_order_relaxed);
+                e.trackSamples[(size_t) track.slot].fetch_add (x.n, std::memory_order_relaxed);
+            }
+        }, &context);
+
+        size_t nextParallel = 0;
+        for (int i = 0; i < (int) graph.tracks.size(); ++i)
+        {
+            const auto& track = graph.tracks[(size_t) i];
+            if (track.isBus)
+                continue;
+            if (nextParallel < parallelTracks.size() && parallelTracks[nextParallel] == i)
+            {
+                ++nextParallel;
+                if (routeAfter[(size_t) i])
+                    routeTrack (track, inputOffset, dL, dR, n);
+            }
+            else
+                timed (track, dL, dR);
+        }
+    }
+    else
+        for (const auto& track : graph.tracks)
+            if (! track.isBus)
+                timed (track, dL, dR);
 
     // Tracks heard directly wait for the slowest bus (delay compensation).
     if (graph.directDelay > 0)
@@ -1318,13 +1401,32 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
                                float* outL, float* outR, int n, bool playingNow,
                                bool resetNotes, bool withLiveMidi) noexcept
 {
+    if (processTrack (track, inputs, numInputs, inputOffset, n, playingNow, resetNotes, withLiveMidi, *scratches.front()))
+        routeTrack (track, inputOffset, outL, outR, n);
+}
+
+bool AudioEngine::canRunInParallel (const PlaybackGraph::Track& track) noexcept
+{
+    // Not a bus (they wait for the tracks' sends), and not listening to another track this block
+    if (track.isBus || (track.monitorInput && track.inputTrackSlot >= 0 && track.inputTrackSlot != track.slot))
+        return false;
+    for (const auto& s : track.sidechains)
+        if (s.sourceSlot != track.slot)
+            return false;
+    return true;
+}
+
+bool AudioEngine::processTrack (const PlaybackGraph::Track& track, const float* const* inputs, int numInputs, int inputOffset,
+                                int n, bool playingNow, bool resetNotes, bool withLiveMidi, Scratch& scratch) noexcept
+{
     if (track.slot < 0 || track.slot >= PlaybackGraph::maxTracks)
-        return;
+        return false;
 
     const auto blockStart = playheadSample.load();
     const auto blockEnd = blockStart + n;
-    auto* tL = trackBuffer.getWritePointer (0);
-    auto* tR = trackBuffer.getWritePointer (1);
+    auto* tL = scratch.track.getWritePointer (0);
+    auto* tR = scratch.track.getWritePointer (1);
+    auto& trackMidi = scratch.midi;
     auto& state = trackStates[(size_t) track.slot];
     auto clearSlotOutput = [this, &track, n]
     {
@@ -1399,7 +1501,7 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
             }
 
             if (playingNow)
-                collectNotes (track, blockStart, blockEnd);
+                collectNotes (track, blockStart, blockEnd, trackMidi);
 
             if (withLiveMidi && track.receivesLiveMidi)
                 trackMidi.addEvents (liveMidi, 0, -1, 0);
@@ -1415,7 +1517,7 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
             && state.gainL.getCurrentValue() <= 0.0f && state.gainR.getCurrentValue() <= 0.0f)
         {
             clearSlotOutput();
-            return;
+            return false;
         }
 
         if (playingNow)
@@ -1444,8 +1546,8 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
                 float* dR = tR + destOffset;
                 if (fading)
                 {
-                    dL = regionBuffer.getWritePointer (0);
-                    dR = regionBuffer.getWritePointer (1);
+                    dL = scratch.region.getWritePointer (0);
+                    dR = scratch.region.getWritePointer (1);
                     juce::FloatVectorOperations::clear (dL, count);
                     juce::FloatVectorOperations::clear (dR, count);
                 }
@@ -1461,10 +1563,10 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
                         {
                             // From disk: the stretch the filter needs, into a scratch buffer, then the same conversion.
                             const auto base = (juce::int64) std::floor (position) - resampler::halfWidth - 1;
-                            const auto needed = (int) juce::jmin ((juce::int64) streamBuffer.getNumSamples(),
+                            const auto needed = (int) juce::jmin ((juce::int64) scratch.stream.getNumSamples(),
                                                                   (juce::int64) std::ceil (count * region.step) + 2 * resampler::halfWidth + 4);
-                            audio.readStereo (base, needed, streamBuffer.getWritePointer (0), streamBuffer.getWritePointer (1));
-                            const juce::AudioBuffer<float> window (streamBuffer.getArrayOfWritePointers(), 2, needed);
+                            audio.readStereo (base, needed, scratch.stream.getWritePointer (0), scratch.stream.getWritePointer (1));
+                            const juce::AudioBuffer<float> window (scratch.stream.getArrayOfWritePointers(), 2, needed);
                             resampler::addResampled (window, position - (double) base, region.step, region.gain, dL, dR, count);
                         }
                         else
@@ -1485,8 +1587,8 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
                         if (audio.isStreamed())
                         {
                             // From disk, straight from the mapped file.
-                            auto* sL = streamBuffer.getWritePointer (0);
-                            auto* sR = streamBuffer.getWritePointer (1);
+                            auto* sL = scratch.stream.getWritePointer (0);
+                            auto* sR = scratch.stream.getWritePointer (1);
                             audio.readStereo (sourceStart, num, sL, sR);
                             juce::FloatVectorOperations::addWithMultiply (dL, sL, region.gain, num);
                             juce::FloatVectorOperations::addWithMultiply (dR, sR, region.gain, num);
@@ -1562,6 +1664,14 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
     if (suspended)
         suspendedCount.fetch_add (1, std::memory_order_relaxed);
 
+    // The analog preamp: first in the channel, its gain and colour
+    if (track.preamp.enabled && ! suspended)
+    {
+        auto& pre = preamps[(size_t) track.slot];
+        pre.setSettings (track.preamp);
+        pre.process (tL, tR, n);
+    }
+
     if (! suspended)
         for (const auto& effect : track.stripPlugins)
         {
@@ -1630,24 +1740,18 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         state.gainL.skip (n);
         state.gainR.skip (n);
         clearSlotOutput();
-        return;
+        return false;
     }
 
-    if (stemCapture != nullptr && stemBeforeFader && track.slot * 2 + 1 < stemCapture->getNumChannels()
-        && inputOffset + n <= stemCapture->getNumSamples())
-    {
-        juce::FloatVectorOperations::add (stemCapture->getWritePointer (track.slot * 2) + inputOffset, tL, n);
-        juce::FloatVectorOperations::add (stemCapture->getWritePointer (track.slot * 2 + 1) + inputOffset, tR, n);
-    }
-
-    // Pre-fader sends (silenced with the track when it's muted).
+    // Its sound before the fader, kept for pre-fader sends (and stems bounced before the fader)
+    bool needsPreFader = stemCapture != nullptr && stemBeforeFader;
     for (const auto& send : track.sends)
+        needsPreFader = needsPreFader || (send.preFader && track.audible);
+    preFaderReady[(size_t) track.slot] = needsPreFader && track.slot * 2 + 1 < preFaderOutputs.getNumChannels() && n <= preFaderOutputs.getNumSamples();
+    if (preFaderReady[(size_t) track.slot])
     {
-        if (! send.preFader || ! track.audible || ! juce::isPositiveAndBelow (send.busIndex, PlaybackGraph::maxBuses))
-            continue;
-
-        juce::FloatVectorOperations::addWithMultiply (busBuffer.getWritePointer (send.busIndex * 2), tL, send.level, n);
-        juce::FloatVectorOperations::addWithMultiply (busBuffer.getWritePointer (send.busIndex * 2 + 1), tR, send.level, n);
+        juce::FloatVectorOperations::copy (preFaderOutputs.getWritePointer (track.slot * 2), tL, n);
+        juce::FloatVectorOperations::copy (preFaderOutputs.getWritePointer (track.slot * 2 + 1), tR, n);
     }
 
     // Stereo width (Stereo Pan mode): narrower towards mono, or wider.
@@ -1675,6 +1779,38 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
     {
         juce::FloatVectorOperations::copy (slotOutputs.getWritePointer (track.slot * 2), tL, n);
         juce::FloatVectorOperations::copy (slotOutputs.getWritePointer (track.slot * 2 + 1), tR, n);
+    }
+
+    storeMax (trackPeaks[(size_t) track.slot * 2], peakL);
+    storeMax (trackPeaks[(size_t) track.slot * 2 + 1], peakR);
+    return true;
+}
+
+void AudioEngine::routeTrack (const PlaybackGraph::Track& track, int inputOffset, float* outL, float* outR, int n) noexcept
+{
+    if (track.slot < 0 || track.slot >= PlaybackGraph::maxTracks)
+        return;
+    const auto* tL = slotOutput (track.slot, 0);
+    const auto* tR = slotOutput (track.slot, 1);
+    const auto pre = preFaderReady[(size_t) track.slot];
+    const auto* pL = pre ? preFaderOutputs.getReadPointer (track.slot * 2) : tL;
+    const auto* pR = pre ? preFaderOutputs.getReadPointer (track.slot * 2 + 1) : tR;
+
+    if (pre && stemCapture != nullptr && stemBeforeFader && track.slot * 2 + 1 < stemCapture->getNumChannels()
+        && inputOffset + n <= stemCapture->getNumSamples())
+    {
+        juce::FloatVectorOperations::add (stemCapture->getWritePointer (track.slot * 2) + inputOffset, pL, n);
+        juce::FloatVectorOperations::add (stemCapture->getWritePointer (track.slot * 2 + 1) + inputOffset, pR, n);
+    }
+
+    // Pre-fader sends (silenced with the track when it's muted).
+    for (const auto& send : track.sends)
+    {
+        if (! pre || ! send.preFader || ! track.audible || ! juce::isPositiveAndBelow (send.busIndex, PlaybackGraph::maxBuses))
+            continue;
+
+        juce::FloatVectorOperations::addWithMultiply (busBuffer.getWritePointer (send.busIndex * 2), pL, send.level, n);
+        juce::FloatVectorOperations::addWithMultiply (busBuffer.getWritePointer (send.busIndex * 2 + 1), pR, send.level, n);
     }
 
     // Post-fader sends.
@@ -1723,8 +1859,6 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         juce::FloatVectorOperations::add (stemCapture->getWritePointer (track.slot * 2 + 1) + inputOffset, tR, n);
     }
 
-    storeMax (trackPeaks[(size_t) track.slot * 2], peakL);
-    storeMax (trackPeaks[(size_t) track.slot * 2 + 1], peakR);
 }
 
 void AudioEngine::renderClick (const PlaybackGraph& graph, float* mixL, float* mixR, int n) noexcept

@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "../engine/AudioEngine.h"
 #include "../engine/Loudness.h"
+#include "../engine/BandAnalysis.h"
 
 namespace riff
 {
@@ -53,17 +54,14 @@ private:
     std::vector<float> readL = std::vector<float> (65536), readR = std::vector<float> (65536);
 
     // --- Analyzer -------------------------------------------------------------
-    static constexpr int fftOrder = 13, fftSize = 1 << fftOrder;
-    juce::dsp::FFT fft { fftOrder };
-    std::vector<float> window = std::vector<float> (fftSize), fftData = std::vector<float> (fftSize * 2);
-    std::vector<float> ringL = std::vector<float> (fftSize), ringR = std::vector<float> (fftSize);
-    int ringPos = 0;
-    float windowPower = 1.0f;
+    bands::FilterBank bankL, bankR, bankM;   // each band's own band-pass filter, per channel read
+    double bankRate = 0.0;
+    std::vector<float> monoScratch;
 
-    int bands = 63;                        // 31 (1/3 octave) or 63 (1/6 octave)
+    int bands = 31;                        // 31 (1/3 octave, as Logic's default) or 63 (1/6 octave)
     std::vector<float> bandDb, bandPower, bandPeak, bandHoldTime;
     Detection detection = Detection::mono;
-    Mode mode = Mode::rmsFast;
+    Mode mode = Mode::peak;
     float analyzerReturn = 11.8f;          // dB a second the bars fall back
     float analyzerPeakSeconds = 4.0f;      // how long a peak mark stays (<= 0: for ever)
     bool analyzerHold = false;
@@ -89,7 +87,7 @@ private:
     juce::TextButton detectionButtons[4], modeButtons[3];
     juce::ComboBox bandsBox, analyzerReturnBox, analyzerPeakBox, levelBox, levelPeakBox, levelReturnBox;
     juce::ComboBox tiltBox;   // dB per octave about 1 kHz, so a balanced mix reads level
-    double tilt = 4.5;
+    double tilt = 0.0;
     juce::TextButton analyzerHoldButton { "Hold" }, analyzerResetButton { "Reset" }, levelHoldButton { "Hold" }, levelResetButton { "Reset" };
 
     juce::Rectangle<int> displayArea, metersArea, correlationArea, controlsArea, topLabel, rangeLabel;

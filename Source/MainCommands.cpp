@@ -200,6 +200,7 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::consolidateRegions:     consolidateRegions (timeline.selectedRegionTrees()); break;
         case commands::alignAudio:             alignAudioToGuide(); break;
         case commands::splitStems:             splitToStems(); break;
+        case commands::detectKey:              detectSongKey(); break;
         case commands::muteRegions:            muteSelectedRegions(); break;
         case commands::nudgeLeft:              nudgeSelectedRegions (-1); break;
         case commands::nudgeRight:             nudgeSelectedRegions (1); break;
@@ -442,7 +443,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             menu.addSeparator();
             add ({ commands::cutRegions, commands::copyRegions, commands::pasteRegions, commands::deleteSelection, commands::selectAllRegions });
             menu.addSeparator();
-            add ({ commands::splitAtPlayhead, commands::repeatRegions, commands::joinRegions, commands::consolidateRegions, commands::alignAudio, commands::splitStems, commands::muteRegions,
+            add ({ commands::splitAtPlayhead, commands::repeatRegions, commands::joinRegions, commands::consolidateRegions, commands::alignAudio, commands::splitStems, commands::detectKey, commands::muteRegions,
                    commands::nudgeLeft, commands::nudgeRight, commands::quantize });
             menu.addSeparator();
             add ({ commands::trimStartToPlayhead, commands::trimEndToPlayhead, commands::loopRegions, commands::regionGain, commands::removeFades });

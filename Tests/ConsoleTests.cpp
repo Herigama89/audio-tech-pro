@@ -237,3 +237,50 @@ TEST_CASE ("Master Bus Compressor's Color: harmonics and grit, level kept", "[co
     const auto quiet = runWith (true, 0.3f, 0.02f);
     CHECK_THAT (toneLevel (quiet, 500.0, 48000.0, 4800), Catch::Matchers::WithinRel (0.02, 0.15));
 }
+
+#include "engine/PreampSaturation.h"
+
+TEST_CASE ("Preamp: its gain turns the channel up, and the more gain the more harmonics", "[console]")
+{
+    using namespace riff;
+    auto thd = [] (float gainDb, float level, float& outLevel)
+    {
+        PreampSaturator pre;
+        pre.prepare (48000.0);
+        pre.setSettings ({ true, gainDb });
+        const int n = 48000;
+        std::vector<float> l ((size_t) n), r ((size_t) n);
+        for (int i = 0; i < n; ++i)
+            l[(size_t) i] = r[(size_t) i] = level * std::sin (juce::MathConstants<float>::twoPi * 1000.0f * (float) i / 48000.0f);
+        pre.process (l.data(), r.data(), n);
+        // the fundamental and the 2nd and 3rd harmonics, over the last half second (a whole number of cycles)
+        auto amp = [&] (double hz)
+        {
+            double s = 0.0, c = 0.0;
+            for (int i = n / 2; i < n; ++i)
+            {
+                s += l[(size_t) i] * std::sin (juce::MathConstants<double>::twoPi * hz * i / 48000.0);
+                c += l[(size_t) i] * std::cos (juce::MathConstants<double>::twoPi * hz * i / 48000.0);
+            }
+            return 2.0 * std::sqrt (s * s + c * c) / (n / 2);
+        };
+        const auto f = amp (1000.0);
+        outLevel = (float) f;
+        return std::sqrt (amp (2000.0) * amp (2000.0) + amp (3000.0) * amp (3000.0)) / f;
+    };
+    float out = 0.0f;
+    const auto clean = thd (12.0f, 0.01f, out);
+    CHECK (std::abs (out / (0.01 * std::pow (10.0, 12.0 / 20.0)) - 1.0) < 0.05);   // quiet: just louder, by the gain
+    CHECK (clean < 0.01);
+    const auto some = thd (12.0f, 0.25f, out);    // -12 dB in, +12 dB of gain
+    const auto lots = thd (30.0f, 0.25f, out);
+    CHECK (some > 0.005);
+    CHECK (lots > some * 3.0);
+    CHECK (out < 2.6f);   // (capped about 6 dB above full scale)
+
+    PreampSaturator off;
+    off.prepare (48000.0);
+    std::vector<float> l (64, 0.3f), r (64, 0.3f);
+    off.process (l.data(), r.data(), 64);
+    CHECK (l[10] == 0.3f);   // out: untouched
+}

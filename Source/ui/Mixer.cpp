@@ -284,6 +284,40 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     preampGain.onRightClick = [this] (const juce::MouseEvent&) { showPreampMenu(); };
     addChildComponent (preampGain);
 
+    // The analog preamp: PRE in or out, Gain dragged (more gain, more colour)
+    look::key (preKey, look::Key::console);
+    preKey.setClickingTogglesState (false);
+    preKey.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffc0392b));
+    preKey.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
+    preKey.setWantsKeyboardFocus (false);
+    preKey.setTooltip ("Preamp: a class-A, transformer console preamp on this channel. Its Gain turns the channel up, and the "
+                       "harder it's driven the more it colours - thicker lows, warm harmonics, a softer top. Pull the fader down to taste.");
+    preKey.onClick = [this]
+    {
+        owner.getUndoManager().beginNewTransaction ("Preamp");
+        const auto on = ! (bool) track.getProperty ("preOn", false);
+        for (auto t2 : acting())
+            t2.setProperty ("preOn", on, &owner.getUndoManager());
+    };
+    addAndMakeVisible (preKey);
+    preKey.setVisible (hasAnalogPre());
+    preGain.setRange (0.0, 30.0, 0.5);
+    preGain.textFromValueFunction = [] (double v) { return "+" + juce::String (v, v < 10.0 && std::fmod (v, 1.0) != 0.0 ? 1 : 0) + " dB"; };
+    preGain.setDoubleClickReturnValue (true, 0.0);
+    preGain.setTooltip ("Preamp gain, 0 to +30 dB: more gain, more saturation. Drag up or down; double-click for 0 dB.");
+    preGain.onDragStart = [this] { owner.getUndoManager().beginNewTransaction ("Preamp gain"); };
+    preGain.onValueChange = [this]
+    {
+        for (auto t2 : acting())
+        {
+            t2.setProperty ("preGain", preGain.getValue(), &owner.getUndoManager());
+            if (! (bool) t2.getProperty ("preOn", false) && preGain.getValue() > 0.0)
+                t2.setProperty ("preOn", true, &owner.getUndoManager());   // (turning it up switches it in)
+        }
+    };
+    addAndMakeVisible (preGain);
+    preGain.setVisible (hasAnalogPre());
+
     // The tape machine: TAPE in or out, Drive dragged; right-click for the speed
     look::key (tapeKey, look::Key::console);
     tapeKey.setClickingTogglesState (false);
@@ -1906,7 +1940,14 @@ void ChannelStrip::resized()
     outputSlot.setBounds (area.removeFromTop (15));
     area.removeFromTop (2);
     {
-        auto row = area.removeFromTop (tapeRow - 3);
+        auto row = area.removeFromTop (tapeRow / 2 - 2);
+        preKey.setBounds (row.removeFromLeft (row.getWidth() / 2 + 2));
+        row.removeFromLeft (2);
+        preGain.setBounds (row);
+        area.removeFromTop (1);
+    }
+    {
+        auto row = area.removeFromTop (tapeRow / 2 - 2);
         tapeKey.setBounds (row.removeFromLeft (row.getWidth() / 2 + 2));
         row.removeFromLeft (2);
         tapeDrive.setBounds (row);
@@ -1994,6 +2035,13 @@ void ChannelStrip::updateTape()
     const auto tree = tapeTree();
     if (! tree.isValid())
         return;
+    if (hasAnalogPre())
+    {
+        preKey.setToggleState ((bool) track.getProperty ("preOn", false), juce::dontSendNotification);
+        if (! preGain.isMouseButtonDown())
+            preGain.setValue ((double) track.getProperty ("preGain", 0.0), juce::dontSendNotification);
+        preGain.setAlpha (preKey.getToggleState() ? 1.0f : 0.5f);
+    }
     tapeKey.setToggleState ((bool) tree.getProperty (tapeId ("On"), false), juce::dontSendNotification);
     const auto speed = (int) tree.getProperty (tapeId ("Speed"), 1);
     tapeKey.setButtonText (speed == 0 ? "TAPE 15" : "TAPE");

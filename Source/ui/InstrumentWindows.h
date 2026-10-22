@@ -91,6 +91,8 @@ public:
           onClose (std::move (onCloseRequested))
     {
         setUsingNativeTitleBar (true);
+        if (appKeys != nullptr)
+            addKeyListener (appKeys);   // the app's keys (space: play) work here too
         setContentOwned (contentToOwn, true);
         setResizable (canResize, false);
         centreAroundComponent (nullptr, getWidth(), getHeight());
@@ -103,6 +105,9 @@ public:
         if (onClose)
             onClose(); // the owner deletes this window
     }
+
+    /** The app's key commands, passed on by every window (set by the main window). */
+    inline static juce::KeyListener* appKeys = nullptr;
 
     /** Plugin windows open pinned or not as the last one was left (the pin key in their header). */
     inline static bool pinByDefault = true;

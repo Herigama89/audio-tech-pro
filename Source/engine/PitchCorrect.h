@@ -85,4 +85,14 @@ namespace riff::pitchcorrect
         or the nearest note of `scale` (pitch classes 0..11, C = 0) when it's given. */
     void correct (std::vector<NoteEdit>& edits, const Analysis& analysis, const std::vector<int>& which, double amount,
                   const std::vector<int>& scale = {});
+
+    /** In the scale (pitch classes 0..11): the scale's note nearest `pitch` (whole semitones). */
+    int nearestInScale (double pitch, const std::vector<int>& scale);
+    /** The scale's next note above (dir > 0) or below `semitone`. */
+    int nextInScale (int semitone, int dir, const std::vector<int>& scale);
+
+    /** Keep in Scale: each note whose semitone (its centre, as edited, rounded) is outside the scale moved to the
+        scale's nearest note - by whole semitones, so how it's sung around its note (its cents) is kept and
+        Pitch Correction then lands it on a note of the scale. True if anything moved. */
+    bool keepInScale (std::vector<NoteEdit>& edits, const Analysis& analysis, const std::vector<int>& scale);
 }

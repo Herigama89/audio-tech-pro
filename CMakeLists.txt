@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
 endif()
 
-project(AudioTechPro VERSION 1.0.1 LANGUAGES C CXX)
+project(AudioTechPro VERSION 1.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -115,8 +115,11 @@ set(RIFF_CORE_SOURCES
     Source/engine/MasterBusCompressor.cpp
     Source/engine/ConsoleChannel.cpp
     Source/engine/TapeSaturation.cpp
+    Source/engine/PreampSaturation.cpp
+    Source/engine/RenderThreads.cpp
     Source/engine/InterfaceControl.cpp
     Source/engine/StemSeparator.cpp
+    Source/engine/KeyDetect.cpp
     Source/engine/ConsolePlugins.cpp
     Source/engine/Resampler.cpp
 )
@@ -221,6 +224,7 @@ set(RIFF_UI_SOURCES
     Source/MainAssistant.cpp
     Source/MainExtras.cpp
     Source/MainStems.cpp
+    Source/MainKey.cpp
     Source/MainScreenRecording.cpp
     Source/ui/PluginHostPanel.cpp
     Source/ui/AudioSuitePanel.cpp
@@ -369,7 +373,8 @@ endif()
 # Hosting Audio Units needs CoreAudioKit (for the generic plugin view).
 if(APPLE)
     # Screen recording (ScreenCaptureKit is weak-linked: the rest of the app runs on older macOS)
-    target_sources(AudioTechPro PRIVATE Source/ui/ScreenRecorder_mac.mm)
+    target_sources(AudioTechPro PRIVATE Source/ui/ScreenRecorder_mac.mm Source/ui/PluginWindowKeys_mac.mm)
+    set_source_files_properties(Source/ui/PluginWindowKeys_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 
     # Sign the app so macOS's privacy permissions (screen recording, microphone) stay with it when it's
     # rebuilt: the requirement names the app's identifier, not this build's fingerprint.
@@ -400,7 +405,7 @@ if(RIFF_BUILD_SNAPSHOTS)
     target_compile_definitions(Snapshots PRIVATE ${RIFF_DEFINITIONS} JUCE_MODAL_LOOPS_PERMITTED=1 RIFF_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(Snapshots PRIVATE AudioTechProData juce::juce_gui_extra juce::juce_audio_utils juce::juce_dsp)
     if(APPLE)
-        target_sources(Snapshots PRIVATE Source/ui/ScreenRecorder_mac.mm)
+        target_sources(Snapshots PRIVATE Source/ui/ScreenRecorder_mac.mm Source/ui/PluginWindowKeys_mac.mm)
         target_link_libraries(Snapshots PRIVATE "-framework CoreAudioKit" "-framework AVFoundation" "-framework CoreMedia"
                                                 "-framework CoreVideo" "-weak_framework ScreenCaptureKit")
     endif()

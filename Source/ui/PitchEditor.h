@@ -146,7 +146,9 @@ private:
     // --- Inspector ----------------------------------------------------------------------
     juce::Label nameLabel, notesLabel;
     juce::ComboBox timeGridBox, scaleKeyBox, scaleModeBox;
-    juce::TextButton timeQButton { "Q" }, scaleQButton { "Q" };
+    juce::TextButton timeQButton { "Q" }, scaleQButton { "Q" }, scaleLockButton { "Keep in Scale" };
+    inline static bool keepScale = false;   // (remembered from one editor to the next)
+    bool scaleLocked() const { return keepScale && ! scaleNotes().empty(); }
     juce::Slider strengthSlider, correctionSlider, gainSlider, driftSlider, vibratoSlider, formantSlider;
     juce::OwnedArray<juce::Label> captions;
     void setupInspector();

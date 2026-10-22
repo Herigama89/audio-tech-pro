@@ -1207,13 +1207,12 @@ TEST_CASE ("Legacy effects: reverbs, silver dynamics, de-esser, grooveshifter, a
     }
 }
 
-TEST_CASE ("MultiMeter: equal octaves; pink noise reads flat, a tone in its band", "[stockfx]")
+TEST_CASE ("MultiMeter: a band-pass per third octave; pink noise level, a tone at its own level, a loud mix's peaks high", "[stockfx]")
 {
     // Pink noise (Paul Kellet's filter): the same power in every third octave
-    auto mm = make ("multiMeter");
     juce::Random random (9);
     float b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
-    std::vector<float> l (48000 * 2);
+    std::vector<float> l (48000 * 4);
     for (auto& x : l)
     {
         const auto white = random.nextFloat() * 2.0f - 1.0f;
@@ -1222,63 +1221,38 @@ TEST_CASE ("MultiMeter: equal octaves; pink noise reads flat, a tone in its band
         x = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362f) * 0.05f;
         b6 = white * 0.115926f;
     }
+    {
+        riff::bands::FilterBank bank;
+        bank.prepare (48000.0, 31);
+        bank.process (l.data(), (int) l.size());
+        std::array<float, 31> peaks {};
+        std::array<double, 31> squares {};
+        REQUIRE (bank.take (peaks.data(), squares.data()));
+        double lowest = 1000.0, highest = -1000.0;
+        for (int b = 3; b <= 29; ++b)   // (bands: 20 Hz * 1000^(b/31); 3 = 25 Hz .. 29 = 16 kHz)
+        {
+            const auto db = 10.0 * std::log10 (squares[(size_t) b]);
+            UNSCOPED_INFO (b << ": " << db);
+            lowest = std::min (lowest, db);
+            highest = std::max (highest, db);
+        }
+        CHECK (highest - lowest < 2.0);
+    }
+
+    // The plugin: pink noise's peaks level too (within what noise's peaks wander)
+    auto mm = make ("multiMeter");
     run (*mm, l, l);
     std::array<float, BuiltInEffect::meterCapacity> m {};
     mm->readMeters (m.data(), (int) m.size());
-    // (bands: 20 Hz * 1000^(b/31); 5 = 61 Hz .. 27 = 10 kHz)
     float lowest = 1000.0f, highest = -1000.0f;
     for (int b = 5; b <= 27; ++b)
     {
         lowest = std::min (lowest, m[(size_t) b]);
         highest = std::max (highest, m[(size_t) b]);
     }
-    CHECK (highest - lowest < 4.0f);
+    CHECK (highest - lowest < 6.0f);
 
-    // On screen (as T-RackS and Logic): at 3 dB/oct pink noise reads level; at 0 it falls 3 dB an octave, as an FFT
-    auto shownAt = [&] (int b, double slope) { return m[(size_t) b] + (float) riff::bands::displayOffsetDb (riff::bands::centre (b, 31), slope); };
-    CHECK (std::abs (shownAt (27, 3.0) - shownAt (7, 3.0)) < 3.0f);
-    CHECK_THAT (shownAt (7, 0.0) - shownAt (27, 0.0), Catch::Matchers::WithinAbs (3.0103 * 20.0 / 3.0, 3.0));
-
-    // A mix's average balance (falling 4.5 dB an octave, made in the frequency domain): level on screen at the
-    // default tilt, 4.5 dB/oct, from 40 Hz to 16 kHz
-    {
-        constexpr int order = 17, size = 1 << order;
-        std::vector<float> spec ((size_t) size * 2, 0.0f);
-        juce::Random r (5);
-        std::vector<std::complex<float>> bins ((size_t) size);
-        for (int k = 1; k < size / 2; ++k)
-        {
-            const auto hz = (double) k * 48000.0 / size;
-            const auto amp = (float) std::pow (hz / 1000.0, -0.75);   // power falls 4.5 dB an octave
-            const auto phase = r.nextFloat() * juce::MathConstants<float>::twoPi;
-            bins[(size_t) k] = std::polar (amp, phase);
-            bins[(size_t) (size - k)] = std::conj (bins[(size_t) k]);
-        }
-        std::vector<std::complex<float>> timeDomain ((size_t) size);
-        juce::dsp::FFT (order).perform (bins.data(), timeDomain.data(), true);
-        std::vector<float> mixL ((size_t) size);
-        float peak = 0.0f;
-        for (int i = 0; i < size; ++i) peak = std::max (peak, std::abs (timeDomain[(size_t) i].real()));
-        for (int i = 0; i < size; ++i) mixL[(size_t) i] = timeDomain[(size_t) i].real() / peak * 0.5f;
-        auto mm2 = make ("multiMeter");
-        run (*mm2, mixL, mixL);
-        std::array<float, BuiltInEffect::meterCapacity> mixM {};
-        mm2->readMeters (mixM.data(), (int) mixM.size());
-        auto shownAt = [&] (int b) { return mixM[(size_t) b] + (float) riff::bands::displayOffsetDb (riff::bands::centre (b, 31), riff::bands::tiltSlope (riff::bands::defaultTilt)); };
-        float lo = 1000.0f, hi = -1000.0f, lows = 0.0f, highs = 0.0f;
-        for (int b = 11; b <= 29; ++b)
-        {
-            lo = std::min (lo, shownAt (b));
-            hi = std::max (hi, shownAt (b));
-            highs += shownAt (b) / 19.0f;
-        }
-        CHECK (hi - lo < 3.0f);
-        for (int b = 3; b <= 10; ++b)   // (one moment's spectrum: the narrow low bands swing; their average doesn't)
-            lows += shownAt (b) / 8.0f;
-        CHECK (std::abs (lows - highs) < 4.0f);
-    }
-
-    // A 1 kHz tone: loudest in the band holding 1 kHz (b = 17: 932 - 1166 Hz)
+    // A 1 kHz tone at -6 dB reads -6 dB, in the band holding 1 kHz (b = 17: 932 - 1166 Hz), its neighbours far lower
     auto tone = make ("multiMeter");
     run (*tone, sine (1000.0, 1.0, 0.5f), sine (1000.0, 1.0, 0.5f));
     tone->readMeters (m.data(), (int) m.size());
@@ -1286,5 +1260,43 @@ TEST_CASE ("MultiMeter: equal octaves; pink noise reads flat, a tone in its band
     for (int b = 0; b < 31; ++b)
         if (m[(size_t) b] > m[(size_t) loudest]) loudest = b;
     CHECK (loudest == 17);
-    CHECK_THAT (m[17], Catch::Matchers::WithinAbs (20.0 * std::log10 (0.5), 1.0));   // (a full-scale sine reads 0 dB, as the MM window's)
+    CHECK_THAT (m[17], Catch::Matchers::WithinAbs (20.0 * std::log10 (0.5), 1.0));
+    CHECK (m[14] < m[17] - 15.0f);   // an octave away
+    CHECK (m[20] < m[17] - 15.0f);
+
+    // A loud master's balance (a bass at -6 dB, noise falling 4.5 dB an octave at -12 dB RMS): the bass band near
+    // -6 dB and the top's peaks above -20 dB, as T-RackS and Logic show a loud song
+    {
+        constexpr int order = 17, size = 1 << order;
+        juce::Random r (5);
+        std::vector<std::complex<float>> bins ((size_t) size), timeDomain ((size_t) size);
+        for (int k = 1; k < size / 2; ++k)
+        {
+            const auto hz = (double) k * 48000.0 / size;
+            bins[(size_t) k] = std::polar ((float) std::pow (hz / 1000.0, -0.75), r.nextFloat() * juce::MathConstants<float>::twoPi);
+            bins[(size_t) (size - k)] = std::conj (bins[(size_t) k]);
+        }
+        juce::dsp::FFT (order).perform (bins.data(), timeDomain.data(), true);
+        double sum = 0.0;
+        for (const auto& v : timeDomain) sum += (double) v.real() * v.real();
+        const auto gain = 0.25f / (float) std::sqrt (sum / size);
+        std::vector<float> master ((size_t) size);
+        for (int i = 0; i < size; ++i)
+            master[(size_t) i] = timeDomain[(size_t) i].real() * gain + 0.5f * std::sin (juce::MathConstants<float>::twoPi * 60.0f * (float) i / 48000.0f);
+        auto mm2 = make ("multiMeter");
+        run (*mm2, master, master);
+        mm2->readMeters (m.data(), (int) m.size());
+        const auto bass = std::max (m[4], m[5]);   // (60 Hz: where bands 4 and 5 meet)
+        CHECK (bass > -9.0f);
+        CHECK (bass < -4.0f);
+        // the noise's peaks: well above its RMS (as a real-time analyzer reads them), so the top reaches up
+        riff::bands::FilterBank bank;
+        bank.prepare (48000.0, 31);
+        bank.process (master.data(), (int) master.size());
+        std::array<float, 31> peaks {};
+        std::array<double, 31> squares {};
+        bank.take (peaks.data(), squares.data());
+        CHECK (m[28] > (float) (10.0 * std::log10 (2.0 * squares[28])) + 4.0f);
+    }
 }
+

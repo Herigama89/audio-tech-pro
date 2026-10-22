@@ -46,15 +46,6 @@ MultiMeterPanel::MultiMeterPanel (AudioEngine& e) : engine (e)
 {
     engine.setMasterTap (true);
 
-    // The analyzer's window (Hann) and its power, to read a full-scale sine as 0 dB.
-    double sum = 0.0;
-    for (int i = 0; i < fftSize; ++i)
-    {
-        window[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) (fftSize - 1));
-        sum += (double) window[(size_t) i] * window[(size_t) i];
-    }
-    windowPower = (float) sum;
-
     auto setUpTab = [this] (juce::TextButton& b, bool gonio)
     {
         b.setClickingTogglesState (true);
@@ -83,7 +74,7 @@ MultiMeterPanel::MultiMeterPanel (AudioEngine& e) : engine (e)
     const char* modeNames[] { "RMS Slow", "RMS Fast", "Peak" };
     for (int i = 0; i < 3; ++i)
         segment (modeButtons[i], modeNames[i], 103, [this, i] { mode = (Mode) i; });
-    modeButtons[1].setToggleState (true, juce::dontSendNotification);   // RMS Fast: the balance of the mix, not its moment-to-moment swings
+    modeButtons[2].setToggleState (true, juce::dontSendNotification);   // Peak, as Logic's
 
     auto combo = [this] (juce::ComboBox& box, const juce::StringArray& items, int selected, std::function<void (int)> onPick)
     {
@@ -95,7 +86,7 @@ MultiMeterPanel::MultiMeterPanel (AudioEngine& e) : engine (e)
     };
     const juce::StringArray rates { "3 dB/s", "6 dB/s", "11.8 dB/s", "20 dB/s", "40 dB/s" };
     const juce::StringArray holds { "2 s", "4 s", "6 s", juce::String::fromUTF8 ("\xe2\x88\x9e") };
-    combo (bandsBox, { "31", "63" }, 1, [this] (int i) { bands = i == 0 ? 31 : 63; bandDb.clear(); });
+    combo (bandsBox, { "31", "63" }, 0, [this] (int i) { bands = i == 0 ? 31 : 63; bandDb.clear(); });
     combo (tiltBox, [] { auto names = bands::tiltNames(); for (auto& n : names) n = n.replace ("/oct", ""); return names; }(), bands::defaultTilt, [this] (int i) { tilt = bands::tiltSlope (i); repaint(); });
     tiltBox.setTooltip ("Tilt: lifts the bars by this much per octave above 1 kHz (and lowers them below). 4.5 dB/oct: a balanced "
                         "mix reads level across the range. 3 dB/oct: pink noise reads level. 0: as a plain FFT analyzer.");
@@ -186,12 +177,24 @@ void MultiMeterPanel::take (const float* l, const float* r, int n)
     {
         loudness.process (l, r, n);
 
-        // The analyzer's input: the latest samples
-        for (int i = 0; i < n; ++i)
+        // The analyzer's input: through each band's filter (only the channel or channels Detection reads)
+        if (bankRate != preparedRate || bankL.count() != bands)
         {
-            ringL[(size_t) ringPos] = l[i];
-            ringR[(size_t) ringPos] = r[i];
-            ringPos = (ringPos + 1) % fftSize;
+            for (auto* bank : { &bankL, &bankR, &bankM })
+                bank->prepare (preparedRate, bands);
+            bankRate = preparedRate;
+        }
+        switch (detection)
+        {
+            case Detection::left:  bankL.process (l, n); break;
+            case Detection::right: bankR.process (r, n); break;
+            case Detection::lrMax: bankL.process (l, n); bankR.process (r, n); break;
+            case Detection::mono:
+                monoScratch.resize ((size_t) n);
+                for (int i = 0; i < n; ++i)
+                    monoScratch[(size_t) i] = 0.5f * (l[i] + r[i]);
+                bankM.process (monoScratch.data(), n);
+                break;
         }
 
         // Level: peaks (falling at the return rate, held), RMS over about 300 ms
@@ -271,36 +274,31 @@ void MultiMeterPanel::analyse (double seconds)
         bandHoldTime.assign ((size_t) bands, 0.0f);
     }
 
-    // One spectrum (or two, for LRmax): the latest fftSize samples, windowed.
-    std::vector<float> power ((size_t) bands, 0.0f);
-    auto spectrum = [this, rate, &power] (int which)   // 0 left, 1 right, 2 mono
+    // Each band's peak and mean square since last time (LRmax: the louder side's)
+    std::vector<float> peak ((size_t) bands, 0.0f), otherPeak ((size_t) bands, 0.0f);
+    std::vector<double> squares ((size_t) bands, 0.0), otherSquares ((size_t) bands, 0.0);
+    if (bankL.count() == bands)
     {
-        for (int i = 0; i < fftSize; ++i)
+        switch (detection)
         {
-            const auto k = (size_t) ((ringPos + i) % fftSize);
-            const auto v = which == 0 ? ringL[k] : which == 1 ? ringR[k] : 0.5f * (ringL[k] + ringR[k]);
-            fftData[(size_t) i] = v * window[(size_t) i];
+            case Detection::left:  bankL.take (peak.data(), squares.data()); break;
+            case Detection::right: bankR.take (peak.data(), squares.data()); break;
+            case Detection::mono:  bankM.take (peak.data(), squares.data()); break;
+            case Detection::lrMax:
+                bankL.take (peak.data(), squares.data());
+                bankR.take (otherPeak.data(), otherSquares.data());
+                for (size_t b = 0; b < (size_t) bands; ++b)
+                {
+                    peak[b] = juce::jmax (peak[b], otherPeak[b]);
+                    squares[b] = juce::jmax (squares[b], otherSquares[b]);
+                }
+                break;
         }
-        std::fill (fftData.begin() + fftSize, fftData.end(), 0.0f);
-        fft.performFrequencyOnlyForwardTransform (fftData.data(), true);
-
-        // Bands log-spaced from 20 Hz to 20 kHz (equal octaves), each the spectrum integrated over exactly its range
-        const auto binHz = rate / (double) fftSize;
-        const auto norm = 4.0f / ((float) fftSize * windowPower);
-        for (int k = 0; k < fftSize / 2; ++k)
-            fftData[(size_t) k] = fftData[(size_t) k] * fftData[(size_t) k] * norm;
-        std::vector<float> these;
-        bands::integrate (fftData.data(), fftSize / 2, binHz, bands, these);
-        for (size_t b = 0; b < (size_t) bands; ++b)
-            power[b] = juce::jmax (power[b], these[b]);
-    };
-    switch (detection)
-    {
-        case Detection::left:  spectrum (0); break;
-        case Detection::right: spectrum (1); break;
-        case Detection::lrMax: spectrum (0); spectrum (1); break;
-        case Detection::mono:  spectrum (2); break;
     }
+    // (a sine reads its level in every mode: its peak, or its RMS + 3 dB)
+    std::vector<float> power ((size_t) bands);
+    for (size_t b = 0; b < (size_t) bands; ++b)
+        power[b] = (float) (2.0 * squares[b]);
 
     const auto tau = mode == Mode::rmsSlow ? 1.5f : 0.3f;
     const auto smooth = 1.0f - std::exp (-dt / tau);
@@ -308,7 +306,7 @@ void MultiMeterPanel::analyse (double seconds)
     {
         float db;
         if (mode == Mode::peak)
-            db = juce::jmax (10.0f * std::log10 (power[b] + 1.0e-12f), bandDb[b] - analyzerReturn * dt);
+            db = juce::jmax (juce::Decibels::gainToDecibels (peak[b], -120.0f), bandDb[b] - analyzerReturn * dt);
         else
         {
             bandPower[b] += (power[b] - bandPower[b]) * smooth;

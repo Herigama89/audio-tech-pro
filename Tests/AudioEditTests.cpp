@@ -377,3 +377,84 @@ TEST_CASE ("Pitch editor: notes found, moved and straightened, length kept", "[a
     CHECK (cut.notes.size() == 2);
     CHECK (cutEdits.size() == 2);
 }
+
+TEST_CASE ("Flex Pitch: Keep in Scale moves notes only onto the scale's notes, keeping how they're sung", "[pitch]")
+{
+    using namespace riff;
+    const std::vector<int> cMajor { 0, 2, 4, 5, 7, 9, 11 };
+    CHECK (pitchcorrect::nearestInScale (60.9, cMajor) == 60);   // C# - 10 cents: nearer C
+    CHECK (pitchcorrect::nearestInScale (61.2, cMajor) == 62);   // C# + 20 cents: nearer D
+    CHECK (pitchcorrect::nearestInScale (64.3, cMajor) == 64);   // E stays
+    CHECK (pitchcorrect::nextInScale (64, 1, cMajor) == 65);     // E -> F
+    CHECK (pitchcorrect::nextInScale (65, 1, cMajor) == 67);     // F -> G (skips F#)
+    CHECK (pitchcorrect::nextInScale (60, -1, cMajor) == 59);    // C -> B
+
+    pitchcorrect::Analysis a;
+    pitchcorrect::Note n1, n2;
+    n1.centre = 61.1;   // C# + 10 cents
+    n2.centre = 66.95;  // G - 5 cents
+    a.notes = { n1, n2 };
+    std::vector<pitchcorrect::NoteEdit> edits (2);
+    edits[1].shift = -1.0;   // moved down to F# - 5 cents: outside C major
+    CHECK (pitchcorrect::keepInScale (edits, a, cMajor));
+    CHECK (std::abs (edits[0].shift - 1.0) < 1.0e-9);   // to D + 10 cents: by a whole semitone, the cents kept
+    CHECK (std::lround (a.notes[1].centre + edits[1].shift) % 12 != 6);
+    CHECK_FALSE (pitchcorrect::keepInScale (edits, a, cMajor));   // nothing left outside
+}
+
+#include "engine/KeyDetect.h"
+
+namespace
+{
+    /** Chords (MIDI notes), each a second, as a piano-ish sound (harmonics), a little sharp of A = 440 if asked. */
+    juce::AudioBuffer<float> chords (const std::vector<std::vector<int>>& progression, double cents = 0.0, int repeats = 2)
+    {
+        const double rate = 44100.0;
+        const int perChord = 44100;
+        juce::AudioBuffer<float> out (1, perChord * (int) progression.size() * repeats);
+        out.clear();
+        int at = 0;
+        for (int rep = 0; rep < repeats; ++rep)
+            for (const auto& chord : progression)
+            {
+                for (const auto note : chord)
+                {
+                    const auto hz = 440.0 * std::pow (2.0, (note - 69 + cents / 100.0) / 12.0);
+                    for (int i = 0; i < perChord; ++i)
+                    {
+                        const auto env = std::exp (-2.0 * i / rate);
+                        double v = 0.0;
+                        for (int h = 1; h <= 5; ++h)
+                            v += std::sin (juce::MathConstants<double>::twoPi * hz * h * i / rate) / (h * h);
+                        out.addSample (0, at + i, (float) (0.1 * env * v));
+                    }
+                }
+                at += perChord;
+            }
+        return out;
+    }
+}
+
+TEST_CASE ("Key detection: hears the key and whether it's major or minor", "[key]")
+{
+    using namespace riff;
+    // G major: G - C - D - G - Em - C - D7 - G
+    const auto g = keydetect::detect (keydetect::chromaOf (chords ({ { 43, 55, 59, 62 }, { 48, 55, 60, 64 }, { 50, 54, 57, 62 }, { 43, 55, 59, 62 },
+                                                                    { 40, 55, 59, 64 }, { 48, 55, 60, 64 }, { 50, 54, 60, 62 }, { 43, 55, 59, 67 } }), 44100.0));
+    CHECK (g.found);
+    CHECK (keydetect::name (g.root, g.minor) == "G major");
+
+    // A minor (harmonic: E major's G#): Am - Dm - E - Am - F - Dm - E7 - Am
+    const auto a = keydetect::detect (keydetect::chromaOf (chords ({ { 45, 57, 60, 64 }, { 50, 57, 62, 65 }, { 40, 56, 59, 64 }, { 45, 57, 60, 64 },
+                                                                    { 41, 57, 60, 65 }, { 50, 57, 62, 65 }, { 40, 56, 62, 64 }, { 45, 57, 60, 69 } }), 44100.0));
+    CHECK (keydetect::name (a.root, a.minor) == "A minor");
+
+    // E flat major, recorded 30 cents sharp: still E flat
+    const auto eb = keydetect::detect (keydetect::chromaOf (chords ({ { 51, 58, 63, 67 }, { 44, 60, 63, 68 }, { 46, 58, 62, 65 }, { 51, 58, 63, 67 } }, 30.0), 44100.0));
+    CHECK (keydetect::name (eb.root, eb.minor) == "Eb major");
+
+    // Silence: nothing found
+    juce::AudioBuffer<float> quiet (1, 44100);
+    quiet.clear();
+    CHECK_FALSE (keydetect::detect (keydetect::chromaOf (quiet, 44100.0)).found);
+}
