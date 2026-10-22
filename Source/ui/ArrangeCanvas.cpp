@@ -2095,6 +2095,7 @@ void ArrangeCanvas::showRegionMenu (juce::ValueTree region)
             menu.addCommandItem (commandManager, commands::audioSuite);
             menu.addCommandItem (commandManager, commands::consolidateRegions);
             menu.addCommandItem (commandManager, commands::alignAudio);
+            menu.addCommandItem (commandManager, commands::splitStems);
         }
         menu.addSeparator();
         menu.addItem ("Rename...", [this, region]

@@ -2532,3 +2532,108 @@ TEST_CASE ("Plug-ins on a silent track rest until sound comes, after their tail 
     run (300, 0.0f);
     CHECK (counting->blocks == resting + 301);
 }
+
+#include "engine/StemSeparator.h"
+
+TEST_CASE ("Stems: the STFT and its inverse are PyTorch's, and give the sound back", "[stems]")
+{
+    juce::Random random (4);
+    std::vector<float> x (48000);
+    for (auto& v : x) v = random.nextFloat() * 2.0f - 1.0f;
+    const auto z = stems::stft (x.data(), (int) x.size());
+    CHECK (z.frames == (int) x.size() / stems::hop + 1);
+    CHECK (z.bins == 2049);
+    // normalized: white noise's average |X|^2 per bin is its variance (the window's mean square, 3/8)
+    double power = 0.0;
+    for (int f = 2; f < z.frames - 2; ++f)
+        for (int b = 1; b < 2048; ++b)
+            power += std::norm (z.at (f, b));
+    power /= (double) (z.frames - 4) * 2047.0;
+    CHECK_THAT (power, Catch::Matchers::WithinRel ((1.0 / 3.0) * 0.375, 0.05));
+    const auto y = stems::istft (z, (int) x.size());
+    float worst = 0.0f;
+    for (size_t i = 0; i < x.size(); ++i)
+        worst = std::max (worst, std::abs (y[i] - x[i]));
+    CHECK (worst < 1.0e-4f);
+}
+
+TEST_CASE ("Stems: the whole separation around a stand-in model gives the mix back", "[stems]")
+{
+    // (needs the ONNX Runtime library: RIFF_ORT_LIBRARY; the stand-in model returns the mix's spectrogram as
+    // source 1 and its waveform as source 2, so both must come back as the mix - every step but the network)
+    const auto library = juce::SystemStats::getEnvironmentVariable ("RIFF_ORT_LIBRARY", {});
+    if (library.isEmpty())
+    {
+        SUCCEED ("no ONNX Runtime library given (RIFF_ORT_LIBRARY): skipped");
+        return;
+    }
+    stems::Separator separator;
+    juce::String error;
+    REQUIRE (separator.load (juce::File (library), juce::File (TEST_DATA_DIR).getChildFile ("stems/identity4.onnx"), error));
+    CHECK (error.isEmpty());
+    CHECK (separator.sources() == 4);
+
+    // 20 s of a stereo signal: three segments and a short last one
+    juce::AudioBuffer<float> mix (2, stems::sampleRate * 20);
+    juce::Random random (7);
+    for (int i = 0; i < mix.getNumSamples(); ++i)
+    {
+        const auto t = (float) i / (float) stems::sampleRate;
+        mix.setSample (0, i, 0.3f * std::sin (juce::MathConstants<float>::twoPi * 220.0f * t) + 0.05f * (random.nextFloat() - 0.5f) + 0.01f);
+        mix.setSample (1, i, 0.2f * std::sin (juce::MathConstants<float>::twoPi * 330.0f * t) + 0.05f * (random.nextFloat() - 0.5f));
+    }
+    int calls = 0;
+    const auto out = separator.separate (mix, [&calls] (float) { ++calls; return true; }, error);
+    REQUIRE (out.size() == 4);
+    CHECK (calls >= 3);
+    for (const auto source : { 0, 1 })
+    {
+        float worst = 0.0f;
+        int where = 0;
+        for (int c = 0; c < 2; ++c)
+            for (int i = 0; i < mix.getNumSamples(); ++i)
+                if (const auto e = std::abs (out[(size_t) source].getSample (c, i) - mix.getSample (c, i)); e > worst) { worst = e; where = i; }
+        INFO ("source " << source << " worst at sample " << where);
+        CHECK (worst < 1.0e-3f);
+    }
+    // (the silent sources: just the mean put back)
+    CHECK (out[2].getMagnitude (0, mix.getNumSamples()) < 0.02f);
+}
+
+TEST_CASE ("Stems: downloads land whole, and mixes reach 44.1 kHz in tune", "[stems]")
+{
+    using namespace riff::stems;
+    const auto dir = juce::File::createTempFile ("stems-dl");
+    dir.createDirectory();
+    const auto source = dir.getChildFile ("source.bin");
+    juce::MemoryBlock data (300000);
+    for (size_t i = 0; i < data.getSize(); ++i)
+        static_cast<char*> (data.getData())[i] = (char) (i * 7);
+    source.replaceWithData (data.getData(), data.getSize());
+
+    float last = 0.0f;
+    const auto dest = dir.getChildFile ("sub").getChildFile ("model.onnx");
+    CHECK (downloadFile (juce::URL (source), dest, [&] (float p) { last = p; return true; }).isEmpty());
+    CHECK (dest.getSize() == (juce::int64) data.getSize());
+    CHECK_FALSE (dest.getSiblingFile ("model.onnx.part").exists());
+    CHECK (last > 0.999f);
+
+    // cancelling leaves nothing that looks finished
+    const auto other = dir.getChildFile ("other.onnx");
+    CHECK (downloadFile (juce::URL (source), other, [] (float) { return false; }) == "cancelled");
+    CHECK_FALSE (other.exists());
+    CHECK_FALSE (other.getSiblingFile ("other.onnx.part").exists());
+
+    // 48 kHz, 1 kHz tone -> 44.1 kHz: the length in time and the pitch kept
+    juce::AudioBuffer<float> tone (1, 48000);
+    for (int i = 0; i < 48000; ++i)
+        tone.setSample (0, i, 0.5f * std::sin (juce::MathConstants<float>::twoPi * 1000.0f * (float) i / 48000.0f));
+    const auto out = resample (tone, 48000.0, 44100.0);
+    CHECK (out.getNumChannels() == 2);
+    CHECK (std::abs (out.getNumSamples() - 44100) <= 1);
+    double worst = 0.0;
+    for (int i = 100; i < out.getNumSamples() - 100; ++i)
+        worst = std::max (worst, std::abs ((double) out.getSample (1, i) - 0.5 * std::sin (juce::MathConstants<double>::twoPi * 1000.0 * i / 44100.0)));
+    CHECK (worst < 0.01);
+    dir.deleteRecursively();
+}

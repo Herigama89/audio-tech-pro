@@ -60,6 +60,14 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::joinRegions:     info.setActive (timeline.selectedRegionTrees().size() > 1 && ! recording); break;
         case commands::consolidateRegions: info.setActive (! timeline.selectedRegionTrees().isEmpty() && ! recording); break;
         case commands::alignAudio:      info.setActive (timeline.selectedRegionTrees().size() > 1 && ! recording); break;
+        case commands::splitStems:
+        {
+            bool audio = false;
+            for (const auto& r : timeline.selectedRegionTrees())
+                audio = audio || ! model::isMidiRegion (r);
+            info.setActive (audio && ! recording);
+            break;
+        }
         case commands::duplicateTrack:
         case commands::createTrackStack:
         case commands::createFolderStack:
@@ -191,6 +199,7 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::joinRegions:            joinSelectedRegions(); break;
         case commands::consolidateRegions:     consolidateRegions (timeline.selectedRegionTrees()); break;
         case commands::alignAudio:             alignAudioToGuide(); break;
+        case commands::splitStems:             splitToStems(); break;
         case commands::muteRegions:            muteSelectedRegions(); break;
         case commands::nudgeLeft:              nudgeSelectedRegions (-1); break;
         case commands::nudgeRight:             nudgeSelectedRegions (1); break;
@@ -433,7 +442,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             menu.addSeparator();
             add ({ commands::cutRegions, commands::copyRegions, commands::pasteRegions, commands::deleteSelection, commands::selectAllRegions });
             menu.addSeparator();
-            add ({ commands::splitAtPlayhead, commands::repeatRegions, commands::joinRegions, commands::consolidateRegions, commands::alignAudio, commands::muteRegions,
+            add ({ commands::splitAtPlayhead, commands::repeatRegions, commands::joinRegions, commands::consolidateRegions, commands::alignAudio, commands::splitStems, commands::muteRegions,
                    commands::nudgeLeft, commands::nudgeRight, commands::quantize });
             menu.addSeparator();
             add ({ commands::trimStartToPlayhead, commands::trimEndToPlayhead, commands::loopRegions, commands::regionGain, commands::removeFades });

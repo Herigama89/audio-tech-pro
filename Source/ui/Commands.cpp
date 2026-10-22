@@ -42,6 +42,7 @@ const std::vector<Info>& all()
         { joinRegions,            "Join Regions",               "Edit",      "Join the selected regions on a track into one (audio: consolidated into one new file)" },
         { consolidateRegions,     "Consolidate Clips",          "Edit",      "The selected audio regions on each track become one region playing one new file (gain, fades and transpose in it; gaps silent)" },
         { alignAudio,             "Align Audio to Guide...",    "Edit",      "Lines the timing of the selected regions up with a guide region (the top one), as VocAlign and Cubase's AudioAlign do" },
+        { splitStems,             "Split to Stems...",          "Edit",      "Splits the selected audio regions into vocals, drums, bass and the rest (or six stems, with guitar and piano), each on a new track, as Logic's Stem Splitter does" },
         { muteRegions,            "Mute Regions",               "Edit",      "Mute or unmute the selected regions" },
         { nudgeLeft,              "Nudge Left",                 "Edit",      "Move the selected regions a 16th note earlier" },
         { nudgeRight,             "Nudge Right",                "Edit",      "Move the selected regions a 16th note later" },

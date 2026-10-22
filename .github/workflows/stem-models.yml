@@ -1,0 +1,87 @@
+# Stem separation's files: Demucs v4 (Meta AI, MIT licence) converted to ONNX (the 4-stem and the 6-stem
+# model, without their STFT, as sevagh/demucs.onnx does), and ONNX Runtime's library for each system.
+# The app downloads them the first time stems are split, from this repository's "stem-models-v1" release.
+#
+# Before publishing, the app's own separator (StemCheck) is run on a test mix and checked against Demucs
+# itself in PyTorch: they must agree to better than 30 dB on every stem.
+name: Stem models
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - .github/workflows/stem-models.yml
+      - Tools/stems/**
+      - Source/engine/StemSeparator.*
+
+permissions:
+  contents: write
+
+env:
+  ORT_VERSION: "1.20.1"
+
+jobs:
+  models:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Demucs and PyTorch (CPU)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          git clone --depth 1 https://github.com/sevagh/demucs.onnx.git demucs.onnx
+          python -m pip install -e demucs.onnx/demucs-for-onnx
+          python -m pip install onnx onnxruntime==${ORT_VERSION} numpy soundfile
+      - name: Convert to ONNX
+        run: |
+          python demucs.onnx/scripts/convert-pth-to-onnx.py models
+          python demucs.onnx/scripts/convert-pth-to-onnx.py models --six-source
+          ls -la models
+      - name: ONNX Runtime libraries
+        run: |
+          mkdir -p ort runtime
+          cd ort
+          curl -sSL -o linux.tgz https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz
+          curl -sSL -o mac.tgz https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-osx-universal2-${ORT_VERSION}.tgz
+          curl -sSL -o win.zip https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-win-x64-${ORT_VERSION}.zip
+          tar xzf linux.tgz && tar xzf mac.tgz && unzip -q win.zip
+          cp onnxruntime-linux-x64-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION} ../runtime/libonnxruntime.so
+          cp onnxruntime-osx-universal2-${ORT_VERSION}/lib/libonnxruntime.${ORT_VERSION}.dylib ../runtime/libonnxruntime.dylib
+          cp onnxruntime-win-x64-${ORT_VERSION}/lib/onnxruntime.dll ../runtime/onnxruntime.dll
+          cp onnxruntime-linux-x64-${ORT_VERSION}/LICENSE ../runtime/onnxruntime-LICENSE.txt
+          ls -la ../runtime
+      - name: Build StemCheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build libasound2-dev libfreetype6-dev libfontconfig1-dev libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxcomposite-dev libgl1-mesa-dev libcurl4-openssl-dev libgtk-3-dev libwebkit2gtk-4.0-dev
+          cmake -B build-check -G Ninja -DCMAKE_BUILD_TYPE=Release -DRIFF_BUILD_STEMCHECK=ON -DRIFF_BUILD_TESTS=OFF
+          cmake --build build-check --target StemCheck
+      - name: Check against Demucs itself
+        run: |
+          python Tools/stems/make_test_mix.py mix.wav
+          ./build-check/StemCheck_artefacts/Release/StemCheck runtime/libonnxruntime.so models/htdemucs.onnx mix.wav out4
+          python Tools/stems/reference_check.py htdemucs out4 mix.wav
+          ./build-check/StemCheck_artefacts/Release/StemCheck runtime/libonnxruntime.so models/htdemucs_6s.onnx mix.wav out6
+          python Tools/stems/reference_check.py htdemucs_6s out6 mix.wav
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: stem-models-v1
+          name: Stem separation models
+          body: |
+            Files the app downloads the first time you split stems: Demucs v4 (Meta AI, MIT licence) as ONNX -
+            htdemucs (vocals, drums, bass, other) and htdemucs_6s (adds guitar and piano) - and ONNX Runtime
+            ${{ env.ORT_VERSION }} (Microsoft, MIT licence) for each system.
+          files: |
+            models/htdemucs.onnx
+            models/htdemucs_6s.onnx
+            runtime/libonnxruntime.dylib
+            runtime/onnxruntime.dll
+            runtime/libonnxruntime.so
+            runtime/onnxruntime-LICENSE.txt

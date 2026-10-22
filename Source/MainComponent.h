@@ -110,6 +110,7 @@ private:
     void joinSelectedRegions();
     void consolidateRegions (const juce::Array<juce::ValueTree>& regions);
     void alignAudioToGuide();
+    void splitToStems();
     void muteSelectedRegions();
     void nudgeSelectedRegions (int direction);
     void duplicateSelectedTrack();

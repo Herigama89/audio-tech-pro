@@ -55,6 +55,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/clap/include)
 
 # Opening Pro Tools sessions: libptformat (LGPL 2.1, from the Ardour project), vendored.
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/ptformat)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/onnxruntime/include)   # (headers only: the runtime is loaded when stems are first split)
 set_source_files_properties(ThirdParty/ptformat/ptformat.cc PROPERTIES COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/w;/UDEBUG,-w;-UDEBUG>")
 
 set(RIFF_CORE_SOURCES
@@ -115,6 +116,7 @@ set(RIFF_CORE_SOURCES
     Source/engine/ConsoleChannel.cpp
     Source/engine/TapeSaturation.cpp
     Source/engine/InterfaceControl.cpp
+    Source/engine/StemSeparator.cpp
     Source/engine/ConsolePlugins.cpp
     Source/engine/Resampler.cpp
 )
@@ -218,6 +220,7 @@ set(RIFF_UI_SOURCES
     Source/MainCommands.cpp
     Source/MainAssistant.cpp
     Source/MainExtras.cpp
+    Source/MainStems.cpp
     Source/MainScreenRecording.cpp
     Source/ui/PluginHostPanel.cpp
     Source/ui/AudioSuitePanel.cpp
@@ -401,4 +404,17 @@ if(RIFF_BUILD_SNAPSHOTS)
         target_link_libraries(Snapshots PRIVATE "-framework CoreAudioKit" "-framework AVFoundation" "-framework CoreMedia"
                                                 "-framework CoreVideo" "-weak_framework ScreenCaptureKit")
     endif()
+endif()
+
+# The stem separator on its own, for checking it against Demucs itself (CI: .github/workflows/stem-models.yml):
+#   StemCheck <onnxruntime library> <model.onnx> <in.wav> <out folder>
+option(RIFF_BUILD_STEMCHECK "Build the stem separation check tool" OFF)
+
+if(RIFF_BUILD_STEMCHECK)
+    juce_add_console_app(StemCheck PRODUCT_NAME "StemCheck")
+    juce_generate_juce_header(StemCheck)
+    target_sources(StemCheck PRIVATE Tools/StemCheck.cpp Source/engine/StemSeparator.cpp)
+    target_include_directories(StemCheck PRIVATE Source)
+    target_compile_definitions(StemCheck PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_STANDALONE_APPLICATION=1)
+    target_link_libraries(StemCheck PRIVATE juce::juce_audio_formats juce::juce_dsp juce::juce_recommended_config_flags)
 endif()
