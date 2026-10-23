@@ -2701,3 +2701,25 @@ TEST_CASE ("Several cores: tracks processed in parallel make exactly the mix one
     CHECK (loudest > 0.05f);
     CHECK (differing == 0);
 }
+
+TEST_CASE ("Turning a built-in effect's knob reaches it at once, without rebuilding the song's graph", "[engine][routing]")
+{
+    RoutingFixture f;
+    auto track = f.audioTrack ("A", f.loud);
+    auto gain = model::addBuiltinInsert (model::chainFor (f.project, track[ids::id]), "gain", 0, nullptr);
+    f.router.setProject (f.project);
+    f.engine.play();
+    renderLeft (f.engine, 4800);
+    const auto before = renderLeft (f.engine, 4800)[2000];
+
+    // +6 dB on the knob: heard on the next block, and nothing waiting to rebuild
+    gain.setProperty ("gain", 6.0, nullptr);
+    CHECK_FALSE (f.router.isRebuildPending());
+    renderLeft (f.engine, 4800);
+    const auto after = renderLeft (f.engine, 4800)[2000];
+    CHECK_THAT (after / before, WithinAbs (std::pow (10.0, 6.0 / 20.0), 0.02));
+
+    // Bypassing it still rebuilds (the graph leaves it out)
+    gain.setProperty (ids::bypass, true, nullptr);
+    CHECK (f.router.isRebuildPending());
+}

@@ -2790,7 +2790,17 @@ void MixerPanel::setSelectedTracks (const juce::StringArray& trackIds, const juc
 
 void MixerPanel::rebuild()
 {
-    strips.clear();
+    // The strips already made stay (making one is costly - dozens of controls - and with many tracks remaking
+    // them all each time one is added made the app crawl): only new tracks get new strips, gone ones go.
+    std::map<juce::String, std::unique_ptr<ChannelStrip>> existing;
+    while (! strips.isEmpty())
+    {
+        auto* s = strips.removeAndReturn (strips.size() - 1);
+        if (s->getTrack().isValid() && s->getTrack().getParent() == project && s->getProject() == project)
+            existing[s->getTrack()[ids::id].toString()].reset (s);
+        else
+            delete s;
+    }
 
     const auto filter = filterBox.getSelectedId();
     const auto shows = [filter] (const juce::ValueTree& track)
@@ -2808,13 +2818,24 @@ void MixerPanel::rebuild()
     for (const auto& track : project)
         if (track.hasType (ids::TRACK) && shows (track))
         {
-            auto* strip = strips.add (new ChannelStrip (*this, project, track));
+            ChannelStrip* strip = nullptr;
+            if (auto it = existing.find (track[ids::id].toString()); it != existing.end() && it->second != nullptr)
+            {
+                strip = strips.add (it->second.release());
+                strip->refresh();
+            }
+            else
+                strip = strips.add (new ChannelStrip (*this, project, track));
             strip->setSelected (track[ids::id].toString() == selectedTrackId || selectedTrackIds.contains (track[ids::id].toString()));
             strip->setComponentID ("strip" + juce::String (strips.size() - 1));
             stripHolder.addAndMakeVisible (strip);
         }
 
-    masterStrip = std::make_unique<ChannelStrip> (*this, project, juce::ValueTree());
+    existing.clear();   // (strips for tracks no longer here)
+    if (masterStrip == nullptr || masterStrip->getProject() != project)
+        masterStrip = std::make_unique<ChannelStrip> (*this, project, juce::ValueTree());
+    else
+        masterStrip->refresh();
     body.addAndMakeVisible (*masterStrip);
     resized();
 }

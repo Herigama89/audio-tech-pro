@@ -686,6 +686,18 @@ bool ProjectPlayer::applyMixMove (const juce::ValueTree& tree, const juce::Ident
     return true;
 }
 
+bool ProjectPlayer::applyKnob (const juce::ValueTree& tree, const juce::Identifier& p)
+{
+    if (effects == nullptr || ! tree.hasType (ids::INSERT))
+        return false;
+    static const juce::Identifier structural[] { ids::id, ids::kind, ids::effect, ids::bypass, ids::slot, ids::sidechain,
+                                                 ids::pluginDescription, ids::pluginState, ids::araArchive };
+    for (const auto& s : structural)
+        if (p == s)
+            return false;
+    return effects->applyParameters (tree);
+}
+
 void ProjectPlayer::rebuildNow()
 {
     cancelPendingUpdate();

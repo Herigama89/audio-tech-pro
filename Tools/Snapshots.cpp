@@ -213,6 +213,49 @@ public:
         return 0;
     }
 
+    /** Where the time goes as a song grows (for the lag with many channels and plug-ins). */
+    int perfOnly()
+    {
+        out.createDirectory();
+        audioFolder = out.getChildFile ("demo-audio");
+        audioFolder.createDirectory();
+        MainComponent main (false);
+        main.setSize (2560, 1440);
+        main.setVisible (true);
+        buildDemoProject (main);
+        main.showMixer();
+        pump (main, 100);
+        const auto file = makeAudio ("perf", 20.0, 220.0f, 1.0f, 99);
+        auto ms = [] (auto&& f) { const auto t0 = juce::Time::getMillisecondCounterHiRes(); f(); return juce::Time::getMillisecondCounterHiRes() - t0; };
+        auto drain = [] { for (int i = 0; i < 20; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (1); };
+        juce::Image canvasImage (juce::Image::ARGB, main.getWidth(), main.getHeight(), true);
+        const char* plugins[] { "channelEq", "compressor", "studioReverb", "tapeDelay" };
+        const auto rounds = juce::jmax (1, juce::SystemStats::getEnvironmentVariable ("RIFF_PERF_ROUNDS", "6").getIntValue());
+        for (int round = 0; round < rounds; ++round)
+        {
+            double addTrack = 0, addPlugins = 0;
+            for (int t = 0; t < 8; ++t)
+            {
+                juce::ValueTree track;
+                addTrack += ms ([&] { main.undoManager.beginNewTransaction(); track = model::addTrack (main.project, "P" + juce::String (round * 8 + t), &main.undoManager);
+                                      model::addRegion (track, file, 0.0, 20.0, &main.undoManager); drain(); });
+                for (auto* type : plugins)
+                    addPlugins += ms ([&] { model::addBuiltinInsert (model::chainFor (main.project, track[ids::id].toString()), type, -1, &main.undoManager); drain(); });
+            }
+            const auto n = model::numTracks (main.project);
+            auto anyTrack = main.project.getChild (2);
+            const auto fader = ms ([&] { for (int i = 0; i < 20; ++i) { anyTrack.setProperty (ids::volume, 0.5 + 0.01 * i, &main.undoManager); drain(); } }) / 20.0;
+            const auto rebuild = ms ([&] { main.player.rebuildNow(); });
+            const auto mixerTick = ms ([&] { for (int i = 0; i < 10; ++i) main.mixer.timerCallback(); }) / 10.0;
+            const auto mainTick = ms ([&] { for (int i = 0; i < 10; ++i) main.timerCallback(); }) / 10.0;
+            const auto paint = ms ([&] { juce::Graphics g (canvasImage); main.paintEntireComponent (g, true); });
+            std::printf ("tracks %3d  add track %7.1f ms  add plugin %7.1f ms  fader move %7.1f ms  graph rebuild %7.1f ms  mixer tick %6.2f ms  main tick %6.2f ms  full paint %7.1f ms\n",
+                         n, addTrack / 8.0, addPlugins / 32.0, fader, rebuild, mixerTick, mainTick, paint);
+            std::fflush (stdout);
+        }
+        return 0;
+    }
+
     int mixerOnly()
     {
         out.createDirectory();
@@ -1605,6 +1648,12 @@ int main (int argc, char* argv[])
         for (int a = 3; a < argc; ++a)
             types.add (argv[a]);
         const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).effectsOnly (types);
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        return r;
+    }
+    if (argc > 2 && juce::String (argv[1]) == "perf")
+    {
+        const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).perfOnly();
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         return r;
     }

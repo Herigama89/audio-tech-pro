@@ -176,6 +176,53 @@ float EffectRack::takeGainReduction (const juce::String& insertId)
     return 0.0f;
 }
 
+juce::uint64 EffectRack::signatureOf (const juce::ValueTree& insert)
+{
+    juce::uint64 h = 1469598103934665603ull;
+    const auto mix = [&h] (juce::uint64 v) { h = (h ^ v) * 1099511628211ull; };
+    for (int i = 0; i < insert.getNumProperties(); ++i)
+    {
+        const auto name = insert.getPropertyName (i);
+        const auto& value = insert.getProperty (name);
+        mix ((juce::uint64) name.toString().hashCode64());
+        if (value.isDouble() || value.isInt() || value.isInt64() || value.isBool())
+        {
+            const auto d = (double) value;
+            juce::uint64 bits;
+            std::memcpy (&bits, &d, sizeof (bits));
+            mix (bits);
+        }
+        else
+            mix ((juce::uint64) value.toString().hashCode64());
+    }
+    return h;
+}
+
+void EffectRack::applyBuiltIn (BuiltInEffect& effect, const juce::ValueTree& insert)
+{
+    const auto& params = effect.getInfo().params;
+    for (size_t p = 0; p < params.size(); ++p)
+        effect.setParameter ((int) p, (float) (double) insert.getProperty (params[p].id, params[p].defaultValue));
+    effect.setAttachedFile (insert.getProperty ("irFile").toString());
+    effect.messageThreadUpdate();
+}
+
+bool EffectRack::applyParameters (const juce::ValueTree& insert)
+{
+    if (insert[ids::kind].toString() == model::pluginKind)
+        return false;
+    const auto it = entries.find (insert[ids::id].toString());
+    if (it == entries.end() || it->second.key != keyFor (insert))
+        return false;
+    auto* builtIn = dynamic_cast<BuiltInEffect*> (it->second.effect.get());
+    if (builtIn == nullptr)
+        return false;
+    const auto latency = builtIn->getLatencySamples();
+    applyBuiltIn (*builtIn, insert);
+    it->second.applied = signatureOf (insert);
+    return builtIn->getLatencySamples() == latency;   // (a new latency: the graph lines the tracks up again)
+}
+
 std::shared_ptr<Effect> EffectRack::effectFor (const juce::ValueTree& insert, double sampleRate, int maxBlockSize)
 {
     const auto id = insert[ids::id].toString();
@@ -187,15 +234,14 @@ std::shared_ptr<Effect> EffectRack::effectFor (const juce::ValueTree& insert, do
 
     if (sameKind && rateOk)
     {
-        // Built-ins take their knob values from the project on every rebuild.
+        // Built-ins take their knob values from the project (only when they've changed: a song with many plug-ins
+        // rebuilds its graph often, and some effects' updates are costly)
         if (auto* builtIn = dynamic_cast<BuiltInEffect*> (entry.effect.get()))
-        {
-            const auto& params = builtIn->getInfo().params;
-            for (size_t p = 0; p < params.size(); ++p)
-                builtIn->setParameter ((int) p, (float) (double) insert.getProperty (params[p].id, params[p].defaultValue));
-            builtIn->setAttachedFile (insert.getProperty ("irFile").toString());
-            builtIn->messageThreadUpdate();
-        }
+            if (const auto signature = signatureOf (insert); signature != entry.applied)
+            {
+                applyBuiltIn (*builtIn, insert);
+                entry.applied = signature;
+            }
 
         return entry.effect;
     }
@@ -212,13 +258,9 @@ std::shared_ptr<Effect> EffectRack::effectFor (const juce::ValueTree& insert, do
             return nullptr;
 
         effect->prepare (sampleRate, maxBlockSize);
-        const auto& params = effect->getInfo().params;
-        for (size_t p = 0; p < params.size(); ++p)
-            effect->setParameter ((int) p, (float) (double) insert.getProperty (params[p].id, params[p].defaultValue));
-        effect->setAttachedFile (insert.getProperty ("irFile").toString());
-        effect->messageThreadUpdate();
+        applyBuiltIn (*effect, insert);
 
-        entry = { key, sampleRate, effect };
+        entry = { key, sampleRate, effect, signatureOf (insert) };
         return effect;
     }
 

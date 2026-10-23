@@ -54,6 +54,7 @@ public:
     void pushGainReduction (float db);
     juce::String getOwnerId() const;
     juce::ValueTree getTrack() const { return track; }
+    juce::ValueTree getProject() const { return project; }
 
     void paint (juce::Graphics& g) override;
     void resized() override;

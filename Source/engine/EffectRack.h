@@ -118,6 +118,10 @@ private:
 class EffectRack
 {
 public:
+    /** A built-in's knob turned (no insert added, removed or switched): its values go straight to the running
+        effect, without a new graph. False when that isn't enough (not running yet, a plug-in, its latency moved). */
+    bool applyParameters (const juce::ValueTree& insert);
+
     explicit EffectRack (juce::AudioPluginFormatManager& formats) : formatManager (formats) {}
 
     /** The effect for an insert, created or updated to match it; nullptr while a plugin loads. */
@@ -170,7 +174,10 @@ private:
         juce::String key;
         double sampleRate = 0.0;
         std::shared_ptr<Effect> effect;
+        juce::uint64 applied = 0;   // a built-in's knob values as last given it (a signature), so unchanged ones are left alone
     };
+    static juce::uint64 signatureOf (const juce::ValueTree& insert);
+    void applyBuiltIn (BuiltInEffect& effect, const juce::ValueTree& insert);
 
     static juce::String keyFor (const juce::ValueTree& insert);
     void loadPlugin (const juce::ValueTree& insert, const juce::String& key, double sampleRate, int maxBlockSize,

@@ -41,6 +41,8 @@ public:
 
     /** Schedules a rebuild (e.g. when a plugin finishes loading). */
     void requestRebuild() { triggerAsyncUpdate(); }
+    /** True while a change is waiting to make a new graph. */
+    bool isRebuildPending() const { return isUpdatePending(); }
 
     /** Live Loops: a cell plays on its track from `from` (seconds) until `until` (0: until it's stopped). */
     struct LiveCell { juce::String cellId; double from = 0.0, until = 0.0; };
@@ -74,6 +76,8 @@ private:
     {
         if (applyMixMove (tree, p))
             return;   // a fader or pan: played straight away, no new graph
+        if (applyKnob (tree, p))
+            return;   // a built-in effect's knob: straight to the effect, no new graph
         if (p != ids::height && p != ids::hidden && p != ids::showAutomation && p != ids::automationParam && p != ids::collapsed && p != ids::icon && p != ids::takesOpen && p != ids::smartControls)   // view settings: nothing to hear
             triggerAsyncUpdate();
     }
@@ -83,6 +87,7 @@ private:
     void valueTreeRedirected (juce::ValueTree&) override                               { triggerAsyncUpdate(); }
 
     void handleAsyncUpdate() override { rebuildNow(); }
+    bool applyKnob (const juce::ValueTree& tree, const juce::Identifier& p);
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
 
     int slotFor (const juce::String& trackId);

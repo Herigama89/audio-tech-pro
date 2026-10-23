@@ -839,11 +839,21 @@ void TrackHeaderList::setProject (juce::ValueTree newProject)
 
 void TrackHeaderList::rebuild()
 {
-    headers.clear();
+    // Headers already made stay (with many tracks, remaking them all on every add was slow); new tracks get new ones.
+    std::vector<std::unique_ptr<TrackHeader>> existing;
+    while (! headers.isEmpty())
+        existing.emplace_back (headers.removeAndReturn (headers.size() - 1));
 
     for (const auto& track : project)
         if (track.hasType (ids::TRACK))
-            content.addAndMakeVisible (headers.add (new TrackHeader (track, undoManager, timeline, inputNames, instrumentMenu)));
+        {
+            auto it = std::find_if (existing.begin(), existing.end(), [&track] (const auto& h) { return h != nullptr && h->getTrack() == track; });
+            if (it != existing.end())
+                headers.add (it->release());
+            else
+                content.addAndMakeVisible (headers.add (new TrackHeader (track, undoManager, timeline, inputNames, instrumentMenu)));
+        }
+    existing.clear();
 
     resized();
     repaint();
