@@ -86,6 +86,8 @@ juce::Array<juce::File> audioFilesOf (const juce::ValueTree& project)
         {
             if (region.hasProperty (ids::file) && region[ids::file].toString().isNotEmpty())
                 list.addIfNotAlreadyThere (juce::File (region[ids::file].toString()));
+            if (region[ids::stretchSource].toString().isNotEmpty())   // (a stretched region's original)
+                list.addIfNotAlreadyThere (juce::File (region[ids::stretchSource].toString()));
             for (const auto& take : region)
                 if (take.hasType (ids::TAKE) && take[ids::file].toString().isNotEmpty())
                     list.addIfNotAlreadyThere (juce::File (take[ids::file].toString()));
@@ -130,8 +132,10 @@ int consolidate (juce::ValueTree project, const juce::File& projectFile, juce::U
 
     auto repoint = [&moved, um] (juce::ValueTree node)
     {
-        if (auto it = moved.find (node[ids::file].toString()); it != moved.end())
-            node.setProperty (ids::file, it->second.getFullPathName(), um);
+        for (const auto& id : { ids::file, ids::stretchSource })
+            if (node.hasProperty (id))
+                if (auto it = moved.find (node[id].toString()); it != moved.end())
+                    node.setProperty (id, it->second.getFullPathName(), um);
     };
 
     for (auto track : project)
@@ -265,8 +269,10 @@ int relinkMissing (juce::ValueTree project, const MediaIndex& index, juce::UndoM
             continue;
         for (auto region : track)
         {
-            if (auto it = found.find (region[ids::file].toString()); it != found.end())
-                region.setProperty (ids::file, it->second.getFullPathName(), um);
+            for (const auto& id : { ids::file, ids::stretchSource })
+                if (region.hasProperty (id))
+                    if (auto it = found.find (region[id].toString()); it != found.end())
+                        region.setProperty (id, it->second.getFullPathName(), um);
             for (auto take : region)
                 if (take.hasType (ids::TAKE))
                     if (auto it = found.find (take[ids::file].toString()); it != found.end())
@@ -347,8 +353,10 @@ juce::File saveCopyWithMedia (const juce::ValueTree& project, const juce::File& 
     std::function<void (juce::ValueTree)> repoint = [&] (juce::ValueTree node)
     {
         if (node.hasType (ids::REGION) || node.hasType (ids::TAKE))
-            if (auto it = copied.find (node[ids::file].toString()); it != copied.end())
-                node.setProperty (ids::file, it->second.getFullPathName(), nullptr);
+            for (const auto& id : { ids::file, ids::stretchSource })
+                if (node.hasProperty (id))
+                    if (auto it = copied.find (node[id].toString()); it != copied.end())
+                        node.setProperty (id, it->second.getFullPathName(), nullptr);
         if (node.hasType (ids::INSERT))
             if (auto it = copied.find (node.getProperty ("irFile").toString()); it != copied.end())
                 node.setProperty ("irFile", it->second.getFullPathName(), nullptr);

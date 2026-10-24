@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
 endif()
 
-project(AudioTechPro VERSION 1.2.0 LANGUAGES C CXX)
+project(AudioTechPro VERSION 1.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -105,6 +105,7 @@ set(RIFF_CORE_SOURCES
     Source/engine/ProjectPlayer.cpp
     Source/engine/AutomationWriter.cpp
     Source/engine/AudioEdit.cpp
+    Source/engine/TimeStretch.cpp
     Source/engine/LatencyMeasure.cpp
     Source/engine/BuiltInSynth.cpp
     Source/engine/BuiltInInstruments.cpp
@@ -224,6 +225,7 @@ set(RIFF_UI_SOURCES
     Source/MainAssistant.cpp
     Source/MainExtras.cpp
     Source/MainStems.cpp
+    Source/MainStretch.cpp
     Source/MainKey.cpp
     Source/MainFiles.cpp
     Source/MainScreenRecording.cpp

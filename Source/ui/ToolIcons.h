@@ -99,6 +99,11 @@ namespace riff::toolicons
                 // A fader cap on its slot
                 p.addRoundedRectangle (7.0f, 10.0f, 10.0f, 5.0f, 1.0f);
                 break;
+            case Tool::stretch:
+                // A short waveform between two arrows
+                for (const auto [x, h] : { std::pair { 9.0f, 4.0f }, { 11.0f, 9.0f }, { 13.0f, 6.0f }, { 15.0f, 10.0f } })
+                    p.addRectangle (x - 0.75f, 12.0f - h * 0.5f, 1.5f, h);
+                break;
             case Tool::zoom:
             case Tool::marquee:
             case Tool::select:
@@ -175,6 +180,14 @@ namespace riff::toolicons
                 p.closeSubPath();
                 break;
             }
+            case Tool::stretch:
+                p.startNewSubPath (2.0f, 12.0f); p.lineTo (6.0f, 12.0f);
+                p.startNewSubPath (4.5f, 9.0f);  p.lineTo (1.5f, 12.0f); p.lineTo (4.5f, 15.0f);
+                p.startNewSubPath (18.0f, 12.0f); p.lineTo (22.0f, 12.0f);
+                p.startNewSubPath (19.5f, 9.0f); p.lineTo (22.5f, 12.0f); p.lineTo (19.5f, 15.0f);
+                p.startNewSubPath (7.0f, 5.0f); p.lineTo (7.0f, 19.0f);
+                p.startNewSubPath (17.0f, 5.0f); p.lineTo (17.0f, 19.0f);
+                break;
             case Tool::pointer: case Tool::pencil: case Tool::eraser: case Tool::glue: case Tool::text:
                 break;
         }
@@ -224,6 +237,7 @@ namespace riff::toolicons
             case Tool::text:     return "Text";
             case Tool::gain:     return "Gain";
             case Tool::select:   return "Select";
+            case Tool::stretch:  return "Stretch";
         }
         return "";
     }
@@ -246,6 +260,7 @@ namespace riff::toolicons
             case Tool::marquee:  return 'r';
             case Tool::gain:     return 'n';
             case Tool::select:   return 'l';
+            case Tool::stretch:  return 'w';
         }
         return 0;
     }
@@ -268,6 +283,7 @@ namespace riff::toolicons
             case Tool::text:     return "rename";
             case Tool::gain:     return "drag a region up or down to change its level";
             case Tool::select:   return "drag a box round regions to select them (even starting on one)";
+            case Tool::stretch:  return "drag a region's edge to stretch its audio (Option-drag with the Pointer too)";
         }
         return "";
     }
@@ -281,6 +297,7 @@ namespace riff::toolicons
             case Tool::text:    return juce::MouseCursor::IBeamCursor;
             case Tool::marquee: return juce::MouseCursor::CrosshairCursor;
             case Tool::select:  return juce::MouseCursor::CrosshairCursor;
+            case Tool::stretch: return juce::MouseCursor::LeftRightResizeCursor;
             default: break;
         }
 
@@ -318,5 +335,5 @@ namespace riff::toolicons
     }
 
     constexpr Tool all[] { Tool::pointer, Tool::pencil, Tool::eraser, Tool::text, Tool::scissors, Tool::glue,
-                           Tool::solo, Tool::mute, Tool::zoom, Tool::fade, Tool::marquee, Tool::select, Tool::gain };
+                           Tool::solo, Tool::mute, Tool::zoom, Tool::fade, Tool::marquee, Tool::select, Tool::gain, Tool::stretch };
 }

@@ -1,4 +1,5 @@
 #include "RegionVariants.h"
+#include "TimeStretch.h"
 #include "AudioEdit.h"
 
 namespace riff
@@ -89,7 +90,7 @@ juce::AudioBuffer<float> RegionVariants::render (const juce::AudioBuffer<float>&
         audio = std::move (out);
     }
     else if (std::abs (spec.ratio - 1.0) > 1.0e-4)
-        audio = audioedit::timeStretch (audio, spec.ratio, sampleRate);
+        audio = stretch::process (audio, spec.ratio, sampleRate);
 
     if (std::abs (spec.semitones) > 1.0e-4)
         audio = audioedit::pitchShift (audio, spec.semitones, sampleRate);

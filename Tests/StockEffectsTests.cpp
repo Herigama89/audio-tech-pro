@@ -497,6 +497,40 @@ TEST_CASE ("Pitch: correction pulls a sharp note onto the key, the transformer a
     auto [el, er] = run (*edited, sine (452.0, 1.5, 0.4f), sine (452.0, 1.5, 0.4f));
     CHECK_THAT (frequencyOf (el, 36000, 72000), Catch::Matchers::WithinAbs (466.2, 4.0));
 
+    // Live mode (for recording through it): nothing added to the mixer's delay, still in tune, out right away
+    {
+        auto live = make ("pitchCorrection");
+        set (*live, "scale", 0.0f);
+        set (*live, "response", 5.0f);
+        set (*live, "live", 1.0f);
+        CHECK (live->getLatencySamples() == 0);
+        auto [ll, lr] = run (*live, sine (452.0, 1.5, 0.4f), sine (452.0, 1.5, 0.4f));
+        CHECK_THAT (frequencyOf (ll, 36000, 72000), Catch::Matchers::WithinAbs (440.0, 3.0));
+        CHECK (peakOf (ll, 36000) > 0.3f);
+        CHECK (peakOf (ll, 36000) < 0.5f);
+
+        auto voice = make ("pitchCorrection");
+        set (*voice, "scale", 0.0f);
+        set (*voice, "response", 5.0f);
+        set (*voice, "live", 1.0f);
+        auto [vl, vr] = run (*voice, buzz (226.0, 1.5, 0.05f), buzz (226.0, 1.5, 0.05f));
+        CHECK_THAT (fundamentalOf (vl, 36000, 4800), Catch::Matchers::WithinRel (220.0, 0.02));
+
+        // A note starting after silence is heard within 10 ms (Studio mode: 60 ms later)
+        auto onset = make ("pitchCorrection");
+        set (*onset, "scale", 0.0f);
+        set (*onset, "live", 1.0f);
+        auto note = sine (220.0, 1.0, 0.4f);
+        std::fill (note.begin(), note.begin() + 24000, 0.0f);
+        auto [ol, orr] = run (*onset, note, note);
+        int first = -1;
+        for (int i = 0; i < (int) ol.size() && first < 0; ++i)
+            if (std::abs (ol[(size_t) i]) > 0.05f)
+                first = i;
+        CHECK (first >= 24000);
+        CHECK (first < 24000 + 480);
+    }
+
     // A voice-like buzz an octave up, a fifth up, and an octave down
     for (const auto [semitones, expected] : { std::pair { 12.0f, 440.0 }, std::pair { 7.0f, 329.6 }, std::pair { -12.0f, 110.0 } })
     {

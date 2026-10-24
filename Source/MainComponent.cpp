@@ -359,6 +359,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     canvas.onEmptyAreaMenu = [this] { showToolMenu (true); };
     canvas.onOpenProject = [this] (const juce::File& f) { confirmDiscardChanges ([this, f] { openImportedProject (f); }); };
     canvas.onDetectTempo = [this] (juce::ValueTree region) { detectTempo (region); };
+    canvas.onStretch = [this] (juce::Array<juce::ValueTree> regions, double factor, bool fromStart, juce::String mode) { stretchRegions (regions, factor, fromStart, mode); };
     canvas.addExtensionItems = [this] (juce::PopupMenu& menu, juce::Array<juce::ValueTree> regions) { addExtensionItems (menu, regions); };
     canvas.onDelete = [this] { deleteSelection(); };
     canvas.onRepeat = [this] { repeatSelectedRegions(); };

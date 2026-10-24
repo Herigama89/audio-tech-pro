@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "../Source/engine/AudioEdit.h"
+#include "../Source/engine/TimeStretch.h"
 
 using namespace riff;
 using Catch::Matchers::WithinAbs;
@@ -458,3 +459,98 @@ TEST_CASE ("Key detection: hears the key and whether it's major or minor", "[key
     quiet.clear();
     CHECK_FALSE (keydetect::detect (keydetect::chromaOf (quiet, 44100.0)).found);
 }
+
+namespace
+{
+    /** A drum-like loop: a decaying 180 Hz hit every `every` seconds, on a quiet 110 Hz hum. */
+    juce::AudioBuffer<float> hits (double seconds, double every, double offset = 0.0)
+    {
+        juce::AudioBuffer<float> b (2, (int) (seconds * 48000.0));
+        for (int i = 0; i < b.getNumSamples(); ++i)
+        {
+            const auto t = std::fmod ((double) i / 48000.0 + every - offset, every);
+            const auto hit = (double) i / 48000.0 >= offset ? 0.6 * std::exp (-t * 40.0) * std::sin (2.0 * juce::MathConstants<double>::pi * 180.0 * t) : 0.0;
+            const auto v = (float) (hit + 0.05 * std::sin (2.0 * juce::MathConstants<double>::pi * 110.0 * i / 48000.0));
+            b.setSample (0, i, v);
+            b.setSample (1, i, v * 0.8f);
+        }
+        return b;
+    }
+
+    /** Where the hits are (seconds): the envelope's peaks. */
+    std::vector<double> hitTimes (const juce::AudioBuffer<float>& b)
+    {
+        std::vector<double> times;
+        const auto* d = b.getReadPointer (0);
+        int last = -100000;
+        for (int i = 0; i < b.getNumSamples(); ++i)
+            if (std::abs (d[i]) > 0.3f && i - last > 9600)
+            {
+                times.push_back (i / 48000.0);
+                last = i;
+            }
+        return times;
+    }
+}
+
+TEST_CASE ("Stretch keeps drum hits sharp and on time", "[audioedit][stretch]")
+{
+    const auto loop = hits (4.0, 0.5, 0.1);
+    for (const auto ratio : { 1.25, 1.5, 2.0, 0.75, 0.5 })
+    {
+        INFO ("ratio " << ratio);
+        const auto out = riff::stretch::process (loop, ratio, 48000.0);
+        CHECK (out.getNumSamples() == (int) std::llround (loop.getNumSamples() * ratio));
+        const auto before = hitTimes (loop), after = hitTimes (out);
+        REQUIRE (after.size() == before.size());
+        for (size_t k = 0; k < before.size(); ++k)
+            CHECK (std::abs (after[k] - before[k] * ratio) < 0.002);   // within 2 ms of where it should be
+
+        // No flam: just before each hit it's as quiet as the hum (no echo of the hit ahead of it)
+        for (const auto t : after)
+        {
+            const auto at = (int) (t * 48000.0);
+            if (at > 2400)
+                CHECK (out.getMagnitude (0, at - 2400, 2300) < 0.15f);
+        }
+    }
+}
+
+TEST_CASE ("Stretch keeps a chord's notes and level steady", "[audioedit][stretch]")
+{
+    juce::AudioBuffer<float> chord (2, 48000 * 2);
+    for (int i = 0; i < chord.getNumSamples(); ++i)
+    {
+        const auto t = i / 48000.0;
+        const auto v = (float) (0.2 * (std::sin (2 * juce::MathConstants<double>::pi * 261.63 * t) + std::sin (2 * juce::MathConstants<double>::pi * 329.63 * t)
+                                       + std::sin (2 * juce::MathConstants<double>::pi * 392.0 * t)));
+        chord.setSample (0, i, v);
+        chord.setSample (1, i, v);
+    }
+    const auto out = riff::stretch::process (chord, 1.5, 48000.0);
+    // the level, in 50 ms pieces through the middle, stays within 1.5 dB of the original's
+    const auto reference = chord.getRMSLevel (0, 24000, 48000);
+    for (int start = 9600; start + 2400 < out.getNumSamples() - 9600; start += 2400)
+        CHECK (std::abs (juce::Decibels::gainToDecibels (out.getRMSLevel (0, start, 2400) / reference)) < 1.5f);
+
+    // the same three notes: a 1 s piece's spectrum peaks where the chord's are
+    constexpr int order = 15;
+    juce::dsp::FFT fft (order);
+    std::vector<float> spectrum ((size_t) (2 << order), 0.0f);
+    for (int i = 0; i < (1 << order); ++i)
+        spectrum[(size_t) i] = out.getSample (0, 24000 + i) * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * i / (float) (1 << order)));
+    fft.performFrequencyOnlyForwardTransform (spectrum.data(), true);
+    const auto binHz = 48000.0 / (1 << order);
+    for (const auto f : { 261.63, 329.63, 392.0 })
+    {
+        const auto bin = (int) std::round (f / binHz);
+        float local = 0.0f;
+        for (int d = -2; d <= 2; ++d)
+            local = std::max (local, spectrum[(size_t) (bin + d)]);
+        float elsewhere = 0.0f;   // between the notes
+        for (int b = (int) (280.0 / binHz); b < (int) (310.0 / binHz); ++b)
+            elsewhere = std::max (elsewhere, spectrum[(size_t) b]);
+        CHECK (local > elsewhere * 20.0f);
+    }
+}
+

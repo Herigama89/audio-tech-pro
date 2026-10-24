@@ -114,6 +114,8 @@ private:
     void consolidateRegions (const juce::Array<juce::ValueTree>& regions);
     void alignAudioToGuide();
     void splitToStems();
+    void stretchRegions (juce::Array<juce::ValueTree> regions, double factor, bool fromStart, juce::String mode);
+    bool stretching = false;   // (a stretch being rendered)
     void detectSongKey();
     // Drawing on the graphics card (macOS: OpenGL), for a smooth window with many tracks and meters
     bool gpuDrawing = false;

@@ -175,6 +175,34 @@ namespace riff::model
 
     /** How an audio region plays differently from its file (Region box: Transpose, Fine Tune,
         Pitch Source, Flex with Smart Tempo). `detectedBpm` is the file's tempo found by Smart Tempo. */
+    // --- Stretch (the Stretch tool, or Option-drag of a region's edge) ------------
+    // An audio region is stretched by rendering its whole original file at the new length (kept in the
+    // project's Stretched folder) and pointing the region at that; the original is remembered, so a
+    // stretch again starts from it (no loss piling up) and Reset Stretch goes back to it.
+    inline const juce::String stretchKeepPitch { "pitch" }, stretchTape { "tape" };
+    inline constexpr double minStretch = 0.125, maxStretch = 8.0;
+
+    /** How many times its original length a region is (1 when not stretched). */
+    double stretchOf (const juce::ValueTree& region);
+
+    struct StretchPlan
+    {
+        juce::File source;      // the original file
+        double ratio = 1.0;     // the whole file's new length / its original length
+        juce::String mode;      // stretchKeepPitch or stretchTape
+        bool isReset() const noexcept { return std::abs (ratio - 1.0) < 1.0e-6 && mode == stretchKeepPitch; }
+    };
+
+    /** What rendering would make the region `factor` times as long as it is now (factor kept within limits). */
+    StretchPlan stretchPlanFor (const juce::ValueTree& region, double factor, const juce::String& mode);
+
+    /** Points the region at `rendered` (the plan's source rendered at its ratio; the source itself when the ratio
+        is 1). `fromStart`: the start edge was dragged, so the end stays where it is. */
+    void applyStretch (juce::ValueTree region, const juce::File& rendered, const StretchPlan& plan, bool fromStart, juce::UndoManager* um);
+
+    /** A MIDI region stretched: its notes and controllers spread out (or squeezed) with it. */
+    void stretchMidiRegion (juce::ValueTree region, double factor, bool fromStart, juce::UndoManager* um);
+
     struct AudioShape { double semitones = 0.0, ratio = 1.0; bool varispeed = false; bool needsTempo = false; };
     AudioShape audioShapeOf (const juce::ValueTree& project, const juce::ValueTree& track, const juce::ValueTree& region, double detectedBpm);
 

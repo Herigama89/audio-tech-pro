@@ -15,6 +15,7 @@
 #include "../Source/ui/Looks.h"
 #include <JuceHeader.h>
 #include "MainComponent.h"
+#include "engine/TimeStretch.h"
 #include "model/Project.h"
 #include "engine/MasterBusCompressor.h"
 #include "ui/KeyCommands.h"
@@ -160,6 +161,120 @@ public:
             panel.resized();
             juce::MessageManager::getInstance()->runDispatchLoopUntil (120);
             save (panel, "fx-" + spec.replaceCharacters (":=,", "_-_").substring (0, 120) + ".png");
+        }
+        return 0;
+    }
+
+    /** The Stretch tool driven by the mouse: a drag of a region's end, then an Option-drag of its start with the Pointer. */
+    int stretchOnly()
+    {
+        out.createDirectory();
+        // a 4-second drum-like loop: a click every half second on a low hum
+        const auto wav = out.getChildFile ("loop.wav");
+        {
+            juce::AudioBuffer<float> b (2, 48000 * 4);
+            for (int i = 0; i < b.getNumSamples(); ++i)
+            {
+                const auto t = (float) (i % 24000) / 48000.0f;
+                const auto v = 0.6f * std::exp (-t * 40.0f) * std::sin (juce::MathConstants<float>::twoPi * 180.0f * t)
+                               + 0.1f * std::sin (juce::MathConstants<float>::twoPi * 110.0f * (float) i / 48000.0f);
+                b.setSample (0, i, v);
+                b.setSample (1, i, v);
+            }
+            wav.deleteFile();
+            std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (wav);
+            juce::WavAudioFormat format;
+            auto w = format.createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (48000.0).withNumChannels (2).withBitsPerSample (24));
+            w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+        }
+
+        MainComponent main (false);
+        main.setSize (1440, 920);
+        main.setVisible (true);
+        auto project = model::createProject();
+        main.setProject (project, out.getChildFile ("Stretch Test" + model::fileExtension));
+        main.canvas.importFiles ({ wav.getFullPathName() }, -1, 0.0);
+        main.player.rebuildNow();
+        main.fileCache.waitUntilIdle (20000);
+        pump (main, 300);
+
+        auto region = main.project.getChild (0).getChild (0);
+        auto& tl = main.timeline;
+        tl.pixelsPerSecond = 100.0;
+        tl.scrollSeconds = 0.0;
+        main.canvas.repaint();
+        pump (main, 200);
+
+        auto& canvas = main.canvas;
+        auto source = juce::Desktop::getInstance().getMainMouseSource();
+        auto event = [&] (juce::Point<float> at, juce::Point<float> down, juce::ModifierKeys mods, bool dragged)
+        {
+            return juce::MouseEvent (source, at, mods, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, &canvas, &canvas, juce::Time::getCurrentTime(),
+                                     down, juce::Time::getCurrentTime(), 1, dragged);
+        };
+        const auto y = (float) tl.trackTop (0) + (float) tl.heightOf (0) * 0.6f;
+        auto drag = [&] (float fromX, float toX, juce::ModifierKeys mods, const juce::String& shot)
+        {
+            const juce::Point<float> down (fromX, y);
+            canvas.mouseDown (event (down, down, mods.withFlags (juce::ModifierKeys::leftButtonModifier), false));
+            for (int k = 1; k <= 10; ++k)
+                canvas.mouseDrag (event ({ fromX + (toX - fromX) * (float) k / 10.0f, y }, down, mods.withFlags (juce::ModifierKeys::leftButtonModifier), true));
+            pump (main, 100);
+            save (main, shot);
+            canvas.mouseUp (event ({ toX, y }, down, mods, true));
+            if (main.stretching)
+                save (main, shot.replace (".png", "-rendering.png"));
+            for (int i = 0; i < 400 && main.stretching; ++i)
+                pump (main, 50);
+            pump (main, 300);
+        };
+        auto report = [&] (const char* what)
+        {
+            std::cout << what << ": start " << (double) region[ids::start] << " length " << (double) region[ids::length]
+                      << " offset " << (double) region[ids::offset] << " stretch " << model::stretchOf (region)
+                      << " file " << juce::File (region[ids::file].toString()).getFileName()
+                      << " (" << main.fileCache.getLengthSeconds (juce::File (region[ids::file].toString())) << " s)" << std::endl;
+        };
+        report ("before");
+
+        // The Stretch tool: the end dragged from 4 s to 6 s (x1.5)
+        tl.tool = TimelineState::Tool::stretch;
+        drag (tl.timeToX (3.9), tl.timeToX (5.9), {}, "stretch-dragging.png");
+        report ("stretch tool, end to 6 s");
+        pump (main, 2500);
+        save (main, "stretch-after.png");
+
+        // The Pointer with Option: the start edge dragged from 0 to 1 s (x5/6 of that: 5 s long, ending at 6 s)
+        tl.tool = TimelineState::Tool::pointer;
+        drag (tl.timeToX (0.0) + 3.0f, tl.timeToX (1.0) + 3.0f, juce::ModifierKeys (juce::ModifierKeys::altModifier), "stretch-option-dragging.png");
+        report ("option-drag start to 1 s");
+        save (main, "stretch-after-option.png");
+
+        // Undo: back to the first stretch; and the menu's reset
+        main.undoManager.undo();
+        report ("undo");
+        main.stretchRegions ({ region }, 0.0, false, {});
+        report ("reset");
+        // the tape mode, from the menu: pitch follows (x1.5 slower: about 7 semitones down)
+        main.stretchRegions ({ region }, 1.5, false, model::stretchTape);
+        for (int i = 0; i < 400 && main.stretching; ++i)
+            pump (main, 50);
+        report ("tape x1.5");
+
+        // How long a minute of stereo takes to stretch
+        {
+            juce::AudioBuffer<float> minute (2, 48000 * 60);
+            juce::Random random (1);
+            for (int i = 0; i < minute.getNumSamples(); ++i)
+            {
+                const auto t = (float) (i % 24000) / 48000.0f;
+                const auto v = 0.6f * std::exp (-t * 40.0f) * std::sin (juce::MathConstants<float>::twoPi * 180.0f * t) + 0.05f * (random.nextFloat() - 0.5f);
+                minute.setSample (0, i, v);
+                minute.setSample (1, i, v * 0.7f);
+            }
+            const auto t0 = juce::Time::getMillisecondCounterHiRes();
+            const auto stretched = stretch::process (minute, 1.25, 48000.0);
+            std::cout << "a minute of stereo stretched x1.25 in " << (int) (juce::Time::getMillisecondCounterHiRes() - t0) << " ms" << std::endl;
         }
         return 0;
     }
@@ -1700,6 +1815,12 @@ int main (int argc, char* argv[])
     if (argc > 2 && juce::String (argv[1]) == "meter")
     {
         const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).meterOnly();
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        return r;
+    }
+    if (argc > 2 && juce::String (argv[1]) == "stretch")
+    {
+        const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).stretchOnly();
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         return r;
     }

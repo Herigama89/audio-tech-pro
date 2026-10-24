@@ -204,6 +204,35 @@ void ArrangeCanvas::paint (juce::Graphics& g)
         }
     }
 
+    const bool stretchDrag = (dragMode == DragMode::stretchStart || dragMode == DragMode::stretchEnd) && dragRegion.isValid();
+    if ((stretchDrag || (pendingStretch.isValid() && pendingStretch.getParent().isValid())) && stretchTrack >= 0)
+    {
+        // where the stretched region will be, and by how much
+        const auto& dragRegion = stretchDrag ? this->dragRegion : pendingStretch;
+        const auto bounds = regionBounds (dragRegion, stretchTrack);
+        const auto x0 = timeline.timeToX (stretchPreviewStart), x1 = timeline.timeToX (stretchPreviewStart + stretchPreviewLength);
+        const juce::Rectangle<float> r (x0, bounds.getY(), juce::jmax (2.0f, x1 - x0), bounds.getHeight());
+        g.setColour (juce::Colour (0xffffb340).withAlpha (0.18f));
+        g.fillRoundedRectangle (r, 3.0f);
+        g.setColour (juce::Colour (0xffffb340));
+        g.drawRoundedRectangle (r.reduced (0.5f), 3.0f, 2.0f);
+        const double length = dragRegion[ids::length];
+        const auto factor = length > 0.0 ? stretchPreviewLength / length : 1.0;
+        const auto total = model::stretchOf (dragRegion) * factor;
+        const bool tape = dragRegion[ids::stretchMode].toString() == model::stretchTape;
+        juce::String text = (stretchDrag ? juce::String() : juce::String ("Stretching ")) + juce::String::charToString (0x00d7) + juce::String (factor, 3);
+        if (std::abs (total - factor) > 1.0e-3)
+            text << "  (" << juce::String::charToString (0x00d7) << juce::String (total, 3) << " of the original)";
+        if (tape)
+            text << "  " << juce::String (12.0 * std::log2 (1.0 / total), 1) << " st";
+        g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+        const auto label = juce::Rectangle<float> (r.getX() + 4.0f, r.getY() + 3.0f, juce::jmax (220.0f, r.getWidth()), 18.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.6f));
+        g.fillRoundedRectangle (label.withWidth ((float) juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), text) + 10.0f), 3.0f);
+        g.setColour (juce::Colours::white);
+        g.drawText (text, label.translated (5.0f, 0.0f), juce::Justification::centredLeft, false);
+    }
+
     if (dragMode == DragMode::zoomRect && ! rubberBand.isEmpty())
     {
         g.setColour (theme::accent.withAlpha (0.15f));
@@ -1403,6 +1432,13 @@ void ArrangeCanvas::mouseDown (const juce::MouseEvent& e)
 
     dragMode = edgeActionAt (region, trackIndex, e.position);
 
+    // Option-drag of an edge stretches the audio instead of trimming it (as in Logic)
+    if ((dragMode == DragMode::trimStart || dragMode == DragMode::trimEnd) && e.mods.isAltDown() && model::numTakes (region) == 0)
+    {
+        startStretch (region, trackIndex, dragMode == DragMode::trimStart);
+        return;
+    }
+
     if (dragMode == DragMode::gain)
     {
         if (e.mods.isAltDown())   // Option-click: back to 0 dB
@@ -1595,6 +1631,30 @@ void ArrangeCanvas::mouseDrag (const juce::MouseEvent& e)
             break;
         }
 
+        case DragMode::stretchStart:
+        case DragMode::stretchEnd:
+        {
+            if (! dragRegion.isValid())
+                break;
+            const double start = dragRegion[ids::start], length = dragRegion[ids::length];
+            const auto t = maybeSnap (timeline.xToTime ((float) e.x));
+            const auto minLength = juce::jmax (model::minRegionLength, length * model::minStretch / model::stretchOf (dragRegion));
+            const auto maxLength = length * model::maxStretch / model::stretchOf (dragRegion);
+            if (dragMode == DragMode::stretchEnd)
+            {
+                stretchPreviewStart = start;
+                stretchPreviewLength = juce::jlimit (minLength, maxLength, t - start);
+            }
+            else
+            {
+                const auto end = start + length;
+                stretchPreviewLength = juce::jlimit (minLength, maxLength, end - t);
+                stretchPreviewStart = end - stretchPreviewLength;
+            }
+            repaint();
+            break;
+        }
+
         case DragMode::trimStart:
             model::trimRegionStart (dragRegion, maybeSnap (timeline.xToTime ((float) e.x)), dragSourceLength, &undoManager);
             break;
@@ -1750,6 +1810,22 @@ void ArrangeCanvas::mouseUp (const juce::MouseEvent& e)
             }
         }
         rubberBand = {};
+    }
+
+    if ((dragMode == DragMode::stretchStart || dragMode == DragMode::stretchEnd) && dragRegion.isValid())
+    {
+        const double length = dragRegion[ids::length];
+        const auto factor = length > 0.0 ? stretchPreviewLength / length : 1.0;
+        const bool fromStart = dragMode == DragMode::stretchStart;
+        dragMode = DragMode::none;
+        repaint();
+        if (! wasClick && std::abs (factor - 1.0) > 1.0e-3 && onStretch)
+        {
+            pendingStretch = dragRegion;
+            onStretch ({ dragRegion }, factor, fromStart, {});
+        }
+        else if (wasClick && timeline.tool == TimelineState::Tool::stretch)
+            showRegionMenu (dragRegion);
     }
 
     if (dragMode == DragMode::tempo && dragTempo.isValid() && ! wasClick)
@@ -1918,6 +1994,16 @@ void ArrangeCanvas::useTool (const juce::MouseEvent& e, juce::ValueTree region, 
     {
         case TimelineState::Tool::select:
             break;   // (handled in mouseDown: a box round regions)
+
+        case TimelineState::Tool::stretch:
+        {
+            // the nearer edge: the left third stretches from the start, the rest from the end
+            if (model::numTakes (region) > 0)
+                break;
+            const auto bounds = regionBounds (region, trackIndex);
+            startStretch (region, trackIndex, e.position.x < bounds.getX() + bounds.getWidth() / 3.0f);
+            break;
+        }
         case TimelineState::Tool::eraser:
             undoManager.beginNewTransaction ("Delete region");
             for (auto& r : selection)
@@ -2056,6 +2142,68 @@ void ArrangeCanvas::resetGain (juce::ValueTree region)
     repaint();
 }
 
+void ArrangeCanvas::startStretch (juce::ValueTree region, int trackIndex, bool fromStart)
+{
+    dragMode = fromStart ? DragMode::stretchStart : DragMode::stretchEnd;
+    dragRegion = region;
+    stretchTrack = trackIndex;
+    stretchPreviewStart = region[ids::start];
+    stretchPreviewLength = region[ids::length];
+    repaint();
+}
+
+void ArrangeCanvas::addStretchMenu (juce::PopupMenu& menu, juce::ValueTree region)
+{
+    // Stretch: the selected regions (or this one) longer or shorter, their audio stretched to fit
+    if (! onStretch)
+        return;
+    auto regions = timeline.selectedRegionTrees();
+    if (! regions.contains (region))
+        regions = { region };
+    const bool midi = model::isMidiRegion (region);
+    const auto mode = region[ids::stretchMode].toString() == model::stretchTape ? model::stretchTape : model::stretchKeepPitch;
+    const auto stretched = model::stretchOf (region);
+
+    juce::PopupMenu sub;
+    const auto times = juce::String::charToString (0x00d7);
+    sub.addItem ("Double Length (" + times + "2)", [this, regions] { onStretch (regions, 2.0, false, {}); });
+    sub.addItem ("Half Length (" + times + "1/2)", [this, regions] { onStretch (regions, 0.5, false, {}); });
+    sub.addItem ("Two-Thirds (" + times + "2/3: triplet feel)", [this, regions] { onStretch (regions, 2.0 / 3.0, false, {}); });
+
+    // To fit a number of bars at the song's tempo (a loop of another tempo, say)
+    juce::PopupMenu fit;
+    const auto map = model::tempoMapOf (project);
+    const double start = region[ids::start], length = region[ids::length];
+    const auto beat0 = map.beatAt (start);
+    for (const auto bars : { 1, 2, 4, 8, 16 })
+    {
+        const auto target = map.secondsAt (beat0 + bars * map.beatsPerBarAt (beat0)) - start;
+        if (length > 0.0 && target > 0.0)
+            fit.addItem (juce::String (bars) + (bars == 1 ? " Bar" : " Bars"), [this, regions, target, length]
+            {
+                onStretch (regions, target / length, false, {});
+            });
+    }
+    sub.addSubMenu ("Fit to Bars", fit);
+
+    if (! midi)
+    {
+        sub.addSeparator();
+        sub.addItem ("Keep Pitch", true, mode == model::stretchKeepPitch, [this, regions]
+        {
+            onStretch (regions, 1.0, false, model::stretchKeepPitch);
+        });
+        sub.addItem ("Tape (pitch follows speed)", true, mode == model::stretchTape, [this, regions]
+        {
+            onStretch (regions, 1.0, false, model::stretchTape);
+        });
+        sub.addSeparator();
+        sub.addItem ("Reset to Original Length" + (stretched != 1.0 ? " (" + times + juce::String (stretched, 3) + " now)" : juce::String()),
+                     stretched != 1.0, false, [this, regions] { onStretch (regions, 0.0, false, {}); });
+    }
+    menu.addSubMenu ("Stretch", sub);
+}
+
 void ArrangeCanvas::showRegionMenu (juce::ValueTree region)
 {
     // Logic's region shortcut menu: the edits, with their keys, then the region's own settings.
@@ -2085,6 +2233,7 @@ void ArrangeCanvas::showRegionMenu (juce::ValueTree region)
             menu.addCommandItem (commandManager, commands::quantize);
             menu.addCommandItem (commandManager, commands::showPianoRoll);
             menu.addCommandItem (commandManager, commands::eventList);
+            addStretchMenu (menu, region);
         }
         else
         {
@@ -2134,6 +2283,7 @@ void ArrangeCanvas::showRegionMenu (juce::ValueTree region)
             for (auto ms : { 10, 50, 250, 1000 })
                 fades.addItem ("Fade out " + juce::String (ms) + " ms", [setFades, ms] { setFades (-1.0, ms / 1000.0); });
             menu.addSubMenu ("Fades", fades);
+            addStretchMenu (menu, region);
 
             // Extensions (Cubase): an ARA plugin on just these regions
             if (addExtensionItems)

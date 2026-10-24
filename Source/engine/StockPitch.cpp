@@ -8,6 +8,10 @@
     copy, refined at full rate), and two-period grains cut one period apart are laid down at the new
     period. The grains keep the voice's character (formants) unless asked to move it. They look 50 ms
     ahead, which the mixer's delay compensation accounts for.
+
+    Pitch Correction's Live mode looks nowhere ahead (for singing through it while recording): each grain
+    is cut from the newest whole periods the instant before it's needed, so nothing is added to the
+    mixer's delay; the voice comes out a cycle or two of itself behind (2 to 10 ms for a singing voice).
 */
 namespace riff
 {
@@ -32,13 +36,17 @@ namespace
             decimated.assign (1024, 0.0f);
             periods.fill (0.0f);
             time = 0;
-            synth = (double) latency;
+            synth = live ? 0.0 : (double) latency;
+            lastHalf = 128.0f;
             mark = 0.0;
             lowPass = 0.0f;
             hopCount = 0;
         }
 
-        int getLatency() const noexcept { return latency; }
+        int getLatency() const noexcept { return live ? 0 : latency; }
+
+        /** Live: no look-ahead (prepare again after changing it). */
+        bool live = false;
 
         /** The Low pitch range: finds notes down to 40 Hz (deep voices, bass) instead of 70 Hz. */
         void setLowRange (bool low) noexcept
@@ -76,9 +84,14 @@ namespace
                 if (time % hopSize == 0 && time >= window)
                     detect();
 
-                // Lay down every grain that reaches this sample (grains are centred up to a period ahead)
-                while (synth <= (double) time + 1.5 * maxPeriod)
-                    addGrain (ratioFor, formant, fixedPeriod);
+                // Lay down every grain that reaches this sample (grains are centred up to a period ahead;
+                // live, each just as it starts, cut from what has been heard by then)
+                if (live)
+                    while (synth - (double) lastHalf <= (double) t)
+                        addGrain (ratioFor, formant, fixedPeriod);
+                else
+                    while (synth <= (double) time + 1.5 * maxPeriod)
+                        addGrain (ratioFor, formant, fixedPeriod);
 
                 const auto slot = (size_t) (t & mask);
                 const auto w = weights[slot];
@@ -178,6 +191,11 @@ namespace
         void addGrain (RatioFn& ratioFor, float formant, float fixedPeriod) noexcept
         {
             const auto centre = (juce::int64) std::llround (synth);
+            if (live)
+            {
+                addLiveGrain (centre, ratioFor, formant, fixedPeriod);
+                return;
+            }
             const auto analysisTime = centre - latency;
             const auto pin = periodAt (analysisTime);
             float halfWidth, step;
@@ -223,6 +241,54 @@ namespace
             synth += step;
         }
 
+        /** Live: the grain's source is the newest audio that can fill it, kept on the voice's period grid. */
+        template <typename RatioFn>
+        void addLiveGrain (juce::int64 centre, RatioFn& ratioFor, float formant, float fixedPeriod) noexcept
+        {
+            const auto newest = (double) (time - 2);   // (the last sample that can be read with its neighbour)
+            const auto pin = periodAt (time);
+            float halfWidth, step;
+            double source;
+            if (pin > 0.0f)
+            {
+                const auto ratio = fixedPeriod > 0.0f ? pin / fixedPeriod : std::max (0.25f, ratioFor (pin));
+                step = fixedPeriod > 0.0f ? fixedPeriod : pin / ratio;
+                halfWidth = std::min (pin, step) * grainScale;
+                const auto target = newest - (double) halfWidth * std::max (1.0f, formant);
+                // the newest whole period at or before the target (periods repeat going down, are skipped going up)
+                if (mark <= 0.0 || std::abs (target - mark) > pin * 3.0)
+                    mark = target;
+                else
+                    mark += std::floor ((target - mark) / pin) * pin;
+                source = mark;
+            }
+            else
+            {
+                mark = 0.0;
+                step = halfWidth = 128.0f;   // (unvoiced: overlap-add of the input, a few ms behind)
+                source = newest - halfWidth;
+                if (! processUnvoiced)
+                    formant = 1.0f;
+            }
+            const auto reach = (int) std::ceil (halfWidth);
+            for (int k = -reach; k <= reach; ++k)
+            {
+                const auto x = (float) k / halfWidth;
+                if (x <= -1.0f || x >= 1.0f || centre + k < time - 1)
+                    continue;   // (already played)
+                const auto w = 0.5f + 0.5f * std::cos (pi * x);
+                const auto at = source + k * formant;
+                if (at > newest || at < (double) (time - size + 4))
+                    continue;
+                const auto slot = (size_t) ((centre + k) & mask);
+                accL[slot] += w * input (inL, at);
+                accR[slot] += w * input (inR, at);
+                weights[slot] += w;
+            }
+            lastHalf = halfWidth;
+            synth += step;
+        }
+
     public:
         float grainScale = 1.0f;          // (Vocal Transformer's Grain Size)
         bool processUnvoiced = false;     // (its Formants: process always, or keep unvoiced sounds as they are)
@@ -232,7 +298,7 @@ namespace
         juce::int64 time = 0, hopCount = 0;
         std::vector<float> inL, inR, accL, accR, weights, decimated;
         std::array<float, 64> periods {};
-        float lowPass = 0.0f;
+        float lowPass = 0.0f, lastHalf = 128.0f;
     };
 
     inline float midiOfPeriod (float period, double rate) noexcept
@@ -247,10 +313,11 @@ namespace
     public:
         using BuiltInEffect::BuiltInEffect;
         void prepare (double rate, int) override { sampleRate = preparedRate = rate; psola.prepare (rate); shift = 0.0f; }
-        int getLatencySamples() const override { return psola.getLatency(); }
+        int getLatencySamples() const override { return choice (iLive) == 1 ? 0 : (int) std::ceil (0.06 * preparedRate); }
         float displayValue() const noexcept override { return shownCents.load (std::memory_order_relaxed); }
 
-        enum Index { iKey, iScale, iResponse, iDetune, iAmount, iBypassAll, iRange, iTolerance, iReference, iKbMode, iNote1, iBypass1 = iNote1 + 12 };
+        enum Index { iKey, iScale, iResponse, iDetune, iAmount, iBypassAll, iRange, iTolerance, iReference, iKbMode, iNote1, iBypass1 = iNote1 + 12,
+                     iLive = iBypass1 + 12 };
 
         void process (float* l, float* r, int n) noexcept override
         {
@@ -263,6 +330,11 @@ namespace
             const auto reference = value (iReference) * 0.01f;
             if ((choice (iRange) == 1) != psola.lowRange)
                 psola.setLowRange (choice (iRange) == 1);
+            if ((choice (iLive) == 1) != psola.live)
+            {
+                psola.live = choice (iLive) == 1;
+                psola.prepare (sampleRate);
+            }
             const auto rate = sampleRate;
             auto ratioFor = [&] (float period)
             {
@@ -531,7 +603,8 @@ const std::vector<StockEffect>& stockPitchEffects()
               { "bp5", "Bypass E", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } }, { "bp6", "Bypass F", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
               { "bp7", "Bypass F#", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } }, { "bp8", "Bypass G", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
               { "bp9", "Bypass G#", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } }, { "bp10", "Bypass A", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
-              { "bp11", "Bypass A#", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } }, { "bp12", "Bypass B", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } } }, "Pitch" },
+              { "bp11", "Bypass A#", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } }, { "bp12", "Bypass B", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "live", "Mode", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Studio", "Live" } } }, "Pitch" },
           make<PitchCorrection> },
         { { "vocalTransformer", "Vocal Transformer", {
               { "pitch", "Pitch", st, -24.0f, 24.0f, 0.0f, 0.0f },

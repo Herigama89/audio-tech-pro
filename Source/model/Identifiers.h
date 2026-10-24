@@ -116,6 +116,9 @@ namespace riff::ids
     RIFF_DECLARE_ID (channelFormat)    // TRACK: "mono" or "stereo" (unset: stereo)
     RIFF_DECLARE_ID (araArchive)       // INSERT: an ARA plugin's edits (base64), e.g. Melodyne's notes
     RIFF_DECLARE_ID (fineTune)         // REGION (audio): cents, -50 .. 50 (with transpose: the pitch it plays at)
+    RIFF_DECLARE_ID (stretch)          // REGION (audio): stretched (Stretch tool): how many times its original length
+    RIFF_DECLARE_ID (stretchSource)    // REGION (audio): the original file it was stretched from (its file is the render)
+    RIFF_DECLARE_ID (stretchMode)      // REGION (audio): "pitch" (kept) or "tape" (pitch follows the speed)
     RIFF_DECLARE_ID (pitchSource)      // REGION (audio): follows the key track (true), from the key it was in when turned on
     RIFF_DECLARE_ID (pitchSourceKey)   // REGION (audio): that key's root (0..11)
     RIFF_DECLARE_ID (flex)             // REGION (audio): Flex on (with the track's Flex Mode)

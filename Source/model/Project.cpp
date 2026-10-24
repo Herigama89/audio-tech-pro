@@ -32,7 +32,7 @@ namespace
             const auto name = tree.getPropertyName (i);
             auto value = tree.getProperty (name);
 
-            if ((tree.hasType (ids::REGION) || tree.hasType (ids::TAKE)) && name == ids::file)
+            if ((tree.hasType (ids::REGION) || tree.hasType (ids::TAKE)) && (name == ids::file || name == ids::stretchSource))
             {
                 const juce::File f (value.toString());
                 value = projectDir.exists() ? f.getRelativePathFrom (projectDir) : f.getFullPathName();
@@ -77,7 +77,7 @@ namespace
 
             auto value = prop.value;
 
-            if ((tree.hasType (ids::REGION) || tree.hasType (ids::TAKE)) && prop.name == ids::file)
+            if ((tree.hasType (ids::REGION) || tree.hasType (ids::TAKE)) && (prop.name == ids::file || prop.name == ids::stretchSource))
             {
                 const auto path = value.toString();
                 value = juce::File::isAbsolutePath (path) ? path
@@ -905,6 +905,75 @@ void applyRegionDefaults (const juce::ValueTree& track, juce::ValueTree region)
         if (name.startsWith (prefix))
             region.setProperty (juce::Identifier (name.substring (prefix.length())), track[track.getPropertyName (i)], nullptr);
     }
+}
+
+double stretchOf (const juce::ValueTree& region)
+{
+    const double k = region.getProperty (ids::stretch, 1.0);
+    return k > 0.0 ? k : 1.0;
+}
+
+StretchPlan stretchPlanFor (const juce::ValueTree& region, double factor, const juce::String& mode)
+{
+    StretchPlan plan;
+    const auto original = region.getProperty (ids::stretchSource).toString();
+    plan.source = juce::File (original.isNotEmpty() ? original : region[ids::file].toString());
+    plan.ratio = juce::jlimit (minStretch, maxStretch, stretchOf (region) * factor);
+    if (std::abs (plan.ratio - 1.0) < 1.0e-4)
+        plan.ratio = 1.0;
+    plan.mode = mode == stretchTape ? stretchTape : stretchKeepPitch;
+    return plan;
+}
+
+void applyStretch (juce::ValueTree region, const juce::File& rendered, const StretchPlan& plan, bool fromStart, juce::UndoManager* um)
+{
+    const auto before = stretchOf (region);
+    const auto factor = plan.ratio / before;
+    const double start = region[ids::start], length = region[ids::length], offset = region[ids::offset];
+    const auto newLength = juce::jmax (minRegionLength, length * factor);
+
+    region.setProperty (ids::file, rendered.getFullPathName(), um);
+    region.setProperty (ids::offset, juce::jmax (0.0, offset * factor), um);
+    region.setProperty (ids::length, newLength, um);
+    if (fromStart)
+        region.setProperty (ids::start, juce::jmax (0.0, start + length - newLength), um);
+    for (const auto& id : { ids::fadeIn, ids::fadeOut })
+        if (region.hasProperty (id))
+            region.setProperty (id, juce::jmin (newLength * 0.5, (double) region[id] * factor), um);
+    if (region.hasProperty (ids::loopEnd))
+        region.setProperty (ids::loopEnd, (double) region[ids::start] + newLength
+                                              + ((double) region[ids::loopEnd] - start - length) * factor, um);
+
+    if (std::abs (plan.ratio - 1.0) < 1.0e-6)
+    {
+        region.removeProperty (ids::stretch, um);
+        region.removeProperty (ids::stretchSource, um);
+        region.removeProperty (ids::stretchMode, um);
+    }
+    else
+    {
+        region.setProperty (ids::stretch, plan.ratio, um);
+        region.setProperty (ids::stretchSource, plan.source.getFullPathName(), um);
+        region.setProperty (ids::stretchMode, plan.mode, um);
+    }
+}
+
+void stretchMidiRegion (juce::ValueTree region, double factor, bool fromStart, juce::UndoManager* um)
+{
+    factor = juce::jlimit (minStretch, maxStretch, factor);
+    const double start = region[ids::start], length = region[ids::length], offset = region[ids::offset];
+    const auto newLength = juce::jmax (minRegionLength, length * factor);
+    for (auto child : region)
+    {
+        if (child.hasProperty (ids::start))
+            child.setProperty (ids::start, (double) child[ids::start] * factor, um);
+        if (child.hasType (ids::NOTE))
+            child.setProperty (ids::length, juce::jmax (1.0e-3, (double) child[ids::length] * factor), um);
+    }
+    region.setProperty (ids::offset, offset * factor, um);
+    region.setProperty (ids::length, newLength, um);
+    if (fromStart)
+        region.setProperty (ids::start, juce::jmax (0.0, start + length - newLength), um);
 }
 
 AudioShape audioShapeOf (const juce::ValueTree& project, const juce::ValueTree& track, const juce::ValueTree& region, double detectedBpm)

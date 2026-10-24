@@ -80,7 +80,14 @@ public:
 
 private:
     enum class DragMode { none, scrub, move, trimStart, trimEnd, cycleNew, cycleMove, automationPoint, rubberBand, pencilRegion, marker,
-                          fadeIn, fadeOut, loopEnd, punch, marquee, zoomRect, solo, tempo, compSwipe, gain };
+                          fadeIn, fadeOut, loopEnd, punch, marquee, zoomRect, solo, tempo, compSwipe, gain,
+                          stretchStart, stretchEnd };
+
+    // Stretch (the Stretch tool, or Option-drag of an edge): the region's new place while dragging.
+    double stretchPreviewStart = 0.0, stretchPreviewLength = 0.0;
+    int stretchTrack = -1;
+    juce::ValueTree pendingStretch;   // (its outline stays at stretchPreview* while it renders)
+    void startStretch (juce::ValueTree region, int trackIndex, bool fromStart);
 
     // Clip gain (the handle on an audio region, as in FL Studio; the Gain tool): each region's level when the drag began.
     std::vector<std::pair<juce::ValueTree, double>> gainBefore;
@@ -127,6 +134,7 @@ private:
     void updateRubberBand (const juce::MouseEvent& e);
     void useTool (const juce::MouseEvent& e, juce::ValueTree region, int trackIndex);
     void showRegionMenu (juce::ValueTree region);
+    void addStretchMenu (juce::PopupMenu& menu, juce::ValueTree region);
 
 public:
     /** Region commands the window's menus and keys run too. */
@@ -137,6 +145,13 @@ public:
 
     /** Detect Tempo (BPM) on an audio region (its shortcut menu). */
     std::function<void (juce::ValueTree region)> onDetectTempo;
+
+    /** Stretch these regions to `factor` times their length (their start edge dragged when `fromStart`, so their
+        end stays); `mode`: "pitch" or "tape" (empty: as each is now); factor 0: back to the original. */
+    std::function<void (juce::Array<juce::ValueTree> regions, double factor, bool fromStart, juce::String mode)> onStretch;
+
+    /** The outline of a stretch being rendered goes once it's done. */
+    void clearPendingStretch() { pendingStretch = {}; repaint(); }
 
     /** A project from another program dropped on the tracks area (Ableton, FL Studio, Pro Tools...). */
     std::function<void (const juce::File&)> onOpenProject;

@@ -2657,6 +2657,7 @@ namespace
                 { "scale", Kind::dropdown, R (40, 132, 190, 30), "Scale/Chord" },
                 { "bypassAll", Kind::toggle, R (40, 196, 160, 28), "=BYPASS ALL" },
                 { "range", Kind::segmented, R (40, 268, 180, 28), "Pitch Range" },
+                { "live", Kind::segmented, R (760, 332, 150, 26), "-" },
                 { "kbMode", Kind::segmented, R (290, 332, 400, 26), "-" },
                 { "response", Kind::knob, R (40, 420, 120, 160), "Response" },
                 { "tolerance", Kind::knob, R (210, 420, 120, 160), "Tolerance" },

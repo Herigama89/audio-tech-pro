@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <JuceHeader.h>
 #include "model/Project.h"
+#include "model/ProjectFiles.h"
 
 using namespace riff;
 using Catch::Matchers::WithinAbs;
@@ -949,4 +950,90 @@ TEST_CASE ("Presets: save and load an insert's settings; a Default every new one
 
     CHECK (presets::remove (comp, "Vocal Squeeze"));
     CHECK (! presets::list (comp).contains ("Vocal Squeeze"));
+}
+
+TEST_CASE ("Stretch: a region points at its render, remembers its original, and goes back to it", "[model][stretch]")
+{
+    auto project = model::createProject();
+    auto track = model::addTrack (project, "A", nullptr);
+    const juce::File original ("/media/loop.wav"), render1 ("/media/Stretched/loop x1.5.wav"), render2 ("/media/Stretched/loop x0.75.wav");
+    auto region = model::addRegion (track, original, 4.0, 2.0, nullptr);
+    region.setProperty (ids::offset, 1.0, nullptr);
+    region.setProperty (ids::fadeOut, 0.1, nullptr);
+
+    // 1.5 times as long from its end edge: same start, the content's place in the render 1.5 times further in
+    auto plan = model::stretchPlanFor (region, 1.5, model::stretchKeepPitch);
+    CHECK (plan.source == original);
+    CHECK (std::abs (plan.ratio - 1.5) < 1e-9);
+    model::applyStretch (region, render1, plan, false, nullptr);
+    CHECK (juce::File (region[ids::file].toString()) == render1);
+    CHECK (std::abs ((double) region[ids::start] - 4.0) < 1e-9);
+    CHECK (std::abs ((double) region[ids::length] - 3.0) < 1e-9);
+    CHECK (std::abs ((double) region[ids::offset] - 1.5) < 1e-9);
+    CHECK (std::abs ((double) region[ids::fadeOut] - 0.15) < 1e-9);
+    CHECK (std::abs (model::stretchOf (region) - 1.5) < 1e-9);
+
+    // Half of that from its start edge: rendered from the original again (x0.75), the end stays at 7 s
+    plan = model::stretchPlanFor (region, 0.5, model::stretchKeepPitch);
+    CHECK (plan.source == original);
+    CHECK (std::abs (plan.ratio - 0.75) < 1e-9);
+    model::applyStretch (region, render2, plan, true, nullptr);
+    CHECK (std::abs ((double) region[ids::length] - 1.5) < 1e-9);
+    CHECK (std::abs ((double) region[ids::start] - 5.5) < 1e-9);
+    CHECK (std::abs ((double) region[ids::offset] - 0.75) < 1e-9);
+
+    // Back to the original: its own file, length and offset, and no stretch left on it
+    plan = model::stretchPlanFor (region, 1.0 / model::stretchOf (region), model::stretchKeepPitch);
+    CHECK (plan.ratio == 1.0);
+    model::applyStretch (region, plan.source, plan, false, nullptr);
+    CHECK (juce::File (region[ids::file].toString()) == original);
+    CHECK (std::abs ((double) region[ids::length] - 2.0) < 1e-9);
+    CHECK (std::abs ((double) region[ids::offset] - 1.0) < 1e-9);
+    CHECK (! region.hasProperty (ids::stretch));
+    CHECK (! region.hasProperty (ids::stretchSource));
+
+    // Limits: never more than 8 times or less than an eighth of the original
+    CHECK (model::stretchPlanFor (region, 100.0, model::stretchTape).ratio == model::maxStretch);
+    CHECK (model::stretchPlanFor (region, 0.001, model::stretchTape).ratio == model::minStretch);
+}
+
+TEST_CASE ("Stretch: a MIDI region's notes spread out with it", "[model][stretch]")
+{
+    auto project = model::createProject();
+    auto track = model::addTrack (project, "Keys", nullptr, -1, model::instrumentKind);
+    auto region = model::addMidiRegion (track, 2.0, 2.0, nullptr);
+    auto note = model::addNote (region, 60, 1.0, 0.5, 100, nullptr);
+    model::stretchMidiRegion (region, 2.0, false, nullptr);
+    CHECK (std::abs ((double) region[ids::length] - 4.0) < 1e-9);
+    CHECK (std::abs ((double) note[ids::start] - 2.0) < 1e-9);
+    CHECK (std::abs ((double) note[ids::length] - 1.0) < 1e-9);
+    CHECK (std::abs ((double) region[ids::start] - 2.0) < 1e-9);
+}
+
+TEST_CASE ("Stretch: a stretched region's original is saved, copied and counted as its media", "[model][stretch]")
+{
+    auto temp = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("riff-stretch-" + juce::Uuid().toString());
+    temp.createDirectory();
+    const auto original = temp.getChildFile ("loop.wav"), rendered = temp.getChildFile ("Stretched/loop x2.wav");
+    original.replaceWithText ("x");
+    rendered.create();
+    rendered.replaceWithText ("y");
+    auto project = model::createProject();
+    auto region = model::addRegion (model::addTrack (project, "A", nullptr), original, 0.0, 1.0, nullptr);
+    model::applyStretch (region, rendered, model::stretchPlanFor (region, 2.0, model::stretchKeepPitch), false, nullptr);
+
+    const auto media = model::files::audioFilesOf (project);
+    CHECK (media.contains (original));
+    CHECK (media.contains (rendered));
+
+    // saved relative to the project, and read back
+    const auto file = temp.getChildFile ("Song" + model::fileExtension);
+    juce::String error;
+    REQUIRE (model::save (project, file, error));
+    CHECK (! file.loadFileAsString().contains (temp.getFullPathName()));
+    auto loaded = model::load (file, error);
+    REQUIRE (loaded.isValid());
+    const auto r = loaded.getChild (0).getChild (0);
+    CHECK (juce::File (r[ids::stretchSource].toString()) == original);
+    temp.deleteRecursively();
 }
