@@ -244,6 +244,8 @@ private:
     /** The selected tracks an edit here goes to (this one alone if it isn't selected). */
     juce::Array<juce::ValueTree> acting() const;
     void showZoneMenu();
+    void startRename();
+    std::unique_ptr<juce::TextEditor> nameEditor;
     void showControlMenu (juce::Slider& control, const juce::String& param, const juce::String& name,
                           std::function<void()> reset, const juce::String& learn = {});
     strip::Fader fader;

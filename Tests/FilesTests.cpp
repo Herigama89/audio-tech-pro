@@ -96,3 +96,90 @@ TEST_CASE ("Consolidate copies outside audio into the project folder", "[files]"
     um.undo();
     CHECK (r1[ids::file].toString() == a.getFullPathName());
 }
+
+TEST_CASE ("Missing audio is found by name: case, accents, extension, a stereo pair's halves", "[files]")
+{
+    TempDir temp;
+    const auto audio = temp.dir.getChildFile ("Session").getChildFile ("Audio Files");
+    audio.createDirectory();
+    for (const auto* name : { "Kick_01.wav", "VOZ Principal.aif", "Guitar.L.wav", "Guitar.R.wav", "Bajo-Final.wav" })
+        audio.getChildFile (name).replaceWithText ("x");
+
+    model::files::MediaIndex index;
+    index.add (temp.dir);
+    CHECK (index.find ("kick_01.WAV").getFileName() == "Kick_01.wav");
+    CHECK (index.find ("/Volumes/Old Drive/Session/Audio Files/Voz Principal.wav").getFileName() == "VOZ Principal.aif");   // another extension
+    CHECK (index.find ("Guitar.wav").getFileName().startsWith ("Guitar."));                                                // a stereo pair
+    CHECK (index.find (juce::String::fromUTF8 ("Bajo Final.wav")).getFileName() == "Bajo-Final.wav");                        // punctuation
+    CHECK_FALSE (index.find ("Nothing.wav").existsAsFile());
+
+    // A project pointing at where they were: pointed at where they are
+    auto project = model::createProject();
+    auto track = model::addTrack (project, "Drums", nullptr);
+    model::addRegion (track, juce::File ("/Users/someone/Old/Kick_01.wav"), 0.0, 1.0, nullptr);
+    model::addRegion (track, juce::File ("/Users/someone/Old/Snare.wav"), 1.0, 1.0, nullptr);
+    CHECK (model::files::missingFilesOf (project).size() == 2);
+    CHECK (model::files::relinkMissing (project, index, nullptr) == 1);
+    CHECK (model::files::missingFilesOf (project).size() == 1);
+    CHECK (track.getChild (0)[ids::file].toString() == audio.getChildFile ("Kick_01.wav").getFullPathName());
+}
+
+TEST_CASE ("Save a Copy: the project and every audio file it uses, in one folder that opens anywhere", "[files]")
+{
+    TempDir temp;
+    const auto elsewhere = temp.dir.getChildFile ("Samples");
+    elsewhere.createDirectory();
+    const auto a = elsewhere.getChildFile ("a.wav"), b = temp.dir.getChildFile ("Desktop").getChildFile ("a.wav");
+    a.replaceWithText ("first");
+    b.getParentDirectory().createDirectory();
+    b.replaceWithText ("second, same name");
+
+    auto project = model::createProject ("Song");
+    auto track = model::addTrack (project, "T", nullptr);
+    model::addRegion (track, a, 0.0, 1.0, nullptr);
+    model::addRegion (track, b, 1.0, 1.0, nullptr);
+    model::addRegion (track, temp.dir.getChildFile ("gone.wav"), 2.0, 1.0, nullptr);
+
+    juce::String error;
+    const auto copy = model::files::saveCopyWithMedia (project, temp.dir.getChildFile ("Out"), "Song Copy", {}, error);
+    REQUIRE (copy.existsAsFile());
+    CHECK (error.isEmpty());
+    const auto folder = copy.getParentDirectory();
+    CHECK (folder.getFileName() == "Song Copy");
+    CHECK (folder.getChildFile ("Audio Files").getNumberOfChildFiles (juce::File::findFiles) == 2);   // both, though named alike
+    CHECK (folder.getChildFile ("Missing files.txt").loadFileAsString().contains ("gone.wav"));
+
+    // Moved somewhere else entirely (another computer), it still finds its audio
+    const auto moved = temp.dir.getChildFile ("Friend").getChildFile ("Song Copy");
+    moved.getParentDirectory().createDirectory();
+    REQUIRE (folder.moveFileTo (moved));
+    auto opened = model::load (moved.getChildFile (copy.getFileName()), error);
+    REQUIRE (opened.isValid());
+    const auto first = juce::File (opened.getChild (0).getChild (0)[ids::file].toString());
+    const auto second = juce::File (opened.getChild (0).getChild (1)[ids::file].toString());
+    CHECK (first.loadFileAsString() == "first");
+    CHECK (second.loadFileAsString() == "second, same name");
+    CHECK (first.isAChildOf (moved));
+
+    // and zipped to send
+    const auto zip = temp.dir.getChildFile ("Song Copy.zip");
+    CHECK (model::files::zipFolder (moved, zip, {}, error));
+    juce::ZipFile z (zip);
+    CHECK (z.getNumEntries() >= 3);
+}
+
+TEST_CASE ("Timed backups hold the project as it is now", "[files]")
+{
+    TempDir temp;
+    const auto file = temp.dir.getChildFile ("Song.atp");
+    auto project = model::createProject ("Song");
+    juce::String error;
+    REQUIRE (model::save (project, file, error));
+    model::addTrack (project, "New since saving", nullptr);
+    const auto backup = model::files::backupNow (project, file, 5);
+    REQUIRE (backup.existsAsFile());
+    auto restored = model::load (backup, error);
+    REQUIRE (restored.isValid());
+    CHECK (model::numTracks (restored) == 1);
+    CHECK (model::files::backupsOf (file).contains (backup));
+}

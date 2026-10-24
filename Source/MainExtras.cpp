@@ -107,9 +107,12 @@ namespace
             addRow (autosave, "Autosave", { "Off", "Every minute", "Every 2 minutes", "Every 5 minutes", "Every 10 minutes" },
                     [] (int minutes) { return minutes == 0 ? 1 : minutes == 1 ? 2 : minutes == 5 ? 4 : minutes == 10 ? 5 : 3; } (props.getIntValue ("autosaveMinutes", 2)),
                     [this] (int id) { props.setValue ("autosaveMinutes", std::array<int, 5> { 0, 1, 2, 5, 10 }[(size_t) id - 1]); });
-            addRow (backups, "Backups kept", { "3", "5", "10", "20" },
-                    [] (int n) { return n <= 3 ? 1 : n <= 5 ? 2 : n <= 10 ? 3 : 4; } (props.getIntValue ("backupsToKeep", 10)),
-                    [this] (int id) { props.setValue ("backupsToKeep", std::array<int, 4> { 3, 5, 10, 20 }[(size_t) id - 1]); });
+            addRow (backups, "Backups kept", { "3", "5", "10", "20", "50" },
+                    [] (int n) { return n <= 3 ? 1 : n <= 5 ? 2 : n <= 10 ? 3 : n <= 20 ? 4 : 5; } (props.getIntValue ("backupsToKeep", 10)),
+                    [this] (int id) { props.setValue ("backupsToKeep", std::array<int, 5> { 3, 5, 10, 20, 50 }[(size_t) id - 1]); });
+            addRow (autoBackup, "Automatic backups", { "Only when saving", "Every 5 minutes", "Every 10 minutes", "Every 15 minutes" },
+                    [] (int m) { return m <= 0 ? 1 : m <= 5 ? 2 : m <= 10 ? 3 : 4; } (props.getIntValue ("backupMinutes", 5)),
+                    [this] (int id) { props.setValue ("backupMinutes", std::array<int, 4> { 0, 5, 10, 15 }[(size_t) id - 1]); });
             addRow (bitDepth, "Recording format", { "16-bit WAV", "24-bit WAV", "32-bit float WAV" },
                     [] (int b) { return b == 16 ? 1 : b == 32 ? 3 : 2; } (props.getIntValue ("recordBitDepth", 24)),
                     [this] (int id) { props.setValue ("recordBitDepth", std::array<int, 3> { 16, 24, 32 }[(size_t) id - 1]); });
@@ -160,7 +163,7 @@ namespace
 
         juce::PropertiesFile& props;
         std::function<void()> onChange;
-        juce::ComboBox autosave, backups, bitDepth, stopBehaviour;
+        juce::ComboBox autosave, backups, autoBackup, bitDepth, stopBehaviour;
         juce::ToggleButton openLast;
         std::vector<Row> rows;
     };
@@ -1432,17 +1435,37 @@ void MainComponent::setAudioSuiteBuiltIn (const juce::String& type)
     audioSuiteSettings.setProperty (ids::effect, type, nullptr);
     audioSuiteSettings.setProperty (ids::id, "audiosuite", nullptr);
     auto settings = audioSuiteSettings;
-    audioSuitePanel->setEffect (effect, effect->getName(), new EffectPanel (audioSuiteSettings, undoManager), [effect, settings]
+    auto apply = [effect, settings]
     {
         const auto& params = effect->getInfo().params;
         for (size_t p = 0; p < params.size(); ++p)
             effect->setParameter ((int) p, (float) (double) settings.getProperty (params[p].id, params[p].defaultValue));
-    });
+        effect->setAttachedFile (settings.getProperty ("irFile").toString());
+        effect->messageThreadUpdate();
+    };
+    engine.stopPreview();
+    auto* face = new EffectPanel (audioSuiteSettings, undoManager);
+    face->setMeterSource ([effect] (float* dest, int capacity) { return effect->readMeters (dest, capacity); });   // (its meters move in the preview)
+    audioSuitePanel->setEffect (effect, effect->getName(), face, apply);
+
+    // A knob turned while previewing: heard at once (Pro Tools' AudioSuite preview)
+    struct Knobs final : juce::ValueTree::Listener
+    {
+        std::function<void()> apply;
+        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { apply(); }
+    };
+    if (audioSuiteKnobs != nullptr)
+        audioSuiteSettings.removeListener (audioSuiteKnobs.get());
+    auto knobs = std::make_unique<Knobs>();
+    knobs->apply = apply;
+    audioSuiteSettings.addListener (knobs.get());
+    audioSuiteKnobs = std::move (knobs);
 }
 
 void MainComponent::setAudioSuitePlugin (const juce::PluginDescription& description)
 {
     showAudioSuite();
+    engine.stopPreview();
     if (audioSuitePanel == nullptr)
         return;
     juce::String error;
@@ -1479,6 +1502,7 @@ void MainComponent::renderAudioSuite()
 {
     if (audioSuitePanel == nullptr || audioSuitePanel->getEffect() == nullptr)
         return;
+    engine.stopPreview();   // (the effect renders now, not plays)
     const auto regions = audioSuiteRegions();
     if (regions.isEmpty())
     {
@@ -1532,20 +1556,20 @@ void MainComponent::previewAudioSuite()
         return;
     }
     audioSuitePanel->prepareForUse();
-    auto options = audioSuitePanel->getOptions();
-    options.handleSeconds = 0.0;
-    options.wholeFile = false;
     const auto region = regions.getFirst();
-    const auto temp = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("AudioTechPro AudioSuite Preview.wav");
-    const auto length = juce::jmin (30.0, (double) region[ids::length]);
-    const auto result = audiosuite::render (engine.getFormatManager(), juce::File (region[ids::file].toString()), (double) region[ids::offset],
-                                            length, *audioSuitePanel->getEffect(), options, temp);
-    if (result.error.isNotEmpty())
+    // Live: the region's audio through the effect as it plays (knobs turned are heard at once), round and round
+    double rate = 48000.0;
+    const auto length = juce::jmin (60.0, (double) region[ids::length]);
+    auto audio = std::make_unique<juce::AudioBuffer<float>> (audioedit::readRegion (engine.getFormatManager(), juce::File (region[ids::file].toString()),
+                                                                                    (double) region[ids::offset], length, rate));
+    if (audio->getNumSamples() < 2)
     {
-        audioSuitePanel->setStatus (result.error);
+        audioSuitePanel->setStatus ("Couldn't read " + juce::File (region[ids::file].toString()).getFileName());
         return;
     }
-    engine.previewFile (temp);
+    if (! engine.isPlaying() && ! engine.getDeviceManager().getCurrentAudioDevice())
+        audioSuitePanel->setStatus ("No audio device: choose one in Audio settings to hear the preview.");
+    engine.previewThrough (std::move (audio), rate, audioSuitePanel->getEffect());
     audioSuitePanel->setStatus ("Previewing " + region[ids::name].toString() + "...");
 }
 

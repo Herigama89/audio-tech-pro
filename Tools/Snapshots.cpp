@@ -336,6 +336,8 @@ public:
         for (auto* st : main.mixer.strips)
         {
             st->pushLevels (level, level * 0.7f);
+            for (int k = 0; k < 6; ++k)
+                st->pushLevels (level * 0.3f, level * 0.2f);   // falling back: the held peaks show above
             st->pushGainReduction (level * 12.0f);
             level *= 0.7f;
         }

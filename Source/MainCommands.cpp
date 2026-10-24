@@ -149,6 +149,9 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::openProject:            openProject(); break;
         case commands::saveProject:            saveProject(); break;
         case commands::saveProjectAs:          saveProjectAs(); break;
+        case commands::saveCopy:               saveCopy(); break;
+        case commands::closeProject:           closeProject(); break;
+        case commands::findMissingFiles:       findMissingFiles(); break;
         case commands::importAudio:            importAudio(); break;
         case commands::consolidateProject:     consolidate(); break;
         case commands::revertToBackup:         showBackups(); break;
@@ -439,9 +442,11 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             addRecentItems (menu);
             addTemplateAndAlternativeItems (menu);
             menu.addSeparator();
-            add ({ commands::saveProject, commands::saveProjectAs, commands::saveAsTemplate, commands::newAlternative, commands::revertToBackup });
+            add ({ commands::closeProject });
             menu.addSeparator();
-            add ({ commands::consolidateProject });
+            add ({ commands::saveProject, commands::saveProjectAs, commands::saveCopy, commands::saveAsTemplate, commands::newAlternative, commands::revertToBackup });
+            menu.addSeparator();
+            add ({ commands::consolidateProject, commands::findMissingFiles });
             menu.addSeparator();
             add ({ commands::importAudio, commands::importTracks });
             menu.addSeparator();

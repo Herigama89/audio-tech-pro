@@ -313,12 +313,10 @@ MainComponent::MainComponent (bool openAudioDevice)
     outputMeter.usePhotoLeds (true);   // the main output: the photo's blue LEDs (Studio White)
     for (auto* m : { &inputMeter, &outputMeter })
     {
-        m->setTooltip ("Input and output levels. Right-click to hide them (View > Show Input and Output Meters brings them back).");
-        m->onMenu = [this]
+        m->setTooltip ("Input and output levels. Click to clear the peaks; right-click for peak hold, how fast they fall, or to hide them.");
+        m->addToMenu = [this] (juce::PopupMenu& menu)
         {
-            juce::PopupMenu menu;
             menu.addCommandItem (&commandManager, commands::toggleMeters, "Show Input and Output Meters");
-            menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
         };
     }
 
@@ -530,6 +528,13 @@ MainComponent::MainComponent (bool openAudioDevice)
     engine.setRecordBitDepth (appProperties.getUserSettings()->getIntValue ("recordBitDepth", 24));
 
     engine.setStopOnClip (appProperties.getUserSettings()->getBoolValue ("stopOnClip", false));
+    LevelMeter::ballistics().holdTicks = appProperties.getUserSettings()->getIntValue ("meterHoldTicks", 60);
+    LevelMeter::ballistics().release = (float) appProperties.getUserSettings()->getDoubleValue ("meterRelease", 0.85);
+    LevelMeter::onBallisticsChanged = [this]
+    {
+        appProperties.getUserSettings()->setValue ("meterHoldTicks", LevelMeter::ballistics().holdTicks);
+        appProperties.getUserSettings()->setValue ("meterRelease", (double) LevelMeter::ballistics().release);
+    };
    #if RIFF_GPU_DRAWING
     setGpuDrawing (appProperties.getUserSettings()->getBoolValue ("gpuDrawing", true));
    #endif
@@ -864,6 +869,7 @@ MainComponent::~MainComponent()
     stopWatchingPluginWindowKeys();
    #endif
     EditorWindow::appKeys = nullptr;
+    LevelMeter::onBallisticsChanged = nullptr;
     commandManager.getKeyMappings()->removeChangeListener (this);
     removeKeyListener (commandManager.getKeyMappings());
 
@@ -1383,6 +1389,9 @@ void MainComponent::openProjectFile (const juce::File& file)
 
     loaded.setProperty (ids::name, file.getFileNameWithoutExtension(), nullptr);
     appProperties.getUserSettings()->setValue ("lastProject", file.getFullPathName());
+    // Audio that isn't where the project says (a copy from another computer, a moved folder): found by name in its folder
+    if (! model::files::missingFilesOf (loaded).isEmpty())
+        relinkFrom (loaded, { file.getParentDirectory() }, nullptr);
 
     // A newer autosave (the app closed before saving): offer it.
     if (const auto autosaved = model::files::newerAutosave (file); autosaved.existsAsFile())
@@ -1412,6 +1421,7 @@ void MainComponent::openProjectFile (const juce::File& file)
     }
 
     setProject (loaded, file);
+    findMissingFiles (true);
 }
 
 juce::StringArray MainComponent::shownPluginFormats()
@@ -1541,6 +1551,11 @@ void MainComponent::openImportedProject (const juce::File& file)
         return;
     }
 
+    // Audio the session's own reader didn't find: looked for by name (any case, accents, extension, a stereo pair's
+    // halves) all through the session's folder and the one it's in
+    if (! model::files::missingFilesOf (imported).isEmpty())
+        relinkFrom (imported, { file.isDirectory() ? file : file.getParentDirectory(), (file.isDirectory() ? file : file.getParentDirectory()).getParentDirectory() }, nullptr);
+
     // An untitled project of ours (Save puts it where you like); the original is left as it was.
     setProject (imported, {});
     markDirty();
@@ -1551,8 +1566,20 @@ void MainComponent::openImportedProject (const juce::File& file)
     message << "\"" << file.getFileNameWithoutExtension() << "\" (" << projectimport::formatName (file) << ") opened: "
             << model::numTracks (imported) << (model::numTracks (imported) == 1 ? " track" : " tracks")
             << ". It isn't saved yet: File > Save keeps it as a project of this app.";
+    // (notes about audio that has since been found are dropped)
+    const auto stillMissing = model::files::missingFilesOf (imported);
+    for (int i = notes.size(); --i >= 0;)
+        if (notes[i].startsWith ("Audio file not found"))
+        {
+            const auto name = notes[i].fromLastOccurrenceOf (": ", false, false).trim();
+            if (! std::any_of (stillMissing.begin(), stillMissing.end(), [&name] (const juce::File& f) { return f.getFileName() == name; }))
+                notes.remove (i);
+        }
     if (! showImportReport)
         return;
+    if (! stillMissing.isEmpty())
+        message << "\n\n" << stillMissing.size() << (stillMissing.size() == 1 ? " audio file wasn't" : " audio files weren't")
+                << " found in the session's folders. Find Missing Audio looks for them in a folder you choose.";
     if (! notes.isEmpty())
     {
         message << "\n\nWhat to know:\n";
@@ -1561,13 +1588,16 @@ void MainComponent::openImportedProject (const juce::File& file)
         if (notes.size() > 12)
             message << "...and " << (notes.size() - 12) << " more.\n";
     }
-    messageBox = juce::AlertWindow::showScopedAsync (juce::MessageBoxOptions()
-                                                         .withIconType (juce::MessageBoxIconType::InfoIcon)
-                                                         .withTitle ("Opened from " + projectimport::formatName (file))
-                                                         .withMessage (message)
-                                                         .withButton ("OK")
-                                                         .withAssociatedComponent (this),
-                                                     nullptr);
+    auto options = juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::InfoIcon)
+                                            .withTitle ("Opened from " + projectimport::formatName (file))
+                                            .withMessage (message)
+                                            .withAssociatedComponent (this);
+    options = stillMissing.isEmpty() ? options.withButton ("OK") : options.withButton ("Find Missing Audio...").withButton ("Later");
+    messageBox = juce::AlertWindow::showScopedAsync (options, [safe = juce::Component::SafePointer<MainComponent> (this), any = ! stillMissing.isEmpty()] (int result)
+    {
+        if (safe != nullptr && any && result == 1)
+            safe->findMissingFiles();
+    });
 }
 
 void MainComponent::openRecent (const juce::File& file)
@@ -1677,6 +1707,7 @@ void MainComponent::showError (const juce::String& title, const juce::String& me
 void MainComponent::markDirty()
 {
     changedSinceAutosave = true;
+    changedSinceBackup = true;
     if (! dirty)
     {
         dirty = true;
@@ -2468,6 +2499,7 @@ void MainComponent::timerCallback()
         if (changedSinceAutosave)
             autosave();
     }
+    backupIfDue();
     if (inspector.isVisible())
         inspector.setTrack (project, model::findById (project, timeline.selectedTrackId)), inspector.setRegion (model::findById (project, timeline.selectedRegionId));
     if (smartControls != nullptr && smartControls->isVisible())
@@ -3309,11 +3341,15 @@ void MainComponent::showFileMenu()
     menu.addItem ("New", [this] { newProject(); });
     menu.addItem ("Open...", [this] { openProject(); });
     addRecentItems (menu);
+    menu.addItem ("Close Project", [this] { closeProject(); });
+    menu.addSeparator();
     menu.addItem ("Save", [this] { saveProject(); });
     menu.addItem ("Save As...", [this] { saveProjectAs(); });
+    menu.addItem ("Save a Copy As... (with its audio)", [this] { saveCopy(); });
     menu.addSeparator();
     menu.addItem ("Revert to Backup...", [this] { showBackups(); });
     menu.addItem ("Consolidate Project...", [this] { consolidate(); });
+    menu.addItem ("Find Missing Audio Files...", [this] { findMissingFiles(); });
     menu.addSeparator();
     menu.addItem ("Import Audio...", [this] { importAudio(); });
     menu.addItem ("Import Tracks from Project...", [this] { importTracksFromProject(); });

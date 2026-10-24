@@ -336,7 +336,7 @@ TEST_CASE ("A take with no audio leaves no file behind", "[engine][record]")
     CHECK_FALSE (file.exists());
 }
 
-TEST_CASE ("Input monitoring on an armed track", "[engine][record]")
+TEST_CASE ("Input monitoring: the I key alone, armed or not", "[engine][record]")
 {
     Fixture f;
     auto track = model::addTrack (f.project, "Vox", nullptr);
@@ -344,10 +344,16 @@ TEST_CASE ("Input monitoring on an armed track", "[engine][record]")
 
     std::vector<float> out;
     renderWithInput (f.engine, 1024, 0.5f, 2, &out);
-    CHECK (out[500] == 0.0f); // not armed
+    CHECK (out[500] == 0.0f); // not monitoring
+
+    // I on, not armed: heard (as in Logic and Pro Tools)
+    track.setProperty (ids::monitor, true, nullptr);
+    f.player.rebuildNow();
+    out.clear();
+    renderWithInput (f.engine, 1024, 0.5f, 2, &out);
+    CHECK_THAT (out[500], WithinAbs (0.5f * 0.8f, 1e-4));
 
     track.setProperty (ids::armed, true, nullptr);
-    track.setProperty (ids::monitor, true, nullptr);
     f.player.rebuildNow();
 
     out.clear();
@@ -2722,4 +2728,51 @@ TEST_CASE ("Turning a built-in effect's knob reaches it at once, without rebuild
     // Bypassing it still rebuilds (the graph leaves it out)
     gain.setProperty (ids::bypass, true, nullptr);
     CHECK (f.router.isRebuildPending());
+}
+
+TEST_CASE ("A bus takes an interface input too (Pro Tools' aux input)", "[engine][routing]")
+{
+    Fixture f;
+    auto bus = model::addTrack (f.project, "Aux", nullptr, -1, model::busKind);
+    f.player.setProject (f.project);
+    std::vector<float> out;
+    renderWithInput (f.engine, 1024, 0.5f, 2, &out);
+    CHECK (out[500] == 0.0f);
+
+    bus.setProperty ("busHardwareInput", true, nullptr);
+    bus.setProperty (ids::input, 0, nullptr);
+    bus.setProperty (ids::inputStereo, true, nullptr);
+    f.player.rebuildNow();
+    out.clear();
+    renderWithInput (f.engine, 1024, 0.5f, 2, &out);
+    CHECK_THAT (out[500], WithinAbs (0.5f * 0.8f, 1e-4));   // no arming, no I: an aux input is always heard
+}
+
+TEST_CASE ("AudioSuite's preview plays live through the effect: a knob turned is heard at once", "[engine][audiosuite]")
+{
+    Fixture f;
+    auto gain = std::shared_ptr<BuiltInEffect> (BuiltInEffect::create ("gain").release());
+    auto audio = std::make_unique<juce::AudioBuffer<float>> (2, 4800);
+    for (int c = 0; c < 2; ++c)
+        for (int i = 0; i < 4800; ++i)
+            audio->setSample (c, i, 0.25f);
+    f.engine.previewThrough (std::move (audio), 48000.0, gain);
+    REQUIRE (f.engine.isPreviewing());
+    juce::AudioBuffer<float> out (2, 512);
+    f.engine.render (nullptr, 0, out.getArrayOfWritePointers(), 2, 512);
+    const auto before = out.getSample (0, 100);
+    CHECK (before > 0.1f);
+
+    gain->setParameter (0, 6.0f);   // +6 dB, while it plays (a moment's glide, no click)
+    for (int i = 0; i < 4; ++i)
+        f.engine.render (nullptr, 0, out.getArrayOfWritePointers(), 2, 512);
+    CHECK (out.getSample (0, 400) / before > 1.9f);
+
+    // it goes round (Pro Tools' loop preview) until stopped
+    for (int i = 0; i < 20; ++i)
+        f.engine.render (nullptr, 0, out.getArrayOfWritePointers(), 2, 512);
+    CHECK (f.engine.isPreviewing());
+    CHECK (std::abs (out.getSample (0, 200)) > 0.1f);
+    f.engine.stopPreview();
+    CHECK_FALSE (f.engine.isPreviewing());
 }

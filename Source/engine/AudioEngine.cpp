@@ -116,12 +116,37 @@ bool AudioEngine::previewFile (const juce::File& file)
 void AudioEngine::stopPreview()
 {
     std::unique_ptr<juce::AudioBuffer<float>> old;
+    std::shared_ptr<Effect> oldEffect;
     {
         const juce::SpinLock::ScopedLockType lock (previewLock);
         previewPlaying.store (false);
         previewBuffer = nullptr;
         old = std::move (previewHold);
+        oldEffect = std::move (previewEffect);
+        previewLoops = false;
     }
+}
+
+void AudioEngine::previewThrough (std::unique_ptr<juce::AudioBuffer<float>> audio, double audioRate, std::shared_ptr<Effect> effect)
+{
+    stopPreview();
+    if (audio == nullptr || audio->getNumSamples() < 2 || effect == nullptr)
+        return;
+    if (audio->getNumChannels() < 2)
+    {
+        audio->setSize (2, audio->getNumSamples(), true);
+        audio->copyFrom (1, 0, *audio, 0, 0, audio->getNumSamples());
+    }
+    const auto rate = sampleRate.load() > 0.0 ? sampleRate.load() : 48000.0;
+    effect->prepare (rate, maxChunkSize);
+    const juce::SpinLock::ScopedLockType lock (previewLock);
+    previewHold = std::move (audio);
+    previewBuffer = previewHold.get();
+    previewPosition = 0.0;
+    previewStep = audioRate / rate;
+    previewEffect = std::move (effect);
+    previewLoops = true;
+    previewPlaying.store (true);
 }
 
 void AudioEngine::renderPreview (float* left, float* right, int n) noexcept
@@ -133,6 +158,30 @@ void AudioEngine::renderPreview (float* left, float* right, int n) noexcept
     const auto length = previewBuffer->getNumSamples();
     const auto* l = previewBuffer->getReadPointer (0);
     const auto* r = previewBuffer->getReadPointer (1);
+    if (previewEffect != nullptr && n <= previewScratch.getNumSamples())
+    {
+        // Live through the effect: the region's audio (round and round), then the effect, as it is right now
+        auto* sl = previewScratch.getWritePointer (0);
+        auto* sr = previewScratch.getWritePointer (1);
+        for (int i = 0; i < n; ++i)
+        {
+            auto index = (int) previewPosition;
+            if (index + 1 >= length)
+            {
+                previewPosition = 0.0;
+                index = 0;
+            }
+            const auto frac = (float) (previewPosition - index);
+            sl[i] = l[index] + (l[index + 1] - l[index]) * frac;
+            sr[i] = r[index] + (r[index + 1] - r[index]) * frac;
+            previewPosition += previewStep;
+        }
+        previewEffect->process (sl, sr, n);
+        previewEffect->tapOutput (sl, sr, n);
+        juce::FloatVectorOperations::add (left, sl, n);
+        juce::FloatVectorOperations::add (right, sr, n);
+        return;
+    }
     for (int i = 0; i < n; ++i)
     {
         const auto index = (int) previewPosition;
@@ -857,6 +906,7 @@ void AudioEngine::prepare (double newSampleRate, int)
     preFaderOutputs.setSize (PlaybackGraph::maxTracks * 2, maxBlockSize);
     preFaderReady.fill (false);
     mixBuffer.setSize (2, maxBlockSize);
+    previewScratch.setSize (2, maxBlockSize);
     directBuffer.setSize (2, maxBlockSize);
     busBuffer.setSize (PlaybackGraph::maxBuses * 2, maxBlockSize);
     hardwareBuffer.setSize (maxHardwareOutputs, maxBlockSize);
@@ -1484,6 +1534,16 @@ bool AudioEngine::processTrack (const PlaybackGraph::Track& track, const float* 
         {
             juce::FloatVectorOperations::copy (tL, busBuffer.getReadPointer (track.busIndex * 2), n);
             juce::FloatVectorOperations::copy (tR, busBuffer.getReadPointer (track.busIndex * 2 + 1), n);
+            anyAudio = true;
+        }
+        // ...and an interface input, when it takes one (Pro Tools' aux input)
+        if (track.busHardwareInput && track.inputChannel < numInputs && inputs[track.inputChannel] != nullptr)
+        {
+            const auto* inL = inputs[track.inputChannel] + inputOffset;
+            const auto rightIndex = track.inputStereo ? track.inputChannel + 1 : track.inputChannel;
+            const auto* inR = (rightIndex < numInputs && inputs[rightIndex] != nullptr) ? inputs[rightIndex] + inputOffset : inL;
+            juce::FloatVectorOperations::add (tL, inL, n);
+            juce::FloatVectorOperations::add (tR, inR, n);
             anyAudio = true;
         }
     }

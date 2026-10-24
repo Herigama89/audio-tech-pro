@@ -260,6 +260,9 @@ public:
 
     /** Library preview: plays a file (decoded, up to 30 s) on its own, over everything; never recorded or exported. */
     bool previewFile (const juce::File& file);
+    /** AudioSuite's preview, live (as Pro Tools'): `audio` (at `audioRate`) played through `effect` as it plays,
+        round and round, so turning its knobs is heard at once and its meters move. The effect is prepared here. */
+    void previewThrough (std::unique_ptr<juce::AudioBuffer<float>> audio, double audioRate, std::shared_ptr<Effect> effect);
     void stopPreview();
     bool isPreviewing() const noexcept { return previewPlaying.load(); }
 
@@ -547,6 +550,9 @@ private:
     std::unique_ptr<juce::AudioBuffer<float>> previewHold;   // message thread owns it
     juce::AudioBuffer<float>* previewBuffer = nullptr;       // what the audio thread reads (under previewLock)
     double previewPosition = 0.0, previewStep = 1.0;
+    std::shared_ptr<Effect> previewEffect;                   // (under previewLock) the live preview's effect
+    bool previewLoops = false;
+    juce::AudioBuffer<float> previewScratch;                 // its audio before the effect (sized in prepare)
     std::atomic<bool> previewPlaying { false };
     void renderPreview (float* left, float* right, int n) noexcept;                      // freezing: before the fader, pan and sends
     std::vector<LevelStats> measuredTracks;       // by slot

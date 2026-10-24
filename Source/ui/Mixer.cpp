@@ -975,6 +975,8 @@ void ChannelStrip::mouseDown (const juce::MouseEvent& e)
     // Right-click anywhere in the console section (knobs, lamps, the metal around them).
     if (! e.mods.isPopupMenu() || isMaster())
         return;
+    if (e.eventComponent == &meter || e.eventComponent == &grColumn)
+        return;   // the meter's own menu (peak hold, release)
     if (auto* drag = dynamic_cast<strip::DragSlider*> (e.eventComponent); drag != nullptr && drag->onRightClick)
         return;   // faders and knobs have their own menu
 
@@ -994,7 +996,7 @@ void ChannelStrip::mouseDown (const juce::MouseEvent& e)
     }
 
     // Below it (the fader, the name): output, group, VCA, stacks and freeze.
-    if (e.eventComponent == this || e.eventComponent == &fader || e.eventComponent == &meter)
+    if (e.eventComponent == this || e.eventComponent == &fader)
     {
         juce::PopupMenu menu;
         menu.addSectionHeader (track[ids::name].toString());
@@ -1005,6 +1007,12 @@ void ChannelStrip::mouseDown (const juce::MouseEvent& e)
 
 void ChannelStrip::mouseDoubleClick (const juce::MouseEvent& e)
 {
+    // Double-click the name plate: rename the track there
+    if (! isMaster() && e.eventComponent == this && e.y >= getHeight() - nameHeight - 4)
+    {
+        startRename();
+        return;
+    }
     // Double-click the console section's panel: the whole strip in its own window.
     if (isMaster() || isVca() || e.eventComponent != this || e.y >= topSection())
         return;
@@ -1231,7 +1239,9 @@ void ChannelStrip::refresh()
     else if (! isVca())
     {
         if (model::isBusTrack (track))
-            inputSlot.setButtonText (track[ids::name].toString());
+            inputSlot.setButtonText ((bool) track.getProperty ("busHardwareInput", false)
+                                         ? model::inputName (track, owner.inputNames ? owner.inputNames() : juce::StringArray())
+                                         : track[ids::name].toString());
         else if (model::isInstrumentTrack (track))
         {
             const auto kind = track[ids::instrument].toString();
@@ -1771,12 +1781,49 @@ void ChannelStrip::showInputMenu()
     juce::PopupMenu menu;
     if (model::isBusTrack (track))
     {
-        menu.addSectionHeader (track[ids::name].toString() + ": what tracks send to it");
+        // As Pro Tools' aux inputs: what the tracks send it, and/or one of the interface's inputs
+        auto& um = owner.getUndoManager();
+        const auto hwNames = owner.inputNames ? owner.inputNames() : juce::StringArray();
+        const bool hw = track.getProperty ("busHardwareInput", false);
+        const int ch = track.getProperty (ids::input, 0);
+        const bool st = track.getProperty (ids::inputStereo, true);
+        auto setHw = [targets = acting(), &um] (bool on, int channel, bool isStereo) mutable
+        {
+            um.beginNewTransaction ("Bus Input");
+            for (auto& t : targets)
+                if (model::isBusTrack (t))
+                {
+                    t.setProperty ("busHardwareInput", on, &um);
+                    if (on)
+                    {
+                        t.setProperty (ids::input, channel, &um);
+                        t.setProperty (ids::inputStereo, isStereo, &um);
+                    }
+                }
+        };
+        menu.addSectionHeader ("Interface Input");
+        menu.addItem ("None (only what's sent to it)", true, ! hw, [setHw]() mutable { setHw (false, 0, true); });
+        juce::PopupMenu mono, both;
+        for (int i = 0; i < hwNames.size(); ++i)
+            mono.addItem (hwNames[i], true, hw && ! st && ch == i, [setHw, i]() mutable { setHw (true, i, false); });
+        for (int i = 0; i + 1 < hwNames.size(); i += 2)
+            both.addItem (hwNames[i] + " + " + hwNames[i + 1], true, hw && st && ch == i, [setHw, i]() mutable { setHw (true, i, true); });
+        menu.addSubMenu ("Mono", mono, ! hwNames.isEmpty());
+        menu.addSubMenu ("Stereo", both, hwNames.size() >= 2);
+        menu.addSeparator();
+        menu.addSectionHeader ("Tracks sending to " + track[ids::name].toString());
+        bool any = false;
         for (const auto& t : project)
             if (t.hasType (ids::TRACK))
+            {
                 for (const auto& send : model::sendsOf (model::findChain (project, t[ids::id].toString())))
                     if (send[ids::target].toString() == track[ids::id].toString())
-                        menu.addItem (t[ids::name].toString(), false, false, [] {});
+                        menu.addItem (t[ids::name].toString() + " (send)", false, false, [] {}), any = true;
+                if (t[ids::output].toString() == track[ids::id].toString())
+                    menu.addItem (t[ids::name].toString() + " (output)", false, false, [] {}), any = true;
+            }
+        if (! any)
+            menu.addItem ("None yet", false, false, [] {});
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&inputSlot));
         return;
     }
@@ -2117,10 +2164,48 @@ void ChannelStrip::showTapeMenu()
     });
 }
 
+void ChannelStrip::startRename()
+{
+    if (isMaster() || ! track.isValid())
+        return;
+    nameEditor = std::make_unique<juce::TextEditor>();
+    auto& ed = *nameEditor;
+    ed.setText (track[ids::name].toString(), juce::dontSendNotification);
+    ed.setJustification (juce::Justification::centred);
+    ed.setFont (juce::FontOptions (14.0f));
+    ed.setSelectAllWhenFocused (true);
+    ed.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff1b1d21));
+    ed.setColour (juce::TextEditor::textColourId, juce::Colours::white);
+    ed.setColour (juce::TextEditor::outlineColourId, theme::knobArc);
+    ed.setBounds (getLocalBounds().withTop (getHeight() - nameHeight).reduced (2, 2));
+    auto finish = [this] (bool keep)
+    {
+        if (nameEditor == nullptr)
+            return;
+        const auto text = nameEditor->getText().trim();
+        auto editor = std::move (nameEditor);   // (gone once this returns)
+        if (keep && text.isNotEmpty() && text != track[ids::name].toString())
+        {
+            owner.getUndoManager().beginNewTransaction ("Rename Track");
+            track.setProperty (ids::name, text, &owner.getUndoManager());
+        }
+        juce::MessageManager::callAsync ([e = std::shared_ptr<juce::TextEditor> (editor.release())] {});
+        repaint();
+    };
+    ed.onReturnKey = [finish] { finish (true); };
+    ed.onFocusLost = [finish] { finish (true); };
+    ed.onEscapeKey = [finish] { finish (false); };
+    addAndMakeVisible (ed);
+    ed.grabKeyboardFocus();
+}
+
 void ChannelStrip::showZoneMenu()
 {
     const auto zone = MixerPanel::zoneOf (project, track);
     juce::PopupMenu menu;
+    menu.addSectionHeader (track[ids::name].toString());
+    menu.addItem ("Rename...", [this] { startRename(); });
+    menu.addSeparator();
     menu.addSectionHeader ("Mixer Zone");
     menu.addItem (1, "Left Zone", true, zone == "left");
     menu.addItem (2, "Right Zone", true, zone == "right");

@@ -339,6 +339,14 @@ private:
     void offerRecovery();
     void consolidate();
     void showBackups();
+    // Save a Copy (with its audio), Close Project, finding missing audio, timed backups (MainFiles.cpp)
+    void saveCopy();
+    void closeProject();
+    void findMissingFiles (bool onlyIfMissing = false);
+    static int relinkFrom (juce::ValueTree project, const juce::Array<juce::File>& folders, juce::UndoManager* um);
+    void backupIfDue();
+    bool changedSinceBackup = false;
+    juce::uint32 lastBackupMs = 0;
     juce::String startupError;
 
     // --- View -----------------------------------------------------------------
@@ -539,6 +547,7 @@ private:
     // AudioSuite (Pro Tools): offline processing of regions with an effect or plugin
     AudioSuitePanel* audioSuitePanel = nullptr;   // owned by its window in editorWindows
     juce::ValueTree audioSuiteSettings;            // a built-in effect's knobs
+    std::unique_ptr<juce::ValueTree::Listener> audioSuiteKnobs;   // its knobs turned: to the effect at once (live preview)
     void showAudioSuite();
     void chooseAudioSuiteEffect (juce::Component& target);
     void setAudioSuiteBuiltIn (const juce::String& type);

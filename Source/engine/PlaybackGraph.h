@@ -130,6 +130,7 @@ struct PlaybackGraph
         std::vector<std::shared_ptr<Effect>> inserts;   // in order, bypassed ones left out
 
         bool isBus = false;
+        bool busHardwareInput = false;   // a bus that also takes an interface input (inputChannel, inputStereo)
         int busIndex = -1;                // for buses: which bus buffer they read
         std::vector<Send> sends;          // for ordinary tracks
         int preDelay = 0, postDelay = 0;  // delay compensation, in samples

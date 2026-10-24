@@ -264,7 +264,11 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
             graph->anyHardwareOut = true;
         }
 
-        t.monitorInput = (bool) track[ids::armed] && (bool) track[ids::monitor];
+        // The I key alone: hear the input (an interface's, or another track's routed in) - armed or not, as in Logic
+        // and Pro Tools. A bus (Pro Tools' aux input) can take an interface input too, always heard.
+        t.monitorInput = (bool) track[ids::monitor];
+        if (model::isBusTrack (track) && (bool) track.getProperty ("busHardwareInput", false))
+            t.busHardwareInput = true;
         t.inputChannel = juce::jmax (0, (int) track.getProperty (ids::input, 0));
         t.inputStereo  = track.getProperty (ids::inputStereo, false);
         if (const auto source = model::findById (project, track[ids::inputTrack].toString()); source.isValid() && source != track)
