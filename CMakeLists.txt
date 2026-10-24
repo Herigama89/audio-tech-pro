@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
 endif()
 
-project(AudioTechPro VERSION 1.1.1 LANGUAGES C CXX)
+project(AudioTechPro VERSION 1.1.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -386,6 +386,9 @@ if(APPLE)
     target_link_libraries(AudioTechPro PRIVATE "-framework AVFoundation" "-framework CoreMedia" "-framework CoreVideo"
                                                "-weak_framework ScreenCaptureKit")
     target_link_libraries(AudioTechPro PRIVATE "-framework CoreAudioKit")
+    # The window drawn by the graphics card (View > Draw with the Graphics Card)
+    target_link_libraries(AudioTechPro PRIVATE juce::juce_opengl)
+    target_compile_definitions(AudioTechPro PRIVATE RIFF_GPU_DRAWING=1 GL_SILENCE_DEPRECATION=1)
     if(TARGET AudioTechProTests)
         target_link_libraries(AudioTechProTests PRIVATE "-framework CoreAudioKit")
     endif()

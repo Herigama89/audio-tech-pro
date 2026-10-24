@@ -511,6 +511,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     };
     addAndMakeVisible (fader);
     addAndMakeVisible (meter);
+    addAndMakeVisible (grColumn);
     meter.usePhotoLeds (isMaster());   // the master's meter: the photo's blue LEDs (Studio White)
 
     if (! isMaster() && ! isVca())
@@ -1653,21 +1654,6 @@ void ChannelStrip::paint (juce::Graphics& g)
         }
     }
 
-    // Gain reduction: amber LEDs from the top, 0 to 20 dB
-    {
-        const auto r = grArea().toFloat();
-        g.setColour (juce::Colour (0xff141616));
-        g.fillRoundedRectangle (r.expanded (1.0f), 1.5f);
-        const int leds = juce::jmax (4, (int) (r.getHeight() / 4.0f));
-        const auto lit = (int) std::ceil (juce::jlimit (0.0f, 20.0f, grShown) / 20.0f * (float) leds);
-        for (int i = 0; i < leds; ++i)
-        {
-            const auto y = r.getY() + (float) i * r.getHeight() / (float) leds;
-            g.setColour (i < lit ? juce::Colour (0xffffa62b) : juce::Colour (0xff3a2a14));
-            g.fillRect (r.getX(), y, r.getWidth(), r.getHeight() / (float) leds - 1.0f);
-        }
-    }
-
     // The level box, from the picture
     if (theme::imageSkin())
     {
@@ -1717,7 +1703,7 @@ void ChannelStrip::pushGainReduction (float db)
     if (std::abs (next - grShown) > 0.05f || (next < 0.05f && grShown > 0.0f))
     {
         grShown = next < 0.05f ? 0.0f : next;
-        repaint (grArea().expanded (1));
+        grColumn.setLit ((int) std::ceil (juce::jlimit (0.0f, 20.0f, grShown) / 20.0f * (float) grColumn.leds()));
     }
 }
 
@@ -1957,6 +1943,7 @@ void ChannelStrip::resized()
     const auto fa = faderArea();
     fader.setBounds (juce::Rectangle<int> (2, fa.getY(), (int) (getWidth() * 0.46f), fa.getHeight()));
     meter.setBounds (juce::Rectangle<int> (getWidth() - 16, fa.getY() + 6, 12, fa.getHeight() - 12));
+    grColumn.setBounds (grArea().expanded (1));
     dbLabel.setBounds (juce::Rectangle<int> (getWidth() - 46, fa.getBottom() + 2, 42, 19));
     if (! isMaster())
     {
@@ -2860,12 +2847,17 @@ void MixerPanel::timerCallback()
 
     // Gain reduction: the strip's Dynamics and every insert that reports it (the most of them).
     std::map<juce::String, float> reductions;
-    auto reductionOf = [this, &reductions] (const juce::String& owner)
+    std::map<juce::String, juce::ValueTree> chains;   // (found once a tick, not once per strip)
+    for (const auto& child : project.getChildWithName (ids::MIXER))
+        if (child.hasType (ids::CHAIN))
+            chains.emplace (child[ids::owner].toString(), child);
+    auto reductionOf = [this, &reductions, &chains] (const juce::String& owner)
     {
         if (auto it = reductions.find (owner); it != reductions.end())
             return it->second;
         float gr = owner == model::masterOwner ? 0.0f : engine.getConsoleGainReduction (player.slotOf (owner));
-        for (const auto& insert : model::insertsOf (model::findChain (project, owner)))
+        const auto chain = chains.find (owner);
+        for (const auto& insert : model::insertsOf (chain != chains.end() ? chain->second : juce::ValueTree()))
             if (! (bool) insert[ids::bypass])
                 gr = juce::jmax (gr, effects.takeGainReduction (insert[ids::id].toString()));
         return reductions[owner] = gr;

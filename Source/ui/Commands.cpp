@@ -87,6 +87,7 @@ const std::vector<Info>& all()
         { toggleControlBar,       "Show Control Bar",           "View",      "The bar along the top (display, transport, tools): show or hide it" },
         { toggleToolbar,          "Show Toolbar",               "View",      "A row of keys for the common edits (split, join, repeat, quantize, bounce, freeze...)" },
         { toggleStatusBar,        "Show Status Bar",            "View",      "The line of hints along the bottom" },
+        { toggleGpuDrawing,       "Draw with the Graphics Card", "View",     "The window is drawn by the graphics card (smooth meters and scrolling with many tracks) instead of the processor" },
         { toggleMeters,           "Show Input and Output Meters", "View",    "The meters to the right of the tracks" },
         { toggleTrackHeaders,     "Show Track Headers",         "View",      "The track names, buttons and faders at the left of the tracks" },
         { showAllPanels,          "Show All Panels",            "View",      "Inspector, control bar, toolbar, Smart Controls, meters and the status bar" },

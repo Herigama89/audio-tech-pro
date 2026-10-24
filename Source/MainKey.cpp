@@ -111,3 +111,29 @@ void MainComponent::detectSongKey()
 }
 
 } // namespace riff
+
+namespace riff
+{
+void MainComponent::setGpuDrawing (bool on)
+{
+   #if RIFF_GPU_DRAWING
+    if (on && openGL == nullptr)
+    {
+        openGL = std::make_unique<juce::OpenGLContext>();
+        openGL->setComponentPaintingEnabled (true);
+        openGL->setContinuousRepainting (false);   // (only what changed is drawn, as before - by the graphics card)
+        openGL->setMultisamplingEnabled (false);
+        openGL->attachTo (*this);
+    }
+    else if (! on && openGL != nullptr)
+    {
+        openGL->detach();
+        openGL.reset();
+    }
+    gpuDrawing = on;
+   #else
+    juce::ignoreUnused (on);
+    gpuDrawing = false;
+   #endif
+}
+}

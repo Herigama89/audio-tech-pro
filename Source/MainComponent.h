@@ -1,6 +1,9 @@
 #pragma once
 
 #include <JuceHeader.h>
+#if RIFF_GPU_DRAWING
+ #include <juce_opengl/juce_opengl.h>
+#endif
 #include "engine/AudioEngine.h"
 #include "engine/AudioFileCache.h"
 #include "engine/ProjectPlayer.h"
@@ -112,6 +115,12 @@ private:
     void alignAudioToGuide();
     void splitToStems();
     void detectSongKey();
+    // Drawing on the graphics card (macOS: OpenGL), for a smooth window with many tracks and meters
+    bool gpuDrawing = false;
+    void setGpuDrawing (bool on);
+   #if RIFF_GPU_DRAWING
+    std::unique_ptr<juce::OpenGLContext> openGL;
+   #endif
     void muteSelectedRegions();
     void nudgeSelectedRegions (int direction);
     void duplicateSelectedTrack();

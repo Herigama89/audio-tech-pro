@@ -40,7 +40,7 @@ public:
             // The VU: 0 VU at -18 dBFS, with a needle's sluggish rise and fall
             const auto vu = juce::jlimit (-22.0f, 4.0f, juce::Decibels::gainToDecibels (juce::jmax (left, right), -100.0f) + 18.0f);
             const auto next = vuNeedle + (vu - vuNeedle) * (vu > vuNeedle ? 0.28f : 0.12f);
-            if (std::abs (next - vuNeedle) > 0.02f)
+            if (std::abs (next - vuNeedle) > 0.1f)
             {
                 vuNeedle = next;
                 repaint (vuArea);
@@ -179,6 +179,29 @@ private:
     bool preampClipped = false;
     float grShown = 0.0f;
     juce::Rectangle<int> grArea() const;
+    /** The gain-reduction LEDs: a little opaque column of their own, so their updates redraw only themselves. */
+    class GrColumn final : public juce::Component
+    {
+    public:
+        GrColumn() { setOpaque (true); setInterceptsMouseClicks (false, false); }
+        void setLit (int n) { if (n != lit) { lit = n; repaint(); } }
+        int leds() const { return juce::jmax (4, (getHeight() - 2) / 4); }
+        void paint (juce::Graphics& g) override
+        {
+            g.fillAll (juce::Colour (0xff141616));
+            const auto r = getLocalBounds().reduced (1).toFloat();
+            const int count = leds();
+            for (int i = 0; i < count; ++i)
+            {
+                const auto y = r.getY() + (float) i * r.getHeight() / (float) count;
+                g.setColour (i < lit ? juce::Colour (0xffffa62b) : juce::Colour (0xff3a2a14));
+                g.fillRect (r.getX(), y, r.getWidth(), r.getHeight() / (float) count - 1.0f);
+            }
+        }
+    private:
+        int lit = 0;
+    };
+    GrColumn grColumn;
     void showInputMenu();
     void showOutputMenu();
     juce::TextButton consoleTag { "EQ" };   // compact mode: lit when the strip's EQ/Dynamics (or plugin) is working; opens it

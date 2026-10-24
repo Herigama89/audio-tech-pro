@@ -530,6 +530,9 @@ MainComponent::MainComponent (bool openAudioDevice)
     engine.setRecordBitDepth (appProperties.getUserSettings()->getIntValue ("recordBitDepth", 24));
 
     engine.setStopOnClip (appProperties.getUserSettings()->getBoolValue ("stopOnClip", false));
+   #if RIFF_GPU_DRAWING
+    setGpuDrawing (appProperties.getUserSettings()->getBoolValue ("gpuDrawing", true));
+   #endif
     engine.setSuspendWhenSilent (appProperties.getUserSettings()->getBoolValue ("suspendPlugins", true));
     timeline.catchPlayhead = appProperties.getUserSettings()->getBoolValue ("catchPlayhead", true);
     catchButton.setClickingTogglesState (false);
@@ -829,6 +832,10 @@ void MainComponent::globalFocusChanged (juce::Component* focused)
 
 MainComponent::~MainComponent()
 {
+   #if RIFF_GPU_DRAWING
+    if (openGL != nullptr)
+        openGL->detach();
+   #endif
     juce::Desktop::getInstance().removeFocusChangeListener (this);
     toolbarLayer.setLookAndFeel (nullptr);
    #if JUCE_MAC

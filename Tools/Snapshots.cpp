@@ -307,6 +307,15 @@ public:
             main.mixer.setMasterLevels (0.7f, 0.6f);
             pump (main, 15);
         }
+        // (levels on the meters, as while playing)
+        float level = 0.9f;
+        for (auto* st : main.mixer.strips)
+        {
+            st->pushLevels (level, level * 0.7f);
+            st->pushGainReduction (level * 12.0f);
+            level *= 0.7f;
+        }
+        pump (main, 30);
         save (main, "mixer-only.png");
         return 0;
     }
