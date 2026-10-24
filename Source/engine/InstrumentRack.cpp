@@ -1,18 +1,22 @@
 #include "InstrumentRack.h"
 #include "../model/Project.h"
 #include "BuiltInInstruments.h"
-#include "ClapFormat.h"
-#include "PluginScanChild.h"
+#if ! JUCE_WASM
+ #include "ClapFormat.h"
+ #include "PluginScanChild.h"
+#endif
 
 namespace riff
 {
 
 InstrumentRack::InstrumentRack()
 {
+   #if ! JUCE_WASM   // (the web version: built-in instruments and effects only)
     juce::addDefaultFormatsToManager (formatManager); // VST3, plus Audio Units on macOS
     formatManager.addFormat (std::make_unique<ClapPluginFormat>());
-    sampleFormats.registerBasicFormats();
     knownPlugins.setCustomScanner (std::make_unique<pluginscan::OutOfProcessScanner>());   // (a crashing plugin can't take the app down)
+   #endif
+    sampleFormats.registerBasicFormats();
 }
 
 BuiltInSynth::Settings InstrumentRack::synthSettingsFrom (const juce::ValueTree& track)

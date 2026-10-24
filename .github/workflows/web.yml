@@ -1,0 +1,50 @@
+# Builds Audio Tech Pro Web (the engine as WebAssembly, and the page) and publishes it on GitHub Pages:
+#   https://herigama89.github.io/audio-tech-pro/
+# whenever the engine, the web app or this file changes on main (or by hand: Actions tab > Web > Run workflow).
+name: Web
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'Source/engine/**', 'Source/model/**', 'Source/web/**', 'Web/**', 'Tools/web/**', '.github/workflows/web.yml' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # (to publish the site on the gh-pages branch, which GitHub Pages serves)
+
+concurrency:
+  group: web
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.50
+      - name: JUCE (the version the desktop app builds with), patched for WebAssembly
+        run: |
+          git clone --depth 1 --branch 8.0.15 https://github.com/juce-framework/JUCE.git juce
+          python3 Tools/web/patch_juce.py juce/modules wjuce
+      - name: Build the engine
+        run: |
+          python3 Tools/web/build.py em++ wjuce site 2>&1 | tee build.log
+          test -f site/atp-engine.wasm || { echo "::error title=Web build failed::$(grep -E 'error' build.log | head -40 | awk '{printf "%s%%0A", $0}')"; exit 1; }
+          rm -rf site/obj
+          ls -la site
+      - name: Test (open, play, effects, export, save and reopen)
+        run: node Tools/web/smoke.mjs site
+      - name: Publish (the gh-pages branch)
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: site
+          force_orphan: true
+          commit_message: "Audio Tech Pro Web"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Audio Tech Pro Web
+          path: site

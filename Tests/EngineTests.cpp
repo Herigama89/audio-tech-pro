@@ -2776,3 +2776,27 @@ TEST_CASE ("AudioSuite's preview plays live through the effect: a knob turned is
     f.engine.stopPreview();
     CHECK_FALSE (f.engine.isPreviewing());
 }
+
+TEST_CASE ("The web host's order: empty project first, a track added, then rebuilt, plays", "[engine][web]")
+{
+    TempDir temp;
+    AudioEngine engine;
+    AudioFileCache cache { engine.getFormatManager(), false };
+    InstrumentRack rack;
+    EffectRack effects { rack.getFormatManager() };
+    ProjectPlayer player { engine, cache, &rack, &effects };
+    auto project = model::createProject();
+    engine.setRenderThreads (0);
+    engine.prepare (48000.0, 128);
+    engine.setActiveOutputs (juce::BigInteger (3));
+    player.setProject (project);
+
+    const auto wav = writeConstantWav (temp.dir.getChildFile ("a.wav"), 48000.0, 48000, 0.5f);
+    auto track = model::addTrack (project, "A", nullptr);
+    model::addRegion (track, wav, 0.0, 1.0, nullptr);
+    player.rebuildNow();
+
+    engine.play();
+    const auto out = renderLeft (engine, 4096, 128);
+    CHECK (std::abs (out[4000]) > 0.1f);
+}
