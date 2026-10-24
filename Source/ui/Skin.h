@@ -163,7 +163,8 @@ namespace riff::skin
         static std::map<juce::String, Entry> cache;
         static juce::uint64 uses = 0;
 
-        const auto scale = juce::jlimit (1.0f, 4.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+        // (at the screen's own scale - smaller too, in a strip drawn narrow - so it's copied, not resampled)
+        const auto scale = juce::jlimit (0.25f, 4.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
         const auto fullKey = key + (opaque ? "|o|" : "|") + juce::String (area.getWidth()) + "x" + juce::String (area.getHeight()) + "@" + juce::String (scale, 3);
         auto it = cache.find (fullKey);
         if (it == cache.end())

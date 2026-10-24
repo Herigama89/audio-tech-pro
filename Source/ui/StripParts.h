@@ -98,6 +98,13 @@ namespace riff::strip
 
         /** Drawn as a small knob (the compact strip's pan) instead of a value. */
         bool asKnob = false;
+
+        /** Shown faded (its section switched out). Drawn faded here rather than with setAlpha: a see-through
+            component is drawn through an extra layer, and dozens of them made the mixer slow. */
+        void setDimmed (float opacity) { if (! juce::approximatelyEqual (opacity, dimmed)) { dimmed = opacity; repaint(); } }
+    private:
+        float dimmed = 1.0f;
+    public:
     };
 
     /** A long-throw fader: a dark slot and a dark cap with a white line. */

@@ -249,6 +249,30 @@ public:
             const auto mixerTick = ms ([&] { for (int i = 0; i < 10; ++i) main.mixer.timerCallback(); }) / 10.0;
             const auto mainTick = ms ([&] { for (int i = 0; i < 10; ++i) main.timerCallback(); }) / 10.0;
             const auto paint = ms ([&] { juce::Graphics g (canvasImage); main.paintEntireComponent (g, true); });
+            // One frame of moving meters: every strip's meter (and its gain reduction) redrawn, as the window would
+            auto meterFrame = [&]
+            {
+                juce::Random rnd (n);
+                for (auto* st : main.mixer.strips) { st->pushLevels (rnd.nextFloat(), rnd.nextFloat()); st->pushGainReduction (rnd.nextFloat() * 8.0f); }
+                return ms ([&] { juce::Graphics g (canvasImage);
+                    for (auto* st : main.mixer.strips)
+                        for (juce::Component* c : { (juce::Component*) &st->meter, (juce::Component*) &st->grColumn })
+                        {
+                            const auto r = main.getLocalArea (c, c->getLocalBounds()).getSmallestIntegerContainer();
+                            juce::Graphics::ScopedSaveState ss (g);
+                            if (g.reduceClipRegion (r.getIntersection (main.getLocalBounds()))) main.paintEntireComponent (g, true);
+                        } });
+            };
+            const auto frameWide = meterFrame();
+            main.mixer.narrowButton.setToggleState (true, juce::sendNotification);
+            main.mixer.resized();
+            { juce::Graphics g (canvasImage); main.paintEntireComponent (g, true); }
+            auto frameNarrow = meterFrame();
+            for (int rep = juce::SystemStats::getEnvironmentVariable ("RIFF_PERF_NARROW_REPEAT", "0").getIntValue(); --rep >= 0;)
+                frameNarrow = meterFrame();
+            main.mixer.narrowButton.setToggleState (false, juce::sendNotification);
+            main.mixer.resized();
+            std::printf ("           meter frame (every strip moving): wide %6.2f ms   narrow %6.2f ms\n", frameWide, frameNarrow);
             std::printf ("tracks %3d  add track %7.1f ms  add plugin %7.1f ms  fader move %7.1f ms  graph rebuild %7.1f ms  mixer tick %6.2f ms  main tick %6.2f ms  full paint %7.1f ms\n",
                          n, addTrack / 8.0, addPlugins / 32.0, fader, rebuild, mixerTick, mainTick, paint);
             std::fflush (stdout);
@@ -317,6 +341,11 @@ public:
         }
         pump (main, 30);
         save (main, "mixer-only.png");
+        main.mixer.narrowButton.setToggleState (true, juce::sendNotification);
+        main.mixer.resized();
+        for (auto* st : main.mixer.strips) st->pushLevels (0.6f, 0.4f);
+        pump (main, 30);
+        save (main, "mixer-narrow.png");
         return 0;
     }
 

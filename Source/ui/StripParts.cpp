@@ -332,7 +332,7 @@ void DisplaySlider::paint (juce::Graphics& g)
     }
 
     const auto r = getLocalBounds().toFloat();
-    g.setColour (look::isOnLight (*this) ? theme::stripInk : juce::Colour (0xffe9e6dc));
+    g.setColour ((look::isOnLight (*this) ? theme::stripInk : juce::Colour (0xffe9e6dc)).withMultipliedAlpha (dimmed));
     g.setFont (juce::FontOptions (r.getHeight() * 0.56f));
     g.drawText (getTextFromValue (getValue()), r, juce::Justification::centred, false);
 }

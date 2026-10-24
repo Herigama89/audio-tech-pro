@@ -351,9 +351,18 @@ static bool drawFace (juce::Graphics& g, juce::Rectangle<float> area, const Mete
     const auto toArea = [placed, sx, sy] (juce::Point<float> p) { return placed.getPosition() + juce::Point<float> (p.x * sx, p.y * sy); };
 
     juce::Graphics::ScopedSaveState state (g);
-    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-    g.setOpacity (1.0f);
-    g.drawImage (m->image, placed);
+    // The photo, scaled once for this size (a scaled photo on every needle move, on every strip, was heavy)
+    if (placed.getWidth() >= 1.0f && placed.getHeight() >= 1.0f)
+    {
+        const auto at = placed.getSmallestIntegerContainer();
+        const auto image = m->image;
+        skin::drawCached (g, "meterFace" + juce::String ((juce::int64) image.getPixelData().get()), at,
+                          [image, size = at.withZeroOrigin().toFloat()] (juce::Graphics& ig)
+                          {
+                              ig.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+                              ig.drawImage (image, size, juce::RectanglePlacement::stretchToFit);
+                          });
+    }
 
     // The needle, in the window only.
     const auto window = juce::Rectangle<float> (toArea (m->window.getPosition()), toArea (m->window.getBottomRight()));

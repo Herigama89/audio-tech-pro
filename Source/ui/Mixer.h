@@ -202,6 +202,11 @@ private:
         int lit = 0;
     };
     GrColumn grColumn;
+    // The strip's face as a picture, and what it showed when made
+    juce::Image face;
+    juce::String lastFaceKey;
+    juce::String faceKey (float scale) const;
+    void paintFace (juce::Graphics& g);
     void showInputMenu();
     void showOutputMenu();
     juce::TextButton consoleTag { "EQ" };   // compact mode: lit when the strip's EQ/Dynamics (or plugin) is working; opens it

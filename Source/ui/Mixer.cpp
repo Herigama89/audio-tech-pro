@@ -45,8 +45,8 @@ namespace
 ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     : owner (o), project (p), track (t)
 {
-    // The strip's face (art, texture, printing) is drawn once and kept: its knobs, keys and meter redraw on their own.
-    setBufferedToImage (true);
+    // (The strip's face - art, texture, printing - is drawn once into a picture and kept: see paint(). Its meter,
+    // knobs and keys redraw on their own, without touching it.)
 
     if (isMaster())
     {
@@ -1495,6 +1495,59 @@ juce::Rectangle<int> ChannelStrip::faderArea() const
 
 void ChannelStrip::paint (juce::Graphics& g)
 {
+    // The face, from its picture: made again only when something printed on it changes (or its size, the theme,
+    // the screen's scale). A meter moving redraws just its own corner of the picture - in narrow mode too.
+    // Only a meter (or the gain-reduction LEDs) being redrawn: they cover themselves completely - nothing to do here
+    {
+        const auto clip = g.getClipBounds();
+        // (a pixel of slack: in Narrow the strip is drawn scaled, and the area to redraw is rounded outwards)
+        if (meter.isVisible() && meter.isOpaque() && meter.getBounds().expanded (1).contains (clip))
+            return;
+        if (grColumn.isVisible() && grColumn.getBounds().expanded (1).contains (clip))
+            return;
+    }
+    const auto scale = juce::jlimit (0.5f, 4.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+    const auto key = faceKey (scale);
+    if (key != lastFaceKey || ! face.isValid())
+    {
+        face = juce::Image (juce::Image::ARGB, juce::jmax (1, juce::roundToInt ((float) getWidth() * scale)),
+                            juce::jmax (1, juce::roundToInt ((float) getHeight() * scale)), true);
+        juce::Graphics fg (face);
+        fg.addTransform (juce::AffineTransform::scale (scale));
+        paintFace (fg);
+        lastFaceKey = key;
+    }
+    {
+        juce::Graphics::ScopedSaveState state (g);
+        g.setImageResamplingQuality (juce::Graphics::lowResamplingQuality);
+        g.setOpacity (1.0f);
+        g.drawImageTransformed (face, juce::AffineTransform::scale (1.0f / scale));
+    }
+
+    // Themes > Strip VU meters: the amber VU at the top (it moves: not part of the picture)
+    if (! vuArea.isEmpty())
+        looks::drawLevelVu (g, vuArea.toFloat(), vuNeedle);
+}
+
+juce::String ChannelStrip::faceKey (float scale) const
+{
+    // Everything paintFace() prints that can change
+    juce::String k;
+    k << getWidth() << "x" << getHeight() << "@" << juce::String (scale, 3)
+      << "|" << (int) theme::imageSkin() << (int) theme::xenonSkin() << (int) theme::trackColouring()
+      << theme::stripFace.toString() << theme::stripFaceLow.toString() << theme::stripInk.toString() << theme::stripInkDim.toString()
+      << theme::stripEdge.toString() << theme::knobArc.toString() << theme::lcd.toString()
+      << "|" << (int) selected << (int) showsConsole() << (int) pluginMode << (int) (stripInstance() != nullptr)
+      << "|" << fader.getY() << "," << fader.getHeight() << "," << dbLabel.getBounds().toString() << "," << panKnob.getBounds().toString()
+      << "|" << const_cast<strip::DisplaySlider&> (panKnob).getTextFromValue (panKnob.getValue());
+    if (track.isValid())
+        k << "|" << track[ids::name].toString() << model::trackColour (track).toString() << track.getParent().indexOf (track)
+          << track[ids::stack].toString() << (isVca() ? model::vcaMembers (project, track).size() : 0);
+    return k;
+}
+
+void ChannelStrip::paintFace (juce::Graphics& g)
+{
     // Labels follow the theme when it changes
     if (dbLabel.findColour (juce::Label::textColourId) != theme::lcdText)
         dbLabel.setColour (juce::Label::textColourId, theme::lcdText);
@@ -1543,9 +1596,6 @@ void ChannelStrip::paint (juce::Graphics& g)
         g.fillRect (bounds.withTrimmedRight (1));
     }
 
-    // Themes > Strip VU meters: the amber VU at the top
-    if (! vuArea.isEmpty())
-        looks::drawLevelVu (g, vuArea.toFloat(), vuNeedle);
 
     // Without the console section: the channel number, and the pan value beside its knob.
     if (! console)
@@ -1990,7 +2040,7 @@ void ChannelStrip::updatePreamp()
         preampGain.setValue (p.gainDb, juce::dontSendNotification);
     if (std::exchange (preampClipped, p.clip) != p.clip)
         repaint();
-    preampGain.setAlpha (p.autoGain ? 0.6f : 1.0f);
+    preampGain.setDimmed (p.autoGain ? 0.6f : 1.0f);
     juce::String tip = "Input " + juce::String (channels.getFirst()) + (channels.size() > 1 ? "-" + juce::String (channels.getLast()) : juce::String()) + " preamp";
     if (p.highPass) tip << " - High-pass on";
     if (p.pad) tip << " - Pad on";
@@ -2027,14 +2077,14 @@ void ChannelStrip::updateTape()
         preKey.setToggleState ((bool) track.getProperty ("preOn", false), juce::dontSendNotification);
         if (! preGain.isMouseButtonDown())
             preGain.setValue ((double) track.getProperty ("preGain", 0.0), juce::dontSendNotification);
-        preGain.setAlpha (preKey.getToggleState() ? 1.0f : 0.5f);
+        preGain.setDimmed (preKey.getToggleState() ? 1.0f : 0.5f);
     }
     tapeKey.setToggleState ((bool) tree.getProperty (tapeId ("On"), false), juce::dontSendNotification);
     const auto speed = (int) tree.getProperty (tapeId ("Speed"), 1);
     tapeKey.setButtonText (speed == 0 ? "TAPE 15" : "TAPE");
     if (! tapeDrive.isMouseButtonDown())
         tapeDrive.setValue ((double) tree.getProperty (tapeId ("Drive"), 35.0), juce::dontSendNotification);
-    tapeDrive.setAlpha (tapeKey.getToggleState() ? 1.0f : 0.5f);
+    tapeDrive.setDimmed (tapeKey.getToggleState() ? 1.0f : 0.5f);
 }
 
 void ChannelStrip::showTapeMenu()
@@ -2400,8 +2450,7 @@ void MasterBusCompressorPanel::resized()
 MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p, EffectRack& fx)
     : undoManager (um), engine (e), player (p), effects (fx), busComp (um, e), consolePanel (um, e, fx)
 {
-    setBufferedToImage (true);
-    busComp.setBufferedToImage (true);
+    // (No picture of the whole mixer: with dozens of strips, every moving meter made it all be redrawn and sent again.)
     // Console mode for the strips: the built-in strip, or a channel strip plugin you own
     consoleCaption.setFont (juce::FontOptions (12.0f));
     consoleCaption.setColour (juce::Label::textColourId, theme::dimText);
