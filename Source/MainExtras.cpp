@@ -1,4 +1,5 @@
 // Undo History, Settings, templates, project alternatives, Autopunch and the Event List.
+#include "ui/Eco.h"
 #include "MainComponent.h"
 #include "engine/AudioEdit.h"
 #include "ui/MultiMeter.h"
@@ -119,6 +120,9 @@ namespace
             addRow (stopBehaviour, "When you stop", { "Stay where it stopped", "Go back to where play started" },
                     props.getBoolValue ("stopReturnsToStart", false) ? 2 : 1,
                     [this] (int id) { props.setValue ("stopReturnsToStart", id == 2); });
+            addRow (ecoMode, "Eco mode", { "Off", "On (for slower computers)", "When on battery" },
+                    juce::jlimit (0, 2, props.getIntValue ("ecoMode", 0)) + 1,
+                    [this] (int id) { props.setValue ("ecoMode", id - 1); });
 
             openLast.setButtonText ("Open the last project when the app starts");
             openLast.setToggleState (props.getBoolValue ("openLastProject", false), juce::dontSendNotification);
@@ -163,7 +167,7 @@ namespace
 
         juce::PropertiesFile& props;
         std::function<void()> onChange;
-        juce::ComboBox autosave, backups, autoBackup, bitDepth, stopBehaviour;
+        juce::ComboBox autosave, backups, autoBackup, bitDepth, stopBehaviour, ecoMode;
         juce::ToggleButton openLast;
         std::vector<Row> rows;
     };
@@ -200,6 +204,15 @@ void MainComponent::toggleAutopunch()
     canvas.repaint();
 }
 
+void MainComponent::setEcoMode (int mode)
+{
+    eco::mode = juce::jlimit (0, 2, mode);
+    eco::batteryNow = eco::runningOnBattery();
+    appProperties.getUserSettings()->setValue ("ecoMode", (int) eco::mode.load());
+    appProperties.getUserSettings()->saveIfNeeded();
+    commandManager.commandStatusChanged();
+}
+
 void MainComponent::showUndoHistory()
 {
     launch (new UndoHistoryPanel (undoManager), "Undo History", this);
@@ -213,6 +226,8 @@ void MainComponent::showPreferences()
         autosaveMinutes = props->getIntValue ("autosaveMinutes", 2);
         engine.setRecordBitDepth (props->getIntValue ("recordBitDepth", 24));
         setStopReturnsToStart (props->getBoolValue ("stopReturnsToStart", false));
+        eco::mode = juce::jlimit (0, 2, props->getIntValue ("ecoMode", 0));
+        eco::batteryNow = eco::runningOnBattery();
         props->saveIfNeeded();
     }), "Settings", this);
 }

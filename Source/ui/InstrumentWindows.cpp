@@ -1,4 +1,5 @@
 #include "InstrumentWindows.h"
+#include "Eco.h"
 #include "ControlMenu.h"
 #include "Theme.h"
 #include "../model/Project.h"
@@ -642,6 +643,8 @@ void EffectPanel::updateSpectrum()
 
 void EffectPanel::timerCallback()
 {
+    if (eco::skipFrame (ecoFrame))
+        return;   // (Eco mode: its meters 15 times a second; still while the app isn't in front)
     if (meterSource != nullptr && design != nullptr && design->meters)
     {
         meterCount = meterSource (meterValues.data(), (int) meterValues.size());

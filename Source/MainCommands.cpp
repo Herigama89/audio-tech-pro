@@ -1,6 +1,7 @@
 // The main window's commands: what each menu item and key command does, and
 // the menu bar. (Split from MainComponent.cpp to keep that file readable.)
 
+#include "ui/Eco.h"
 #include "MainComponent.h"
 #include "ui/ToolChooser.h"
 #include "ui/ToolIcons.h"
@@ -101,6 +102,7 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::toggleCatch:     info.setTicked (timeline.catchPlayhead); break;
         case commands::toggleSuspendPlugins: info.setTicked (engine.getSuspendWhenSilent()); break;
         case commands::compareBypass:   info.setTicked (engine.getCompare()); break;
+        case commands::toggleEco:       info.setTicked (eco::active()); break;
         case commands::toggleMidiMerge: info.setTicked ((bool) project[ids::midiMerge]); break;
         case commands::eventList:       info.setActive (region.isValid() && model::isMidiRegion (region)); break;
 
@@ -374,6 +376,9 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::compareBypass:
             setCompare (! engine.getCompare());
             break;
+        case commands::toggleEco:
+            setEcoMode (eco::active() ? 0 : 1);
+            break;
         case commands::resetChannels:
             showResetChannels();
             break;
@@ -547,7 +552,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             // As in Logic: show or hide each panel of the main window.
             add ({ commands::toggleControlBar, commands::toggleToolbar, commands::toggleInspector, commands::showSmartControls,
                    commands::showLibrary, commands::showMixer, commands::showPianoRoll, commands::showLoopBrowser,
-                   commands::toggleTrackHeaders, commands::toggleHeaderInserts, commands::toggleHeaderIO, commands::toggleMeters, commands::toggleStatusBar, commands::toggleGpuDrawing });
+                   commands::toggleTrackHeaders, commands::toggleHeaderInserts, commands::toggleHeaderIO, commands::toggleMeters, commands::toggleStatusBar, commands::toggleGpuDrawing, commands::toggleEco });
             menu.addSeparator();
             add ({ commands::showAllPanels, commands::hideAllPanels });
             menu.addSeparator();

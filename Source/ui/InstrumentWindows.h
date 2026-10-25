@@ -208,6 +208,7 @@ private:
     Knob* addKnob (const ParamInfo& p);
     void buildDesign (const EffectInfo& info);
     void timerCallback() override;
+    int ecoFrame = 0;
 
     // A hand-made face (Logic-style) for some effects
     struct Placed

@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
 endif()
 
-project(AudioTechPro VERSION 1.4.2 LANGUAGES C CXX)
+project(AudioTechPro VERSION 1.4.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -241,6 +241,7 @@ set(RIFF_UI_SOURCES
     Source/ui/InsertBar.cpp
     Source/ui/AutomixPanel.cpp
     Source/ui/ConsoleLook.cpp
+    Source/ui/Eco.cpp
     Source/ui/Commands.cpp
     Source/ui/KeyCommands.cpp
     Source/ui/GeneratorPanel.cpp

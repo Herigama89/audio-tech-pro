@@ -243,7 +243,9 @@ private:
     juce::String formatClock (double seconds) const;
     juce::Rectangle<int> lcdBounds() const;
     int lcdWidth = 560;                       // (narrower on a narrow window)
-    bool compactKeys = false;                 // (the control bar's keys narrowed to fit)
+    bool compactKeys = false;
+    int ecoFrame = 0, batteryCheck = 0;       // (Eco mode: frames left out; when to ask about the battery)
+    void setEcoMode (int mode);                 // (the control bar's keys narrowed to fit)
     std::vector<juce::Component*> squeezedOut;   // control bar keys left out on a narrow window
     void setCompare (bool on);
     void showAudioSettings();

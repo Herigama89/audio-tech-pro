@@ -1,3 +1,4 @@
+#include "ui/Eco.h"
 #include "ui/InsertBar.h"
 #include "MainComponent.h"
 #include "ui/PluginWindowKeys.h"
@@ -543,6 +544,8 @@ MainComponent::MainComponent (bool openAudioDevice)
     setGpuDrawing (appProperties.getUserSettings()->getBoolValue ("gpuDrawing", true));
    #endif
     engine.setSuspendWhenSilent (appProperties.getUserSettings()->getBoolValue ("suspendPlugins", true));
+    eco::mode = juce::jlimit (0, 2, appProperties.getUserSettings()->getIntValue ("ecoMode", 0));
+    eco::batteryNow = eco::runningOnBattery();
     timeline.catchPlayhead = appProperties.getUserSettings()->getBoolValue ("catchPlayhead", true);
     catchButton.setClickingTogglesState (false);
     catchButton.setToggleState (timeline.catchPlayhead, juce::dontSendNotification);
@@ -2569,10 +2572,20 @@ void MainComponent::timerCallback()
     updateScreenRecording();
 
 
+    // Eco mode: on battery? (asked every few seconds)
+    if (++batteryCheck % 90 == 1 && eco::mode.load() == (int) eco::Mode::onBattery)
+        eco::batteryNow = eco::runningOnBattery();
+
+    // The display: in Eco mode 15 times a second, and still while the app isn't in front (the levels in between are
+    // kept, so a peak isn't missed). What isn't display - recording, punching, automation - runs every time.
+    const bool drawFrame = ! eco::skipFrame (ecoFrame);
+    if (drawFrame)
+    {
     const auto levels = engine.takeLevels();
     inputMeter.push (levels.inL, levels.inR);
     outputMeter.push (levels.outL, levels.outR);
     mixer.setMasterLevels (levels.outL, levels.outR);
+    }
     mixerButton.setToggleState (mixer.isVisible(), juce::dontSendNotification);
     editorButton.setToggleState (pianoRoll.isVisible(), juce::dontSendNotification);
     inspectorButton.setToggleState (inspector.isVisible(), juce::dontSendNotification);
@@ -2582,8 +2595,11 @@ void MainComponent::timerCallback()
     // (While the song renders offline, the playhead races ahead: keep showing where it was.)
     const bool offline = engine.isRenderingOffline();
     const auto playhead = offline ? juce::jmax (0.0, lastPaintedPlayhead) : engine.getPlayheadSeconds();
-    positionLabel.setText (formatPosition (playhead), juce::dontSendNotification);
-    clockLabel.setText (formatClock (playhead), juce::dontSendNotification);
+    if (drawFrame)
+    {
+        positionLabel.setText (formatPosition (playhead), juce::dontSendNotification);
+        clockLabel.setText (formatClock (playhead), juce::dontSendNotification);
+    }
 
     const bool playing = engine.isPlaying() && ! offline;
     if (playing != playButton.getToggleState() || engine.isRecording() != recordButton.getToggleState())
@@ -2636,7 +2652,7 @@ void MainComponent::timerCallback()
         }
     }
 
-    if (! juce::exactlyEqual (playhead, lastPaintedPlayhead))
+    if (drawFrame && ! juce::exactlyEqual (playhead, lastPaintedPlayhead))
     {
         // Only the strips where the playhead was and is now are drawn again (not every track and region).
         const auto oldX = juce::roundToInt (timeline.timeToX (lastPaintedPlayhead)), newX = juce::roundToInt (timeline.timeToX (playhead));

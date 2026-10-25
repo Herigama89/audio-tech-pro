@@ -1,4 +1,5 @@
 #include "ConsoleStripWindow.h"
+#include "Eco.h"
 #include "ConsoleLook.h"
 #include "Theme.h"
 #include "Skin.h"
@@ -132,6 +133,9 @@ juce::Rectangle<int> ConsoleStripWindow::meterArea() const
 
 void ConsoleStripWindow::timerCallback()
 {
+    static int ecoFrame = 0;
+    if (eco::skipFrame (ecoFrame))
+        return;   // (Eco mode)
     const auto now = levels();
     const auto in = juce::Decibels::gainToDecibels (now[0], -100.0f), out = juce::Decibels::gainToDecibels (now[1], -100.0f);
     inDb = juce::jmax (in, inDb - 1.5f);    // (they fall back gently)

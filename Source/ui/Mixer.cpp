@@ -1,4 +1,5 @@
 #include "Mixer.h"
+#include "Eco.h"
 #include "InsertBar.h"
 #include "Skin.h"
 #include "RoutingMenu.h"
@@ -3037,6 +3038,12 @@ void MixerPanel::rebuild()
 
 void MixerPanel::timerCallback()
 {
+    // Eco mode: the meters 15 times a second (the levels in between are kept: a peak isn't missed), and not at all
+    // while the app isn't in front
+    if (eco::skipFrame (ecoFrame))
+        return;
+    const bool ecoOn = eco::active();
+    const auto inView = viewport.getViewArea();
     bool extraShowing = false;
     for (auto* s : extraStrips)
         extraShowing = extraShowing || s->isShowing();
@@ -3076,6 +3083,8 @@ void MixerPanel::timerCallback()
     {
         if (! isShowing())
             break;   // (just the Inspector's strips while the mixer is closed)
+        if (ecoOn && s->getParentComponent() == &stripHolder && ! inView.intersects (s->getBounds()))
+            continue;   // (Eco mode: strips scrolled out of view wait)
         const auto [l, r] = levelOf (s->getOwnerId());
         s->pushLevels (l, r);
         s->pushGainReduction (reductionOf (s->getOwnerId()));

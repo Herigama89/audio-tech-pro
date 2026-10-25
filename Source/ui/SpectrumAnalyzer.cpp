@@ -1,4 +1,5 @@
 #include "SpectrumAnalyzer.h"
+#include "Eco.h"
 #include "Theme.h"
 
 namespace riff
@@ -119,6 +120,9 @@ std::vector<float> SpectrumAnalyzer::analyse (const float* samples, int numSampl
 
 void SpectrumAnalyzer::timerCallback()
 {
+    static int ecoFrame = 0;
+    if (eco::skipFrame (ecoFrame))
+        return;   // (Eco mode: 15 a second; nothing while the app isn't in front)
     const auto now = juce::Time::getMillisecondCounter();
     const auto dt = lastTick == 0 ? 1.0f / 30.0f : juce::jlimit (0.001f, 0.5f, (float) (now - lastTick) / 1000.0f);
     lastTick = now;

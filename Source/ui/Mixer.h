@@ -467,6 +467,7 @@ private:
     float stripScale() const;
     juce::Array<juce::PluginDescription> stripCandidates;
     int syncCounter = 0;
+    int ecoFrame = 0;
     void refreshConsoleBox();
     juce::TextButton closeButton { "Close" };
     juce::Viewport outer;          // scrolls everything up and down when the pane is short
