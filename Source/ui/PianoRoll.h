@@ -4,6 +4,7 @@
 #include "../engine/AudioEngine.h"
 #include "NoteViews.h"
 #include "PlayerEditor.h"
+#include "NoteToolIcons.h"
 
 namespace riff
 {
@@ -58,7 +59,8 @@ private:
     enum class Tool { draw, paint, erase, mute, slice, select, zoom };
     Tool tool = Tool::draw;
     void setTool (Tool t);
-    juce::TextButton toolButtons[7];
+    juce::OwnedArray<notetoolicons::Button> toolButtons;   // FL Studio's tool icons, the one in use lit
+    void showToolChooser();                                  // T: the tool menu
     juce::ComboBox stampBox, snapBox;
     juce::TextButton scaleHighlightButton { "Scale" }, ghostButton { "Ghosts" }, toolsButton { "Tools" };
     void showToolsMenu();

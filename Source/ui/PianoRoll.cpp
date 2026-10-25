@@ -80,25 +80,22 @@ PianoRoll::PianoRoll (juce::UndoManager& um, AudioEngine& e)
     }
 
     // FL Studio's toolbar: the tools, the stamp, the snap, scale highlighting, ghost notes and the Tools menu
-    const char* toolNames[] { "Draw", "Paint", "Delete", "Mute", "Slice", "Select", "Zoom" };
     const char* toolTips[] {
         "Draw (P): click to add a note (as long as the last one), drag to set its length; drag notes to move them, their right edge to resize",
         "Paint (B): drag to paint notes along the grid", "Delete (D): click or drag over notes to delete them (right-click deletes with any tool)",
-        "Mute (T): click or drag over notes to mute or unmute them", "Slice (C): drag down across notes to cut them where you started",
+        "Mute (T, then T): click or drag over notes to mute or unmute them", "Slice (C): drag down across notes to cut them where you started",
         "Select (E): drag to select notes in a rectangle; drag a selected note to move them all", "Zoom (Z): click to zoom in, Option-click out, drag across a stretch to fill the view with it" };
-    for (int i = 0; i < 7; ++i)
+    for (int i = 0; i < notetoolicons::count; ++i)
     {
-        auto& b = toolButtons[i];
-        b.setButtonText (toolNames[i]);
-        b.setTooltip (toolTips[i]);
-        b.setClickingTogglesState (true);
-        b.setRadioGroupId (701);
-        b.setColour (juce::TextButton::buttonOnColourId, theme::accent);
-        b.setWantsKeyboardFocus (false);
-        b.onClick = [this, i] { setTool ((Tool) i); };
+        auto* b = toolButtons.add (new notetoolicons::Button (i));
+        b->setTooltip (juce::String (toolTips[i]) + "\nT: the tool menu");
+        b->setClickingTogglesState (true);
+        b->setRadioGroupId (701);
+        b->setWantsKeyboardFocus (false);
+        b->onClick = [this, i] { setTool ((Tool) i); };
         addAndMakeVisible (b);
     }
-    toolButtons[0].setToggleState (true, juce::dontSendNotification);
+    toolButtons[0]->setToggleState (true, juce::dontSendNotification);
 
     stampBox.addItem ("No Stamp", 1);
     for (size_t i = 0; i < notetools::stamps().size(); ++i)
@@ -134,9 +131,22 @@ PianoRoll::PianoRoll (juce::UndoManager& um, AudioEngine& e)
 void PianoRoll::setTool (Tool t)
 {
     tool = t;
-    for (int i = 0; i < 7; ++i)
-        toolButtons[i].setToggleState (i == (int) t, juce::dontSendNotification);
-    setMouseCursor (t == Tool::zoom ? juce::MouseCursor::CrosshairCursor : juce::MouseCursor::NormalCursor);
+    for (int i = 0; i < toolButtons.size(); ++i)
+        toolButtons[i]->setToggleState (i == (int) t, juce::dontSendNotification);
+    setMouseCursor (notetoolicons::cursor ((int) t));
+}
+
+void PianoRoll::showToolChooser()
+{
+    // As in the Edit window: at the mouse when it's over the notes, else under the tool icons.
+    auto chooser = std::make_unique<notetoolicons::Chooser> ((int) tool,
+        [safe = juce::Component::SafePointer<PianoRoll> (this)] (int i) { if (safe != nullptr) safe->setTool ((Tool) i); },
+        [safe = juce::Component::SafePointer<PianoRoll> (this)] { if (safe != nullptr) safe->showToolsMenu(); });
+    const auto mouse = juce::Desktop::getMousePosition();
+    const auto at = getScreenBounds().contains (mouse) && ! toolButtons.isEmpty() && mouse.y > toolButtons[0]->getScreenBounds().getBottom()
+                        ? juce::Rectangle<int> (mouse, mouse).expanded (2)
+                        : toolButtons[(int) tool]->getScreenBounds();
+    juce::CallOutBox::launchAsynchronously (std::move (chooser), at, nullptr);
 }
 
 double PianoRoll::snapSeconds() const
@@ -342,7 +352,7 @@ juce::String PianoRoll::shortcutsText()
     text << "TOOLS\n"
          << "P  Draw (pencil; it remembers the last note's length)\n"
          << "B  Paint (drag to lay notes along the grid)\n"
-         << "D  Delete      T  Mute      C  Slice\n"
+         << "D  Delete      C  Slice      T  the tool menu (T again: Mute)\n"
          << "E  Select      Z  Zoom (Option-click zooms out)\n"
          << "Right-click or right-drag: delete notes, with any tool\n\n"
          << "EDITING\n"
@@ -376,6 +386,19 @@ void PianoRoll::showToolsMenu()
     if (! region.isValid())
         return;
     juce::PopupMenu menu;
+
+    // The tools themselves first, with their icons and keys (the one in use ticked)
+    menu.addSectionHeader ("Tool");
+    for (int i = 0; i < notetoolicons::count; ++i)
+    {
+        juce::PopupMenu::Item t (juce::String (notetoolicons::name (i)) + "    (" + notetoolicons::hint (i) + ")");
+        t.image = notetoolicons::drawable (i, theme::text);
+        t.shortcutKeyDescription = i == 3 ? "T T" : juce::String::charToString (notetoolicons::key (i)).toUpperCase();
+        t.isTicked = (int) tool == i;
+        t.setAction ([safe = juce::Component::SafePointer<PianoRoll> (this), i] { if (safe != nullptr) safe->setTool ((Tool) i); });
+        menu.addItem (std::move (t));
+    }
+    menu.addSeparator();
     menu.addSectionHeader (selection.isEmpty() ? "Tools (all notes)" : "Tools (selected notes)");
     const auto shortcuts = noteShortcuts();
     const auto item = [&menu, &shortcuts] (const juce::String& name)
@@ -664,9 +687,9 @@ void PianoRoll::resized()
 
     // The toolbar row
     auto bar = getLocalBounds().withTrimmedTop (headerHeight).removeFromTop (toolbarHeight).reduced (8, 3);
-    for (auto& b : toolButtons)
+    for (auto* b : toolButtons)
     {
-        b.setBounds (bar.removeFromLeft (58));
+        b->setBounds (bar.removeFromLeft (bar.getHeight() + 4));
         bar.removeFromLeft (2);
     }
     bar.removeFromLeft (10);
@@ -1238,12 +1261,15 @@ bool PianoRoll::keyPressed (const juce::KeyPress& key)
     if (! key.getModifiers().isAnyModifierKeyDown())
     {
         const auto c = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
-        const std::pair<juce::juce_wchar, Tool> keys[] { { 'p', Tool::draw }, { 'b', Tool::paint }, { 'd', Tool::erase }, { 't', Tool::mute },
-                                                         { 'c', Tool::slice }, { 'e', Tool::select }, { 'z', Tool::zoom } };
-        for (const auto& [ch, t] : keys)
-            if (c == ch)
+        if (c == 't')
+        {
+            showToolChooser();   // T: the tool menu (T again in it: Mute)
+            return true;
+        }
+        for (int i = 0; i < notetoolicons::count; ++i)
+            if (c == notetoolicons::key (i))
             {
-                setTool (t);
+                setTool ((Tool) i);
                 return true;
             }
     }
@@ -1353,8 +1379,8 @@ void PianoRoll::showView (int id)
     for (auto* c : std::initializer_list<juce::Component*> { &laneBox, &stepButton, &restButton, &stampBox, &snapBox,
                                                              &scaleHighlightButton, &ghostButton, &toolsButton })
         c->setVisible (id == 1);
-    for (auto& b : toolButtons)
-        b.setVisible (id == 1);
+    for (auto* b : toolButtons)
+        b->setVisible (id == 1);
     resized();
     repaint();
 }

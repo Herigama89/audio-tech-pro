@@ -736,6 +736,12 @@ public:
             roll.setTool (PianoRoll::Tool::paint);
             pump (main, 150);
             save (roll, "pianoroll-tools.png");
+            {
+                // The tool icons up close, and the tool menu that T opens
+                save (roll, "pianoroll-toolbar.png", 2.0f);
+                notetoolicons::Chooser chooser ((int) PianoRoll::Tool::paint, [] (int) {}, [] {});
+                save (chooser, "pianoroll-toolmenu.png", 2.0f);
+            }
             out.getChildFile ("pianoroll-keys.txt").replaceWithText (roll.shortcutsText());
             {
                 // The FL keys reach the tools: Option-F flams the notes (one undoable step)
