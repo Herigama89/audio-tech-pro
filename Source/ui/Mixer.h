@@ -139,6 +139,12 @@ private:
     juce::AudioProcessorParameter* stripParameter (console::StripControl c) const;
     int stripParameterIndex (console::StripControl c) const;
     mutable ParameterNames parameterNames;   // (the strip plugin's, read once)
+    // Which of the plugin's parameters each knob drives, worked out once (matching every name, on every strip, ten
+    // times a second, made plugins whose names don't match - most channel strips - slow the whole app down)
+    mutable const juce::AudioPluginInstance* indexCacheFor = nullptr;
+    mutable std::array<int, 16> indexCache {};
+    void forgetParameterIndices() const { indexCacheFor = nullptr; }
+    float shownDynamics = -1.0f;   // (the Dynamics value its label shows)
     bool usesPlugin() const { return stripInsert().isValid(); }
     void applyMode();
     void toggleStripSwitch (console::StripControl c, const juce::Identifier& builtInProperty, const juce::String& undoName);

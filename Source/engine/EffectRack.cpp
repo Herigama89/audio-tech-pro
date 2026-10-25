@@ -162,11 +162,15 @@ float PluginEffect::takeGainReductionDb() noexcept
     }
     if (grParameter == nullptr)
         return 0.0f;
-    // Read the plugin's own reading of it ("-4.2 dB"), or its position on a 0..20 dB scale.
+    // Read the plugin's own reading of it ("-4.2 dB"), or its position on a 0..20 dB scale. The text only when the
+    // meter moved, and at most ten times a second: some plugins (UAD's) are slow to give it, and a strip asks often.
+    const auto value = grParameter->getValue();
+    if (std::abs (value - grLastValue) < 1.0e-6f || (++grAsked % 3 != 0 && grLastDb >= 0.0f))
+        return grLastDb >= 0.0f ? grLastDb : value * 20.0f;
+    grLastValue = value;
     const auto text = grParameter->getCurrentValueAsText().retainCharacters ("0123456789.-");
-    if (text.containsAnyOf ("0123456789"))
-        return std::abs (text.getFloatValue());
-    return grParameter->getValue() * 20.0f;
+    grLastDb = text.containsAnyOf ("0123456789") ? std::abs (text.getFloatValue()) : value * 20.0f;
+    return grLastDb;
 }
 
 float EffectRack::takeGainReduction (const juce::String& insertId)

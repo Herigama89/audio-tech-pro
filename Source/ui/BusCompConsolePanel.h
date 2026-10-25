@@ -86,6 +86,8 @@ private:
     juce::AudioProcessorParameter* parameterFor (Control c) const;
     int parameterIndexFor (Control c) const;
     mutable ParameterNames parameterNames;   // (the plugin's, read once)
+    mutable const juce::AudioPluginInstance* indexCacheFor = nullptr;
+    mutable std::array<int, 16> indexCache {};
     void assign (Control c, int parameterIndex);
     bool isIn() const;
     void toggleIn();

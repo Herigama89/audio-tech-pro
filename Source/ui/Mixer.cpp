@@ -676,18 +676,29 @@ int ChannelStrip::stripParameterIndex (console::StripControl c) const
     auto* p = stripInstance();
     if (p == nullptr)
         return -1;
+    const auto slot = (size_t) juce::jlimit (0, (int) indexCache.size() - 1, (int) c);
+    if (indexCacheFor != p)
+    {
+        indexCacheFor = p;
+        indexCache.fill (-2);   // (-2: not worked out yet)
+    }
+    if (indexCache[slot] != -2)
+        return indexCache[slot];
 
     const auto& params = p->getParameters();
     const auto insert = stripInsert();
     const juce::Identifier key ("map" + juce::String ((int) c));
 
+    int index = -1;
     if (insert.hasProperty (key))
     {
-        const int index = insert[key];
-        return juce::isPositiveAndBelow (index, params.size()) ? index : -1;
+        const int chosen = insert[key];
+        index = juce::isPositiveAndBelow (chosen, params.size()) ? chosen : -1;
     }
-
-    return console::matchStripParameter (c, parameterNames.of (p));
+    else
+        index = console::matchStripParameter (c, parameterNames.of (p));
+    indexCache[slot] = index;
+    return index;
 }
 
 juce::AudioProcessorParameter* ChannelStrip::stripParameter (console::StripControl c) const
@@ -743,7 +754,8 @@ void ChannelStrip::applyMode()
 
 void ChannelStrip::syncFromPlugin()
 {
-    if (! pluginMode || stripInstance() == nullptr)
+    // (only what's on screen: the knobs are hidden when the strip is compact)
+    if (! pluginMode || ! showsConsole() || ! isShowing() || stripInstance() == nullptr)
         return;
 
     for (int c = 0; c <= (int) console::StripControl::dynamics; ++c)
@@ -767,8 +779,13 @@ void ChannelStrip::syncFromPlugin()
     lamp (console::StripControl::eqIn, consoleInButton);
     lamp (console::StripControl::dynIn, dynInButton);
 
+    // (its text asked for only when it moved: some plugins are slow to give it)
     if (auto* p = stripParameter (console::StripControl::dynamics))
-        dynLabel.setText (p->getCurrentValueAsText().upToFirstOccurrenceOf (" ", false, false).substring (0, 6), juce::dontSendNotification);
+        if (const auto v = p->getValue(); std::abs (v - shownDynamics) > 1.0e-5f || dynLabel.getText().isEmpty())
+        {
+            shownDynamics = v;
+            dynLabel.setText (p->getCurrentValueAsText().upToFirstOccurrenceOf (" ", false, false).substring (0, 6), juce::dontSendNotification);
+        }
 }
 
 void ChannelStrip::toggleStripSwitch (console::StripControl c, const juce::Identifier& builtInProperty, const juce::String& undoName)
@@ -1199,6 +1216,7 @@ void ChannelStrip::showSendMenu (int index)
 
 void ChannelStrip::refresh()
 {
+    forgetParameterIndices();   // (a knob may have been given another parameter)
     updateTape();
     updatePreamp();
     if (track.isValid())
@@ -3088,11 +3106,13 @@ void MixerPanel::timerCallback()
     else
         busComp.updateMeter();
 
-    // Console mode: follow knobs turned in the plugins' own windows (10 times a second).
+    // Console mode: follow knobs turned in the plugins' own windows (10 times a second), on the strips in view.
     if (++syncCounter % 3 == 0)
     {
+        const auto view = viewport.getViewArea();
         for (auto* s : strips)
-            s->syncFromPlugin();
+            if (s->getParentComponent() != &stripHolder || view.intersects (s->getBounds()))
+                s->syncFromPlugin();
         for (auto* s : extraStrips)
             s->syncFromPlugin();
     }

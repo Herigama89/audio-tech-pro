@@ -162,18 +162,30 @@ int BusCompConsolePanel::parameterIndexFor (Control c) const
     auto* p = plugin();
     if (p == nullptr)
         return -1;
+    // (worked out once for the plugin, not every frame)
+    const auto slot = (size_t) juce::jlimit (0, (int) indexCache.size() - 1, (int) c);
+    if (indexCacheFor != p)
+    {
+        indexCacheFor = p;
+        indexCache.fill (-2);
+    }
+    if (indexCache[slot] != -2)
+        return indexCache[slot];
 
     const auto& params = p->getParameters();
     const auto insert = model::busCompPlugin (project);
 
     // Chosen by hand (right-click a knob), or matched by name.
+    int index = -1;
     if (insert.hasProperty (mapProperty (c)))
     {
-        const int index = insert[mapProperty (c)];
-        return juce::isPositiveAndBelow (index, params.size()) ? index : -1;
+        const int chosen = insert[mapProperty (c)];
+        index = juce::isPositiveAndBelow (chosen, params.size()) ? chosen : -1;
     }
-
-    return console::matchParameter (c, parameterNames.of (p));
+    else
+        index = console::matchParameter (c, parameterNames.of (p));
+    indexCache[slot] = index;
+    return index;
 }
 
 juce::AudioProcessorParameter* BusCompConsolePanel::parameterFor (Control c) const
@@ -243,6 +255,7 @@ void BusCompConsolePanel::toggleIn()
 
 void BusCompConsolePanel::refresh()
 {
+    indexCacheFor = nullptr;   // (a knob may have been given another parameter)
     auto* p = plugin();
     if (p != lastPlugin)
     {

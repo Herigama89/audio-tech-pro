@@ -105,6 +105,8 @@ private:
     };
     std::unique_ptr<Watcher> watcher;
     juce::AudioProcessorParameter* grParameter = nullptr;
+    float grLastValue = -1.0f, grLastDb = -1.0f;
+    int grAsked = 0;
     const float* sideL = nullptr;
     const float* sideR = nullptr;
     bool grSearched = false;
