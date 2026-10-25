@@ -390,7 +390,7 @@ if(APPLE)
     set_source_files_properties(Source/ui/ScreenRecorder_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(AudioTechPro PRIVATE "-framework AVFoundation" "-framework CoreMedia" "-framework CoreVideo"
                                                "-weak_framework ScreenCaptureKit")
-    target_link_libraries(AudioTechPro PRIVATE "-framework CoreAudioKit")
+    target_link_libraries(AudioTechPro PRIVATE "-framework CoreAudioKit" "-framework IOKit")
     # The window drawn by the graphics card (View > Draw with the Graphics Card)
     target_link_libraries(AudioTechPro PRIVATE juce::juce_opengl)
     target_compile_definitions(AudioTechPro PRIVATE RIFF_GPU_DRAWING=1 GL_SILENCE_DEPRECATION=1)
