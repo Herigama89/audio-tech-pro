@@ -1059,11 +1059,35 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
     }
     else
     {
-        g.setGradientFill (juce::ColourGradient (base.darker (0.05f), 0.0f, bounds.getY(), base.darker (0.45f), 0.0f, bounds.getBottom(), false));
-        g.fillRoundedRectangle (bounds, 3.0f);
+        // (rectangles with their corners nicked, not rounded paths: a long region's rounded path was costly to fill,
+        // and at 3 pixels it looks the same)
+        const auto nicked = [&g] (juce::Rectangle<float> r, float corner)
+        {
+            g.fillRect (r.reduced (corner, 0.0f));
+            g.fillRect (r.withWidth (corner).reduced (0.0f, corner));
+            g.fillRect (r.withLeft (r.getRight() - corner).reduced (0.0f, corner));
+        };
+        // (only the part on screen: a long region can be far wider than the window)
+        const auto shown = bounds.getIntersection (g.getClipBounds().toFloat().expanded (4.0f, 0.0f));
+        const auto body = bounds.withLeft (juce::jmax (bounds.getX(), shown.getX() - 4.0f)).withRight (juce::jmin (bounds.getRight(), shown.getRight() + 4.0f));
+        // The body's shading, top to bottom, in 2-pixel bands of solid colour (looks the same as a gradient, and
+        // solid fills are many times quicker on a wide region)
+        {
+            const auto r = body.getSmallestIntegerContainer().getIntersection (body.toNearestInt().withHeight (juce::roundToInt (body.getHeight())));
+            const auto top = base.darker (0.05f), bottom = base.darker (0.45f);
+            const auto h = juce::jmax (1, r.getHeight());
+            for (int y = 0; y < h; y += 2)
+            {
+                g.setColour (top.interpolatedWith (bottom, ((float) y + 1.0f) / (float) h));
+                const auto inset = (y == 0 || y >= h - 2) ? 1 : 0;   // (the corners nicked)
+                g.fillRect (r.getX() + inset, r.getY() + y, r.getWidth() - 2 * inset, juce::jmin (2, h - y));
+            }
+        }
+        juce::ignoreUnused (nicked);
         g.setColour (base.withMultipliedSaturation (0.9f).brighter (0.1f));
-        g.fillRoundedRectangle (header, 3.0f);
-        g.fillRect (header.withTrimmedTop (3.0f));
+        const auto headerShown = header.withLeft (body.getX()).withRight (body.getRight());
+        g.fillRect (headerShown.reduced (1.5f, 0.0f).withTrimmedBottom (0.0f));
+        g.fillRect (headerShown.withTrimmedTop (1.5f));
         g.setColour (juce::Colour (0xff15161a));
     }
     g.setFont (juce::FontOptions (11.5f, juce::Font::bold));

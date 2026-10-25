@@ -1,4 +1,5 @@
 #include "StripParts.h"
+#include "Pictures.h"
 #include "ConsoleLook.h"
 #include "Skin.h"
 #include "ThemePack.h"
@@ -121,7 +122,7 @@ PointerKnob::PointerKnob (juce::Colour pointerColour) : pointer (pointerColour)
     setWantsKeyboardFocus (false);
 }
 
-void PointerKnob::paint (juce::Graphics& g)
+void PointerKnob::paintUncached (juce::Graphics& g)
 {
     // Themes > Knobs: a photo knob, or the classic drawn one, whatever the skin.
     if (theme::knobStyle() >= 0)
@@ -238,7 +239,7 @@ CreamKey::CreamKey (const juce::String& letter, juce::Colour litColour) : juce::
     setWantsKeyboardFocus (false);
 }
 
-void CreamKey::paintButton (juce::Graphics& g, bool over, bool down)
+void CreamKey::paintUncached (juce::Graphics& g, bool over, bool down)
 {
     // Themes > Buttons: the photo's key, lit in its colour, its letter on it.
     {
@@ -300,8 +301,27 @@ DisplaySlider::DisplaySlider()
     setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
 }
 
-void DisplaySlider::paint (juce::Graphics& g)
+void DisplaySlider::paintUncached (juce::Graphics& g)
 {
+    if (knobAndValue)
+    {
+        // A knob the row's height (grey when its section is switched out), the value beside it
+        auto r = getLocalBounds().toFloat();
+        const auto knobArea = r.removeFromLeft (juce::jmin (r.getHeight(), r.getWidth()));
+        const auto proportion = (float) valueToProportionOfLength (getValue());
+        const bool live = isEnabled() && dimmed >= 0.99f;
+        if (theme::knobStyle() < 0 || ! looks::drawKnob (g, knobArea, proportion, juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f), true, live))
+            look::drawNeonKnob (g, knobArea, proportion, juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f),
+                                theme::knobBlack, true, live, true);
+        if (r.getWidth() >= 10.0f)
+        {
+            g.setColour ((look::isOnLight (*this) ? theme::stripInk : juce::Colour (0xffe9e6dc)).withMultipliedAlpha (dimmed));
+            g.setFont (juce::FontOptions (juce::jmin (11.0f, r.getHeight() * 0.62f)));
+            g.drawFittedText (getTextFromValue (getValue()), r.toNearestInt().withTrimmedLeft (1), juce::Justification::centred, 1, 0.7f);
+        }
+        return;
+    }
+
     if (asKnob)
     {
         const auto proportion = (float) valueToProportionOfLength (getValue());
@@ -441,6 +461,45 @@ void Fader::paint (juce::Graphics& g)
     // The cap (the picture's cap keeps its shape: 20 x 34)
     const auto capWidth = capHeight() * 21.0f / 36.0f;
     look::drawFaderCap (g, juce::Rectangle<float> (capWidth, capHeight()).withCentre ({ cx, yForValue (getValue()) }), true);
+}
+
+//==============================================================================
+// Drawn once for each look, then copied (see Pictures.h)
+void PointerKnob::paint (juce::Graphics& g)
+{
+    const auto scale = pictures::scaleOf (g);
+    auto key = pictures::start (*this, scale);
+    const auto params = getRotaryParameters();
+    pictures::mix (key, (juce::uint64) juce::roundToInt (valueToProportionOfLength (getValue()) * 512.0));
+    pictures::mix (key, (juce::uint64) juce::roundToInt (params.startAngleRadians * 1000.0f) << 20 ^ (juce::uint64) juce::roundToInt (params.endAngleRadians * 1000.0f));
+    pictures::mix (key, (getMinimum() < 0.0 && getMaximum() > 0.0) ? 7u : 3u);
+    pictures::mix (key, pointer.getARGB());
+    pictures::mix (key, cap.getARGB());
+    pictures::mix (key, (juce::uint64) (juce::pointer_sized_int) skinBody.getPixelData().get());
+    pictures::mix (key, skinPointer.getARGB());
+    pictures::draw (g, key, *this, scale, [this] (juce::Graphics& ig) { paintUncached (ig); });
+}
+
+void CreamKey::paintButton (juce::Graphics& g, bool over, bool down)
+{
+    const auto scale = pictures::scaleOf (g);
+    auto key = pictures::start (*this, scale);
+    pictures::mix (key, (juce::uint64) (getToggleState() ? 1 : 0) | (over ? 2 : 0) | (down ? 4 : 0) | (onArt ? 8 : 0));
+    pictures::mix (key, lit.getARGB());
+    pictures::mix (key, pictures::ofText (getName()));
+    pictures::mix (key, look::isOnLight (*this) ? 11u : 13u);
+    pictures::draw (g, key, *this, scale, [this, over, down] (juce::Graphics& ig) { paintUncached (ig, over, down); });
+}
+
+void DisplaySlider::paint (juce::Graphics& g)
+{
+    const auto scale = pictures::scaleOf (g);
+    auto key = pictures::start (*this, scale);
+    pictures::mix (key, pictures::ofText (getTextFromValue (getValue())));
+    pictures::mix (key, (juce::uint64) juce::roundToInt (valueToProportionOfLength (getValue()) * 512.0));
+    pictures::mix (key, (juce::uint64) juce::roundToInt (dimmed * 100.0f) | (asKnob ? 1000u : 0u) | (knobAndValue ? 2000u : 0u));
+    pictures::mix (key, look::isOnLight (*this) ? 11u : 13u);
+    pictures::draw (g, key, *this, scale, [this] (juce::Graphics& ig) { paintUncached (ig); });
 }
 
 } // namespace riff::strip

@@ -135,6 +135,13 @@ public:
 
     /** Plug-ins on a silent track stop working (their output was silent for a second too, so tails have rung out)
         until sound comes again, as Cubase's VST3 suspend and FL Studio's Smart Disable. On by default. */
+    /** Compare (the control bar's bypass): every channel's processing - its preamp, channel strip, inserts and tape -
+        and the master's inserts, bus compressor and tape heard bypassed, all at once, to hear the mix without them.
+        They keep running (so it switches back instantly, with tails and timing intact) and the dry sound is
+        delayed as much as they delay it. */
+    void setCompare (bool on) noexcept { compare.store (on); }
+    bool getCompare() const noexcept { return compare.load(); }
+
     void setSuspendWhenSilent (bool on) noexcept { suspendWhenSilent.store (on); }
     bool getSuspendWhenSilent() const noexcept { return suspendWhenSilent.load(); }
     /** How many tracks' plug-ins were resting in the last block (for the Performance window) */
@@ -394,7 +401,7 @@ private:
     /** One thread's scratch space for rendering a track (each render thread has its own). */
     struct Scratch
     {
-        juce::AudioBuffer<float> track, region, stream;
+        juce::AudioBuffer<float> track, region, stream, dry;
         juce::MidiBuffer midi;
     };
     void collectNotes (const PlaybackGraph::Track& track, juce::int64 from, juce::int64 to, juce::MidiBuffer& into) noexcept;
@@ -496,12 +503,20 @@ private:
                    ? slotOutputs.getReadPointer (slot * 2 + channel) : silence.getReadPointer (channel);
     }
     std::array<std::unique_ptr<DelayLine>, PlaybackGraph::maxTracks> trackDelays;
+    std::array<std::unique_ptr<DelayLine>, PlaybackGraph::maxTracks> dryDelays;   // (Compare: the dry sound, as late as its plugins)
+    std::atomic<bool> compare { false };
+    float masterCompareMix = 0.0f;
+    juce::AudioBuffer<float> masterDry;
+    DelayLine masterDryDelay;
+    /** Compare: towards dry (or back), over 20 ms, blending `wet` with `dry` in place. Returns the new mix. */
+    static float blendCompare (float* wetL, float* wetR, const float* dryL, const float* dryR, int n, float mix, bool toDry, double rate) noexcept;
     std::unique_ptr<DelayLine> directDelayLine;
     struct TrackState
     {
         juce::SmoothedValue<float> gainL, gainR;
         bool initialised = false;
         juce::int64 quietFor = 0;   // samples both into and out of its plug-ins have been silent (for suspending them)
+        float compareMix = 0.0f;    // Compare: 0 its processing heard, 1 it dry (moved there over 20 ms)
     };
     std::atomic<bool> suspendWhenSilent { true };
     std::atomic<int> suspendedNow { 0 }, suspendedCount { 0 };

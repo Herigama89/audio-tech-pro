@@ -2,6 +2,7 @@
 
 #include "Theme.h"
 #include "Skin.h"
+#include "Pictures.h"
 
 namespace riff
 {
@@ -138,7 +139,10 @@ public:
         else
             g.fillRoundedRectangle (housing, 2.5f);
         g.setColour (juce::Colours::black);
-        g.drawRoundedRectangle (housing.reduced (0.5f), 2.5f, 1.0f);
+        if (isOpaque())
+            g.drawRect (area, 1);   // (a plain edge: a rounded one was a path to fill, every frame)
+        else
+            g.drawRoundedRectangle (housing.reduced (0.5f), 2.5f, 1.0f);
 
         auto bars = housing.reduced (2.0f, 3.0f);
         const auto barWidth = (bars.getWidth() - 2.0f) / 2.0f;
@@ -182,24 +186,55 @@ private:
     {
         if (r.isEmpty())
             return;
-        const auto key = "meter" + juce::String (r.getWidth()) + "x" + juce::String (r.getHeight()) + "/"
-                       + theme::meterGreen.toString() + theme::meterAmber.toString() + theme::meterRed.toString();
+        // (keyed by a number, not a string built every frame: dozens of meters move 30 times a second)
+        const auto scale = pictures::scaleOf (g);
+        if (std::abs (scale - std::round (scale)) > 1.0e-3f)
+        {
+            // Drawn scaled (the mixer's Narrow): pictures would be resampled, which is slow - the LEDs drawn directly are quicker
+            drawSegments (g, r.toFloat(), lit, peak);
+            return;
+        }
+        auto key = theme::paletteKey();
+        pictures::mix (key, (juce::uint64) (juce::uint32) r.getWidth() << 32 | (juce::uint64) (juce::uint32) r.getHeight());
+        pictures::mix (key, (juce::uint64) juce::roundToInt (scale * 1000.0f));
+        pictures::mix (key, theme::meterGreen.getARGB());
+        pictures::mix (key, theme::meterAmber.getARGB());
+        pictures::mix (key, theme::meterRed.getARGB());
+        auto keyOn = key;
+        pictures::mix (keyOn, 0x5151u);
         const auto local = r.withZeroOrigin().toFloat();
-        skin::drawCached (g, key + "off", r, [local] (juce::Graphics& ig) { drawBar (ig, local, 0.0f); }, true);
+        pictures::drawArea (g, key, r, scale, true, [local] (juce::Graphics& ig) { drawBar (ig, local, 0.0f); });
+        const auto& onPicture = pictures::pictureOf (keyOn, r, scale, true, [local] (juce::Graphics& ig) { drawBar (ig, local, 1.0f); });
         auto lightUpTo = [&] (int from, int to)   // segments [from, to) lit, counted from the bottom
         {
             if (to <= from)
                 return;
-            const auto top = (float) r.getBottom() - (float) to * (segment + gap) + gap - 0.5f;
-            const auto bottom = (float) r.getBottom() - (float) from * (segment + gap) + 0.5f;
-            juce::Graphics::ScopedSaveState state (g);
-            if (g.reduceClipRegion (juce::Rectangle<int>::leftTopRightBottom (r.getX(), juce::jmax (r.getY(), (int) std::floor (top)),
-                                                                              r.getRight(), juce::jmin (r.getBottom(), (int) std::ceil (bottom)))))
-                skin::drawCached (g, key + "on", r, [local] (juce::Graphics& ig) { drawBar (ig, local, 1.0f); }, true);
+            const auto top = (float) r.getHeight() - (float) to * (segment + gap) + gap - 0.5f;
+            const auto bottom = (float) r.getHeight() - (float) from * (segment + gap) + 0.5f;
+            pictures::drawRows (g, onPicture, r, (int) std::floor (top), (int) std::ceil (bottom));
         };
         lightUpTo (0, lit);
         if (peak > lit)
             lightUpTo (peak - 1, peak);   // the held peak: its one segment lit above the bar
+    }
+
+    /** The column's LEDs, `lit` of them on from the bottom, and the held peak's. */
+    static void drawSegments (juce::Graphics& g, juce::Rectangle<float> r, int lit, int peak)
+    {
+        g.setColour (juce::Colour (0xff0d0e10));
+        g.fillRect (r);
+        const auto count = juce::jmax (1, (int) ((r.getHeight() + gap) / (segment + gap)));
+        for (int i = 0; i < count; ++i)
+        {
+            const auto segDb = juce::jmap ((float) (i + 1) / (float) count, -60.0f, 0.0f);
+            const auto colour = segDb > -1.0f ? theme::meterRed
+                              : segDb > -6.0f ? theme::meterAmber
+                              : segDb > -18.0f ? theme::meterGreen.brighter (0.25f)
+                              : theme::meterGreen;
+            const bool on = i < lit || i == peak - 1;
+            g.setColour (on ? colour : colour.withAlpha (0.13f));
+            g.fillRect (r.getX(), r.getBottom() - (float) (i + 1) * (segment + gap) + gap, r.getWidth(), segment);
+        }
     }
 
     static void drawBar (juce::Graphics& g, juce::Rectangle<float> r, float linear)

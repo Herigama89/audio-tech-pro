@@ -4,6 +4,7 @@
 #include "../engine/AudioEngine.h"
 #include "../engine/EffectRack.h"
 #include "../engine/ConsolePlugins.h"
+#include "ParameterNames.h"
 
 namespace riff
 {
@@ -84,6 +85,7 @@ private:
     juce::AudioPluginInstance* plugin() const;
     juce::AudioProcessorParameter* parameterFor (Control c) const;
     int parameterIndexFor (Control c) const;
+    mutable ParameterNames parameterNames;   // (the plugin's, read once)
     void assign (Control c, int parameterIndex);
     bool isIn() const;
     void toggleIn();

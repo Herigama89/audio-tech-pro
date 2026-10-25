@@ -214,6 +214,7 @@ private:
     /** The master's MultiMeter (levels, LUFS loudness, goniometer, spectrum), in its own window. */
     void showMultiMeter();
     void showAutomix();
+    void showResetChannels();
 
     // BPM: detect it from an audio region, or tap it
     void detectTempo (juce::ValueTree region);
@@ -240,6 +241,10 @@ private:
     juce::String formatPosition (double seconds) const;
     juce::String formatClock (double seconds) const;
     juce::Rectangle<int> lcdBounds() const;
+    int lcdWidth = 560;                       // (narrower on a narrow window)
+    bool compactKeys = false;                 // (the control bar's keys narrowed to fit)
+    std::vector<juce::Component*> squeezedOut;   // control bar keys left out on a narrow window
+    void setCompare (bool on);
     void showAudioSettings();
     void showKeyCommands();
     void showGenerator();
@@ -373,6 +378,7 @@ private:
     IconButton punchButton     { "Punch",   IconButton::Icon::punch,  juce::Colour (0xffd8352d) };
     IconButton replaceButton   { "Replace", IconButton::Icon::replace, juce::Colour (0xffd8352d) };
     IconButton clipStopButton  { "Clip Stop", IconButton::Icon::clipStop, juce::Colour (0xffd8352d) };
+    IconButton compareButton   { "Bypass", IconButton::Icon::bypass, juce::Colour (0xffe8a23a) };
     IconButton mixerButton     { "Mixer",   IconButton::Icon::mixer,  juce::Colour (0xff5a9cff) };
     IconButton editorButton    { "Editor",  IconButton::Icon::pianoRoll, juce::Colour (0xff5a9cff) };
     IconButton keysButton      { "Keys",    IconButton::Icon::keys };

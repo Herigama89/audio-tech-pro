@@ -29,6 +29,15 @@ public:
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour& backgroundColour,
                                bool isMouseOverButton, bool isButtonDown) override;
 
+    /** Text keys are drawn once per look (size, state, colours, theme) and copied after: the mixer has hundreds,
+        and drawing each one's gradients and text every time made it slow. Off: drawn every time. */
+    static inline bool cacheKeys = true;
+private:
+    void drawKeyBackground (juce::Graphics&, juce::Button&, const juce::Colour& backgroundColour, bool over, bool down);
+    void drawKeyText (juce::Graphics&, juce::TextButton&, bool over, bool down);
+    const juce::Button* textAlreadyDrawn = nullptr;
+public:
+
     juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override;
 
     /** Insert and send slots shorten long plugin names to fit (as Logic does). */
@@ -92,7 +101,7 @@ namespace look
 class IconButton final : public juce::Button
 {
 public:
-    enum class Icon { toStart, rewind, forward, stop, play, record, cycle, metronome, countIn, mixer, pianoRoll, keys, plus, generate, chat, screen, punch, replace, inspector, library, smartControls, quickHelp, toolbar, listEditors, notepad, loopBrowser, browser, clipStop, returnToStart };
+    enum class Icon { toStart, rewind, forward, stop, play, record, cycle, metronome, countIn, mixer, pianoRoll, keys, plus, generate, chat, screen, punch, replace, inspector, library, smartControls, quickHelp, toolbar, listEditors, notepad, loopBrowser, browser, clipStop, returnToStart, bypass };
 
     IconButton (const juce::String& name, Icon icon, juce::Colour onColour = juce::Colour (0xff3fa34d));
 

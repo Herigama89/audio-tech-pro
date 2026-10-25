@@ -15,6 +15,12 @@
 #include "../Source/ui/Looks.h"
 #include <JuceHeader.h>
 #include "MainComponent.h"
+#if __has_include (<valgrind/callgrind.h>)
+ #include <valgrind/callgrind.h>
+#else
+ #define CALLGRIND_START_INSTRUMENTATION
+ #define CALLGRIND_STOP_INSTRUMENTATION
+#endif
 #include "engine/TimeStretch.h"
 #include "model/Project.h"
 #include "engine/MasterBusCompressor.h"
@@ -161,6 +167,84 @@ public:
             panel.resized();
             juce::MessageManager::getInstance()->runDispatchLoopUntil (120);
             save (panel, "fx-" + spec.replaceCharacters (":=,", "_-_").substring (0, 120) + ".png");
+        }
+        return 0;
+    }
+
+    /** For profiling: a big project's full paints and a resize, between callgrind's start and stop marks. */
+    int paintProfile()
+    {
+        out.createDirectory();
+        audioFolder = out.getChildFile ("demo-audio");
+        audioFolder.createDirectory();
+        MainComponent main (false);
+        main.setSize (2560, 1440);
+        main.setVisible (true);
+        buildDemoProject (main);
+        main.showMixer();
+        const auto file = makeAudio ("perf", 20.0, 220.0f, 1.0f, 99);
+        const char* plugins[] { "channelEq", "compressor", "studioReverb", "tapeDelay" };
+        for (int t = 0; t < 32; ++t)
+        {
+            auto track = model::addTrack (main.project, "P" + juce::String (t), &main.undoManager);
+            model::addRegion (track, file, 0.0, 20.0, &main.undoManager);
+            for (auto* type : plugins)
+                model::addBuiltinInsert (model::chainFor (main.project, track[ids::id].toString()), type, -1, &main.undoManager);
+        }
+        pump (main, 500);
+        juce::Image canvasImage (juce::Image::ARGB, main.getWidth(), main.getHeight(), true);
+        { juce::Graphics g (canvasImage); main.paintEntireComponent (g, true); }
+        if (juce::SystemStats::getEnvironmentVariable ("RIFF_PROFILE_METERS", "0") == "1")
+        {
+            // Narrow mixer, every strip's meter moving: the frames only
+            main.mixer.narrowButton.setToggleState (true, juce::sendNotification);
+            main.mixer.resized();
+            { juce::Graphics g (canvasImage); main.paintEntireComponent (g, true); }
+            juce::Random rnd (3);
+            CALLGRIND_START_INSTRUMENTATION;
+            for (int frame = 0; frame < 3; ++frame)
+            {
+                for (auto* st : main.mixer.strips) { st->pushLevels (rnd.nextFloat(), rnd.nextFloat()); st->pushGainReduction (rnd.nextFloat() * 8.0f); }
+                juce::Graphics g (canvasImage);
+                for (auto* st : main.mixer.strips)
+                    for (juce::Component* c : { (juce::Component*) &st->meter, (juce::Component*) &st->grColumn })
+                    {
+                        const auto r = main.getLocalArea (c, c->getLocalBounds()).getSmallestIntegerContainer();
+                        juce::Graphics::ScopedSaveState ss (g);
+                        if (g.reduceClipRegion (r.getIntersection (main.getLocalBounds()))) main.paintEntireComponent (g, true);
+                    }
+            }
+            CALLGRIND_STOP_INSTRUMENTATION;
+            return 0;
+        }
+        CALLGRIND_START_INSTRUMENTATION;
+        for (int i = 0; i < 2; ++i)
+        {
+            juce::Graphics g (canvasImage);
+            main.paintEntireComponent (g, true);
+        }
+        main.setSize (main.getWidth() - 120, main.getHeight());
+        { juce::Graphics g (canvasImage); main.paintEntireComponent (g, true); }
+        CALLGRIND_STOP_INSTRUMENTATION;
+        return 0;
+    }
+
+    /** The main window at several widths (nothing should overlap), the mixer open. */
+    int layoutOnly()
+    {
+        out.createDirectory();
+        for (const auto width : { 1024, 1180, 1280, 1440, 1920 })
+        {
+            MainComponent main (false);
+            main.setSize (width, 860);
+            main.setVisible (true);
+            auto project = model::createProject();
+            for (int i = 0; i < 12; ++i)
+                model::addTrack (project, "Track " + juce::String (i + 1), nullptr);
+            main.setProject (project, {});
+            main.showMixer();
+            pump (main, 400);
+            save (main, "layout-" + juce::String (width) + ".png");
         }
         return 0;
     }
@@ -387,6 +471,41 @@ public:
                 frameNarrow = meterFrame();
             main.mixer.narrowButton.setToggleState (false, juce::sendNotification);
             main.mixer.resized();
+            // Resizing: the window a little narrower and back, the mixer pane taller and back (each laid out and painted)
+            const auto resize = ms ([&]
+            {
+                for (int w : { main.getWidth() - 120, main.getWidth() })
+                {
+                    main.setSize (w, main.getHeight());
+                    juce::Graphics g (canvasImage);
+                    main.paintEntireComponent (g, true);
+                }
+            }) / 2.0;
+            const auto paneResize = ms ([&]
+            {
+                for (int h : { 700, 600 })
+                {
+                    main.mixerPaneHeight = h;
+                    main.resized();
+                    juce::Graphics g (canvasImage);
+                    main.paintEntireComponent (g, true);
+                }
+            }) / 2.0;
+            // The editor: scrolling the tracks area (each step painted)
+            const auto scroll = ms ([&]
+            {
+                for (int i = 0; i < 10; ++i)
+                {
+                    main.timeline.scrollSeconds = i * 0.7;
+                    main.canvas.repaint();
+                    juce::Graphics g (canvasImage);
+                    const auto r = main.getLocalArea (&main.canvas, main.canvas.getLocalBounds());
+                    juce::Graphics::ScopedSaveState ss (g);
+                    if (g.reduceClipRegion (r)) main.paintEntireComponent (g, true);
+                }
+            }) / 10.0;
+            main.timeline.scrollSeconds = 0.0;
+            std::printf ("           window resize %6.1f ms   mixer pane resize %6.1f ms   tracks scroll step %6.1f ms\n", resize, paneResize, scroll);
             std::printf ("           meter frame (every strip moving): wide %6.2f ms   narrow %6.2f ms\n", frameWide, frameNarrow);
             std::printf ("tracks %3d  add track %7.1f ms  add plugin %7.1f ms  fader move %7.1f ms  graph rebuild %7.1f ms  mixer tick %6.2f ms  main tick %6.2f ms  full paint %7.1f ms\n",
                          n, addTrack / 8.0, addPlugins / 32.0, fader, rebuild, mixerTick, mainTick, paint);
@@ -1815,6 +1934,18 @@ int main (int argc, char* argv[])
     if (argc > 2 && juce::String (argv[1]) == "meter")
     {
         const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).meterOnly();
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        return r;
+    }
+    if (argc > 2 && juce::String (argv[1]) == "paintprof")
+    {
+        const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).paintProfile();
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        return r;
+    }
+    if (argc > 2 && juce::String (argv[1]) == "layout")
+    {
+        const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).layoutOnly();
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         return r;
     }

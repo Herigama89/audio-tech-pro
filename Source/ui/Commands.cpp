@@ -119,6 +119,8 @@ const std::vector<Info>& all()
         { toggleAutopunch,        "Autopunch",                  "Transport", "Record only between the punch locators (the red bar under the cycle; drag it in the ruler)" },
         { toggleSnap,             "Snap to Grid",               "Edit",      "Snap on or off: regions and notes land on the grid, or anywhere (Cmd while dragging does the opposite once)" },
         { toggleCatch,            "Catch Playhead",             "View",      "The tracks area follows the playhead while it plays (Logic's Catch); off, the view stays where you put it" },
+        { compareBypass,          "Bypass All (Compare)",       "Mix",       "Hear the mix with every channel's processing bypassed - preamps, channel strips, inserts, tape - and the master's inserts, bus compressor and tape; again to hear it all back (as one switch, to compare)" },
+        { resetChannels,          "Reset Channels...",          "Mix",       "Every channel (or the selected ones) and the master back to a fresh start: faders, pans, mute and solo, the channel strips, inserts and sends (as Cubase's Reset MixConsole Channels)" },
         { toggleSuspendPlugins,   "Suspend Plug-ins When Silent", "Mix",     "Plug-ins on a track that's silent stop working until sound comes again, to save CPU (as Cubase's VST3 suspend and FL Studio's Smart Disable)" },
         { toggleStopOnClip,       "Stop Recording on Clip",     "Transport", "Recording stops by itself if a mic or instrument input clips (hits 0 dB); the take keeps what came before" },
         { toggleReplace,          "Replace",                    "Transport", "A recording replaces the parts of regions it covers" },

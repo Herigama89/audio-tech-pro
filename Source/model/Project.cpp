@@ -2252,6 +2252,81 @@ juce::ValueTree setBusCompPlugin (juce::ValueTree project, const juce::String& d
     return addPluginInsert (chain, descriptionXml, 0, um);
 }
 
+juce::Array<juce::ValueTree> resetChannels (juce::ValueTree project, const ResetOptions& options, juce::UndoManager* um)
+{
+    juce::Array<juce::ValueTree> pluginStrips;
+    const auto chainOps = [&] (const juce::String& owner)
+    {
+        auto chain = findChain (project, owner);
+        if (! chain.isValid())
+            return;
+        for (auto insert : insertsOf (chain))
+        {
+            if (options.removeInserts)
+                removeInsert (insert, um);
+            else if (options.bypassInserts)
+                insert.setProperty (ids::bypass, true, um);
+        }
+        if (options.sends)
+            for (auto send : sendsOf (chain))
+                send.setProperty (ids::level, 0.0, um);
+    };
+
+    for (auto track : project)
+    {
+        if (! track.hasType (ids::TRACK) || isVcaTrack (track))
+            continue;
+        const auto id = track[ids::id].toString();
+        if (! options.onlyTracks.isEmpty() && ! options.onlyTracks.contains (id))
+            continue;
+        if (options.levels)
+        {
+            track.setProperty (ids::volume, 1.0, um);
+            track.setProperty (ids::pan, 0.0, um);
+            track.setProperty (ids::mute, false, um);
+            track.setProperty (ids::solo, false, um);
+            if (track.hasProperty (ids::panWidth))
+                track.setProperty (ids::panWidth, 1.0, um);
+        }
+        if (options.strips)
+        {
+            // every console property back to its default (they read as defaults when absent)
+            juce::Array<juce::Identifier> console;
+            for (int i = 0; i < track.getNumProperties(); ++i)
+                if (const auto name = track.getPropertyName (i); name.toString().startsWith ("console"))
+                    console.add (name);
+            for (const auto& name : console)
+                track.removeProperty (name, um);
+            track.setProperty ("preOn", false, um);
+            track.setProperty ("preGain", 0.0, um);
+            track.setProperty ("tapeOn", false, um);
+            track.removeProperty ("tapeDrive", um);
+            if (auto strip = stripPlugin (project, id); strip.isValid())
+            {
+                strip.setProperty (ids::bypass, false, um);
+                pluginStrips.add (strip);
+            }
+        }
+        chainOps (id);
+    }
+
+    if (options.master && options.onlyTracks.isEmpty())
+    {
+        if (options.levels)
+            project.setProperty (ids::masterGain, 0.8, um);   // (a new project's)
+        if (options.strips)
+        {
+            project.setProperty ("masterTapeOn", false, um);
+            project.setProperty (ids::busCompOn, false, um);
+        }
+        chainOps (masterOwner);
+        if (options.bypassInserts || options.removeInserts)
+            if (auto bus = busCompPlugin (project); bus.isValid())
+                bus.setProperty (ids::bypass, true, um);
+    }
+    return pluginStrips;
+}
+
 juce::ValueTree stripPlugin (const juce::ValueTree& project, const juce::String& trackId)
 {
     const auto inserts = insertsOf (findChain (project, stripOwner (trackId)));

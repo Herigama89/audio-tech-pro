@@ -47,6 +47,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
 {
     // (The strip's face - art, texture, printing - is drawn once into a picture and kept: see paint(). Its meter,
     // knobs and keys redraw on their own, without touching it.)
+    setOpaque (true);   // (its face covers it all: what's behind needn't be drawn first)
 
     if (isMaster())
     {
@@ -302,7 +303,8 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     addAndMakeVisible (preKey);
     preKey.setVisible (hasAnalogPre());
     preGain.setRange (0.0, 30.0, 0.5);
-    preGain.textFromValueFunction = [] (double v) { return "+" + juce::String (v, v < 10.0 && std::fmod (v, 1.0) != 0.0 ? 1 : 0) + " dB"; };
+    preGain.knobAndValue = true;
+    preGain.textFromValueFunction = [] (double v) { return "+" + juce::String (juce::roundToInt (v)); };
     preGain.setDoubleClickReturnValue (true, 0.0);
     preGain.setTooltip ("Preamp gain, 0 to +30 dB: more gain, more saturation. Drag up or down; double-click for 0 dB.");
     preGain.onDragStart = [this] { owner.getUndoManager().beginNewTransaction ("Preamp gain"); };
@@ -342,7 +344,8 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     addAndMakeVisible (tapeKey);
     tapeKey.setVisible (! isVca());
     tapeDrive.setRange (0.0, 100.0, 1.0);
-    tapeDrive.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v)) + "%"; };
+    tapeDrive.knobAndValue = true;
+    tapeDrive.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v)); };
     tapeDrive.setDoubleClickReturnValue (true, 35.0);
     tapeDrive.setTooltip ("Tape drive: how hard the channel hits the tape. Drag up or down; double-click for 35%.");
     tapeDrive.onDragStart = [this] { owner.getUndoManager().beginNewTransaction ("Tape drive"); };
@@ -675,10 +678,7 @@ int ChannelStrip::stripParameterIndex (console::StripControl c) const
         return juce::isPositiveAndBelow (index, params.size()) ? index : -1;
     }
 
-    juce::StringArray names;
-    for (auto* param : params)
-        names.add (param->getName (64));
-    return console::matchStripParameter (c, names);
+    return console::matchStripParameter (c, parameterNames.of (p));
 }
 
 juce::AudioProcessorParameter* ChannelStrip::stripParameter (console::StripControl c) const
@@ -748,7 +748,7 @@ void ChannelStrip::syncFromPlugin()
         if (auto* p = stripParameter (c))
         {
             const bool on = p->getValue() >= 0.5f;
-            b.setToggleState (console::isBypassParameter (p->getName (64)) ? ! on : on, juce::dontSendNotification);
+            b.setToggleState (console::isBypassParameter (parameterNames.nameOf (stripInstance(), stripParameterIndex (c))) ? ! on : on, juce::dontSendNotification);
         }
         else
         {
@@ -1511,16 +1511,18 @@ void ChannelStrip::paint (juce::Graphics& g)
     {
         const auto clip = g.getClipBounds();
         // (a pixel of slack: in Narrow the strip is drawn scaled, and the area to redraw is rounded outwards)
-        if (meter.isVisible() && meter.isOpaque() && meter.getBounds().expanded (1).contains (clip))
+        // (two pixels: in Narrow one pixel of the screen is more than one of the strip's)
+        if (meter.isVisible() && meter.isOpaque() && meter.getBounds().expanded (2).contains (clip))
             return;
-        if (grColumn.isVisible() && grColumn.getBounds().expanded (1).contains (clip))
+        if (grColumn.isVisible() && grColumn.getBounds().expanded (2).contains (clip))
             return;
     }
     const auto scale = juce::jlimit (0.5f, 4.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
     const auto key = faceKey (scale);
     if (key != lastFaceKey || ! face.isValid())
     {
-        face = juce::Image (juce::Image::ARGB, juce::jmax (1, juce::roundToInt ((float) getWidth() * scale)),
+        // (no see-through: the face covers the whole strip, so the picture is copied, not blended)
+        face = juce::Image (juce::Image::RGB, juce::jmax (1, juce::roundToInt ((float) getWidth() * scale)),
                             juce::jmax (1, juce::roundToInt ((float) getHeight() * scale)), true);
         juce::Graphics fg (face);
         fg.addTransform (juce::AffineTransform::scale (scale));
@@ -1619,8 +1621,9 @@ void ChannelStrip::paintFace (juce::Graphics& g)
         }
         else
         {
+            // (left of the MultiMeter key, so they never overlap)
             g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
-            g.drawText ("MAIN", juce::Rectangle<int> (0, 4, getWidth(), 16), juce::Justification::centred, false);
+            g.drawFittedText ("MAIN", juce::Rectangle<int> (4, 4, juce::jmax (10, multiMeterKey.getX() - 6), 16), juce::Justification::centredLeft, 1, 0.7f);
             g.setColour (theme::stripInkDim);
             g.setFont (juce::FontOptions (11.0f));
             g.drawText ("Stereo Out", juce::Rectangle<int> (0, 20, getWidth(), 14), juce::Justification::centred, false);
@@ -2024,14 +2027,16 @@ void ChannelStrip::resized()
     area.removeFromTop (2);
     {
         auto row = area.removeFromTop (tapeRow / 2 - 2);
-        preKey.setBounds (row.removeFromLeft (row.getWidth() / 2 + 2));
+        const auto keyWidth = row.getWidth() / 2 + 2;
+        preKey.setBounds (row.removeFromLeft (keyWidth).withSizeKeepingCentre (keyWidth, 16));
         row.removeFromLeft (2);
         preGain.setBounds (row);
         area.removeFromTop (1);
     }
     {
         auto row = area.removeFromTop (tapeRow / 2 - 2);
-        tapeKey.setBounds (row.removeFromLeft (row.getWidth() / 2 + 2));
+        const auto keyWidth = row.getWidth() / 2 + 2;
+        tapeKey.setBounds (row.removeFromLeft (keyWidth).withSizeKeepingCentre (keyWidth, 16));
         row.removeFromLeft (2);
         tapeDrive.setBounds (row);
     }

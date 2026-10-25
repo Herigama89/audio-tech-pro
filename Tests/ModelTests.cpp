@@ -1037,3 +1037,51 @@ TEST_CASE ("Stretch: a stretched region's original is saved, copied and counted 
     CHECK (juce::File (r[ids::stretchSource].toString()) == original);
     temp.deleteRecursively();
 }
+
+TEST_CASE ("Reset Channels: every channel and the master back to a fresh start", "[model][reset]")
+{
+    auto project = model::createProject();
+    auto a = model::addTrack (project, "A", nullptr), b = model::addTrack (project, "B", nullptr);
+    for (auto t : { a, b })
+    {
+        t.setProperty (ids::volume, 0.3, nullptr);
+        t.setProperty (ids::pan, -0.7, nullptr);
+        t.setProperty (ids::mute, true, nullptr);
+        t.setProperty (ids::consoleHF, 6.0, nullptr);
+        t.setProperty ("tapeOn", true, nullptr);
+        t.setProperty ("preOn", true, nullptr);
+        model::addBuiltinInsert (model::chainFor (project, t[ids::id].toString()), "gain", -1, nullptr);
+    }
+    project.setProperty (ids::masterGain, 0.2, nullptr);
+    project.setProperty ("masterTapeOn", true, nullptr);
+    model::addBuiltinInsert (model::chainFor (project, model::masterOwner), "gain", -1, nullptr);
+
+    // Only the selected one
+    model::ResetOptions onlyA;
+    onlyA.onlyTracks = { a[ids::id].toString() };
+    model::resetChannels (project, onlyA, nullptr);
+    CHECK ((double) a[ids::volume] == 1.0);
+    CHECK ((double) a[ids::pan] == 0.0);
+    CHECK (! (bool) a[ids::mute]);
+    CHECK (! a.hasProperty (ids::consoleHF));
+    CHECK (! (bool) a["tapeOn"]);
+    CHECK ((bool) model::insertsOf (model::findChain (project, a[ids::id].toString()))[0][ids::bypass]);
+    CHECK ((double) b[ids::volume] == 0.3);
+    CHECK ((double) project[ids::masterGain] == 0.2);
+
+    // Everything, inserts taken out
+    model::ResetOptions all;
+    all.removeInserts = true;
+    juce::UndoManager um;
+    model::resetChannels (project, all, &um);
+    CHECK ((double) b[ids::volume] == 1.0);
+    CHECK (model::insertsOf (model::findChain (project, b[ids::id].toString())).isEmpty());
+    CHECK (model::insertsOf (model::findChain (project, model::masterOwner)).isEmpty());
+    CHECK (std::abs ((double) project[ids::masterGain] - 0.8) < 1e-9);
+    CHECK (! (bool) project["masterTapeOn"]);
+
+    // One undo brings it all back
+    um.undo();
+    CHECK ((double) b[ids::volume] == 0.3);
+    CHECK (model::insertsOf (model::findChain (project, b[ids::id].toString())).size() == 1);
+}

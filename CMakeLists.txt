@@ -226,6 +226,7 @@ set(RIFF_UI_SOURCES
     Source/MainExtras.cpp
     Source/MainStems.cpp
     Source/MainStretch.cpp
+    Source/MainMixTools.cpp
     Source/MainKey.cpp
     Source/MainFiles.cpp
     Source/MainScreenRecording.cpp

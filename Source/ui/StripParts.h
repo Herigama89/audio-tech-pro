@@ -51,6 +51,7 @@ namespace riff::strip
 
         /** Draw the picture's knob (its scale is printed on the strip art underneath). */
         void useSkin (juce::Image body, juce::Colour pointerLine) { skinBody = body; skinPointer = pointerLine; repaint(); }
+        void paintUncached (juce::Graphics&);
 
         /** A coloured cap on the knob (as on a classic console's EQ: red, green, blue, black). */
         void setCap (juce::Colour c) { cap = c; repaint(); }
@@ -81,6 +82,7 @@ namespace riff::strip
     public:
         CreamKey (const juce::String& letter, juce::Colour litColour);
         void paintButton (juce::Graphics&, bool over, bool down) override;
+        void paintUncached (juce::Graphics&, bool over, bool down);
 
         /** The key is printed on the strip art: draw only its letter, and its light when on. */
         bool onArt = false;
@@ -95,9 +97,13 @@ namespace riff::strip
     public:
         DisplaySlider();
         void paint (juce::Graphics&) override;
+        void paintUncached (juce::Graphics&);
 
         /** Drawn as a small knob (the compact strip's pan) instead of a value. */
         bool asKnob = false;
+
+        /** Drawn as a knob with its value beside it (the strip's PRE and TAPE). */
+        bool knobAndValue = false;
 
         /** Shown faded (its section switched out). Drawn faded here rather than with setAlpha: a see-through
             component is drawn through an extra layer, and dozens of them made the mixer slow. */

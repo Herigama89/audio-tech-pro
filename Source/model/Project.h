@@ -271,6 +271,21 @@ namespace riff::model
     /** Console mode: the chain holding the user's own bus compressor plugin for the master. */
     inline const juce::String busCompOwner { "busComp" };
 
+    /** Reset Channels (as Cubase's Reset MixConsole Channels): what goes back to a fresh start. */
+    struct ResetOptions
+    {
+        bool levels = true;          // faders to 0 dB, pans centred, mute and solo off
+        bool strips = true;          // channel strip EQ and dynamics flat (or the strip plugin to its defaults), preamp and tape off
+        bool bypassInserts = true;   // inserts switched off (kept, to switch back on)
+        bool removeInserts = false;  // ... or taken out
+        bool sends = true;           // sends turned all the way down
+        bool master = true;          // the master too: its fader, inserts, bus compressor and tape
+        juce::StringArray onlyTracks;   // just these (empty: every track)
+    };
+
+    /** Resets the channels; returns the strip-plugin inserts to set to their defaults (done by whoever runs the plugins). */
+    juce::Array<juce::ValueTree> resetChannels (juce::ValueTree project, const ResetOptions& options, juce::UndoManager* um);
+
     /** The bus compressor plugin on the master, or an invalid tree. */
     juce::ValueTree busCompPlugin (const juce::ValueTree& project);
 

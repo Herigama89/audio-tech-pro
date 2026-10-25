@@ -2800,3 +2800,37 @@ TEST_CASE ("The web host's order: empty project first, a track added, then rebui
     const auto out = renderLeft (engine, 4096, 128);
     CHECK (std::abs (out[4000]) > 0.1f);
 }
+
+TEST_CASE ("Compare: every channel's and the master's processing heard bypassed, and back", "[engine][compare]")
+{
+    TempDir temp;
+    AudioEngine engine;
+    AudioFileCache cache { engine.getFormatManager(), false };
+    InstrumentRack rack;
+    EffectRack effects { rack.getFormatManager() };
+    ProjectPlayer player { engine, cache, &rack, &effects };
+    auto project = model::createProject();
+    engine.prepare (48000.0, 512);
+
+    const auto wav = writeConstantWav (temp.dir.getChildFile ("a.wav"), 48000.0, 48000 * 3, 0.5f);
+    auto track = model::addTrack (project, "A", nullptr);
+    model::addRegion (track, wav, 0.0, 3.0, nullptr);
+    auto trackGain = model::addBuiltinInsert (model::chainFor (project, track[ids::id].toString()), "gain", -1, nullptr);
+    trackGain.setProperty ("gain", -12.0, nullptr);
+    auto masterGain = model::addBuiltinInsert (model::chainFor (project, model::masterOwner), "gain", -1, nullptr);
+    masterGain.setProperty ("gain", -6.0, nullptr);
+    track.setProperty ("tapeOn", true, nullptr);
+    player.setProject (project);
+
+    engine.play();
+    auto level = [&] { const auto out = renderLeft (engine, 4800); return std::abs (out.back()); };
+    const auto processed = level();
+    CHECK (processed < 0.5f * 0.8f * 0.5f);   // (both gains down)
+
+    engine.setCompare (true);
+    const auto dry = level();
+    CHECK_THAT (dry, WithinAbs (0.5 * 0.8, 0.01));   // the file at the master fader, nothing else
+
+    engine.setCompare (false);
+    CHECK_THAT (level(), WithinAbs (processed, 0.005));
+}

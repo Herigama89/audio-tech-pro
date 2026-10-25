@@ -134,6 +134,7 @@ struct PlaybackGraph
         int busIndex = -1;                // for buses: which bus buffer they read
         std::vector<Send> sends;          // for ordinary tracks
         int preDelay = 0, postDelay = 0;  // delay compensation, in samples
+        int chainLatency = 0;             // its strip plugins' and inserts' latency (Compare plays it dry, this late)
 
         Curve volumeAutomation, panAutomation;
         std::vector<ParamAutomation> paramAutomation;
@@ -180,6 +181,7 @@ struct PlaybackGraph
 
     int directDelay = 0;        // extra delay for tracks heard directly, matching the slowest bus
     int playbackLatency = 0;    // how late everything is heard because of plugin latency
+    int masterChainLatency = 0; // the master's inserts' and bus compressor plugin's
 };
 
 } // namespace riff

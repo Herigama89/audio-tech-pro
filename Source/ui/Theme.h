@@ -151,6 +151,12 @@ namespace riff::theme
 
     /** Works out every colour above from the skin and the adjustments. */
     void set (const Settings&);
+
+    /** Changes whenever what's drawn could look different (a theme set, or another part's theme entered): for
+        pictures of controls kept to be copied rather than drawn again. */
+    juce::uint64 paletteKey();
+    /** Something theme-like changed outside set() (a REAPER theme's pictures loaded, say). */
+    void touch();
     const Settings& current();
 
     /** True when the console pieces come from the picture (the studio skin); false draws them flat. */

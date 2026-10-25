@@ -173,11 +173,7 @@ int BusCompConsolePanel::parameterIndexFor (Control c) const
         return juce::isPositiveAndBelow (index, params.size()) ? index : -1;
     }
 
-    juce::StringArray names;
-    for (auto* param : params)
-        names.add (param->getName (64));
-
-    return console::matchParameter (c, names);
+    return console::matchParameter (c, parameterNames.of (p));
 }
 
 juce::AudioProcessorParameter* BusCompConsolePanel::parameterFor (Control c) const
@@ -210,7 +206,7 @@ bool BusCompConsolePanel::isIn() const
     if (auto* p = parameterFor (Control::in))
     {
         const bool on = p->getValue() >= 0.5f;
-        return console::isBypassParameter (p->getName (64)) ? ! on : on;
+        return console::isBypassParameter (parameterNames.nameOf (plugin(), parameterIndexFor (Control::in))) ? ! on : on;
     }
 
     return plugin() != nullptr;
@@ -351,13 +347,9 @@ float BusCompConsolePanel::gainReduction()
     // The plugin's own meter, when it publishes one and it moves (some publish one that never does).
     juce::AudioProcessorParameter* meter = nullptr;
     const auto& params = p->getParameters();
-    juce::StringArray names;
-    for (auto* param : params)
-    {
-        if (param->getCategory() == juce::AudioProcessorParameter::compressorLimiterGainReductionMeter)
-            meter = param;
-        names.add (param->getName (64));
-    }
+    const auto& names = parameterNames.of (p);   // (read once, not every frame)
+    if (const auto marked = parameterNames.meterIndex(); juce::isPositiveAndBelow (marked, params.size()))
+        meter = params[marked];
     if (meter == nullptr)
         if (const auto index = console::findGainReductionMeter (names); index >= 0)
             meter = params[index];

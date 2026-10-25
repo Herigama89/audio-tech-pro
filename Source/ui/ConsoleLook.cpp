@@ -5,6 +5,7 @@
 #include "ThemePack.h"
 #include "Looks.h"
 #include "PluginNames.h"
+#include "Pictures.h"
 
 namespace riff
 {
@@ -114,8 +115,57 @@ void ConsoleLook::drawLinearSlider (juce::Graphics& g, int x, int y, int width, 
     }
 }
 
+namespace
+{
+    inline void mix (juce::uint64& h, juce::uint64 v) noexcept
+    {
+        h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+    }
+
+    juce::uint64 keyOf (const juce::TextButton& b, const juce::Colour& background, bool over, bool down, float scale)
+    {
+        juce::uint64 h = theme::paletteKey();
+        mix (h, (juce::uint64) b.getWidth() << 32 | (juce::uint64) (juce::uint32) b.getHeight());
+        mix (h, (juce::uint64) (over ? 1 : 0) | (down ? 2 : 0) | (b.getToggleState() ? 4 : 0) | (b.isEnabled() ? 8 : 0)
+                  | ((juce::uint64) b.getConnectedEdgeFlags() << 4));
+        mix (h, (juce::uint64) juce::roundToInt (scale * 1000.0f));
+        mix (h, background.getARGB());
+        for (const auto id : { juce::TextButton::buttonColourId, juce::TextButton::buttonOnColourId,
+                               juce::TextButton::textColourOffId, juce::TextButton::textColourOnId })
+            mix (h, b.findColour (id).getARGB());
+        mix (h, (juce::uint64) b.getButtonText().hashCode64());
+        const auto& props = b.getProperties();
+        for (int i = 0; i < props.size(); ++i)
+        {
+            mix (h, (juce::uint64) props.getName (i).toString().hashCode64());
+            mix (h, (juce::uint64) props.getValueAt (i).toString().hashCode64());
+        }
+        return h;
+    }
+}
+
 void ConsoleLook::drawButtonBackground (juce::Graphics& g, juce::Button& button, const juce::Colour& backgroundColour,
                                         bool over, bool down)
+{
+    auto* text = dynamic_cast<juce::TextButton*> (&button);
+    if (! cacheKeys || text == nullptr || button.getWidth() <= 0 || button.getHeight() <= 0 || button.getWidth() * button.getHeight() > 40000)
+    {
+        drawKeyBackground (g, button, backgroundColour, over, down);
+        return;
+    }
+
+    const auto scale = pictures::scaleOf (g);
+    const auto key = keyOf (*text, backgroundColour, over, down, scale);
+    pictures::draw (g, key, button, scale, [&] (juce::Graphics& ig)
+    {
+        drawKeyBackground (ig, button, backgroundColour, over, down);
+        drawKeyText (ig, *text, over, down);
+    });
+    textAlreadyDrawn = &button;   // (its text is in the picture)
+}
+
+void ConsoleLook::drawKeyBackground (juce::Graphics& g, juce::Button& button, const juce::Colour& backgroundColour,
+                                     bool over, bool down)
 {
     const auto style = static_cast<look::Key> ((int) button.getProperties().getWithDefault (keyProperty, (int) look::Key::dark));
     const auto on = button.getToggleState();
@@ -219,6 +269,13 @@ void ConsoleLook::drawButtonBackground (juce::Graphics& g, juce::Button& button,
 }
 
 void ConsoleLook::drawButtonText (juce::Graphics& g, juce::TextButton& button, bool over, bool down)
+{
+    if (std::exchange (textAlreadyDrawn, nullptr) == &button)
+        return;
+    drawKeyText (g, button, over, down);
+}
+
+void ConsoleLook::drawKeyText (juce::Graphics& g, juce::TextButton& button, bool over, bool down)
 {
     // On a photo key (Themes > Buttons): its letter, dark on a lit key.
     if (theme::buttonStyle() >= 1 && (button.getProperties().contains ("packKind") || button.getProperties().contains ("channelKey")))
@@ -748,6 +805,18 @@ void IconButton::drawIcon (juce::Graphics& g, Icon icon, juce::Rectangle<float> 
                            r.getX() + w * 0.42f, r.getCentreY() - h * 0.12f,
                            r.getX() + w * 0.42f, r.getCentreY() + h * 0.36f);
             break;
+        }
+
+        case Icon::bypass:
+        {
+            // The power sign: a ring open at the top, a bar through the gap
+            const auto c = r.getCentre();
+            const auto rad = juce::jmin (r.getWidth(), r.getHeight()) * 0.42f;
+            juce::Path ring;
+            ring.addCentredArc (c.x, c.y + rad * 0.08f, rad, rad, 0.0f, juce::degreesToRadians (35.0f), juce::degreesToRadians (325.0f), true);
+            g.strokePath (ring, juce::PathStrokeType (rad * 0.24f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.drawLine (c.x, c.y - rad * 1.05f, c.x, c.y - rad * 0.1f, rad * 0.24f);
+            return;
         }
 
         case Icon::clipStop:

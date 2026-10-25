@@ -39,7 +39,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     // --- Toolbar ----------------------------------------------------------------
     for (auto* b : std::initializer_list<juce::Button*> { &fileButton, &undoButton, &redoButton, &addTrackButton, &settingsButton,
                                                           &rewindButton, &backBarButton, &forwardButton, &stopButton, &returnButton, &playButton,
-                                                          &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton, &replaceButton, &clipStopButton,
+                                                          &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton, &replaceButton, &clipStopButton, &compareButton,
                                                           &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton, &screenButton,
                                                           &inspectorButton, &libraryButton, &smartButton, &helpButton, &toolbarButton,
                                                           &listButton, &notesButton, &loopsButton, &browserButton })
@@ -65,6 +65,9 @@ MainComponent::MainComponent (bool openAudioDevice)
     bind (replaceButton, commands::toggleReplace);
     bind (clipStopButton, commands::toggleStopOnClip);
     clipStopButton.setTooltip ("Clip Stop: recording stops by itself if an input clips (hits 0 dB)");
+    bind (compareButton, commands::compareBypass);
+    compareButton.setTooltip ("Bypass all: hear the mix with every channel's preamp, channel strip, inserts and tape, and the "
+                              "master's inserts, bus compressor and tape, bypassed - to compare. Click again for it all back.");
     punchButton.setTooltip ("Autopunch: record only between the punch locators (the red bar in the ruler, under the cycle)");
     replaceButton.setTooltip ("Replace: a recording replaces the parts of regions it covers");
     bind (mixerButton, commands::showMixer);
@@ -920,7 +923,7 @@ void MainComponent::applyPanelVisibility()
         c->setVisible (showControlBar);
     for (auto* c : std::initializer_list<juce::Component*> { &rewindButton, &backBarButton, &forwardButton, &stopButton, &returnButton, &playButton,
                                                             &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton,
-                                                            &replaceButton, &clipStopButton, &mixerButton, &editorButton, &keysButton, &generateButton,
+                                                            &replaceButton, &clipStopButton, &compareButton, &mixerButton, &editorButton, &keysButton, &generateButton,
                                                             &claudeButton, &screenButton, &inspectorButton, &libraryButton, &smartButton,
                                                             &helpButton, &toolbarButton, &listButton, &notesButton, &loopsButton, &browserButton })
         c->setVisible (showControlBar);
@@ -935,7 +938,18 @@ void MainComponent::applyPanelVisibility()
 
 juce::Rectangle<int> MainComponent::lcdBounds() const
 {
-    return juce::Rectangle<int> (560, 42).withCentre ({ getWidth() / 2, toolbarTopRow / 2 + 1 });
+    return juce::Rectangle<int> (lcdWidth, 42).withCentre ({ getWidth() / 2, toolbarTopRow / 2 + 1 });
+}
+
+void MainComponent::setCompare (bool on)
+{
+    engine.setCompare (on);
+    compareButton.setToggleState (on, juce::dontSendNotification);
+    statusLabel.setText (on ? "BYPASS ALL: every channel's and the master's processing is bypassed (click Bypass again for it back)"
+                            : "Bypass all off: the mix as it is", juce::dontSendNotification);
+    commandManager.commandStatusChanged();
+    if (toolbarLayer.isShowing())
+        toolbarLayer.repaint();
 }
 
 void MainComponent::paint (juce::Graphics& g)
@@ -1032,14 +1046,17 @@ void MainComponent::paintToolbarCaptions (juce::Graphics& g)
         return;
     // Captions under the keys
     for (auto* b : std::initializer_list<juce::Button*> { &rewindButton, &backBarButton, &forwardButton, &stopButton, &playButton,
-                                                          &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton, &replaceButton, &clipStopButton,
+                                                          &recordButton, &cycleButton, &countInButton, &clickButton, &punchButton, &replaceButton, &clipStopButton, &compareButton,
                                                           &mixerButton, &editorButton, &keysButton, &generateButton, &claudeButton, &screenButton,
                                                           &inspectorButton, &libraryButton, &smartButton, &helpButton, &toolbarButton,
                                                           &listButton, &notesButton, &loopsButton, &browserButton })
     {
+        if (! b->isVisible())
+            continue;
         g.setColour (b->getToggleState() ? theme::cream : theme::text.withAlpha (0.78f));
-        g.drawText (b->getName(), b->getBounds().translated (0, b->getHeight() + 1).withHeight (13).expanded (8, 0),
-                    juce::Justification::centred, false);
+        g.setFont (juce::FontOptions (compactKeys ? 9.5f : 12.0f));
+        g.drawFittedText (b->getName(), b->getBounds().translated (0, b->getHeight() + 1).withHeight (13).expanded (compactKeys ? 2 : 8, 0),
+                          juce::Justification::centred, 1, 0.8f);
     }
 }
 
@@ -1059,34 +1076,107 @@ void MainComponent::resized()
         left (redoButton, 54, 12);
         left (addTrackButton, 74);
 
+        // The display stays centred; on a narrow window the performance meter and the master's caption make
+        // way first, then the display narrows (nothing overlaps)
+        const auto leftEnd = addTrackButton.getRight() + 12;
+        const auto room = [this, leftEnd] (int rightWidth) { return getWidth() - 2 * juce::jmax (leftEnd, rightWidth + 12) - 16; };
+        const int full = 62 + 14 + 120 + 4 + 52 + 14 + 120, noMeter = 62 + 14 + 120 + 4 + 52 + 14, bare = 62 + 14 + 120;
+        const bool showMeter = room (full) >= 560, showCaption = showMeter || room (noMeter) >= 520;
+        lcdWidth = juce::jlimit (360, 560, room (showMeter ? full : showCaption ? noMeter : bare));
+        performanceMeter.setVisible (showControlBar && showMeter);
+        masterCaption.setVisible (showControlBar && showCaption);
+
         right (settingsButton, 62, 14);
         right (masterSlider, 120, 4);
-        right (masterCaption, 52, 14);
-        right (performanceMeter, 120);
+        if (showCaption)
+            right (masterCaption, 52, 14);
+        if (showMeter)
+            right (performanceMeter, 120);
 
         auto lcd = lcdBounds().reduced (6, 2);
         auto numbers = lcd.withTrimmedBottom (12);
-        positionLabel.setBounds (numbers.removeFromLeft (150));
-        clockLabel.setBounds (numbers.removeFromLeft (190));
-        auto tempo = lcd.withLeft (numbers.getX()).withWidth (100);
+        const auto scale = (float) lcdWidth / 560.0f;
+        positionLabel.setBounds (numbers.removeFromLeft (juce::roundToInt (150 * scale)));
+        clockLabel.setBounds (numbers.removeFromLeft (juce::roundToInt (190 * scale)));
+        auto tempo = lcd.withLeft (numbers.getX()).withWidth (juce::roundToInt (100 * scale));
         tempoLabel.setBounds (tempo.withTrimmedBottom (12));
         tempoCaption.setBounds (tempo.removeFromBottom (12).translated (0, 1));
         signatureLabel.setBounds (lcd.withLeft (tempo.getRight()).withTrimmedBottom (12));
     }
 
-    // Row 2: transport keys in the middle, views on the right
+    // Row 2: transport keys in the middle, views at the left and right. On a narrow window the keys get narrower,
+    // then the least used ones make way (the menus still have them), so nothing overlaps.
     {
-        constexpr int keyWidth = 44, keyHeight = 30, gap = 6;
-        auto row = toolbar.withTrimmedTop (5).withHeight (keyHeight);
+        auto row = toolbar.withTrimmedTop (5);
+        const std::vector<juce::Component*> transport { &rewindButton, &backBarButton, &forwardButton, &stopButton, &returnButton,
+                                                        &playButton, &recordButton, &cycleButton, &countInButton, &clickButton,
+                                                        &punchButton, &replaceButton, &clipStopButton, &compareButton };
+        const std::vector<juce::Component*> leftKeys { &libraryButton, &inspectorButton, &helpButton, &toolbarButton, &smartButton, &mixerButton, &editorButton };
+        const std::vector<juce::Component*> rightKeys { &keysButton, &screenButton, &claudeButton, &generateButton, &browserButton, &loopsButton,
+                                                        &notesButton, &listButton };
+        // (the first to go first)
+        const std::vector<juce::Component*> leaveOut { &browserButton, &loopsButton, &notesButton, &helpButton, &toolbarButton, &listButton,
+                                                       &screenButton, &claudeButton, &keysButton, &generateButton, &replaceButton, &punchButton,
+                                                       &smartButton, &libraryButton, &countInButton, &backBarButton, &forwardButton };
 
-        const std::initializer_list<juce::Component*> transport { &rewindButton, &backBarButton, &forwardButton, &stopButton, &returnButton,
-                                                                  &playButton, &recordButton, &cycleButton, &countInButton, &clickButton,
-                                                                  &punchButton, &replaceButton, &clipStopButton };
-        const int totalWidth = ((int) transport.size() - 1) * (keyWidth + gap) + 14 + 20;   // (the Return key is a small one)
-        int x = getWidth() / 2 - totalWidth / 2;
+        squeezedOut.clear();
+        const auto shown = [this] (juce::Component* c) { return std::find (squeezedOut.begin(), squeezedOut.end(), c) == squeezedOut.end(); };
+        int keyWidth = 44, gap = 6;
+        const auto widthOf = [&] (const std::vector<juce::Component*>& keys, bool isTransport)
+        {
+            int w = 0, count = 0;
+            for (auto* c : keys)
+                if (shown (c))
+                {
+                    w += (c == &returnButton ? 22 - gap + 4 : keyWidth) + gap;
+                    ++count;
+                }
+            return count == 0 ? 0 : w - gap + (isTransport ? 14 : 14);
+        };
+        const auto needed = [&] { return 12 + widthOf (leftKeys, false) + 16 + widthOf (transport, true) + 16 + widthOf (rightKeys, false) + 12; };
+        size_t next = 0;
+        for (int tier = 0; needed() > getWidth(); )
+        {
+            if (tier < 2)
+            {
+                ++tier;
+                keyWidth = tier == 1 ? 38 : 34;
+                gap = tier == 1 ? 4 : 3;
+            }
+            else if (next < leaveOut.size())
+                squeezedOut.push_back (leaveOut[next++]);
+            else
+                break;
+        }
+        compactKeys = keyWidth < 44;
+        const int keyHeight = 30;
+        for (auto* c : transport)   c->setVisible (showControlBar && shown (c));
+        for (auto* c : leftKeys)    c->setVisible (showControlBar && shown (c));
+        for (auto* c : rightKeys)   c->setVisible (showControlBar && shown (c));
 
+        int lx = 14;
+        for (auto* c : leftKeys)
+            if (shown (c))
+            {
+                c->setBounds (lx, row.getY(), keyWidth, keyHeight);
+                lx += keyWidth + gap + (c == &toolbarButton ? 14 : 0);
+            }
+        int rx = getWidth() - 12 - keyWidth;
+        for (auto* c : rightKeys)
+            if (shown (c))
+            {
+                c->setBounds (rx, row.getY(), keyWidth, keyHeight);
+                rx -= keyWidth + gap + (c == &generateButton ? 14 : 0);
+            }
+
+        // The transport: centred, unless that runs into the keys either side
+        const auto total = widthOf (transport, true);
+        const auto leftLimit = lx - gap + 16, rightLimit = rx + keyWidth + gap - 16;
+        int x = juce::jlimit (leftLimit, juce::jmax (leftLimit, rightLimit - total), getWidth() / 2 - total / 2);
         for (auto* c : transport)
         {
+            if (! shown (c))
+                continue;
             if (c == &returnButton)
             {
                 // the small square key, tucked in by Stop
@@ -1096,36 +1186,7 @@ void MainComponent::resized()
                 continue;
             }
             c->setBounds (x, row.getY(), keyWidth, keyHeight);
-            x += keyWidth + gap + (c == &recordButton ? 14 : 0);
-        }
-
-        // Logic's keys at the left: Library, Inspector, Quick Help, Toolbar | Smart Controls, Mixer, Editors.
-        int lx = 14;
-        for (auto* c : { (juce::Component*) &libraryButton, (juce::Component*) &inspectorButton, (juce::Component*) &helpButton,
-                         (juce::Component*) &toolbarButton, (juce::Component*) &smartButton, (juce::Component*) &mixerButton,
-                         (juce::Component*) &editorButton })
-        {
-            c->setBounds (lx, row.getY(), keyWidth, keyHeight);
-            lx += keyWidth + gap + (c == &toolbarButton ? 14 : 0);
-        }
-
-        // ...and at the right: List Editors, Notepad, Loop Browser, Browser | Generate, Claude, Screen, Keys.
-        x = getWidth() - 12 - keyWidth;
-        for (auto* c : { (juce::Component*) &keysButton, (juce::Component*) &screenButton, (juce::Component*) &claudeButton,
-                         (juce::Component*) &generateButton, (juce::Component*) &browserButton, (juce::Component*) &loopsButton,
-                         (juce::Component*) &notesButton, (juce::Component*) &listButton })
-        {
-            c->setBounds (x, row.getY(), keyWidth, keyHeight);
-            x -= keyWidth + gap + (c == &generateButton ? 14 : 0);
-        }
-
-        // On a narrower window the centred transport would run into the keys at the right: move it left.
-        if (const auto overlap = clipStopButton.getRight() + 16 - listButton.getX(); overlap > 0)
-        {
-            const auto room = rewindButton.getX() - (editorButton.getRight() + 16);
-            const auto shift = juce::jmin (overlap, juce::jmax (0, room));
-            for (auto* c : transport)
-                c->setTopLeftPosition (c->getX() - shift, c->getY());
+            x += keyWidth + gap + (c == &recordButton || c == &clipStopButton ? 14 : 0);
         }
     }
 
@@ -1135,9 +1196,9 @@ void MainComponent::resized()
         auto row = functionBarArea.reduced (12, 5);
         for (auto* key : functionKeys)
         {
-            key->setVisible (showToolbarRow);
             const auto w = juce::jmax (58, key->getBestWidthForHeight (row.getHeight()) + 10);
-            key->setBounds (row.removeFromLeft (w));
+            key->setVisible (showToolbarRow && w <= row.getWidth());   // (the ones that don't fit wait for a wider window)
+            key->setBounds (row.removeFromLeft (juce::jmin (w, row.getWidth())));
             row.removeFromLeft (4);
         }
     }

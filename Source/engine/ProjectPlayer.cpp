@@ -360,6 +360,7 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
             latency += e->getLatencySamples();
         for (const auto& e : t.inserts)
             latency += e->getLatencySamples();
+        t.chainLatency = latency;
 
         if (t.isBus)
         {
@@ -654,6 +655,7 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         masterLatency += e->getLatencySamples();
 
     graph->playbackLatency = slowestTrack + slowestBus + masterLatency;
+    graph->masterChainLatency = masterLatency;
 
     if (effects != nullptr)
         effects->removeAllExcept (insertIds);

@@ -357,8 +357,18 @@ namespace
     void setMain (const Settings& s);
 }
 
+namespace
+{
+    juce::uint64& epoch() { static juce::uint64 e = 1; return e; }
+    int& activeArea() { static int a = 0; return a; }
+}
+
+juce::uint64 paletteKey() { return epoch() * 8 + (juce::uint64) activeArea(); }
+void touch() { ++epoch(); }
+
 void set (const Settings& s)
 {
+    ++epoch();
     // The parts with themes of their own first (their colours kept aside), then the main theme.
     while (areaDepth() > 0)
         leaveArea();
@@ -392,6 +402,7 @@ void enterArea (Area area)
     ++areaDepth();
     if (area != Area::main && areaData (area).own)
     {
+        activeArea() = (int) area;
         writeColours (areaData (area).colours);
         settingsNow() = areaData (area).settings;
     }
@@ -403,6 +414,7 @@ void leaveArea()
         return;
     if (--areaDepth() == 0 && ! areaData (Area::main).colours.empty())
     {
+        activeArea() = 0;
         writeColours (areaData (Area::main).colours);
         settingsNow() = areaData (Area::main).settings;
     }

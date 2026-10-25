@@ -100,6 +100,7 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::toggleSnap:      info.setTicked (timeline.snapMode != TimelineState::Snap::off); break;
         case commands::toggleCatch:     info.setTicked (timeline.catchPlayhead); break;
         case commands::toggleSuspendPlugins: info.setTicked (engine.getSuspendWhenSilent()); break;
+        case commands::compareBypass:   info.setTicked (engine.getCompare()); break;
         case commands::toggleMidiMerge: info.setTicked ((bool) project[ids::midiMerge]); break;
         case commands::eventList:       info.setActive (region.isValid() && model::isMidiRegion (region)); break;
 
@@ -370,6 +371,12 @@ bool MainComponent::perform (const InvocationInfo& info)
             appProperties.getUserSettings()->setValue ("catchPlayhead", timeline.catchPlayhead);
             commandManager.commandStatusChanged();
             break;
+        case commands::compareBypass:
+            setCompare (! engine.getCompare());
+            break;
+        case commands::resetChannels:
+            showResetChannels();
+            break;
         case commands::toggleSuspendPlugins:
             engine.setSuspendWhenSilent (! engine.getSuspendWhenSilent());
             appProperties.getUserSettings()->setValue ("suspendPlugins", engine.getSuspendWhenSilent());
@@ -508,6 +515,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             add ({ commands::newAuxBus, commands::newVca, commands::createFolderStack, commands::createSummingStack });
             menu.addSeparator();
             add ({ commands::groupSettings, commands::ioLabels, commands::controllerAssignments });
+            menu.addSeparator();
+            add ({ commands::compareBypass, commands::resetChannels });
             menu.addSeparator();
             add ({ commands::toggleExclusiveSolo, commands::showMultiMeter, commands::automix, commands::toggleMixerComments });
             add ({ commands::toggleSuspendPlugins });

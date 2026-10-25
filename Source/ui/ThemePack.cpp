@@ -1,4 +1,5 @@
 #include "ThemePack.h"
+#include "Theme.h"
 
 namespace riff::themepack
 {
@@ -229,6 +230,7 @@ void use (const juce::File& themeFolder)
     auto& c = current();
     if (c.root == themeFolder && (themeFolder == juce::File() || ! c.colours.empty() || c.images != juce::File()))
         return;
+    theme::touch();
     c = {};
     if (! themeFolder.isDirectory())
         return;

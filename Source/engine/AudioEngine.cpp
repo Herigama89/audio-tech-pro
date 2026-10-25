@@ -259,9 +259,14 @@ void AudioEngine::setGraph (std::unique_ptr<PlaybackGraph> newGraph)
     // Delay lines are made here, on the message thread, before the audio thread
     // can see a graph that needs them. They live as long as the engine.
     for (const auto& track : newGraph->tracks)
+    {
         if ((track.preDelay > 0 || track.postDelay > 0) && juce::isPositiveAndBelow (track.slot, PlaybackGraph::maxTracks))
             if (trackDelays[(size_t) track.slot] == nullptr)
                 trackDelays[(size_t) track.slot] = std::make_unique<DelayLine>();
+        if (track.chainLatency > 0 && juce::isPositiveAndBelow (track.slot, PlaybackGraph::maxTracks))
+            if (dryDelays[(size_t) track.slot] == nullptr)
+                dryDelays[(size_t) track.slot] = std::make_unique<DelayLine>();
+    }
 
     auto* old = currentGraph.exchange (newGraph.release(), std::memory_order_acq_rel);
 
@@ -896,6 +901,7 @@ void AudioEngine::prepare (double newSampleRate, int)
                 auto s = std::make_unique<Scratch>();
                 s->track.setSize (2, maxBlockSize);
                 s->region.setSize (2, maxBlockSize);
+                s->dry.setSize (2, maxBlockSize);
                 s->stream.setSize (2, maxBlockSize * 8 + 4 * resampler::halfWidth + 16);   // up to 8x the session's rate
                 s->midi.ensureSize (32768);
                 scratches.push_back (std::move (s));
@@ -906,6 +912,7 @@ void AudioEngine::prepare (double newSampleRate, int)
     preFaderOutputs.setSize (PlaybackGraph::maxTracks * 2, maxBlockSize);
     preFaderReady.fill (false);
     mixBuffer.setSize (2, maxBlockSize);
+    masterDry.setSize (2, maxBlockSize);
     previewScratch.setSize (2, maxBlockSize);
     directBuffer.setSize (2, maxBlockSize);
     busBuffer.setSize (PlaybackGraph::maxBuses * 2, maxBlockSize);
@@ -1072,6 +1079,17 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
             if (recordingChunk)
                 recordChunk (inputs, numInputs, offset, n, true);
 
+            // Compare: the master's sum before its processing (as late as its plugins)
+            const bool comparing = compare.load (std::memory_order_relaxed) && ! bouncing.load (std::memory_order_relaxed);
+            const bool keepMasterDry = (comparing || masterCompareMix > 0.0f || graph->masterChainLatency > 0) && n <= masterDry.getNumSamples();
+            if (keepMasterDry)
+            {
+                masterDry.copyFrom (0, 0, mixL, n);
+                masterDry.copyFrom (1, 0, mixR, n);
+                if (graph->masterChainLatency > 0)
+                    masterDryDelay.process (masterDry.getWritePointer (0), masterDry.getWritePointer (1), n, graph->masterChainLatency);
+            }
+
             // The master chain (e.g. a limiter) on the sum of every track; the click comes after it.
             for (const auto& effect : graph->masterInserts)
             {
@@ -1108,6 +1126,10 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
                 masterTape.setSettings (graph->masterTape);
                 masterTape.process (mixL, mixR, n);
             }
+
+            if (keepMasterDry && (comparing || masterCompareMix > 0.0f))
+                masterCompareMix = blendCompare (mixL, mixR, masterDry.getReadPointer (0), masterDry.getReadPointer (1), n,
+                                                 masterCompareMix, comparing, sampleRate.load());
 
             const bool countingIn = isRecordingNow && position < recordStart;
             if (isPlayingNow && (graph->metronome || countingIn) && ! bouncing)
@@ -1455,6 +1477,27 @@ void AudioEngine::renderTrack (const PlaybackGraph::Track& track, const float* c
         routeTrack (track, inputOffset, outL, outR, n);
 }
 
+float AudioEngine::blendCompare (float* wetL, float* wetR, const float* dryL, const float* dryR, int n, float mix, bool toDry, double rate) noexcept
+{
+    const auto step = (float) (1.0 / std::max (1.0, 0.02 * rate)) * (toDry ? 1.0f : -1.0f);
+    if ((toDry && mix >= 1.0f) || (! toDry && mix <= 0.0f))
+    {
+        if (toDry)
+        {
+            juce::FloatVectorOperations::copy (wetL, dryL, n);
+            juce::FloatVectorOperations::copy (wetR, dryR, n);
+        }
+        return toDry ? 1.0f : 0.0f;
+    }
+    for (int i = 0; i < n; ++i)
+    {
+        mix = juce::jlimit (0.0f, 1.0f, mix + step);
+        wetL[i] += (dryL[i] - wetL[i]) * mix;
+        wetR[i] += (dryR[i] - wetR[i]) * mix;
+    }
+    return mix;
+}
+
 bool AudioEngine::canRunInParallel (const PlaybackGraph::Track& track) noexcept
 {
     // Not a bus (they wait for the tracks' sends), and not listening to another track this block
@@ -1724,6 +1767,20 @@ bool AudioEngine::processTrack (const PlaybackGraph::Track& track, const float* 
     if (suspended)
         suspendedCount.fetch_add (1, std::memory_order_relaxed);
 
+    // Compare: the sound before any of its processing, kept (as late as its plugins make the rest)
+    const bool comparing = compare.load (std::memory_order_relaxed) && ! bouncing.load (std::memory_order_relaxed);   // (never in a bounce)
+    const bool keepDry = (comparing || state.compareMix > 0.0f || track.chainLatency > 0) && n <= scratch.dry.getNumSamples();
+    auto* dryL = scratch.dry.getWritePointer (0);
+    auto* dryR = scratch.dry.getWritePointer (1);
+    if (keepDry)
+    {
+        juce::FloatVectorOperations::copy (dryL, tL, n);
+        juce::FloatVectorOperations::copy (dryR, tR, n);
+        if (track.chainLatency > 0)
+            if (auto* line = dryDelays[(size_t) track.slot].get())
+                line->process (dryL, dryR, n, track.chainLatency);
+    }
+
     // The analog preamp: first in the channel, its gain and colour
     if (track.preamp.enabled && ! suspended)
     {
@@ -1783,6 +1840,9 @@ bool AudioEngine::processTrack (const PlaybackGraph::Track& track, const float* 
         tape.setSettings (track.tape);
         tape.process (tL, tR, n);
     }
+
+    if (keepDry && (comparing || state.compareMix > 0.0f))
+        state.compareMix = blendCompare (tL, tR, dryL, dryR, n, state.compareMix, comparing, rate);
 
     // How long it's been quiet in and out (the plug-ins rest after a second of it)
     if (! suspended)
