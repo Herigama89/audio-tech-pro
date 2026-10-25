@@ -8,7 +8,7 @@
     or one of the pieces below; the drawing code asks here first.
 
     Faders (theme::faderStyle):  4 black (Studio White's photo, untinted), 5 black long-throw,
-                                 6 black with a red line, 7 silver console cap
+                                 6 black with a red line, 7 silver console cap, 8 Dark VU, 9 Studio Grey's cap
     Knobs (theme::knobStyle):    0 classic (drawn), 1 black with a white line, 2 black with a
                                  yellow pointer, 3 yellow cap, 4 red, 5 Studio White's photo knob,
                                  6 Xenon's glass knob

@@ -19,8 +19,8 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
 
-    /** Measure and apply: (genre, cycle range only). */
-    std::function<void (const juce::String& genre, bool cycleOnly)> onRun;
+    /** Measure and apply: (genre, cycle range only, what to do). */
+    std::function<void (const juce::String& genre, bool cycleOnly, automix::Options)> onRun;
 
     void setBusy (bool busy);
     void showResults (const std::vector<automix::Result>& results, const juce::String& genre);
@@ -29,6 +29,7 @@ private:
     juce::ValueTree project;
     juce::ComboBox genreBox, rangeBox;
     juce::TextButton runButton { "Automix" };
+    juce::ToggleButton fadersBox { "Faders" }, panBox { "Panning" }, pluginsBox { "Plugins (EQ, compression...)" };
     juce::TextEditor report;
     juce::String note;
 };

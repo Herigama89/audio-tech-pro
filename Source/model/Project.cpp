@@ -2740,7 +2740,10 @@ juce::String mixerZoneOf (const juce::ValueTree& project, const juce::ValueTree&
         return {};
     if (isBusTrack (track))
     {
-        const auto buses = project.getProperty ("mixerBusZone").toString();
+        // (buses go to the right zone by themselves, unless you've put them elsewhere: "none" keeps them with the tracks;
+        // a summing stack stays by its tracks, as a folder does, unless you chose a zone for them all)
+        const bool stack = track[ids::stack].toString().isNotEmpty();
+        const auto buses = project.getProperty ("mixerBusZone", stack ? "none" : "right").toString();
         if (buses == "left" || buses == "right")
             return buses;
     }

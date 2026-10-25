@@ -344,7 +344,7 @@ namespace riff::model
     bool isBusTrack (const juce::ValueTree& track);
 
     /** The mixer zone a channel sits in (as Cubase's): "left", "right", or empty (with the tracks, scrolling).
-        Its own mixerZone first ("none": with the tracks); buses and summing stacks follow the project's mixerBusZone. */
+        Its own mixerZone first ("none": with the tracks); buses and summing stacks follow the project's mixerBusZone (unset: the right zone; "none": with the tracks). */
     juce::String mixerZoneOf (const juce::ValueTree& project, const juce::ValueTree& track);
 
     /** Whether playing `track` into the track `targetId` would come back round to it (a bus into itself, through others). */

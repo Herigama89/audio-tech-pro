@@ -15,6 +15,7 @@
 #include "../Source/ui/Looks.h"
 #include <JuceHeader.h>
 #include "MainComponent.h"
+#include "ui/ThemePanel.h"
 #if __has_include (<valgrind/callgrind.h>)
  #include <valgrind/callgrind.h>
 #else
@@ -245,6 +246,47 @@ public:
             main.showMixer();
             pump (main, 400);
             save (main, "layout-" + juce::String (width) + ".png");
+        }
+
+        // Smooth level meters, a summing stack (open, then closed), meters moving
+        {
+            auto settings = theme::current();
+            settings.levelMeters = 1;
+            theme::set (settings);
+            MainComponent main (false);
+            main.setSize (1440, 860);
+            main.setVisible (true);
+            auto project = model::createProject();
+            juce::Array<juce::ValueTree> drums;
+            for (int i = 0; i < 6; ++i)
+            {
+                auto t = model::addTrack (project, i < 3 ? "Drum " + juce::String (i + 1) : "Track " + juce::String (i + 1), nullptr);
+                if (i < 3)
+                    drums.add (t);
+            }
+            auto stack = model::createTrackStack (project, drums, true, nullptr);
+            main.setProject (project, {});
+            main.showMixer();
+            pump (main, 300);
+            juce::Random rnd (4);
+            for (auto* st : main.mixer.strips)
+                st->pushLevels (0.2f + 0.7f * rnd.nextFloat(), 0.2f + 0.7f * rnd.nextFloat());
+            pump (main, 200);
+            save (main, "layout-smooth-stack-open.png");
+            main.project.getChildWithProperty (ids::id, stack[ids::id]).setProperty (ids::collapsed, true, nullptr);
+            pump (main, 400);
+            save (main, "layout-smooth-stack-closed.png");
+            settings.levelMeters = 0;
+            theme::set (settings);
+        }
+        {
+            juce::PropertiesFile::Options o;
+            o.applicationName = "SnapshotThemes";
+            o.folderName = out.getFullPathName();
+            juce::PropertiesFile store (out.getChildFile ("themes.settings"), o);
+            ThemePanel panel (theme::current(), [] (const theme::Settings&) {}, &store);
+            panel.setVisible (true);
+            save (panel, "theme-panel.png");
         }
         return 0;
     }

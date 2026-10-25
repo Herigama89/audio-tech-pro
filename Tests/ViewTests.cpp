@@ -116,13 +116,20 @@ TEST_CASE ("Selecting several tracks; hidden tracks", "[view]")
 }
 
 
-TEST_CASE ("Mixer zones: buses follow the mixer's choice, a channel's own choice wins", "[view]")
+TEST_CASE ("Mixer zones: buses go right (or as the mixer says), a channel's own choice wins", "[view]")
 {
     auto project = model::createProject();
     auto vox = model::addTrack (project, "Vox", nullptr);
     auto verb = model::addTrack (project, "Verb", nullptr, -1, model::busKind);
 
     CHECK (model::mixerZoneOf (project, vox).isEmpty());
+    CHECK (model::mixerZoneOf (project, verb) == "right");   // (buses go to the right zone by themselves)
+
+    auto drums = model::addTrack (project, "Drums", nullptr);
+    auto stack = model::createTrackStack (project, { drums }, true, nullptr);
+    CHECK (model::mixerZoneOf (project, stack).isEmpty());   // (a summing stack stays by its tracks, as a folder)
+
+    project.setProperty ("mixerBusZone", "none", nullptr);   // ... unless kept with the tracks
     CHECK (model::mixerZoneOf (project, verb).isEmpty());
 
     project.setProperty ("mixerBusZone", "right", nullptr);

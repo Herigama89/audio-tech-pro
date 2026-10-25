@@ -502,4 +502,32 @@ void DisplaySlider::paint (juce::Graphics& g)
     pictures::draw (g, key, *this, scale, [this] (juce::Graphics& ig) { paintUncached (ig); });
 }
 
+void PowerKey::paintButton (juce::Graphics& g, bool over, bool down)
+{
+    const auto r = getLocalBounds().toFloat().reduced (0.5f);
+    g.setColour (juce::Colour (0xff15171a).withAlpha (down ? 0.95f : 0.8f));
+    g.fillRoundedRectangle (r, 3.0f);
+    const auto on = getToggleState();
+    const auto colour = on ? juce::Colour (0xff4fdc6a) : juce::Colour (over ? 0xffb0b4b8 : 0xff7a7f85);
+    const auto c = r.getCentre();
+    const auto rad = juce::jmin (r.getWidth(), r.getHeight()) * 0.3f;
+    juce::Path ring;
+    ring.addCentredArc (c.x, c.y + rad * 0.1f, rad, rad, 0.0f, juce::degreesToRadians (40.0f), juce::degreesToRadians (320.0f), true);
+    g.setColour (colour);
+    g.strokePath (ring, juce::PathStrokeType (juce::jmax (1.2f, rad * 0.3f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.drawLine (c.x, c.y - rad * 1.1f, c.x, c.y - rad * 0.1f, juce::jmax (1.2f, rad * 0.3f));
+}
+
+void FoldKey::paintButton (juce::Graphics& g, bool over, bool down)
+{
+    const auto r = getLocalBounds().toFloat().reduced (2.0f, 3.0f);
+    juce::Path p;
+    if (open)
+        p.addTriangle (r.getX(), r.getY() + r.getHeight() * 0.2f, r.getRight(), r.getY() + r.getHeight() * 0.2f, r.getCentreX(), r.getBottom() - r.getHeight() * 0.1f);
+    else
+        p.addTriangle (r.getX() + r.getWidth() * 0.15f, r.getY(), r.getX() + r.getWidth() * 0.15f, r.getBottom(), r.getRight(), r.getCentreY());
+    g.setColour ((look::isOnLight (*this) ? juce::Colour (0xff1c1d20) : juce::Colour (0xffe6e9ea)).withAlpha (down ? 0.6f : over ? 1.0f : 0.85f));
+    g.fillPath (p);
+}
+
 } // namespace riff::strip

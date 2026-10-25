@@ -6,6 +6,8 @@
 #include "ui/Commands.h"
 #include "engine/ConsolePlugins.h"
 #include "ui/AutomixPanel.h"
+#include "engine/BuiltInEffects.h"
+#include <map>
 #include <BinaryData.h>
 
 namespace riff
@@ -328,11 +330,11 @@ void MainComponent::showAutomix()
         });
     };
     auto* panel = new AutomixPanel (project);
-    panel->onRun = [this] (const juce::String& genre, bool cycleOnly) { runAutomix (genre, cycleOnly); };
+    panel->onRun = [this] (const juce::String& genre, bool cycleOnly, automix::Options options) { runAutomix (genre, cycleOnly, options); };
     editorWindows[id] = std::make_unique<EditorWindow> ("Automix", panel, false, closer);
 }
 
-void MainComponent::runAutomix (const juce::String& genre, bool cycleOnly)
+void MainComponent::runAutomix (const juce::String& genre, bool cycleOnly, automix::Options options)
 {
     auto panelNow = [this]() -> AutomixPanel*
     {
@@ -369,7 +371,7 @@ void MainComponent::runAutomix (const juce::String& genre, bool cycleOnly)
     statusLabel.setText ("Automix: listening to every track...", juce::dontSendNotification);
 
     mixMeasureJob = std::make_unique<MixMeasureJob> (engine, start, end,
-        [safe = juce::Component::SafePointer<MainComponent> (this), genre, panelNow] (AudioEngine::MixMeasurement result)
+        [safe = juce::Component::SafePointer<MainComponent> (this), genre, panelNow, options] (AudioEngine::MixMeasurement result)
     {
         if (safe == nullptr)
             return;
@@ -397,13 +399,50 @@ void MainComponent::runAutomix (const juce::String& genre, bool cycleOnly)
             tracks.push_back (t);
         }
 
-        const auto results = automix::balance (tracks, genre);
+        auto results = automix::balance (tracks, genre);
         if (! results.empty())
         {
-            safe->undoManager.beginNewTransaction ("Automix (" + genre + ")");
+            auto& um = safe->undoManager;
+            um.beginNewTransaction ("Automix (" + genre + ")");
+            const auto [keyRoot, minor] = model::keyAt (safe->project, 0.0);
+            const bool hasKey = safe->project.hasProperty (ids::keyRoot);   // (the song's key, set or detected)
+            std::map<automix::Role, int> roleCount, roleIndex;
             for (const auto& r : results)
-                if (auto track = model::findById (safe->project, r.id); track.isValid())
-                    track.setProperty (ids::volume, juce::Decibels::decibelsToGain (r.toDb, -60.0), &safe->undoManager);
+                ++roleCount[r.role];
+            for (auto& r : results)
+            {
+                auto track = model::findById (safe->project, r.id);
+                if (! track.isValid())
+                    continue;
+                if (options.faders)
+                    track.setProperty (ids::volume, juce::Decibels::decibelsToGain (r.toDb, -60.0), &um);
+                r.pan = automix::targetPan (genre, r.role, roleIndex[r.role]++, roleCount[r.role]);
+                if (options.pan)
+                    track.setProperty (ids::pan, r.pan, &um);
+                if (options.plugins)
+                {
+                    // (a track keeps the plugins it has: one of the same kind isn't added again)
+                    const automix::Track* measured = nullptr;
+                    for (const auto& t : tracks)
+                        if (t.id == r.id)
+                            measured = &t;
+                    if (measured == nullptr)
+                        continue;
+                    auto chain = model::chainFor (safe->project, r.id);
+                    for (const auto& want : automix::recommendedInserts (genre, r.role, *measured, hasKey ? keyRoot : -1, minor))
+                    {
+                        bool present = false;
+                        for (const auto& existing : model::insertsOf (chain))
+                            present = present || existing[ids::effect].toString() == want.type;
+                        if (present || findBuiltInEffect (want.type) == nullptr)
+                            continue;
+                        auto insert = model::addBuiltinInsert (chain, want.type, -1, &um);
+                        for (const auto& [param, value] : want.params)
+                            insert.setProperty (juce::Identifier (param), value, &um);
+                        r.added.add (want.why);
+                    }
+                }
+            }
         }
         safe->statusLabel.setText (results.empty() ? juce::String ("Automix: nothing played, nothing changed")
                                                    : "Automix: " + juce::String ((int) results.size()) + " faders set for " + genre,

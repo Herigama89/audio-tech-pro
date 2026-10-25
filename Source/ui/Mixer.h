@@ -211,6 +211,8 @@ private:
     void paintFace (juce::Graphics& g);
     void showInputMenu();
     void showOutputMenu();
+    strip::FoldKey foldKey;                 // a stack's: its channels shown or folded away (shared with the tracks area)
+    strip::PowerKey stripPowerKey;          // compact mode: the whole channel strip in or out (the IN key's job when it's hidden)
     juce::TextButton consoleTag { "EQ" };   // compact mode: lit when the strip's EQ/Dynamics (or plugin) is working; opens it
     void updateConsoleTag();
     juce::Label dynLabel;

@@ -132,4 +132,130 @@ std::vector<Result> balance (const std::vector<Track>& tracks, const juce::Strin
     return results;
 }
 
+double targetPan (const juce::String& genre, Role role, int index, int count)
+{
+    // How wide the genre usually spreads things (hip-hop keeps most of it in the middle; rock and jazz spread the band)
+    static const std::map<juce::String, double> widths { { "Hip-Hop", 0.6 }, { "Trap", 0.6 }, { "R&B", 0.8 }, { "Pop", 0.85 },
+        { "Rock", 1.0 }, { "Metal", 1.0 }, { "EDM", 0.9 }, { "House", 0.9 }, { "Reggaeton", 0.7 }, { "Afrobeats", 0.8 },
+        { "Country", 0.9 }, { "Gospel", 0.85 }, { "Jazz", 1.0 }, { "Lo-Fi", 0.7 }, { "Acoustic", 0.9 } };
+    double width = 0.85;
+    for (const auto& [g, w] : widths)
+        if (genre.equalsIgnoreCase (g))
+            width = w;
+    const auto side = (index % 2 == 0) ? -1.0 : 1.0;     // the first left, the next right...
+    const auto pair = count > 1;
+    double pan = 0.0;
+    switch (role)
+    {
+        case Role::kick: case Role::snare: case Role::bass: case Role::leadVocal: case Role::drums: case Role::pad:
+            pan = 0.0; break;   // the centre of the mix (a pad or a drum bus is stereo already)
+        case Role::hats:         pan = 0.25; break;
+        case Role::perc:         pan = side * 0.45; break;
+        case Role::backingVocal: pan = pair ? side * 0.55 : 0.3; break;
+        case Role::guitar:       pan = pair ? side * (genre == "Rock" || genre == "Metal" ? 0.95 : 0.8) : -0.4; break;
+        case Role::keys:         pan = pair ? side * 0.4 : (genre == "Jazz" ? -0.45 : -0.3); break;
+        case Role::synth:        pan = pair ? side * 0.35 : 0.2; break;
+        case Role::strings:      pan = pair ? side * 0.5 : -0.4; break;
+        case Role::brass:        pan = pair ? side * 0.5 : 0.4; break;
+        case Role::fx:           pan = side * 0.5; break;
+        case Role::other:        pan = pair ? side * 0.25 : 0.0; break;
+    }
+    return juce::jlimit (-1.0, 1.0, pan * width);
+}
+
+std::vector<Insert> recommendedInserts (const juce::String& genre, Role role, const Track& t, int keyRoot, bool minor)
+{
+    std::vector<Insert> out;
+    const auto in = t.activeRmsDb > -90.0 ? t.activeRmsDb - t.faderDb : -18.0;   // its level going into the plugins
+    const auto is = [&genre] (std::initializer_list<const char*> names)
+    {
+        for (const auto* n : names)
+            if (genre.equalsIgnoreCase (n))
+                return true;
+        return false;
+    };
+    const bool urban = is ({ "Hip-Hop", "Trap", "R&B", "Reggaeton", "Afrobeats" });
+
+    // EQ: cut what each part doesn't need, a touch where it lives
+    Insert eq { "channelEq", {}, "EQ" };
+    auto band = [&eq] (const char* id, float v) { eq.params.emplace_back (id, v); };
+    switch (role)
+    {
+        case Role::kick:   band ("hpFreq", 30); band ("p1Freq", 350); band ("p1Gain", -3); band ("p3Freq", 3500); band ("p3Gain", 2); eq.why = "EQ: low cut, less box, more click"; break;
+        case Role::snare:  band ("hpFreq", 80); band ("p1Freq", 400); band ("p1Gain", -2); band ("hsFreq", 8000); band ("hsGain", 2); eq.why = "EQ: low cut, less ring, more snap"; break;
+        case Role::hats:   band ("hpFreq", 250); band ("hsGain", 1.5f); eq.why = "EQ: low cut, a little air"; break;
+        case Role::drums:  band ("hpFreq", 30); band ("p1Freq", 400); band ("p1Gain", -2); eq.why = "EQ: low cut, less boxiness"; break;
+        case Role::perc:   band ("hpFreq", 150); eq.why = "EQ: low cut"; break;
+        case Role::bass:   band ("hpFreq", urban ? 25.0f : 35.0f); band ("p1Freq", 250); band ("p1Gain", -2); eq.why = "EQ: sub cleaned up, less mud"; break;
+        case Role::leadVocal: band ("hpFreq", 90); band ("p1Freq", 300); band ("p1Gain", -2); band ("p3Freq", 3500); band ("p3Gain", 1.5f);
+                           band ("hsFreq", 10000); band ("hsGain", 2); eq.why = "EQ: low cut, less mud, presence and air"; break;
+        case Role::backingVocal: band ("hpFreq", 150); band ("p1Freq", 300); band ("p1Gain", -3); band ("hsGain", 1.5f); eq.why = "EQ: thinned to sit behind the lead"; break;
+        case Role::guitar: band ("hpFreq", 90); band ("p1Freq", is ({ "Metal" }) ? 500.0f : 400.0f); band ("p1Gain", is ({ "Metal" }) ? -3.0f : -2.0f); eq.why = "EQ: low cut, less mud"; break;
+        case Role::keys:   band ("hpFreq", 80); band ("p1Freq", 300); band ("p1Gain", -1.5f); eq.why = "EQ: low cut, room for the bass and vocal"; break;
+        case Role::synth:  band ("hpFreq", 100); eq.why = "EQ: low cut"; break;
+        case Role::pad:    band ("hpFreq", 150); band ("p1Freq", 400); band ("p1Gain", -2); eq.why = "EQ: low cut, out of the vocal's way"; break;
+        case Role::strings: case Role::brass: band ("hpFreq", 100); eq.why = "EQ: low cut"; break;
+        case Role::fx:     band ("hpFreq", 200); eq.why = "EQ: low cut"; break;
+        case Role::other:  band ("hpFreq", 60); eq.why = "EQ: low cut"; break;
+    }
+    if (is ({ "Lo-Fi" }) && (role == Role::keys || role == Role::drums || role == Role::synth))
+        band ("lpFreq", 9000);
+    out.push_back (eq);
+
+    // Compression: about 3 to 6 dB off the loudest moments, from its own level
+    const auto comp = [&] (int model, float ratio, float attack, float release, float above, float makeup, const juce::String& why)
+    {
+        Insert c { "studioComp", {}, why };
+        c.params = { { "model", (float) model }, { "ratio", ratio }, { "attack", attack }, { "release", release },
+                     { "threshold", (float) juce::jlimit (-50.0, -3.0, in + above) }, { "makeup", makeup } };
+        out.push_back (c);
+    };
+    switch (role)
+    {
+        case Role::kick:  comp (2, 4.0f, 20.0f, 80.0f, 6.0f, 2.0f, "Compressor: punch (a fast circuit, the attack let through)"); break;
+        case Role::snare: comp (2, 4.0f, 10.0f, 100.0f, 6.0f, 2.0f, "Compressor: snap"); break;
+        case Role::drums: comp (is ({ "Rock", "Metal" }) ? 4 : 3, 3.0f, 25.0f, 150.0f, 4.0f, 2.0f, "Compressor: the kit glued together"); break;
+        case Role::bass:  comp (6, 4.0f, 15.0f, 200.0f, 2.0f, 3.0f, "Compressor: an even low end (optical)"); break;
+        case Role::leadVocal:
+            if (urban)                          comp (5, 4.0f, 5.0f, 80.0f, 3.0f, 3.0f, "Compressor: up-front, steady vocal (vintage FET)");
+            else if (is ({ "Rock", "Metal" }))  comp (2, 5.0f, 5.0f, 100.0f, 3.0f, 3.0f, "Compressor: an aggressive vocal (FET)");
+            else if (is ({ "Jazz", "Acoustic" })) comp (6, 2.5f, 15.0f, 250.0f, 4.0f, 1.5f, "Compressor: gentle (optical)");
+            else                                comp (6, 3.0f, 10.0f, 150.0f, 3.0f, 2.5f, "Compressor: a smooth, even vocal (optical)");
+            break;
+        case Role::backingVocal: comp (6, 3.0f, 10.0f, 150.0f, 3.0f, 2.0f, "Compressor: even backing vocals"); break;
+        case Role::guitar: if (is ({ "Rock", "Metal", "Country" })) comp (3, 3.0f, 20.0f, 120.0f, 4.0f, 1.5f, "Compressor: even guitars"); break;
+        case Role::brass: comp (6, 2.5f, 15.0f, 200.0f, 4.0f, 1.5f, "Compressor: gentle"); break;
+        default: break;
+    }
+
+    // De-essing: vocals
+    if (role == Role::leadVocal || role == Role::backingVocal)
+        out.push_back ({ "deesser", { { "freq", 6500.0f }, { "range", 6.0f } }, "De-esser: softer S's" });
+
+    // Saturation: an 808's harmonics (heard on small speakers); lo-fi drums
+    if (role == Role::bass && is ({ "Hip-Hop", "Trap", "Reggaeton", "Afrobeats" }))
+        out.push_back ({ "saturator", { { "model", 1.0f }, { "drive", 30.0f }, { "mix", 60.0f } }, "Saturator: the 808 heard on small speakers" });
+    if (role == Role::drums && is ({ "Lo-Fi" }))
+        out.push_back ({ "saturator", { { "model", 2.0f }, { "drive", 25.0f } }, "Saturator: tape-warm drums" });
+
+    // Tuning: lead vocals in the styles that tune them (hard and fast in trap, natural elsewhere)
+    if (role == Role::leadVocal && is ({ "Hip-Hop", "Trap", "R&B", "Pop", "Reggaeton", "Afrobeats", "EDM" }))
+    {
+        Insert tune { "pitchCorrection", {}, "" };
+        const bool hard = is ({ "Trap" });
+        tune.params = { { "response", hard ? 1.0f : 40.0f } };
+        if (keyRoot >= 0)
+        {
+            tune.params.emplace_back ("key", (float) (keyRoot % 12));
+            tune.params.emplace_back ("scale", minor ? 2.0f : 1.0f);
+        }
+        else
+            tune.params.emplace_back ("scale", 0.0f);   // (no key set: to the nearest note)
+        tune.why = juce::String ("Pitch Correction: ") + (hard ? "hard tuning (the trap sound)" : "natural tuning")
+                 + (keyRoot >= 0 ? " in the song's key" : ", any note (set the song's key for in-key tuning)");
+        out.push_back (tune);
+    }
+    return out;
+}
+
 } // namespace riff::automix

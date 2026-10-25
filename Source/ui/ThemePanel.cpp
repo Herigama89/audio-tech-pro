@@ -125,6 +125,15 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
         changed();
     };
     addAndMakeVisible (stripVuButton);
+    levelMeterBox.addItemList ({ "LED segments", "Smooth (FL Studio style)" }, 1);
+    levelMeterBox.setTooltip ("The mixer's and the main window's level meters: lit LED segments, or smooth bars "
+                              "shading green to yellow to red with a peak line");
+    levelMeterBox.onChange = [this]
+    {
+        settings.levelMeters = levelMeterBox.getSelectedItemIndex();
+        changed();
+    };
+    addAndMakeVisible (levelMeterBox);
 
     const auto percent = [] (double v) { return (v > 0.005 ? "+" : "") + juce::String (juce::roundToInt (v * 100.0)) + "%"; };
     addRow ("Hue", -180.0, 180.0, 1.0, [] (const theme::Settings& s) { return (double) s.hue; },
@@ -357,13 +366,17 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
             savePresets (all);
             refreshMyPresets();
         };
-        for (auto* c : std::initializer_list<juce::Component*> { &myPresets, &savePreset, &deletePreset })
+        exportButton.setTooltip ("Save these colours and looks as a theme file (.atptheme) to share, or to use on another computer");
+        importButton.setTooltip ("Open a theme file someone shared: it's used now and kept in My presets");
+        exportButton.onClick = [this] { exportTheme(); };
+        importButton.onClick = [this] { importTheme(); };
+        for (auto* c : std::initializer_list<juce::Component*> { &myPresets, &savePreset, &deletePreset, &exportButton, &importButton })
             addAndMakeVisible (c);
         refreshMyPresets();
     }
 
     refreshControls();
-    setSize (460, 120 + (int) rows.size() * 34 + 110 + 40 + 68 + 34 + 30 + 34 + 34 + 34 + 34 - 20 + 34 + 68 + 32 + (store != nullptr ? 36 : 0));
+    setSize (460, 120 + (int) rows.size() * 34 + 110 + 40 + 68 + 34 + 30 + 34 + 34 + 34 + 34 - 20 + 34 + 68 + 32 + 32 + (store != nullptr ? 36 + 32 : 0));
 }
 
 void ThemePanel::chooseMeterColour (int which)
@@ -519,6 +532,7 @@ void ThemePanel::refreshControls()
     buttonBox.setSelectedItemIndex (settings.buttonStyle + 1, juce::dontSendNotification);
     meterBox.setSelectedItemIndex (settings.meterStyle + 1, juce::dontSendNotification);
     stripVuButton.setToggleState (settings.stripVu, juce::dontSendNotification);
+    levelMeterBox.setSelectedItemIndex (juce::jlimit (0, 1, settings.levelMeters), juce::dontSendNotification);
     refreshReaperThemes();
     waveModeBox.setSelectedItemIndex (settings.waveMode + 1, juce::dontSendNotification);
     regionBox.setSelectedItemIndex (settings.glassRegions + 1, juce::dontSendNotification);
@@ -557,6 +571,7 @@ void ThemePanel::editScope (int scope)
         settings = whole;
     sameButton.setVisible (scope != 0);
     stripVuButton.setVisible (scope == 0);
+    levelMeterBox.setVisible (scope == 0);
     for (auto* box : { &faderBox, &knobBox, &buttonBox, &meterBox })
         box->setVisible (scope == 0);   // (faders, knobs, keys and the meter are the mixer's)
     refreshControls();
@@ -604,6 +619,7 @@ void ThemePanel::paint (juce::Graphics& g)
     {
         g.drawText ("Faders / Knobs", 16, faderBox.getY(), 94, faderBox.getHeight(), juce::Justification::centredLeft);
         g.drawText ("Keys / Meter", 16, buttonBox.getY(), 94, buttonBox.getHeight(), juce::Justification::centredLeft);
+        g.drawText ("Level meters", 16, levelMeterBox.getY(), 94, levelMeterBox.getHeight(), juce::Justification::centredLeft);
     }
     g.drawText ("Edit windows", 16, editButtons[0].getY(), 94, editButtons[0].getHeight(), juce::Justification::centredLeft);
     g.drawText ("Text colours", 16, textButtons[0].getY(), 94, textButtons[0].getHeight(), juce::Justification::centredLeft);
@@ -739,18 +755,92 @@ void ThemePanel::resized()
     buttonBox.setBounds (112, y, half, 26);
     meterBox.setBounds (112 + half + 4, y, half, 26);
     y += 32;
+    levelMeterBox.setBounds (112, y, half, 26);
+    y += 32;
     stripVuButton.setBounds (110, y, getWidth() - 126, 24);
 
     if (store != nullptr)
     {
         y += 36;
         auto mine = juce::Rectangle<int> (16, y, getWidth() - 32, 26);
-        deletePreset.setBounds (mine.removeFromRight (70));
+        deletePreset.setBounds (mine.removeFromRight (64));
         mine.removeFromRight (4);
-        savePreset.setBounds (mine.removeFromRight (110));
+        savePreset.setBounds (mine.removeFromRight (104));
         mine.removeFromRight (4);
         myPresets.setBounds (mine);
+        y += 32;
+        auto files = juce::Rectangle<int> (16, y, getWidth() - 32, 26);
+        importButton.setBounds (files.removeFromRight (90));
+        files.removeFromRight (4);
+        exportButton.setBounds (files.removeFromRight (90));
     }
+}
+
+void ThemePanel::exportTheme()
+{
+    // The whole theme (the main one, with the editor's, the toolbar's and the MultiMeter's inside it)
+    const auto name = myPresets.getText().isNotEmpty() ? myPresets.getText() : juce::String ("My Theme");
+    chooser = std::make_unique<juce::FileChooser> ("Export Theme", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                                                                        .getChildFile (juce::File::createLegalFileName (name) + ".atptheme"),
+                                                   "*.atptheme");
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                              | juce::FileBrowserComponent::warnAboutOverwriting,
+                          [safe = juce::Component::SafePointer<ThemePanel> (this), name] (const juce::FileChooser& fc)
+    {
+        if (safe == nullptr || fc.getResult() == juce::File())
+            return;
+        auto file = fc.getResult().withFileExtension ("atptheme");
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("app", "Audio Tech Pro");
+        o->setProperty ("kind", "theme");
+        o->setProperty ("version", 1);
+        o->setProperty ("name", file.getFileNameWithoutExtension().isNotEmpty() ? file.getFileNameWithoutExtension() : name);
+        const auto copy = safe->whole;   // (the main theme, with the editor's, toolbar's and MultiMeter's in it)
+        if (copy.themePack.isNotEmpty())
+            o->setProperty ("note", "Uses a REAPER theme (" + juce::File (copy.themePack).getFileName() + "): load it too for its pictures");
+        o->setProperty ("settings", copy.toString());
+        if (! file.replaceWithText (juce::JSON::toString (juce::var (o), false)))
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Export Theme", "Couldn't write " + file.getFullPathName());
+    });
+}
+
+void ThemePanel::importTheme()
+{
+    chooser = std::make_unique<juce::FileChooser> ("Import Theme", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), "*.atptheme");
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                          [safe = juce::Component::SafePointer<ThemePanel> (this)] (const juce::FileChooser& fc)
+    {
+        if (safe == nullptr || ! fc.getResult().existsAsFile())
+            return;
+        const auto json = juce::JSON::parse (fc.getResult().loadFileAsString());
+        const auto text = json.getProperty ("settings", {}).toString();
+        if (json.getProperty ("kind", {}).toString() != "theme" || text.isEmpty())
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Import Theme", "That isn't an Audio Tech Pro theme file.");
+            return;
+        }
+        auto& self = *safe;
+        self.whole = theme::Settings::fromString (text);   // (with its parts' own themes)
+        self.scopeBox.setSelectedItemIndex (0, juce::dontSendNotification);
+        self.editScope (0);
+        if (self.onChange)
+            self.onChange (self.whole);
+        self.updateMeterButtons();
+        self.repaint();
+        if (self.store != nullptr)
+        {
+            auto name = json.getProperty ("name", {}).toString().trim();
+            if (name.isEmpty())
+                name = fc.getResult().getFileNameWithoutExtension();
+            auto all = self.loadPresets();
+            all.set (name, text);
+            self.savePresets (all);
+            self.refreshMyPresets();
+            self.myPresets.setText (name, juce::dontSendNotification);
+        }
+        if (const auto note = json.getProperty ("note", {}).toString(); note.isNotEmpty())
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Import Theme", note);
+    });
 }
 
 } // namespace riff

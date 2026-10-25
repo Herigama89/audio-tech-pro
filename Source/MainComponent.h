@@ -32,6 +32,7 @@
 #include "ui/SmartControls.h"
 #include "ui/CombineInterfacesPanel.h"
 #include "engine/AggregateDevice.h"
+#include "model/Automix.h"
 #include "model/ProjectFiles.h"
 #include "engine/ScreenAudioTap.h"
 #include "ai/Assistant.h"
@@ -220,7 +221,7 @@ private:
     void detectTempo (juce::ValueTree region);
     void showTapTempo();
     void showTempoMenu();
-    void runAutomix (const juce::String& genre, bool cycleOnly);
+    void runAutomix (const juce::String& genre, bool cycleOnly, automix::Options options);
 
     /** Cubase's Extensions: an ARA plugin (Melodyne...) on just the chosen audio regions; the rest of the track plays as usual. */
     void addExtensionItems (juce::PopupMenu& menu, juce::Array<juce::ValueTree> regions);

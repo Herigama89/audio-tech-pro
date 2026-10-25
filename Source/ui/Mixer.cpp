@@ -88,10 +88,19 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
             track.setProperty (ids::stripIn, ! (bool) track.getProperty (ids::stripIn, true), &um);
         };
         addAndMakeVisible (stripInButton);
+        stripPowerKey.setTooltip ("Channel strip in or out (its EQ and dynamics, or your strip plugin) - lit when in");
+        stripPowerKey.onClick = stripInButton.onClick;
+        addChildComponent (stripPowerKey);
+        foldKey.setTooltip ("Open or close this stack: its channels shown here (and in the tracks area), or folded away");
+        foldKey.onClick = [this]
+        {
+            track.setProperty (ids::collapsed, ! (bool) track[ids::collapsed], nullptr);   // (a view, as in the tracks area: no undo step)
+        };
+        addChildComponent (foldKey);
 
         // A VCA (or folder stack) strip is just a fader with mute and solo.
         if (isVca())
-            for (auto* c : std::initializer_list<juce::Component*> { &hfKnob, &hmfKnob, &lmfKnob, &lfKnob, &dynKnob, &consoleInButton, &dynInButton, &stripInButton })
+            for (auto* c : std::initializer_list<juce::Component*> { &hfKnob, &hmfKnob, &lmfKnob, &lfKnob, &dynKnob, &consoleInButton, &dynInButton, &stripInButton, &stripPowerKey })
                 c->setVisible (false);
 
         muteButton.setTooltip ("Mute");
@@ -1192,6 +1201,19 @@ void ChannelStrip::refresh()
 {
     updateTape();
     updatePreamp();
+    if (track.isValid())
+    {
+        // A stack's main channel: its fold key, open or closed
+        const bool stack = track[ids::stack].toString().isNotEmpty();
+        const bool open = ! (bool) track[ids::collapsed];
+        if (foldKey.isVisible() != stack || foldKey.open != open)
+        {
+            foldKey.open = open;
+            foldKey.setVisible (stack);
+            foldKey.repaint();
+            repaint();   // (the number moves over for it)
+        }
+    }
     // Console mode or the built-in strip?
     if (! isMaster())
     {
@@ -1276,6 +1298,7 @@ void ChannelStrip::refresh()
         panKnob.setValue (track.getProperty (ids::pan, 0.0), juce::dontSendNotification);
         muteButton.setToggleState ((bool) track[ids::mute], juce::dontSendNotification);
         stripInButton.setToggleState ((bool) track.getProperty (ids::stripIn, true), juce::dontSendNotification);
+        stripPowerKey.setToggleState ((bool) track.getProperty (ids::stripIn, true), juce::dontSendNotification);
         soloButton.setToggleState ((bool) track[ids::solo], juce::dontSendNotification);
         armKey.setToggleState ((bool) track[ids::armed], juce::dontSendNotification);
         monitorKey.setToggleState ((bool) track[ids::monitor], juce::dontSendNotification);
@@ -1616,8 +1639,11 @@ void ChannelStrip::paintFace (juce::Graphics& g)
         if (channel || isVca())
         {
             g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
-            g.drawText (isVca() ? juce::String ("VCA") : juce::String (track.getParent().indexOf (track) + 1),
-                        juce::Rectangle<int> (5, 3, 34, 16), juce::Justification::centredLeft, false);
+            // (fitted in left of the power key, so a long number never runs under it)
+            const auto left = foldKey.isVisible() ? foldKey.getRight() + 1 : 5;
+            const auto room = stripPowerKey.isVisible() ? juce::jmax (10, stripPowerKey.getX() - 2 - left) : 34;
+            g.drawFittedText (isVca() ? juce::String ("VCA") : juce::String (track.getParent().indexOf (track) + 1),
+                              juce::Rectangle<int> (left, 3, room, 16), juce::Justification::centredLeft, 1, 0.6f);
         }
         else
         {
@@ -1936,6 +1962,7 @@ void ChannelStrip::resized()
         for (auto* c : std::initializer_list<juce::Component*> { &hfKnob, &hmfKnob, &lmfKnob, &lfKnob, &dynKnob, &consoleInButton, &dynInButton, &stripInButton, &dynLabel })
             c->setVisible (console);
         consoleTag.setVisible (! console);
+        stripPowerKey.setVisible (! console);
         muteButton.onArt = soloButton.onArt = console && theme::imageSkin();
         stripInButton.onArt = consoleInButton.onArt = dynInButton.onArt = theme::imageSkin();
         panKnob.asKnob = ! console;
@@ -1943,11 +1970,15 @@ void ChannelStrip::resized()
 
     if (isMaster())
         multiMeterKey.setBounds (getWidth() - 36, 3, 32, 16);
+    else
+        foldKey.setBounds (2, 3, 14, 16);
 
     if (! isMaster() && ! console)
     {
         // Compact: number and EQ tag, the pan knob, then mute and solo.
         consoleTag.setBounds (getWidth() - 40, 3, 36, 16);
+        stripPowerKey.setBounds (getWidth() - 57, 3, 16, 16);
+        foldKey.setBounds (2, 3, 14, 16);
         panKnob.setBounds (8, 24, 30, 30);
         muteButton.setBounds (6, 60, getWidth() / 2 - 8, 24);
         soloButton.setBounds (getWidth() / 2 + 2, 60, getWidth() / 2 - 8, 24);
@@ -1963,6 +1994,7 @@ void ChannelStrip::resized()
         knobAt (dynKnob, 98.0f, 752.0f, 43.0f);
 
         stripInButton.setBounds (fromArt (66.0f, 26.0f, 53.0f, 41.0f));
+        foldKey.setBounds (2, 3, 14, 16);
         consoleInButton.setBounds (fromArt (140.0f, 22.0f, 42.0f, 45.0f));
         dynInButton.setBounds (fromArt (140.0f, 432.0f, 42.0f, 36.0f));
         muteButton.setBounds (fromArt (28.0f, 591.0f, 71.0f, 62.0f));
@@ -2744,6 +2776,8 @@ void MixerPanel::touched (const juce::ValueTree& tree, const juce::Identifier& p
     {
         if (tree != t)
             return;   // a region or a note: nothing on the strips changes
+        if (property == ids::collapsed || property == ids::stackParent || property == ids::stack)
+            needsRebuild = true;   // (a stack folded or opened: its channels go or come back)
         if (property == ids::name || property == ids::kind || property == ids::colour)
             refreshAll = true;   // (bus names show on other strips' sends and outputs)
         else
@@ -2942,7 +2976,7 @@ void MixerPanel::rebuild()
     };
 
     for (const auto& track : project)
-        if (track.hasType (ids::TRACK) && shows (track))
+        if (track.hasType (ids::TRACK) && shows (track) && ! model::isInCollapsedStack (project, track))   // (folded away in a closed stack)
         {
             ChannelStrip* strip = nullptr;
             if (auto it = existing.find (track[ids::id].toString()); it != existing.end() && it->second != nullptr)
@@ -3248,7 +3282,7 @@ void MixerPanel::setZone (const juce::Array<juce::ValueTree>& tracks, const juce
 
 void MixerPanel::showZonesMenu()
 {
-    const auto buses = project.getProperty ("mixerBusZone").toString();
+    const auto buses = project.getProperty ("mixerBusZone", "right").toString();
     juce::PopupMenu menu;
     menu.addSectionHeader ("Buses and summing channels");
     menu.addItem (1, "Left Zone", true, buses == "left");
@@ -3271,14 +3305,14 @@ void MixerPanel::showZonesMenu()
         {
             case 1: case 2: case 3:
                 undoManager.beginNewTransaction ("Mixer zones");
-                project.setProperty ("mixerBusZone", chosen == 1 ? "left" : chosen == 2 ? "right" : "", &undoManager);
+                project.setProperty ("mixerBusZone", chosen == 1 ? "left" : chosen == 2 ? "right" : "none", &undoManager);
                 break;
             case 4: setZone (selected, "left"); break;
             case 5: setZone (selected, "right"); break;
             case 6: setZone (selected, "none"); break;
             case 7:
                 undoManager.beginNewTransaction ("Reset mixer zones");
-                project.setProperty ("mixerBusZone", "", &undoManager);
+                project.removeProperty ("mixerBusZone", &undoManager);   // (buses back to the right)
                 for (auto t : project)
                     if (t.hasType (ids::TRACK) && t.hasProperty ("mixerZone"))
                         t.removeProperty ("mixerZone", &undoManager);

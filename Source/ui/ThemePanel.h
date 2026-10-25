@@ -80,11 +80,15 @@ private:
     // The fader caps, knobs, channel keys and bus compressor meter, whatever the skin
     juce::ComboBox faderBox, knobBox, buttonBox, meterBox;
     juce::ToggleButton stripVuButton { "VU meters on the mixer strips" };
+    juce::ComboBox levelMeterBox;   // LED segments or smooth bars
 
     // Your presets, kept in the settings file
     juce::PropertiesFile* store = nullptr;
     juce::ComboBox myPresets;
     juce::TextButton savePreset { "Save Preset..." }, deletePreset { "Delete" };
+    juce::TextButton exportButton { "Export..." }, importButton { "Import..." };   // a theme as a file, to share
+    void exportTheme();
+    void importTheme();
     juce::StringPairArray loadPresets() const;
     void savePresets (const juce::StringPairArray& all);
     void refreshMyPresets();

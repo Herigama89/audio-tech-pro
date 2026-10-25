@@ -41,7 +41,29 @@ namespace riff::automix
         juce::String id, name;
         Role role = Role::other;
         double fromDb = 0.0, toDb = 0.0;
+        double pan = 0.0;              // (when panning)
+        juce::StringArray added;       // plugins added (when adding them)
     };
+
+    /** What Automix does: set the faders, pan, add the usual plugins. */
+    struct Options { bool faders = true, pan = true, plugins = true; };
+
+    /** A plugin to add (a built-in effect's type) with its settings, and why. */
+    struct Insert
+    {
+        juce::String type;
+        std::vector<std::pair<juce::String, float>> params;   // parameter id, value
+        juce::String why;
+    };
+
+    /** Where a track sits in the stereo picture for the genre (-1 left .. 1 right). `index` and `count`: which of
+        the tracks with the same role it is (doubled guitars go left and right, backing vocals spread...). */
+    double targetPan (const juce::String& genre, Role role, int index, int count);
+
+    /** The plugins a track of this role usually gets in the genre (EQ, compression, de-essing, saturation,
+        tuning), set from what it sounds like: `t.activeRmsDb - t.faderDb` is its level going in.
+        `keyRoot` (0 = C) and `minor`: the song's key, for tuning (keyRoot < 0: no key - chromatic). */
+    std::vector<Insert> recommendedInserts (const juce::String& genre, Role role, const Track& t, int keyRoot = -1, bool minor = false);
 
     /** New fader levels for the genre. Silent tracks are left alone. `headroomDb`: where the loudest element's
         own level lands (dBFS RMS while it plays), leaving room in the mix bus. */

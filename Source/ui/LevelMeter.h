@@ -164,6 +164,13 @@ public:
         // the lit one up to the level
         const auto inner = getLocalBounds().withTrimmedBottom (label.isNotEmpty() ? 16 : 0).reduced (2, 3);
         const auto columnWidth = juce::jmax (1, (inner.getWidth() - 2) / 2);
+        if (theme::levelMeters() == 1)
+        {
+            // Smooth bars (Themes > Level meters), with a peak line
+            drawSmooth (g, inner.withWidth (columnWidth), litL, peakSegL);
+            drawSmooth (g, inner.withTrimmedLeft (columnWidth + 2).withWidth (columnWidth), litR, peakSegR);
+            return;
+        }
         drawColumn (g, inner.withWidth (columnWidth), litL, peakSegL);
         drawColumn (g, inner.withTrimmedLeft (columnWidth + 2).withWidth (columnWidth), litR, peakSegR);
     }
@@ -216,6 +223,53 @@ private:
         lightUpTo (0, lit);
         if (peak > lit)
             lightUpTo (peak - 1, peak);   // the held peak: its one segment lit above the bar
+    }
+
+    /** A smooth bar up to `lit` segments' height, shading green to yellow to red, and a line at the held peak. */
+    void drawSmooth (juce::Graphics& g, juce::Rectangle<int> r, int lit, int peak) const
+    {
+        if (r.isEmpty())
+            return;
+        const auto count = segmentCount();
+        const auto heightOf = [&] (int segments) { return juce::roundToInt ((float) r.getHeight() * (float) segments / (float) juce::jmax (1, count)); };
+        g.setColour (juce::Colour (0xff15171a));
+        g.fillRect (r);
+        const auto paintBar = [] (juce::Graphics& ig, juce::Rectangle<float> area)
+        {
+            juce::ColourGradient grad (theme::meterRed, 0.0f, area.getY(), theme::meterGreen.darker (0.15f), 0.0f, area.getBottom(), false);
+            grad.addColour (0.04, theme::meterRed);
+            grad.addColour (0.10, theme::meterAmber);
+            grad.addColour (0.30, theme::meterGreen.brighter (0.2f));
+            ig.setGradientFill (grad);
+            ig.fillRect (area);
+        };
+        const auto h = heightOf (lit);
+        const auto scale = pictures::scaleOf (g);
+        if (h > 0)
+        {
+            if (std::abs (scale - std::round (scale)) > 1.0e-3f)
+            {
+                juce::Graphics::ScopedSaveState state (g);
+                g.reduceClipRegion (r.withTop (r.getBottom() - h));
+                paintBar (g, r.toFloat());
+            }
+            else
+            {
+                auto key = theme::paletteKey();
+                pictures::mix (key, (juce::uint64) (juce::uint32) r.getWidth() << 32 | (juce::uint64) (juce::uint32) r.getHeight());
+                pictures::mix (key, (juce::uint64) juce::roundToInt (scale * 1000.0f));
+                pictures::mix (key, 0x5300ull);
+                const auto local = r.withZeroOrigin().toFloat();
+                const auto& bar = pictures::pictureOf (key, r, scale, true, [&] (juce::Graphics& ig) { paintBar (ig, local); });
+                pictures::drawRows (g, bar, r, r.getHeight() - h, r.getHeight());
+            }
+        }
+        if (peak > 0)
+        {
+            const auto y = r.getBottom() - heightOf (peak);
+            g.setColour (peak >= count ? theme::meterRed : juce::Colour (0xffe8e9ec));
+            g.fillRect (r.getX(), juce::jlimit (r.getY(), r.getBottom() - 2, y), r.getWidth(), 2);
+        }
     }
 
     /** The column's LEDs, `lit` of them on from the bottom, and the held peak's. */

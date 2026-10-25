@@ -585,6 +585,7 @@ bool reaperSkin() { return settingsNow().skin == Skin::reaper && themepack::acti
 int knobStyle()   { return settingsNow().knobStyle; }
 int buttonStyle() { return settingsNow().buttonStyle; }
 int meterStyle()  { return settingsNow().meterStyle; }
+int levelMeters() { return settingsNow().levelMeters; }
 
 int faderStyle()
 {
@@ -650,7 +651,8 @@ juce::String Settings::toString() const
                                juce::URL::addEscapeChars (editorTheme, false),
                                juce::URL::addEscapeChars (toolbarTheme, false), juce::URL::addEscapeChars (meterTheme, false),
                                juce::String::toHexString ((int) textColour), juce::String::toHexString ((int) stripTextColour),
-                               juce::String (trackColouring), juce::String (gridStyle), juce::String (stripVu ? 1 : 0) }.joinIntoString (";");
+                               juce::String (trackColouring), juce::String (gridStyle), juce::String (stripVu ? 1 : 0),
+                               juce::String (levelMeters) }.joinIntoString (";");
 }
 
 Settings Settings::fromString (const juce::String& text)
@@ -689,7 +691,7 @@ Settings Settings::fromString (const juce::String& text)
     if (v.size() >= 20)
     {
         s.themePack = juce::URL::removeEscapeChars (v[18]);
-        s.faderStyle = juce::jlimit (-1, 8, v[19].getIntValue());
+        s.faderStyle = juce::jlimit (-1, 9, v[19].getIntValue());
     }
     if (v.size() >= 24)
     {
@@ -720,6 +722,8 @@ Settings Settings::fromString (const juce::String& text)
     }
     if (v.size() >= 35)
         s.stripVu = v[34].getIntValue() != 0;
+    if (v.size() >= 36)
+        s.levelMeters = juce::jlimit (0, 1, v[35].getIntValue());
     return s;
 }
 

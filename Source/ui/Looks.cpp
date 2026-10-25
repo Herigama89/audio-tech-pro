@@ -39,6 +39,7 @@ namespace
             case 6: return capBlackRed();
             case 7: return capSilver();
             case 8: return capDark();
+            case 9: return skin::faderCap();   // (Studio Grey's, with any skin)
             default: return {};
         }
     }
@@ -169,7 +170,8 @@ namespace
 juce::StringArray faderNames()
 {
     return { "Skin's own", "Classic", "Studio White (photo cap)", "Xenon (glass cap)", "REAPER theme's",
-             "Black (photo)", "Black long-throw", "Black, red line", "Silver console", "Dark VU (picture)" };
+             "Black (photo)", "Black long-throw", "Black, red line", "Silver console", "Dark VU (picture)",
+             "Studio Grey (picture)" };
 }
 
 juce::StringArray knobNames()

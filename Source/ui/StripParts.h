@@ -91,6 +91,23 @@ namespace riff::strip
         juce::Colour lit;
     };
 
+    /** A small power key (the compact strip's channel strip IN): a power sign, lit green when on. */
+    class PowerKey final : public juce::Button
+    {
+    public:
+        PowerKey() : juce::Button ("IN") { setClickingTogglesState (false); setWantsKeyboardFocus (false); }
+        void paintButton (juce::Graphics&, bool over, bool down) override;
+    };
+
+    /** A stack's disclosure triangle (its channels shown, or folded away): pointing down when open. */
+    class FoldKey final : public juce::Button
+    {
+    public:
+        FoldKey() : juce::Button ("Fold") { setClickingTogglesState (false); setWantsKeyboardFocus (false); }
+        void paintButton (juce::Graphics&, bool over, bool down) override;
+        bool open = true;
+    };
+
     /** A value shown in one of the dark display boxes; drag sideways to change it (pan). */
     class DisplaySlider final : public DragSlider
     {

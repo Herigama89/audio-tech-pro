@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "../Source/model/Automix.h"
+#include <map>
 #include "../Source/engine/MixAnalysis.h"
 
 using namespace riff;
@@ -66,4 +67,49 @@ TEST_CASE ("A track's level while it plays leaves its silences out", "[automix]"
         stats.add (quiet.data(), quiet.data(), 512);
     CHECK_THAT (stats.activeRmsDb(), WithinAbs (juce::Decibels::gainToDecibels (0.5), 0.01));
     CHECK (stats.rmsDb() < stats.activeRmsDb() - 9.0);
+}
+
+TEST_CASE ("Automix pans by role and genre, and recommends plugins", "[automix]")
+{
+    using namespace riff::automix;
+    // the centre: kick, snare, bass, lead vocal
+    for (auto r : { Role::kick, Role::snare, Role::bass, Role::leadVocal })
+        CHECK (targetPan ("Pop", r, 0, 1) == 0.0);
+    // doubled guitars: left and right, wider in rock than in pop
+    CHECK (targetPan ("Rock", Role::guitar, 0, 2) < -0.9);
+    CHECK (targetPan ("Rock", Role::guitar, 1, 2) > 0.9);
+    CHECK (std::abs (targetPan ("Pop", Role::guitar, 0, 2)) < std::abs (targetPan ("Rock", Role::guitar, 0, 2)));
+    // hip-hop keeps things narrower than jazz
+    CHECK (std::abs (targetPan ("Hip-Hop", Role::keys, 0, 1)) < std::abs (targetPan ("Jazz", Role::keys, 0, 1)));
+
+    Track vox;
+    vox.name = "Lead Vox";
+    vox.activeRmsDb = -20.0;
+    vox.faderDb = -2.0;
+    const auto trap = recommendedInserts ("Trap", Role::leadVocal, vox, 9, true);
+    juce::StringArray types;
+    for (const auto& i : trap) types.add (i.type);
+    CHECK (types == juce::StringArray { "channelEq", "studioComp", "deesser", "pitchCorrection" });
+    // the compressor's threshold follows the vocal's own level (-18 in): a few dB above it
+    for (const auto& i : trap)
+        if (i.type == "studioComp")
+            for (const auto& [id, v] : i.params)
+                if (id == "threshold")
+                    CHECK (std::abs (v - (-15.0f)) < 0.01f);
+    // tuned in the song's key (A minor), hard for trap
+    for (const auto& i : trap)
+        if (i.type == "pitchCorrection")
+        {
+            std::map<juce::String, float> p (i.params.begin(), i.params.end());
+            CHECK (p["key"] == 9.0f);
+            CHECK (p["scale"] == 2.0f);
+            CHECK (p["response"] == 1.0f);
+        }
+    // jazz vocals aren't tuned; an 808 in hip-hop gets saturation
+    for (const auto& i : recommendedInserts ("Jazz", Role::leadVocal, vox))
+        CHECK (i.type != "pitchCorrection");
+    bool saturated = false;
+    for (const auto& i : recommendedInserts ("Hip-Hop", Role::bass, vox))
+        saturated = saturated || i.type == "saturator";
+    CHECK (saturated);
 }
