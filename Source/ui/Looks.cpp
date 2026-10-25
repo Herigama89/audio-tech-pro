@@ -337,6 +337,12 @@ bool drawLevelVu (juce::Graphics& g, juce::Rectangle<float> area, float vu, bool
     return drawFace (g, area, levelVu(), vu, ! stretch);
 }
 
+bool drawStripCompMeter (juce::Graphics& g, juce::Rectangle<float> area, float reductionDb)
+{
+    const auto* black = meterFor (1);
+    return black != nullptr && drawFace (g, area, *black, reductionDb, false);
+}
+
 static bool drawFace (juce::Graphics& g, juce::Rectangle<float> area, const MeterFace& face, float value, bool keepProportion)
 {
     const auto* m = &face;

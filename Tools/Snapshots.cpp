@@ -252,6 +252,8 @@ public:
         {
             auto settings = theme::current();
             settings.levelMeters = 1;
+            settings.stripVu = true;
+            settings.stripMeterKind = 1;
             theme::set (settings);
             MainComponent main (false);
             main.setSize (1440, 860);
@@ -269,14 +271,20 @@ public:
             main.showMixer();
             pump (main, 300);
             juce::Random rnd (4);
-            for (auto* st : main.mixer.strips)
-                st->pushLevels (0.2f + 0.7f * rnd.nextFloat(), 0.2f + 0.7f * rnd.nextFloat());
+            for (int k = 0; k < 20; ++k)
+                for (auto* st : main.mixer.strips)
+                {
+                    st->pushLevels (0.2f + 0.7f * rnd.nextFloat(), 0.2f + 0.7f * rnd.nextFloat());
+                    st->pushGainReduction (2.0f + 3.0f * (float) (st->getComponentID().getTrailingIntValue() % 4));
+                }
             pump (main, 200);
             save (main, "layout-smooth-stack-open.png");
             main.project.getChildWithProperty (ids::id, stack[ids::id]).setProperty (ids::collapsed, true, nullptr);
             pump (main, 400);
             save (main, "layout-smooth-stack-closed.png");
             settings.levelMeters = 0;
+            settings.stripVu = false;
+            settings.stripMeterKind = 0;
             theme::set (settings);
         }
         {

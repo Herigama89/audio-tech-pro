@@ -79,7 +79,8 @@ private:
 
     // The fader caps, knobs, channel keys and bus compressor meter, whatever the skin
     juce::ComboBox faderBox, knobBox, buttonBox, meterBox;
-    juce::ToggleButton stripVuButton { "VU meters on the mixer strips" };
+    juce::ToggleButton stripVuButton { "VU meters on the mixer strips" };   // (kept hidden: the box below chooses)
+    juce::ComboBox stripMeterBox;   // the strips' top meter: none, the amber VU, the black compression meter
     juce::ComboBox levelMeterBox;   // LED segments or smooth bars
 
     // Your presets, kept in the settings file

@@ -36,7 +36,7 @@ public:
     void pushLevels (float left, float right)
     {
         meter.push (left, right);
-        if (! vuArea.isEmpty())
+        if (! vuArea.isEmpty() && theme::stripMeterKind() == 0)
         {
             // The VU: 0 VU at -18 dBFS, with a needle's sluggish rise and fall
             const auto vu = juce::jlimit (-22.0f, 4.0f, juce::Decibels::gainToDecibels (juce::jmax (left, right), -100.0f) + 18.0f);
@@ -50,6 +50,7 @@ public:
     }
     juce::Rectangle<int> vuArea;   // (empty when the strips have no VU)
     float vuNeedle = -22.0f;
+    float grNeedle = 0.0f;   // (the black compression meter's, in dB of reduction)
 
     /** The channel's gain reduction (its dynamics and compressors), shown on an amber LED column by the meter. */
     void pushGainReduction (float db);

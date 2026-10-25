@@ -142,6 +142,8 @@ namespace riff::theme
         bool stripVu = false;
         // The level meters: 0 LED segments, 1 smooth bars (as FL Studio's mixer)
         int levelMeters = 0;
+        // The meter at the top of each strip (when stripVu): 0 the amber VU (level), 1 the black compression meter (gain reduction)
+        int stripMeterKind = 0;
 
         // The edit windows (tracks area and editors): your own colours (ARGB), 0: the skin's.
         juce::uint32 editBack = 0, gridBarColour = 0, gridBeatColour = 0, rollBack = 0;
@@ -193,6 +195,8 @@ namespace riff::theme
     bool stripVu();
     /** Themes > Level meters: 0 LED segments, 1 smooth bars */
     int levelMeters();
+    /** The strips' top meter: 0 amber VU (level), 1 black compression meter (gain reduction) */
+    int stripMeterKind();
     /** A track's header or strip face in its colour (as Themes > Tracks says), and ink that reads on it */
     juce::Colour trackFace (juce::Colour face, juce::Colour trackColour);
     juce::Colour inkOn (juce::Colour face, juce::Colour normalInk);

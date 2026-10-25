@@ -586,6 +586,7 @@ int knobStyle()   { return settingsNow().knobStyle; }
 int buttonStyle() { return settingsNow().buttonStyle; }
 int meterStyle()  { return settingsNow().meterStyle; }
 int levelMeters() { return settingsNow().levelMeters; }
+int stripMeterKind() { return settingsNow().stripMeterKind; }
 
 int faderStyle()
 {
@@ -652,7 +653,7 @@ juce::String Settings::toString() const
                                juce::URL::addEscapeChars (toolbarTheme, false), juce::URL::addEscapeChars (meterTheme, false),
                                juce::String::toHexString ((int) textColour), juce::String::toHexString ((int) stripTextColour),
                                juce::String (trackColouring), juce::String (gridStyle), juce::String (stripVu ? 1 : 0),
-                               juce::String (levelMeters) }.joinIntoString (";");
+                               juce::String (levelMeters), juce::String (stripMeterKind) }.joinIntoString (";");
 }
 
 Settings Settings::fromString (const juce::String& text)
@@ -724,6 +725,8 @@ Settings Settings::fromString (const juce::String& text)
         s.stripVu = v[34].getIntValue() != 0;
     if (v.size() >= 36)
         s.levelMeters = juce::jlimit (0, 1, v[35].getIntValue());
+    if (v.size() >= 37)
+        s.stripMeterKind = juce::jlimit (0, 1, v[36].getIntValue());
     return s;
 }
 

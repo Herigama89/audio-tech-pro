@@ -124,7 +124,18 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
         settings.stripVu = stripVuButton.getToggleState();
         changed();
     };
-    addAndMakeVisible (stripVuButton);
+    addChildComponent (stripVuButton);
+    stripMeterBox.addItemList ({ "None", "VU meter (level)", "Compression meter (gain reduction)" }, 1);
+    stripMeterBox.setTooltip ("A meter at the top of each mixer strip: an amber VU showing its level (0 VU at -18 dBFS), "
+                              "or the black compression meter showing how much its dynamics and compressors are taking off");
+    stripMeterBox.onChange = [this]
+    {
+        const auto i = stripMeterBox.getSelectedItemIndex();
+        settings.stripVu = i > 0;
+        settings.stripMeterKind = i == 2 ? 1 : 0;
+        changed();
+    };
+    addAndMakeVisible (stripMeterBox);
     levelMeterBox.addItemList ({ "LED segments", "Smooth (FL Studio style)" }, 1);
     levelMeterBox.setTooltip ("The mixer's and the main window's level meters: lit LED segments, or smooth bars "
                               "shading green to yellow to red with a peak line");
@@ -532,6 +543,7 @@ void ThemePanel::refreshControls()
     buttonBox.setSelectedItemIndex (settings.buttonStyle + 1, juce::dontSendNotification);
     meterBox.setSelectedItemIndex (settings.meterStyle + 1, juce::dontSendNotification);
     stripVuButton.setToggleState (settings.stripVu, juce::dontSendNotification);
+    stripMeterBox.setSelectedItemIndex (! settings.stripVu ? 0 : settings.stripMeterKind == 1 ? 2 : 1, juce::dontSendNotification);
     levelMeterBox.setSelectedItemIndex (juce::jlimit (0, 1, settings.levelMeters), juce::dontSendNotification);
     refreshReaperThemes();
     waveModeBox.setSelectedItemIndex (settings.waveMode + 1, juce::dontSendNotification);
@@ -570,7 +582,7 @@ void ThemePanel::editScope (int scope)
     else
         settings = whole;
     sameButton.setVisible (scope != 0);
-    stripVuButton.setVisible (scope == 0);
+    stripMeterBox.setVisible (scope == 0);
     levelMeterBox.setVisible (scope == 0);
     for (auto* box : { &faderBox, &knobBox, &buttonBox, &meterBox })
         box->setVisible (scope == 0);   // (faders, knobs, keys and the meter are the mixer's)
@@ -620,6 +632,7 @@ void ThemePanel::paint (juce::Graphics& g)
         g.drawText ("Faders / Knobs", 16, faderBox.getY(), 94, faderBox.getHeight(), juce::Justification::centredLeft);
         g.drawText ("Keys / Meter", 16, buttonBox.getY(), 94, buttonBox.getHeight(), juce::Justification::centredLeft);
         g.drawText ("Level meters", 16, levelMeterBox.getY(), 94, levelMeterBox.getHeight(), juce::Justification::centredLeft);
+        g.drawText ("Strip meters", 16, stripMeterBox.getY(), 94, stripMeterBox.getHeight(), juce::Justification::centredLeft);
     }
     g.drawText ("Edit windows", 16, editButtons[0].getY(), 94, editButtons[0].getHeight(), juce::Justification::centredLeft);
     g.drawText ("Text colours", 16, textButtons[0].getY(), 94, textButtons[0].getHeight(), juce::Justification::centredLeft);
@@ -757,7 +770,7 @@ void ThemePanel::resized()
     y += 32;
     levelMeterBox.setBounds (112, y, half, 26);
     y += 32;
-    stripVuButton.setBounds (110, y, getWidth() - 126, 24);
+    stripMeterBox.setBounds (112, y, getWidth() - 128, 26);
 
     if (store != nullptr)
     {

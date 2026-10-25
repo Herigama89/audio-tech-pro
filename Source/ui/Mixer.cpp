@@ -1561,7 +1561,12 @@ void ChannelStrip::paint (juce::Graphics& g)
 
     // Themes > Strip VU meters: the amber VU at the top (it moves: not part of the picture)
     if (! vuArea.isEmpty())
-        looks::drawLevelVu (g, vuArea.toFloat(), vuNeedle);
+    {
+        if (theme::stripMeterKind() == 1)
+            looks::drawStripCompMeter (g, vuArea.toFloat(), grNeedle);
+        else
+            looks::drawLevelVu (g, vuArea.toFloat(), vuNeedle);
+    }
 }
 
 juce::String ChannelStrip::faceKey (float scale) const
@@ -1787,6 +1792,18 @@ juce::Rectangle<int> ChannelStrip::grArea() const
 
 void ChannelStrip::pushGainReduction (float db)
 {
+    // The black compression meter at the top (Themes > Strip meters): a needle's quick swing and slower return
+    if (! vuArea.isEmpty() && theme::stripMeterKind() == 1)
+    {
+        const auto target = juce::jlimit (0.0f, 20.0f, db);
+        const auto next = grNeedle + (target - grNeedle) * (target > grNeedle ? 0.5f : 0.15f);
+        if (std::abs (next - grNeedle) > 0.05f)
+        {
+            grNeedle = next;
+            repaint (vuArea);
+        }
+    }
+
     // Instant up, about 300 ms down.
     const auto next = db >= grShown ? db : grShown * 0.82f;
     if (std::abs (next - grShown) > 0.05f || (next < 0.05f && grShown > 0.0f))
