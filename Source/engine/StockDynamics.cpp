@@ -351,6 +351,16 @@ namespace
 
         int getLatencySamples() const override { return juce::roundToInt (value (iLookahead) * 0.001 * sampleRate); }
 
+        /** For its window: each band's gain change now (dB down: compression and expansion), then the levels in and out
+            (dB, left and right, falling 20 dB a second after a peak). */
+        int readMeters (float* dest, int capacity) const noexcept override
+        {
+            const auto n = std::min ((int) readings.size(), capacity);
+            for (int i = 0; i < n; ++i)
+                dest[i] = readings[(size_t) i].load (std::memory_order_relaxed);
+            return n;
+        }
+
         float bandValue (int band, int which) const noexcept { return value (bandBase + band * perBand + which); }
 
         void process (float* l, float* r, int n) noexcept override
@@ -388,8 +398,12 @@ namespace
             const auto output = dbToGain (value (iOut));
             const auto lookSamples = (float) getLatencySamples();
 
+            std::array<float, 4> bandMost {};
+            float inPeakL = 0.0f, inPeakR = 0.0f, outPeakL = 0.0f, outPeakR = 0.0f;
             for (int i = 0; i < n; ++i)
             {
+                inPeakL = std::max (inPeakL, std::abs (l[i]));
+                inPeakR = std::max (inPeakR, std::abs (r[i]));
                 // Four bands: split at the middle crossover, align each half to the other's, split again
                 float lowL, highL, lowR, highR;
                 x2.split (l[i], 0, lowL, highL);
@@ -415,6 +429,7 @@ namespace
                     auto& e = env[b];
                     e = target + (target > e ? attack[b] : release[b]) * (e - target);
                     most = std::max (most, e);
+                    bandMost[b] = std::abs (e) > std::abs (bandMost[b]) ? e : bandMost[b];
                     look[b * 2].push (bl[b]);
                     look[b * 2 + 1].push (br[b]);
                     const auto dl = lookSamples >= 1.0f ? look[b * 2].read (lookSamples) : bl[b];
@@ -427,13 +442,27 @@ namespace
                 report (most);
                 l[i] = outL * output;
                 r[i] = outR * output;
+                outPeakL = std::max (outPeakL, std::abs (l[i]));
+                outPeakR = std::max (outPeakR, std::abs (r[i]));
             }
             publish();
+            for (size_t b = 0; b < 4; ++b)
+                readings[b].store (on[b] ? bandMost[b] : 0.0f, std::memory_order_relaxed);
+            const auto fall = 20.0f * (float) n / (float) sampleRate;
+            const float peaks[] { inPeakL, inPeakR, outPeakL, outPeakR };
+            for (size_t k = 0; k < 4; ++k)
+            {
+                auto& held = meterDb[k];
+                held = std::max (gainToDb (std::max (peaks[k], 1.0e-6f)), held - fall);
+                readings[4 + k].store (held, std::memory_order_relaxed);
+            }
         }
 
     private:
         Crossover x1, x2, x3, ap1, ap3;
         std::array<float, 4> env {}, rms {};
+        std::array<float, 4> meterDb { -120.0f, -120.0f, -120.0f, -120.0f };
+        std::array<std::atomic<float>, 8> readings {};
         std::array<DelayLine, 8> look;
         float lastKey = -1.0f;
     };

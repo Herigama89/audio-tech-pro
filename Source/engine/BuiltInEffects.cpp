@@ -25,7 +25,16 @@ const std::vector<EffectInfo>& originalEffects()
             { "midGain",  "Mid",       " dB", -18.0f,  18.0f,    0.0f,    0.0f },
             { "midQ",     "Mid Q",     "",    0.2f,    10.0f,    1.0f,    1.2f },
             { "highFreq", "High Freq", " Hz", 1000.0f, 18000.0f, 8000.0f, 5000.0f },
-            { "highGain", "High",      " dB", -18.0f,  18.0f,    0.0f,    0.0f } }, "Legacy" },
+            { "highGain", "High",      " dB", -18.0f,  18.0f,    0.0f,    0.0f } }, "Legacy",
+            // (its curve, so the window draws it with the analyzer behind)
+            [] (const float* v, double freq, double rate)
+            {
+                Biquad low, mid, high;
+                low.setLowShelf (rate, v[0], v[1]);
+                mid.setPeak (rate, v[2], v[3], v[4]);
+                high.setHighShelf (rate, v[5], v[6]);
+                return low.magnitudeDb (freq, rate) + mid.magnitudeDb (freq, rate) + high.magnitudeDb (freq, rate);
+            } },
 
         { "compressor", "Compressor", {
             { "threshold", "Threshold", " dB", -60.0f, 0.0f,    -18.0f, -18.0f },
@@ -276,10 +285,12 @@ public:
             peakReduction = juce::jmax (peakReduction, reductionDb);
         }
         meter.store (juce::jmax (meter.load(), peakReduction));
+        shown.store (peakReduction, std::memory_order_relaxed);
         peakReduction = 0.0f;
     }
 
     float takeGainReductionDb() noexcept override { return meter.exchange (0.0f); }
+    float displayValue() const noexcept override { return shown.load (std::memory_order_relaxed); }
     void setSidechain (const float* left, const float* right) noexcept override { keyL = left; keyR = right != nullptr ? right : left; }
     bool acceptsSidechain() const override { return true; }
 
@@ -287,7 +298,7 @@ private:
     const float* keyL = nullptr;
     const float* keyR = nullptr;
     float reductionDb = 0.0f, peakReduction = 0.0f;
-    std::atomic<float> meter { 0.0f };
+    std::atomic<float> meter { 0.0f }, shown { 0.0f };
 };
 
 class DelayEffect final : public BuiltInEffect
@@ -399,14 +410,16 @@ public:
         }
         const auto db = -juce::Decibels::gainToDecibels (lowest, -60.0f);
         meter.store (juce::jmax (meter.load(), db));
+        shown.store (db, std::memory_order_relaxed);
         lowest = 1.0f;
     }
 
     float takeGainReductionDb() noexcept override { return meter.exchange (0.0f); }
+    float displayValue() const noexcept override { return shown.load (std::memory_order_relaxed); }
 
 private:
     float gain = 1.0f, lowest = 1.0f;
-    std::atomic<float> meter { 0.0f };
+    std::atomic<float> meter { 0.0f }, shown { 0.0f };
 };
 
 } // namespace

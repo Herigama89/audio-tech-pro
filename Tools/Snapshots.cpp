@@ -95,6 +95,40 @@ public:
     explicit SnapshotTool (juce::File outputFolder) : out (std::move (outputFolder)) {}
 
     /** Just the stock effects' windows (quick: snapshots fx <folder> [types...]). */
+    /** Every stock effect: its family, whether its window has a live meter, an analyzer, readings; what it reports on music. */
+    int auditEffects()
+    {
+        static const auto music = mixLike();
+        std::cout << "type|name|category|live|analyzer|meters|maxDisplay|meterCount|response" << std::endl;
+        for (const auto& info : builtInEffects())
+        {
+            const auto* d = effectdesign::designFor (info.type);
+            auto fx = BuiltInEffect::create (info.type);
+            float maxDisplay = 0.0f;
+            int meterCount = 0;
+            if (fx != nullptr)
+            {
+                fx->prepare (48000.0, 512);
+                for (size_t p = 0; p < info.params.size(); ++p)
+                    fx->setParameter ((int) p, info.params[p].defaultValue);
+                fx->setPosition (0, true, 120.0);
+                std::vector<float> a (512), b (512);
+                for (int block = 0; block < juce::jmin (200, music.getNumSamples() / 512); ++block)
+                {
+                    std::copy_n (music.getReadPointer (0, block * 512), 512, a.data());
+                    std::copy_n (music.getReadPointer (music.getNumChannels() > 1 ? 1 : 0, block * 512), 512, b.data());
+                    fx->process (a.data(), b.data(), 512);
+                    maxDisplay = juce::jmax (maxDisplay, std::abs (fx->displayValue()));
+                }
+                std::vector<float> m (BuiltInEffect::meterCapacity);
+                meterCount = fx->readMeters (m.data(), (int) m.size());
+            }
+            std::cout << info.type << "|" << info.name << "|" << info.category << "|" << (d && d->live) << "|" << (d && d->analyzer) << "|"
+                      << (d && d->meters) << "|" << maxDisplay << "|" << meterCount << "|" << (info.response != nullptr) << std::endl;
+        }
+        return 0;
+    }
+
     int effectsOnly (const juce::StringArray& types)
     {
         out.createDirectory();
@@ -1978,6 +2012,12 @@ int main (int argc, char* argv[])
         for (int a = 3; a < argc; ++a)
             types.add (argv[a]);
         const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).effectsOnly (types);
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        return r;
+    }
+    if (argc > 2 && juce::String (argv[1]) == "audit")
+    {
+        const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).auditEffects();
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         return r;
     }

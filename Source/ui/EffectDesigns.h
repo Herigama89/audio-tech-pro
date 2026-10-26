@@ -34,6 +34,9 @@ namespace riff::effectdesign
     {
         juce::String freq, gain, q;   // (gain empty: a cut, it only moves across)
         juce::String on;              // (the band's on/off: double-click toggles it)
+        // A band between two crossovers (freq empty): it sits midway between the parameters `left` and `right`
+        // (empty: 20 Hz, 20 kHz) and moves only up and down
+        juce::String left {}, right {};
     };
 
     struct Control

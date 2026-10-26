@@ -525,9 +525,13 @@ namespace
             const auto ceiling = dbToGain (-1.0f);
             const auto release = coeffMs (80.0, sampleRate);
             const auto attack = coeffMs (0.5, sampleRate);
+            float inPeakL = 0.0f, inPeakR = 0.0f, outPeakL = 0.0f, outPeakR = 0.0f, leastGain = 1.0f;
+            double sumLR = 0.0, sumLL = 0.0, sumRR = 0.0;
             for (int i = 0; i < n; ++i)
             {
                 auto a = l[i], b = r[i];
+                inPeakL = std::max (inPeakL, std::abs (a));
+                inPeakR = std::max (inPeakR, std::abs (b));
                 if (! bypass)
                 {
                     for (auto& f : eq) { a = f.process (a, 0); b = f.process (b, 1); }
@@ -581,6 +585,7 @@ namespace
                     limiterGain = heldNeed < limiterGain ? heldNeed + attack * (limiterGain - heldNeed) : heldNeed + release * (limiterGain - heldNeed);
                     a = juce::jlimit (-ceiling, ceiling, delayL.readInt (look) * limiterGain);
                     b = juce::jlimit (-ceiling, ceiling, delayR.readInt (look) * limiterGain);
+                    leastGain = std::min (leastGain, limiterGain);
                 }
                 else
                 {
@@ -593,7 +598,29 @@ namespace
                 output.push (a, b);
                 l[i] = a;
                 r[i] = b;
+                outPeakL = std::max (outPeakL, std::abs (a));
+                outPeakR = std::max (outPeakR, std::abs (b));
+                sumLR += (double) a * b; sumLL += (double) a * a; sumRR += (double) b * b;
             }
+            // The meters: peaks in and out (falling 20 dB a second), the limiter's gain reduction, the stereo correlation
+            const auto fall = 20.0f * (float) n / (float) sampleRate;
+            const float peaks[] { inPeakL, inPeakR, outPeakL, outPeakR };
+            for (size_t k = 0; k < 4; ++k)
+            {
+                meterDb[k] = std::max (gainToDb (std::max (peaks[k], 1.0e-6f)), meterDb[k] - fall);
+                out.set (14 + k, meterDb[k]);
+            }
+            const auto limitDb = -gainToDb (leastGain);
+            limitShown = std::max (limitDb, limitShown - fall);
+            out.set (18, bypass ? 0.0f : limitShown);
+            if (sumLL > 1.0e-9 && sumRR > 1.0e-9)
+            {
+                const auto c = (float) (sumLR / std::sqrt (sumLL * sumRR));
+                const auto k = (float) std::exp (-(double) n / (0.3 * sampleRate));
+                correlation = c + k * (correlation - c);
+            }
+            out.set (19, correlation);
+            out.set (20, input.shortTerm);
             out.set (0, output.shortTerm);
             out.set (1, output.integrated);
             out.set (2, gainToDb (output.truePeak));
@@ -661,7 +688,9 @@ namespace
         int holdLeft = 0;
         int lastReanalyze = 0, look = 72;
         std::array<float, 4> histL {}, histR {};
-        Readings<14> out;
+        std::array<float, 4> meterDb { -120.0f, -120.0f, -120.0f, -120.0f };
+        float limitShown = 0.0f, correlation = 1.0f;
+        Readings<21> out;
     };
 
     template <typename T>

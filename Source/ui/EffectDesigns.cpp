@@ -529,7 +529,8 @@ namespace
         d.showScale = true;
 
         const bool display = effectface::hasDisplay (info);
-        const bool meter = info.category == "Dynamics";
+        // (a gain reduction meter for every compressor, gate, limiter and de-esser, the older ones too)
+        const bool meter = info.category == "Dynamics" || info.type == "silverComp" || info.type == "silverGate" || info.type == "deesserLegacy";
         d.live = meter;
         const auto sections = effectface::resolveSections (info);
 
@@ -1040,18 +1041,119 @@ namespace
     const juce::Colour multiColours[] { juce::Colour (0xffff9a3c), juce::Colour (0xffe7d94a), juce::Colour (0xff3ddc6a), juce::Colour (0xff4f9bff) };
     const char* multiRows[] { "Comp Threshold", "Comp Ratio", "Exp Threshold", "Exp Ratio", "Exp Reduction", "Peak/RMS", "Attack", "Release", "Gain Make-up" };
 
-    void paintMultipressor (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float gr)
+    float meterAt (int index, float fallback);
+
+    /** The Multipressor's screen: where it sits, and the dB scale of the bands' levels (+-24 dB over its height). */
+    const RF multiScreen (30.0f, 24.0f, 1000.0f, 220.0f);
+
+    void paintMultipressor (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
     {
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2c3e57), 0.0f, 0.0f, juce::Colour (0xff1c2a3d), 0.0f, (float) b.getBottom(), false));
         g.fillRect (b);
-        effectface::drawDisplay (g, RF (20.0f, 16.0f, (float) b.getWidth() - 110.0f, 236.0f), info, v, juce::Colour (0xff8fe39a));
-        // The reduction meter at the right of the display
-        const RF meter ((float) b.getWidth() - 70.0f, 26.0f, 26.0f, 216.0f);
+
+        // As Logic's: each band a column between its crossovers, its level a line you drag up and down, and under the
+        // line, live, how far the band is being turned down - with the spectrum of what comes out behind it all
+        const auto a = multiScreen;
         g.setColour (juce::Colour (0xff0b0d10));
-        g.fillRect (meter);
-        g.setColour (juce::Colour (0xff8fe39a));
-        g.fillRect (meter.withHeight (meter.getHeight() * juce::jlimit (0.0f, 1.0f, gr / 30.0f)));
-        title (g, R ((int) meter.getX() - 20, 4, 66, 18), "GR", juce::Colours::white.withAlpha (0.6f), 12.0f);
+        g.fillRoundedRectangle (a.expanded (10.0f, 8.0f), 6.0f);
+        const auto xOf = [a] (double f) { return a.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * a.getWidth(); };
+        const auto yOf = [a] (float db) { return a.getCentreY() - juce::jlimit (-24.0f, 24.0f, db) / 24.0f * a.getHeight() * 0.5f; };
+        g.setFont (juce::FontOptions (10.5f));
+        for (const auto f : { 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0 })
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.06f));
+            g.fillRect (xOf (f), a.getY(), 1.0f, a.getHeight());
+            g.setColour (juce::Colours::white.withAlpha (0.32f));
+            g.drawText (f >= 1000.0 ? juce::String ((int) (f / 1000.0)) + "k" : juce::String ((int) f), RF (xOf (f) + 3.0f, a.getBottom() - 12.0f, 30.0f, 11.0f), juce::Justification::left, false);
+        }
+        for (const auto db : { -18.0f, -12.0f, -6.0f, 6.0f, 12.0f, 18.0f })
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.05f));
+            g.fillRect (a.getX(), yOf (db), a.getWidth(), 1.0f);
+            g.setColour (juce::Colours::white.withAlpha (0.3f));
+            g.drawText ((db > 0 ? "+" : "") + juce::String ((int) db), RF (a.getX() - 28.0f, yOf (db) - 6.0f, 24.0f, 12.0f), juce::Justification::right, false);
+        }
+        g.setColour (juce::Colours::white.withAlpha (0.16f));
+        g.fillRect (a.getX(), yOf (0.0f), a.getWidth(), 1.0f);
+        drawSpectrum (g, a, xOf, juce::Colour (0xff7fb4e6));
+
+        const float edges[] { 20.0f, valueOf (info, v, "x1", 150.0f), valueOf (info, v, "x2", 1000.0f), valueOf (info, v, "x3", 5000.0f), 20000.0f };
+        bool anySolo = false;
+        for (int k = 0; k < 4; ++k)
+            anySolo = anySolo || valueOf (info, v, ("b" + juce::String (k + 1) + "Solo").toRawUTF8()) > 0.5f;
+        const char* bandNames[] { "LOW", "LOW MID", "HIGH MID", "HIGH" };
+        for (int k = 0; k < 4; ++k)
+        {
+            const auto id = "b" + juce::String (k + 1);
+            const auto on = valueOf (info, v, (id + "On").toRawUTF8(), 1.0f) > 0.5f;
+            const auto heard = on && (! anySolo || valueOf (info, v, (id + "Solo").toRawUTF8()) > 0.5f);
+            const auto colour = multiColours[k];
+            const auto gainDb = valueOf (info, v, (id + "Gain").toRawUTF8(), 0.0f);
+            const auto change = on ? meterAt (k, 0.0f) : 0.0f;   // dB down now
+            const auto x0 = xOf (edges[k]) + (k > 0 ? 1.5f : 0.0f), x1 = xOf (edges[k + 1]) - (k < 3 ? 1.5f : 0.0f);
+            const auto level = yOf (gainDb);
+            // The band's area, from 0 dB to its level
+            g.setColour (colour.withAlpha (heard ? 0.13f : 0.04f));
+            g.fillRect (RF (x0, std::min (level, yOf (0.0f)), x1 - x0, std::abs (level - yOf (0.0f)) + 1.0f));
+            // The gain change, hanging from the level line
+            if (std::abs (change) > 0.05f)
+            {
+                const auto to = yOf (gainDb - change);
+                const auto bar = RF (x0 + 6.0f, std::min (level, to), x1 - x0 - 12.0f, std::abs (to - level));
+                g.setGradientFill (juce::ColourGradient (colour.withAlpha (heard ? 0.75f : 0.25f), 0.0f, level, colour.withAlpha (heard ? 0.35f : 0.1f), 0.0f, to, false));
+                g.fillRect (bar);
+            }
+            // The level line, with a grip in its middle
+            g.setColour (colour.withAlpha (heard ? 1.0f : 0.35f));
+            g.fillRect (RF (x0 + 2.0f, level - 1.5f, x1 - x0 - 4.0f, 3.0f));
+            const auto mid = xOf (std::sqrt ((double) edges[k] * edges[k + 1]));
+            g.fillRoundedRectangle (RF (mid - 14.0f, level - 4.0f, 28.0f, 8.0f), 3.0f);
+            // Its name and what it's doing now
+            g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+            g.drawText (bandNames[k], RF (x0 + 6.0f, a.getY() + 2.0f, x1 - x0 - 12.0f, 14.0f), juce::Justification::left, false);
+            g.setFont (juce::FontOptions (11.0f));
+            g.setColour (juce::Colours::white.withAlpha (on ? 0.85f : 0.4f));
+            const auto text = ! on ? juce::String ("off") : std::abs (change) < 0.05f ? juce::String ("0.0 dB") : juce::String (-change, 1) + " dB";
+            g.drawText (text, RF (x0 + 6.0f, a.getY() + 16.0f, x1 - x0 - 12.0f, 13.0f), juce::Justification::left, false);
+        }
+        // The crossovers: lines you drag across, the frequency above
+        for (int k = 1; k < 4; ++k)
+        {
+            const auto x = xOf (edges[k]);
+            g.setColour (juce::Colours::white.withAlpha (0.55f));
+            g.fillRect (x - 1.0f, a.getY() - 4.0f, 2.0f, a.getHeight() + 8.0f);
+            g.fillEllipse (x - 5.0f, a.getCentreY() - 5.0f, 10.0f, 10.0f);
+            g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+            const auto f = edges[k];
+            g.drawText (f >= 1000.0f ? juce::String (f / 1000.0f, f >= 10000.0f ? 1 : 2) + " kHz" : juce::String (juce::roundToInt (f)) + " Hz",
+                        RF (x - 40.0f, a.getBottom() + 0.0f, 80.0f, 12.0f), juce::Justification::centred, false);
+        }
+
+        // In and out meters at the right
+        const auto meterTop = 26.0f, meterHeight = 214.0f;
+        const auto yDb = [&] (float db) { return meterTop + meterHeight * (1.0f - juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 66.0f)); };
+        g.setFont (juce::FontOptions (10.0f));
+        for (const auto db : { 6, 0, -6, -12, -24, -36, -48, -60 })
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.35f));
+            g.drawText (juce::String (db), RF ((float) b.getWidth() - 62.0f, yDb ((float) db) - 6.0f, 18.0f, 12.0f), juce::Justification::centred, false);
+        }
+        const auto bar = [&] (float x, float db)
+        {
+            const RF track (x, meterTop, 7.0f, meterHeight);
+            g.setColour (juce::Colour (0xff0b0d10));
+            g.fillRect (track);
+            const auto top = yDb (db);
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xffff4b3a), 0.0f, yDb (3.0f), juce::Colour (0xff59d36b), 0.0f, yDb (-18.0f), false));
+            g.fillRect (track.withTop (top));
+        };
+        bar ((float) b.getWidth() - 104.0f, meterAt (4, -120.0f));
+        bar ((float) b.getWidth() - 95.0f, meterAt (5, -120.0f));
+        bar ((float) b.getWidth() - 40.0f, meterAt (6, -120.0f));
+        bar ((float) b.getWidth() - 31.0f, meterAt (7, -120.0f));
+        title (g, R (b.getWidth() - 112, 4, 30, 18), "IN", juce::Colours::white.withAlpha (0.6f), 11.0f);
+        title (g, R (b.getWidth() - 50, 4, 36, 18), "OUT", juce::Colours::white.withAlpha (0.6f), 11.0f);
+
         // Band titles, row names
         const char* names[] { "LOW", "LOW MID", "HIGH MID", "HIGH" };
         for (int k = 0; k < 4; ++k)
@@ -1450,29 +1552,73 @@ namespace
     {
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xff23272e), 0.0f, 0.0f, juce::Colour (0xff15171b), 0.0f, (float) b.getBottom(), false));
         g.fillRect (b);
-        // The Auto EQ curve (eight octave bands) on the display
+        const auto purple = juce::Colour (0xffb07bff), amber = juce::Colour (0xffffb84d);
+
+        // The display: the spectrum, the Auto EQ's curve (eight octave bands) and the custom EQ's
         const RF screen (20.0f, 60.0f, 700.0f, 240.0f);
         g.setColour (juce::Colour (0xff0b0d10));
         g.fillRoundedRectangle (screen, 6.0f);
+        const auto inner = screen.reduced (6.0f, 4.0f);
         const auto amount = valueOf (info, v, "autoEq", 50.0f) * 0.01f;
-        const auto xOf = [screen] (double f) { return screen.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * screen.getWidth(); };
-        const auto yOf = [screen] (double db) { return screen.getCentreY() - (float) (db / 9.0) * screen.getHeight() * 0.5f; };
-        g.setColour (juce::Colours::white.withAlpha (0.12f));
-        g.fillRect (screen.getX(), screen.getCentreY(), screen.getWidth(), 1.0f);
-        Biquad bands[8];
-        for (int k = 0; k < 8; ++k)
-            bands[k].setPeak (48000.0, 62.5 * std::pow (2.0, k), meterAt (5 + k, 0.0f) * amount, 1.0);
-        juce::Path curve;
-        for (int x = 0; x <= (int) screen.getWidth(); x += 2)
+        const auto xOf = [inner] (double f) { return inner.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * inner.getWidth(); };
+        const auto yOf = [inner] (double db) { return inner.getCentreY() - (float) (juce::jlimit (-9.0, 9.0, db) / 9.0) * inner.getHeight() * 0.5f; };
+        g.setFont (juce::FontOptions (10.5f));
+        for (const auto f : { 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0 })
         {
-            const auto f = 20.0 * std::pow (1000.0, x / (double) screen.getWidth());
-            double db = 0.0;
-            for (auto& q : bands) db += q.magnitudeDb (f, 48000.0);
-            if (x == 0) curve.startNewSubPath (screen.getX(), yOf (db)); else curve.lineTo (screen.getX() + (float) x, yOf (db));
+            g.setColour (juce::Colours::white.withAlpha (0.06f));
+            g.fillRect (xOf (f), inner.getY(), 1.0f, inner.getHeight());
+            g.setColour (juce::Colours::white.withAlpha (0.32f));
+            g.drawText (f >= 1000.0 ? juce::String ((int) (f / 1000.0)) + "k" : juce::String ((int) f), RF (xOf (f) + 3.0f, inner.getBottom() - 12.0f, 30.0f, 11.0f), juce::Justification::left, false);
         }
-        g.setColour (juce::Colour (0xffb07bff));
-        g.strokePath (curve, juce::PathStrokeType (2.2f));
-        drawSpectrum (g, screen, xOf, juce::Colour (0xff7fb4e6));
+        for (const auto db : { -6.0, -3.0, 3.0, 6.0 })
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.05f));
+            g.fillRect (inner.getX(), yOf (db), inner.getWidth(), 1.0f);
+            g.setColour (juce::Colours::white.withAlpha (0.3f));
+            g.drawText ((db > 0 ? "+" : "") + juce::String ((int) db), RF (inner.getX() + 2.0f, yOf (db) - 12.0f, 24.0f, 11.0f), juce::Justification::left, false);
+        }
+        g.setColour (juce::Colours::white.withAlpha (0.14f));
+        g.fillRect (inner.getX(), yOf (0.0), inner.getWidth(), 1.0f);
+        drawSpectrum (g, inner, xOf, juce::Colour (0xff7fb4e6));
+        const auto curveOf = [&] (std::function<double (int)> gainOfBand)
+        {
+            Biquad bands[8];
+            for (int k = 0; k < 8; ++k)
+                bands[k].setPeak (48000.0, 62.5 * std::pow (2.0, k), gainOfBand (k), 1.0);
+            juce::Path curve;
+            for (int x = 0; x <= (int) inner.getWidth(); x += 2)
+            {
+                const auto f = 20.0 * std::pow (1000.0, x / (double) inner.getWidth());
+                double db = 0.0;
+                for (auto& q : bands) db += q.magnitudeDb (f, 48000.0);
+                if (x == 0) curve.startNewSubPath (inner.getX(), yOf (db)); else curve.lineTo (inner.getX() + (float) x, yOf (db));
+            }
+            return curve;
+        };
+        if (valueOf (info, v, "customOn") > 0.5f)
+        {
+            const auto low = valueOf (info, v, "customLow"), mid = valueOf (info, v, "customMid"), high = valueOf (info, v, "customHigh");
+            auto custom = curveOf ([=] (int k) { return (double) (k < 2 ? low * (k == 0 ? 1.0f : 0.5f) : k < 6 ? mid * ((k == 3 || k == 4) ? 1.0f : 0.5f)
+                                                                                                         : high * (k == 7 ? 1.0f : 0.5f)); });
+            juce::Path dashed;
+            const float dashes[] { 6.0f, 4.0f };
+            juce::PathStrokeType (1.8f).createDashedStroke (dashed, custom, dashes, 2);
+            g.setColour (amber);
+            g.fillPath (dashed);
+        }
+        const auto autoCurve = curveOf ([amount] (int k) { return (double) (meterAt (5 + k, 0.0f) * amount); });
+        g.setColour (purple.withAlpha (0.25f));
+        g.strokePath (autoCurve, juce::PathStrokeType (5.0f));
+        g.setColour (purple);
+        g.strokePath (autoCurve, juce::PathStrokeType (2.2f));
+        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        g.drawText ("AUTO EQ", RF (inner.getRight() - 150.0f, inner.getY() + 4.0f, 70.0f, 12.0f), juce::Justification::right, false);
+        if (valueOf (info, v, "customOn") > 0.5f)
+        {
+            g.setColour (amber);
+            g.drawText ("CUSTOM", RF (inner.getRight() - 74.0f, inner.getY() + 4.0f, 70.0f, 12.0f), juce::Justification::right, false);
+        }
+
         // Analysis progress and the readings
         const auto progress = meterAt (4, 0.0f);
         title (g, R (20, 16, 400, 30), progress < 1.0f ? "Analyzing... " + juce::String (juce::roundToInt (progress * 100.0f)) + " %" : juce::String ("Analysis complete"),
@@ -1486,6 +1632,92 @@ namespace
         row (115, "INTEGRATED", lufsText (meterAt (1)) + " LUFS");
         row (170, "TRUE PEAK", (meterAt (2) <= -99.0f ? juce::String ("--") : juce::String (meterAt (2), 1)) + " dBTP");
         row (225, "SOURCE / GAIN", lufsText (meterAt (3)) + " LUFS  " + (meterAt (13, 0.0f) >= 0.0f ? "+" : "") + juce::String (meterAt (13, 0.0f), 1) + " dB");
+
+        // Level meters: in and out (left, right), and how hard the limiter works
+        const auto meterTop = 78.0f, meterHeight = 222.0f;
+        const auto yDb = [&] (float db) { return meterTop + meterHeight * (1.0f - juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f)); };
+        g.setFont (juce::FontOptions (10.0f));
+        for (const auto db : { 0, -6, -12, -18, -24, -36, -48, -60 })
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.35f));
+            g.drawText (juce::String (db), RF (1010.0f, yDb ((float) db) - 6.0f, 22.0f, 12.0f), juce::Justification::centred, false);
+        }
+        const auto bar = [&] (float x, float db)
+        {
+            const RF track (x, meterTop, 8.0f, meterHeight);
+            g.setColour (juce::Colour (0xff0b0d10));
+            g.fillRect (track);
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xffff4b3a), 0.0f, yDb (0.0f), juce::Colour (0xff59d36b), 0.0f, yDb (-18.0f), false));
+            g.fillRect (track.withTop (yDb (db)));
+        };
+        bar (978.0f, meterAt (14, -120.0f));
+        bar (989.0f, meterAt (15, -120.0f));
+        bar (1036.0f, meterAt (16, -120.0f));
+        bar (1047.0f, meterAt (17, -120.0f));
+        title (g, R (966, 58, 44, 16), "IN", juce::Colours::white.withAlpha (0.6f), 11.0f);
+        title (g, R (1024, 58, 44, 16), "OUT", juce::Colours::white.withAlpha (0.6f), 11.0f);
+        {
+            // The limiter's reduction, down from the top (0 to 12 dB)
+            const RF track (1080.0f, meterTop, 8.0f, meterHeight);
+            g.setColour (juce::Colour (0xff0b0d10));
+            g.fillRect (track);
+            g.setColour (purple);
+            g.fillRect (track.withHeight (meterHeight * juce::jlimit (0.0f, 1.0f, meterAt (18, 0.0f) / 12.0f)));
+            title (g, R (1064, 58, 44, 16), "LIM", juce::Colours::white.withAlpha (0.6f), 11.0f);
+            const auto limit = meterAt (18, 0.0f);
+            title (g, R (1060, 302, 50, 16), limit < 0.05f ? juce::String ("0.0") : juce::String (-limit, 1), purple, 11.0f);
+        }
+
+        // Along the bottom: the loudness against the target, the dynamics left, the stereo correlation
+        g.setColour (juce::Colours::white.withAlpha (0.08f));
+        g.fillRect (20, 536, b.getWidth() - 40, 1);
+        {
+            title (g, R (20, 546, 110, 16), "LOUDNESS", juce::Colours::white.withAlpha (0.55f), 11.0f, juce::Justification::centredLeft);
+            const RF track (20.0f, 566.0f, 520.0f, 14.0f);
+            const auto xLufs = [track] (float lufs) { return track.getX() + track.getWidth() * juce::jlimit (0.0f, 1.0f, (lufs + 36.0f) / 32.0f); };
+            g.setColour (juce::Colour (0xff0b0d10));
+            g.fillRoundedRectangle (track, 3.0f);
+            const auto shortTerm = meterAt (0, -70.0f), integrated = meterAt (1, -70.0f), target = valueOf (info, v, "loudness", -14.0f);
+            g.setColour (purple.withAlpha (0.8f));
+            g.fillRoundedRectangle (track.withRight (xLufs (shortTerm)), 3.0f);
+            g.setColour (juce::Colours::white);
+            g.fillRect (xLufs (integrated) - 1.0f, track.getY() - 3.0f, 2.0f, track.getHeight() + 6.0f);
+            g.setColour (amber);
+            g.fillRect (xLufs (target) - 1.5f, track.getY() - 5.0f, 3.0f, track.getHeight() + 10.0f);
+            g.setFont (juce::FontOptions (10.0f));
+            for (const auto l : { -36, -30, -24, -18, -12, -6 })
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.35f));
+                g.drawText (juce::String (l), RF (xLufs ((float) l) - 12.0f, 582.0f, 24.0f, 12.0f), juce::Justification::centred, false);
+            }
+            title (g, R (130, 546, 420, 16), "short-term (bar)   integrated (white)   target " + juce::String (target, 1) + " LUFS (amber)",
+                   juce::Colours::white.withAlpha (0.4f), 10.5f, juce::Justification::centredRight);
+        }
+        {
+            // PLR: how far the peaks stand above the loudness (squashed below about 8)
+            const auto truePeak = meterAt (2, -100.0f), integrated = meterAt (1, -70.0f);
+            const auto plr = truePeak > -99.0f && integrated > -69.0f ? truePeak - integrated : 0.0f;
+            title (g, R (570, 546, 140, 16), "DYNAMICS (PLR)", juce::Colours::white.withAlpha (0.55f), 11.0f, juce::Justification::centredLeft);
+            title (g, R (570, 562, 140, 24), plr > 0.0f ? juce::String (plr, 1) + " dB" : juce::String ("--"),
+                   plr > 0.0f && plr < 8.0f ? amber : juce::Colours::white, 17.0f, juce::Justification::centredLeft);
+        }
+        {
+            title (g, R (740, 546, 200, 16), "CORRELATION", juce::Colours::white.withAlpha (0.55f), 11.0f, juce::Justification::centredLeft);
+            const RF track (740.0f, 566.0f, 360.0f, 14.0f);
+            g.setColour (juce::Colour (0xff0b0d10));
+            g.fillRoundedRectangle (track, 3.0f);
+            const auto c = juce::jlimit (-1.0f, 1.0f, meterAt (19, 1.0f));
+            const auto mid = track.getCentreX(), x = mid + c * track.getWidth() * 0.5f;
+            g.setColour (c < 0.0f ? juce::Colour (0xffff5a4a) : juce::Colour (0xff59d36b));
+            g.fillRect (RF (std::min (mid, x), track.getY() + 2.0f, std::abs (x - mid), track.getHeight() - 4.0f));
+            g.setColour (juce::Colours::white.withAlpha (0.5f));
+            g.fillRect (mid - 0.5f, track.getY() - 2.0f, 1.0f, track.getHeight() + 4.0f);
+            g.setFont (juce::FontOptions (10.0f));
+            g.drawText ("-1", RF (track.getX(), 582.0f, 20.0f, 12.0f), juce::Justification::left, false);
+            g.drawText ("0", RF (mid - 10.0f, 582.0f, 20.0f, 12.0f), juce::Justification::centred, false);
+            g.drawText ("+1", RF (track.getRight() - 20.0f, 582.0f, 20.0f, 12.0f), juce::Justification::right, false);
+            title (g, R (940, 546, 160, 16), juce::String (c, 2), juce::Colours::white, 12.0f, juce::Justification::centredRight);
+        }
     }
 
     //==============================================================================
@@ -2692,6 +2924,8 @@ namespace
             c.knobs = KnobStyle::dark;
             c.label = juce::Colours::white.withAlpha (0.7f); c.value = juce::Colour (0xff8fe39a); c.accent = juce::Colour (0xff8fe39a); c.track = juce::Colour (0xff17263a);
             c.live = true;
+            c.meters = true;     // (each band's gain change, the levels in and out)
+            c.analyzer = true;   // (the spectrum behind the bands)
             c.paint = paintMultipressor;
             const char* fields[] { "Thr", "Ratio", "ExpThr", "ExpRatio", "ExpRed", "Rms", "Attack", "Release", "Gain" };
             for (int b = 0; b < 4; ++b)
@@ -2706,7 +2940,10 @@ namespace
             c.controls.push_back ({ "autoGain", Kind::toggle, R (190, 632, 120, 30), "=AUTO GAIN" });
             c.controls.push_back ({ "lookahead", Kind::field, R (430, 632, 200, 30), "-", juce::Colours::white });
             c.controls.push_back ({ "output", Kind::field, R (790, 632, 200, 30), "-", juce::Colours::white });
-            c.graphs.push_back ({ R (30, 24, 1160 - 130, 220), { { "x1", {}, {}, {} }, { "x2", {}, {}, {} }, { "x3", {}, {}, {} } }, 0 });
+            // Drag the crossovers across, each band's level up and down (as Logic's)
+            c.graphs.push_back ({ multiScreen.toNearestInt(), { { "x1", {}, {}, {} }, { "x2", {}, {}, {} }, { "x3", {}, {}, {} },
+                                                               { {}, "b1Gain", {}, "b1On", {}, "x1" }, { {}, "b2Gain", {}, "b2On", "x1", "x2" },
+                                                               { {}, "b3Gain", {}, "b3On", "x2", "x3" }, { {}, "b4Gain", {}, "b4On", "x3", {} } }, 0 });
             d["multiband"] = c;
         }
         {
@@ -2863,7 +3100,7 @@ namespace
             meter ("tuner", 520, 400, paintTuner, { { "reference", Kind::field, R (160, 368, 200, 26), "-", juce::Colours::white } });
             meter ("bpmCounter", 320, 150, paintBpmCounter, {});
             Design m;
-            m.width = 960; m.height = 540;
+            m.width = 1120; m.height = 610;
             m.knobs = KnobStyle::dark;
             m.label = juce::Colours::white.withAlpha (0.6f); m.value = juce::Colour (0xffb07bff); m.accent = juce::Colour (0xffb07bff); m.track = juce::Colour (0xff17263a);
             m.meters = true;
@@ -3307,6 +3544,67 @@ namespace
             d["delayDesigner"] = c;
         }
         addHardwareDesigns (d);
+
+        // The vintage EQs: under their faces, a screen with the curve they make and the live spectrum behind it
+        for (const char* type : { "consoleEq", "graphicEq", "tubeEq" })
+        {
+            auto& c = d[type];
+            const auto faceHeight = c.height;
+            constexpr int strip = 190;
+            c.height += strip;
+            c.analyzer = true;
+            c.paint = [old = c.paint, faceHeight] (juce::Graphics& g, R bounds, const EffectInfo& fx, const float* v, float live)
+            {
+                {
+                    juce::Graphics::ScopedSaveState keep (g);
+                    g.reduceClipRegion (bounds.withHeight (faceHeight));
+                    old (g, bounds.withHeight (faceHeight), fx, v, live);
+                }
+                const auto panel = R (0, faceHeight, bounds.getWidth(), bounds.getHeight() - faceHeight);
+                g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1d2128), 0.0f, (float) panel.getY(), juce::Colour (0xff121418), 0.0f, (float) panel.getBottom(), false));
+                g.fillRect (panel);
+                g.setColour (juce::Colours::black.withAlpha (0.6f));
+                g.fillRect (panel.withHeight (2));
+                const auto screen = panel.reduced (20, 16).toFloat();
+                g.setColour (juce::Colour (0xff0b0d10));
+                g.fillRoundedRectangle (screen, 5.0f);
+                const auto inner = screen.reduced (8.0f, 6.0f);
+                const auto xOf = [inner] (double f) { return inner.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * inner.getWidth(); };
+                const auto yOf = [inner] (double db) { return inner.getCentreY() - (float) juce::jlimit (-1.0, 1.0, db / 24.0) * inner.getHeight() * 0.5f; };
+                g.setFont (juce::FontOptions (10.5f));
+                for (const auto f : { 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0 })
+                {
+                    g.setColour (juce::Colours::white.withAlpha (0.07f));
+                    g.fillRect (xOf (f), inner.getY(), 1.0f, inner.getHeight());
+                    g.setColour (juce::Colours::white.withAlpha (0.35f));
+                    g.drawText (f >= 1000.0 ? juce::String ((int) (f / 1000.0)) + "k" : juce::String ((int) f), RF (xOf (f) + 3.0f, inner.getBottom() - 13.0f, 34.0f, 12.0f), juce::Justification::left, false);
+                }
+                for (const auto db : { -12.0, 12.0 })
+                {
+                    g.setColour (juce::Colours::white.withAlpha (0.07f));
+                    g.fillRect (inner.getX(), yOf (db), inner.getWidth(), 1.0f);
+                    g.setColour (juce::Colours::white.withAlpha (0.35f));
+                    g.drawText ((db > 0 ? "+" : "") + juce::String ((int) db), RF (inner.getX() + 2.0f, yOf (db) - 12.0f, 30.0f, 12.0f), juce::Justification::left, false);
+                }
+                g.setColour (juce::Colours::white.withAlpha (0.18f));
+                g.fillRect (inner.getX(), yOf (0.0), inner.getWidth(), 1.0f);
+                drawSpectrum (g, inner, xOf, juce::Colour (0xff7fb4e6));
+                if (fx.response != nullptr)
+                {
+                    juce::Path curve;
+                    for (int x = 0; x <= (int) inner.getWidth(); x += 2)
+                    {
+                        const auto f = 20.0 * std::pow (1000.0, x / (double) inner.getWidth());
+                        const auto y = yOf (fx.response (v, f, 48000.0));
+                        if (x == 0) curve.startNewSubPath (inner.getX(), y); else curve.lineTo (inner.getX() + (float) x, y);
+                    }
+                    g.setColour (juce::Colour (0xffffc35a).withAlpha (0.25f));
+                    g.strokePath (curve, juce::PathStrokeType (5.0f));
+                    g.setColour (juce::Colour (0xffffc35a));
+                    g.strokePath (curve, juce::PathStrokeType (2.0f));
+                }
+            };
+        }
         return d;
     }
 }

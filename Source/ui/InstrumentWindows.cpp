@@ -492,6 +492,13 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                     if (p.id == id) return &p;
                 return nullptr;
             }
+            float xOfHandle (const effectdesign::GraphHandle& h) const
+            {
+                if (h.freq.isNotEmpty())
+                    return xOf (current (h.freq));
+                const auto from = h.left.isEmpty() ? 20.0 : (double) current (h.left), to = h.right.isEmpty() ? 20000.0 : (double) current (h.right);
+                return xOf (std::sqrt (std::max (1.0, from) * std::max (1.0, to)));
+            }
             int handleAt (juce::Point<float> at) const
             {
                 int best = -1;
@@ -499,8 +506,18 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                 for (size_t k = 0; k < graph.handles.size(); ++k)
                 {
                     const auto& h = graph.handles[k];
-                    const juce::Point<float> p (xOf (current (h.freq)), h.gain.isEmpty() ? (float) getHeight() * 0.5f : yOf (h.gain, current (h.gain)));
-                    if (p.getDistanceFrom (at) < bestDistance) { bestDistance = p.getDistanceFrom (at); best = (int) k; }
+                    const juce::Point<float> p (xOfHandle (h), h.gain.isEmpty() ? (float) getHeight() * 0.5f : yOf (h.gain, current (h.gain)));
+                    auto distance = p.getDistanceFrom (at);
+                    if (h.freq.isEmpty())
+                    {
+                        // A band: anywhere along its level line, between its crossovers (a little in from them)
+                        const auto x0 = h.left.isEmpty() ? 0.0f : xOf (current (h.left)) + 8.0f;
+                        const auto x1 = h.right.isEmpty() ? (float) getWidth() : xOf (current (h.right)) - 8.0f;
+                        distance = at.x >= x0 && at.x <= x1 ? std::abs (at.y - p.y) + 4.0f : 1.0e9f;
+                    }
+                    else if (h.gain.isEmpty() && h.q.isEmpty() && h.on.isEmpty())
+                        distance = std::abs (at.x - p.x) + 2.0f;   // (a plain divider, as a crossover: anywhere along its line)
+                    if (distance < bestDistance) { bestDistance = distance; best = (int) k; }
                 }
                 return best;
             }
@@ -523,9 +540,10 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                     const auto* p = paramOf (id);
                     return (float) (p != nullptr ? juce::jlimit ((double) p->min, (double) p->max, value) : value);
                 };
-                set (h.freq, clampTo (h.freq, freqAt (e.position.x)), ! started);
+                if (h.freq.isNotEmpty())
+                    set (h.freq, clampTo (h.freq, freqAt (e.position.x)), ! started);
                 if (h.gain.isNotEmpty())
-                    set (h.gain, clampTo (h.gain, std::round (valueAt (h.gain, e.position.y) * 1000.0) / 1000.0), false);
+                    set (h.gain, clampTo (h.gain, std::round (valueAt (h.gain, e.position.y) * 1000.0) / 1000.0), h.freq.isEmpty() && ! started);
                 started = true;
             }
             void mouseDoubleClick (const juce::MouseEvent& e) override
