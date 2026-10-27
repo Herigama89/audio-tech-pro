@@ -1609,6 +1609,7 @@ bool AudioEngine::processTrack (const PlaybackGraph::Track& track, const float* 
             if (withLiveMidi && track.receivesLiveMidi)
                 trackMidi.addEvents (liveMidi, 0, -1, 0);
 
+            track.instrument->setPosition (chunkPosition, chunkPlaying, chunkBpm);
             track.instrument->render (tL, tR, n, trackMidi);
             anyAudio = true;
         }

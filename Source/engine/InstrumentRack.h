@@ -47,6 +47,11 @@ public:
     std::function<void (const juce::String& trackName, const juce::String& error)> onLoadError;
     std::function<void (const juce::String& trackId)> onPluginReplaced; // close its editor window
 
+    /** Nemix: one knob changed in a track's NEMIX tree - straight to the synth, nothing rebuilt. False if it isn't playing. */
+    bool applyNemix (const juce::ValueTree& nemixTree, const juce::Identifier& property);
+    /** The track's Nemix, if it has one (for its editor's live readings). */
+    std::shared_ptr<class Nemix> getNemix (const juce::String& trackId);
+
     /** Settings for the built-in synth, read from the track. */
     static BuiltInSynth::Settings synthSettingsFrom (const juce::ValueTree& track);
     static void applyBuiltInSettings (Instrument* instrument, const juce::ValueTree& track);

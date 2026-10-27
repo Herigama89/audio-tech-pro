@@ -204,6 +204,8 @@ void TrackHeader::refresh()
         juce::String name = app::synthName;
         if (track[ids::instrument].toString() == "drums")
             name = "Drum Kit";
+        else if (track[ids::instrument].toString() == "nemix")
+            name = "Nemix: " + track.getChildWithName ("NEMIX")["nmxPreset"].toString();
         else if (track[ids::instrument].toString() == "sampler")
             name = juce::File (track[ids::samplerFile].toString()).existsAsFile() ? "Sampler: " + juce::File (track[ids::samplerFile].toString()).getFileNameWithoutExtension()
                                                                                      : juce::String ("Sampler");

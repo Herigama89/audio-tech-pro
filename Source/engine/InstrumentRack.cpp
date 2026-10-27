@@ -1,6 +1,8 @@
 #include "InstrumentRack.h"
 #include "../model/Project.h"
 #include "BuiltInInstruments.h"
+#include "nemix/Nemix.h"
+#include "../model/NemixState.h"
 #if ! JUCE_WASM
  #include "ClapFormat.h"
  #include "PluginScanChild.h"
@@ -54,8 +56,33 @@ juce::String InstrumentRack::keyFor (const juce::ValueTree& track)
         return "drums";
     if (track[ids::instrument].toString() == "sampler")
         return "sampler:" + track[ids::samplerFile].toString();
+    if (track[ids::instrument].toString() == "nemix")
+        return "nemix";
 
     return "synth";
+}
+
+bool InstrumentRack::applyNemix (const juce::ValueTree& nemixTree, const juce::Identifier& property)
+{
+    const auto track = nemixTree.getParent();
+    const auto it = entries.find (track[ids::id].toString());
+    if (it == entries.end() || it->second.key != "nemix")
+        return false;
+    auto* synth = dynamic_cast<Nemix*> (it->second.instrument.get());
+    if (synth == nullptr)
+        return false;
+    const auto index = nemix::indexOf (property.toString());
+    if (index >= 0)
+        synth->setParameter (index, nemixstate::valueOf (nemixTree, index));
+    return true;
+}
+
+std::shared_ptr<Nemix> InstrumentRack::getNemix (const juce::String& trackId)
+{
+    const auto it = entries.find (trackId);
+    if (it == entries.end())
+        return nullptr;
+    return std::dynamic_pointer_cast<Nemix> (it->second.instrument);
 }
 
 std::shared_ptr<Instrument> InstrumentRack::instrumentFor (const juce::ValueTree& track, double sampleRate, int maxBlockSize)
@@ -69,6 +96,30 @@ std::shared_ptr<Instrument> InstrumentRack::instrumentFor (const juce::ValueTree
     auto& entry = entries[id];
     const bool sameKind = entry.key == key;
     const bool rateOk = std::abs (entry.sampleRate - sampleRate) < 0.5;
+
+    // Nemix: its whole sound from the track (each time: a preset may have replaced it)
+    const auto applyNemixSound = [] (Nemix& synth, const juce::ValueTree& t)
+    {
+        synth.resetToDefaults();
+        for (const auto& [index, value] : nemixstate::soundOf (nemixstate::of (t)))
+            synth.setParameter (index, value);
+    };
+    if (key == "nemix")
+    {
+        if (sameKind && rateOk)
+        {
+            if (auto* synth = dynamic_cast<Nemix*> (entry.instrument.get()))
+                applyNemixSound (*synth, track);
+            return entry.instrument;
+        }
+        if (! sameKind && onPluginReplaced && entry.instrument != nullptr)
+            onPluginReplaced (id);
+        auto synth = std::make_shared<Nemix>();
+        applyNemixSound (*synth, track);
+        synth->prepare (sampleRate, maxBlockSize);
+        entry = { key, sampleRate, synth, false };
+        return synth;
+    }
 
     // Already set up (or loading) for this instrument at this rate.
     if (sameKind && rateOk)

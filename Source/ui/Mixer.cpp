@@ -1286,7 +1286,7 @@ void ChannelStrip::refresh()
         else if (model::isInstrumentTrack (track))
         {
             const auto kind = track[ids::instrument].toString();
-            juce::String name = kind == "drums" ? "Drum Kit" : kind == "sampler" ? "Sampler" : "Synth";
+            juce::String name = kind == "drums" ? "Drum Kit" : kind == "sampler" ? "Sampler" : kind == "nemix" ? "Nemix" : "Synth";
             if (kind == "plugin")
             {
                 juce::PluginDescription d;

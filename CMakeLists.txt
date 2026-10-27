@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
 endif()
 
-project(AudioTechPro VERSION 1.4.5 LANGUAGES C CXX)
+project(AudioTechPro VERSION 1.5.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -108,6 +108,11 @@ set(RIFF_CORE_SOURCES
     Source/engine/TimeStretch.cpp
     Source/engine/LatencyMeasure.cpp
     Source/engine/BuiltInSynth.cpp
+    Source/engine/nemix/NemixParams.cpp
+    Source/engine/nemix/Wavetables.cpp
+    Source/engine/nemix/NemixFx.cpp
+    Source/engine/nemix/Nemix.cpp
+    Source/engine/nemix/NemixPresets.cpp
     Source/engine/BuiltInInstruments.cpp
     Source/engine/PluginInstrument.cpp
     Source/engine/InstrumentRack.cpp
@@ -172,6 +177,9 @@ juce_add_binary_data(AudioTechProData
     HEADER_NAME BinaryData.h
     NAMESPACE   BinaryData
     SOURCES     Resources/Logo.png
+                # Nemix's logo and its graffiti-wall skin (from the artwork Nemix was given)
+                Resources/nemix/logo.jpg
+                Resources/nemix/wall.jpg
                 README.md
                 # The mixer skin, cut from Resources/skin/source.jpg by Tools/make_skin_from_image.py
                 Resources/skin/strip_top.png
@@ -255,6 +263,7 @@ set(RIFF_UI_SOURCES
     Source/ui/LatencyCalibrator.cpp
     Source/ui/PianoRoll.cpp
     Source/ui/InstrumentWindows.cpp
+    Source/ui/NemixPanel.cpp
     Source/ui/EffectFace.cpp
     Source/ui/EffectDesigns.cpp
     Source/ui/Mixer.cpp
@@ -337,6 +346,7 @@ if(RIFF_BUILD_TESTS)
         Tests/AutomixTests.cpp
         Tests/NoteToolsTests.cpp
         Tests/StockEffectsTests.cpp
+        Tests/NemixTests.cpp
         Source/ui/Theme.cpp
         Source/ui/ThemePack.cpp
         Source/ui/ScreenRecordPanel.cpp

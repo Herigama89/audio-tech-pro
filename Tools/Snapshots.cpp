@@ -3,6 +3,10 @@
 //     Snapshots <output folder>
 
 #include "../Source/ui/Skin.h"
+#include "../Source/ui/NemixPanel.h"
+#include "../Source/engine/nemix/Nemix.h"
+#include "../Source/model/NemixState.h"
+#include "../Source/engine/nemix/NemixPresets.h"
 #include "../Source/ui/ThemePack.h"
 #include "../Source/ui/LiveLoopsGrid.h"
 #include "../Source/ui/ToolIcons.h"
@@ -95,6 +99,35 @@ public:
     explicit SnapshotTool (juce::File outputFolder) : out (std::move (outputFolder)) {}
 
     /** Just the stock effects' windows (quick: snapshots fx <folder> [types...]). */
+    /** Nemix's window: each page, with a sound loaded and a chord held (so the modulation shows). */
+    int nemixOnly (const juce::String& presetName)
+    {
+        out.createDirectory();
+        juce::UndoManager um;
+        auto project = model::createProject();
+        auto track = model::addTrack (project, "Nemix", nullptr, -1, model::instrumentKind);
+        track.setProperty (ids::instrument, "nemix", nullptr);
+        auto synth = std::make_shared<Nemix>();
+        NemixPanel panel (track, um, [synth] { return synth; });
+        panel.loadPresetNamed (presetName.isNotEmpty() ? presetName : juce::String ("Dubstep Growl Yoy"));
+        for (const auto& [index, value] : nemixstate::soundOf (nemixstate::of (track)))
+            synth->setParameter (index, value);
+        synth->prepare (48000.0, 512);
+        juce::MidiBuffer chord;
+        for (auto n : { 48, 55, 60 }) chord.addEvent (juce::MidiMessage::noteOn (1, n, 0.9f), 0);
+        std::vector<float> l (512), r (512);
+        for (int b = 0; b < 40; ++b)
+            synth->render (l.data(), r.data(), 512, b == 0 ? chord : juce::MidiBuffer());
+        panel.setVisible (true);
+        const char* names[] { "sound", "matrix", "fx", "arp", "browse" };
+        for (int pg = 0; pg < 5; ++pg)
+        {
+            panel.showPage (pg);
+            save (panel, juce::String ("nemix-") + names[pg] + ".png");
+        }
+        return 0;
+    }
+
     /** Every stock effect: its family, whether its window has a live meter, an analyzer, readings; what it reports on music. */
     int auditEffects()
     {
@@ -2012,6 +2045,34 @@ int main (int argc, char* argv[])
         for (int a = 3; a < argc; ++a)
             types.add (argv[a]);
         const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).effectsOnly (types);
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        return r;
+    }
+    if (argc > 1 && juce::String (argv[1]) == "nemixperf")
+    {
+        // How long Nemix takes: heavy sounds, a four-note chord, ten seconds of audio
+        for (const auto* name : { "Supersaw Lead", "Dubstep Growl Yoy", "Warm Analog Pad", "808 Classic", "Future Bass Supersaw Chords" })
+        {
+            riff::Nemix synth;
+            for (const auto& p : riff::nemix::factoryPresets())
+                if (p.name == name)
+                    for (const auto& [i, v] : p.sound) synth.setParameter (i, v);
+            synth.prepare (48000.0, 512);
+            juce::MidiBuffer chord;
+            for (auto n : { 48, 55, 60, 64 }) chord.addEvent (juce::MidiMessage::noteOn (1, n, 0.9f), 0);
+            std::vector<float> l (512), r (512);
+            const auto start = juce::Time::getMillisecondCounterHiRes();
+            const auto blocks = (int) (10.0 * 48000.0 / 512);
+            for (int b = 0; b < blocks; ++b)
+                synth.render (l.data(), r.data(), 512, b == 0 ? chord : juce::MidiBuffer());
+            const auto ms = juce::Time::getMillisecondCounterHiRes() - start;
+            std::cout << name << ": " << ms / 100.0 << " % of one core (4 notes)" << std::endl;
+        }
+        return 0;
+    }
+    if (argc > 2 && juce::String (argv[1]) == "nemix")
+    {
+        const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).nemixOnly (argc > 3 ? juce::String (argv[3]) : juce::String());
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         return r;
     }

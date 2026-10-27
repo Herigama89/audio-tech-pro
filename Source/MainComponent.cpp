@@ -1,4 +1,5 @@
 #include "ui/Eco.h"
+#include "ui/NemixPanel.h"
 #include "ui/InsertBar.h"
 #include "MainComponent.h"
 #include "ui/PluginWindowKeys.h"
@@ -2892,6 +2893,16 @@ void MainComponent::showInstrumentMenu (juce::ValueTree track, juce::Component& 
         undoManager.beginNewTransaction ("Choose instrument");
         track.setProperty (ids::instrument, "synth", &undoManager);
     });
+    menu.addItem ("Nemix (wavetable synth)", true, kind == "nemix", [this, track]() mutable
+    {
+        undoManager.beginNewTransaction ("Choose instrument");
+        track.setProperty (ids::instrument, "nemix", &undoManager);
+        juce::Timer::callAfterDelay (300, [safe = juce::Component::SafePointer<MainComponent> (this), track]
+        {
+            if (safe != nullptr)
+                safe->openInstrumentWindow (track);
+        });
+    });
     menu.addItem ("Drum Kit", true, kind == "drums", [this, track]() mutable
     {
         undoManager.beginNewTransaction ("Choose instrument");
@@ -2984,6 +2995,13 @@ void MainComponent::openInstrumentWindow (const juce::ValueTree& track)
         // The plugin's face under a header (Editor / Controls, and its parameters for MIDI Learn).
         auto* host = new PluginHostPanel (*plugin, plugin->createEditorAndMakeActive(), { project, id, {}, &undoManager });
         editorWindows[id] = std::make_unique<EditorWindow> (title + ": " + plugin->getName(), host, host->isResizableHost(), closer);
+        return;
+    }
+
+    if (track[ids::instrument].toString() == "nemix")
+    {
+        auto* panel = new NemixPanel (track, undoManager, [this, id] { return rack.getNemix (id); });
+        editorWindows[id] = std::make_unique<EditorWindow> (title + ": Nemix", panel, false, closer);
         return;
     }
 

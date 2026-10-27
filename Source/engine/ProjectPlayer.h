@@ -78,6 +78,8 @@ private:
             return;   // a fader or pan: played straight away, no new graph
         if (applyKnob (tree, p))
             return;   // a built-in effect's knob: straight to the effect, no new graph
+        if (tree.getType() == juce::Identifier ("NEMIX") && rack != nullptr && rack->applyNemix (tree, p))
+            return;   // a Nemix knob: straight to the synth
         if (p != ids::height && p != ids::hidden && p != ids::showAutomation && p != ids::automationParam && p != ids::collapsed && p != ids::icon && p != ids::takesOpen && p != ids::smartControls)   // view settings: nothing to hear
             triggerAsyncUpdate();
     }

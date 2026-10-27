@@ -24,6 +24,9 @@ public:
 
     virtual juce::String getName() const = 0;
 
+    /** Where the song is and its tempo, before each render (audio thread): for LFOs, delays and arpeggios in time. */
+    virtual void setPosition (juce::int64 /*samplePosition*/, bool /*playing*/, double /*bpm*/) noexcept {}
+
     /** How many samples late this instrument's output is (for delay compensation). */
     virtual int getLatencySamples() const { return 0; }
 
