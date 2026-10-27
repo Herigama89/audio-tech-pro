@@ -1,6 +1,7 @@
 #include "Wavetables.h"
 #include "NemixParams.h"
 #include <complex>
+#include <functional>
 
 namespace riff::nemix::wt
 {
@@ -12,7 +13,7 @@ namespace
     Spectrum empty() { return Spectrum ((size_t) maxHarmonic + 1); }
 
     /** A sum of sines: b(n) for each harmonic. */
-    template <typename F> Spectrum sines (F&& b, int most = maxHarmonic)
+    Spectrum sines (const std::function<float (int)>& b, int most = maxHarmonic)
     {
         auto s = empty();
         for (int n = 1; n <= std::min (most, maxHarmonic); ++n)
@@ -21,13 +22,17 @@ namespace
     }
 
     /** The spectrum of a shape drawn in time (x through the cycle, 0..1), from 8192 points so little folds back. */
-    template <typename F> Spectrum shape (F&& fn)
+    // (not a template, and one transform shared under a lock: Visual Studio's compiler trips over a
+    //  thread_local inside a template here)
+    Spectrum shape (const std::function<float (float)>& fn)
     {
         constexpr int order = 13, n = 1 << order;
-        static thread_local juce::dsp::FFT fft (order);
+        static juce::dsp::FFT fft (order);
+        static juce::CriticalSection fftLock;
         std::vector<float> buf ((size_t) n * 2, 0.0f);
         for (int i = 0; i < n; ++i)
             buf[(size_t) i] = fn ((float) i / (float) n);
+        const juce::ScopedLock sl (fftLock);
         fft.performRealOnlyForwardTransform (buf.data(), true);
         auto s = empty();
         for (int h = 1; h <= maxHarmonic; ++h)
