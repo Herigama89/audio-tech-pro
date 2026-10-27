@@ -61,7 +61,17 @@ jobs:
       - name: Configure
         run: cmake -B build-windows -G "Visual Studio 17 2022" -A x64
       - name: Build
-        run: cmake --build build-windows --config Release --parallel
+        # (compile errors are listed in one annotation on the run's page, so they can be read without the log)
+        shell: pwsh
+        run: |
+          $out = & cmake --build build-windows --config Release --parallel 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          $out | Write-Output
+          if ($code -ne 0) {
+            $errors = ($out -split "`r?`n" | Where-Object { $_ -match ': error |: fatal error|error C|error LNK' } | Select-Object -Unique -First 60) -join '%0A'
+            Write-Output "::error title=Windows build errors::$errors"
+            exit $code
+          }
       - name: Test
         # (failures are listed in one annotation on the run's page, so they can be read without the log)
         shell: pwsh

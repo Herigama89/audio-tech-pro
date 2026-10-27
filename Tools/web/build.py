@@ -22,7 +22,7 @@ flags = ["-std=c++20", "-O3" if not debug else "-O1", "-fexceptions",
 sources = [modules / m / f"{m}.cpp" for m in ["juce_core", "juce_events", "juce_data_structures", "juce_audio_basics",
                                              "juce_audio_formats", "juce_audio_devices", "juce_audio_processors_headless", "juce_audio_processors", "juce_dsp", "juce_graphics"]]
 skip = {"ClapFormat.cpp", "PluginScanChild.cpp", "StemSeparator.cpp", "InterfaceControl.cpp", "PluginBuses.cpp"}
-for folder in ["engine", "model"]:
+for folder in ["engine", "engine/nemix", "model"]:
     for f in sorted((repo / "Source" / folder).glob("*.cpp")):
         if f.name not in skip:
             sources.append(f)
