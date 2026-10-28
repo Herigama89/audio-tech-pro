@@ -2,6 +2,7 @@
 // the menu bar. (Split from MainComponent.cpp to keep that file readable.)
 
 #include "ui/Eco.h"
+#include "ui/ManualPanel.h"
 #include "MainComponent.h"
 #include "ui/ToolChooser.h"
 #include "ui/ToolIcons.h"
@@ -417,6 +418,8 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::zoomVerticalIn:         zoomVertically (1); break;
         case commands::zoomVerticalOut:        zoomVertically (-1); break;
         case commands::keyCommands:            showKeyCommands(); break;
+        case commands::showManual:             showManual(); break;
+        case commands::openManualPdf:          openManualPdf(); break;
         case commands::generateMidi:           showGenerator(); break;
         case commands::showAssistant:          toggleAssistant(); break;
         case commands::recordScreen:           toggleScreenRecording(); break;
@@ -435,7 +438,7 @@ bool MainComponent::perform (const InvocationInfo& info)
 //==============================================================================
 juce::StringArray MainComponent::getMenuBarNames()
 {
-    return { "File", "Edit", "Track", "Navigate", "Record", "Mix", "View", "AudioSuite", "Window" };
+    return { "File", "Edit", "Track", "Navigate", "Record", "Mix", "View", "AudioSuite", "Window", "Help" };
 }
 
 juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
@@ -584,11 +587,66 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             add ({ commands::keyCommands, commands::controllerAssignments, commands::audioSettings, commands::themeSettings });
             break;
 
+        case 9:
+            // The manual (as FL Studio's Help menu), and the app's other help
+            add ({ commands::showManual, commands::openManualPdf });
+            menu.addSeparator();
+            {
+                juce::PopupMenu chapters;
+                juce::String lastTab;
+                for (const auto& c : manual::chapters())
+                {
+                    if (c.tab != lastTab)
+                    {
+                        chapters.addSectionHeader (c.tab);
+                        lastTab = c.tab;
+                    }
+                    chapters.addItem (c.title, [this, title = c.title] { showManual (title); });
+                }
+                menu.addSubMenu ("Manual Chapters", chapters, ! manual::chapters().empty());
+            }
+            menu.addSeparator();
+            add ({ commands::toggleQuickHelp, commands::keyCommands, commands::showAssistant });
+            break;
+
         default:
             break;
     }
 
     return menu;
+}
+
+//==============================================================================
+// The manual
+//==============================================================================
+void MainComponent::showManual (const juce::String& chapter)
+{
+    if (manualWindow == nullptr)
+    {
+        auto* panel = new ManualPanel();
+        manualWindow = std::make_unique<EditorWindow> ("Audio Tech Pro Manual", panel, true, [this]
+        {
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this)]
+            {
+                if (safe != nullptr)
+                    safe->manualWindow.reset();
+            });
+        });
+        manualWindow->setResizeLimits (760, 480, 4000, 3000);
+    }
+    manualWindow->toFront (true);
+    if (chapter.isNotEmpty())
+        if (auto* panel = dynamic_cast<ManualPanel*> (manualWindow->getContentComponent()))
+            panel->showChapter (chapter);
+}
+
+void MainComponent::openManualPdf()
+{
+    const auto pdf = manual::pdf();
+    if (pdf.existsAsFile())
+        pdf.startAsProcess();
+    else
+        showError ("Manual", "The PDF of the manual isn't installed with this copy of the app. Help > Manual (F1) opens it in the app.");
 }
 
 //==============================================================================

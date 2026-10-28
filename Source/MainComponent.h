@@ -250,6 +250,8 @@ private:
     void setCompare (bool on);
     void showAudioSettings();
     void showKeyCommands();
+    void showManual (const juce::String& chapter = {});
+    void openManualPdf();
     void showGenerator();
     void toggleAssistant();
     void toggleScreenRecording();
@@ -495,6 +497,7 @@ private:
     void setStopReturnsToStart (bool on);   // saves it, and lights the Return key   // workflow: jump back to where playback started when stopping
     double playStartedAt = 0.0;
     std::unique_ptr<EditorWindow> keyCommandsWindow;
+    std::unique_ptr<EditorWindow> manualWindow;
 
     // MIDI generator
     std::unique_ptr<EditorWindow> generatorWindow;

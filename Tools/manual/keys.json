@@ -1,0 +1,448 @@
+{
+ "main-window.jpg": [
+  [
+   1,
+   "File menu"
+  ],
+  [
+   2,
+   "Undo and Redo"
+  ],
+  [
+   3,
+   "Add tracks"
+  ],
+  [
+   4,
+   "Audio settings"
+  ],
+  [
+   5,
+   "Go to start"
+  ],
+  [
+   6,
+   "Stop"
+  ],
+  [
+   7,
+   "Play"
+  ],
+  [
+   8,
+   "Record"
+  ],
+  [
+   9,
+   "Cycle (loop)"
+  ],
+  [
+   10,
+   "Count-in"
+  ],
+  [
+   11,
+   "Metronome"
+  ],
+  [
+   12,
+   "Punch in/out"
+  ],
+  [
+   13,
+   "Bypass all (compare)"
+  ],
+  [
+   14,
+   "Position (bars and beats)"
+  ],
+  [
+   15,
+   "Tempo"
+  ],
+  [
+   16,
+   "Time signature and key"
+  ],
+  [
+   17,
+   "Mixer"
+  ],
+  [
+   18,
+   "Editor (piano roll)"
+  ],
+  [
+   19,
+   "Library"
+  ],
+  [
+   20,
+   "Smart Controls"
+  ],
+  [
+   21,
+   "Quick Help"
+  ],
+  [
+   22,
+   "Loops"
+  ],
+  [
+   23,
+   "Generate (drummer, bass, keys)"
+  ],
+  [
+   24,
+   "Screen recording"
+  ],
+  [
+   25,
+   "Claude assistant"
+  ],
+  [
+   26,
+   "Tool menu"
+  ],
+  [
+   27,
+   "Snap"
+  ],
+  [
+   28,
+   "Track headers"
+  ],
+  [
+   29,
+   "Tracks area (regions)"
+  ],
+  [
+   30,
+   "Input and output meters"
+  ],
+  [
+   31,
+   "Master volume"
+  ]
+ ],
+ "mixer.jpg": [
+  [
+   1,
+   "Which tracks to show"
+  ],
+  [
+   2,
+   "Narrow strips"
+  ],
+  [
+   3,
+   "EQ/Dyn: channel strip thumbnails"
+  ],
+  [
+   4,
+   "Bus compressor on the master"
+  ],
+  [
+   5,
+   "Automix"
+  ],
+  [
+   6,
+   "Comments under each strip"
+  ],
+  [
+   7,
+   "Zones (show or hide parts of the strips)"
+  ],
+  [
+   8,
+   "Console: the channel strip model"
+  ],
+  [
+   9,
+   "Close the mixer"
+  ],
+  [
+   10,
+   "A track channel strip (see the next picture)"
+  ],
+  [
+   11,
+   "Aux (bus) strip"
+  ],
+  [
+   12,
+   "Master strip"
+  ]
+ ],
+ "channel-strip-parts.jpg": [
+  [
+   1,
+   "Track number and On/Off"
+  ],
+  [
+   2,
+   "EQ thumbnail: click to open the channel strip"
+  ],
+  [
+   3,
+   "Pan"
+  ],
+  [
+   4,
+   "Mute and Solo"
+  ],
+  [
+   5,
+   "Setting: load or save a patch"
+  ],
+  [
+   6,
+   "Input (and mono/stereo)"
+  ],
+  [
+   7,
+   "Inserts: click an empty slot to add an effect"
+  ],
+  [
+   8,
+   "Sends to aux buses (knob = send level)"
+  ],
+  [
+   9,
+   "Output"
+  ],
+  [
+   10,
+   "Preamp (PRE) and its drive"
+  ],
+  [
+   11,
+   "Tape and its drive"
+  ],
+  [
+   12,
+   "Record, Input monitor, Automation mode"
+  ],
+  [
+   13,
+   "Fader (Option-click: 0 dB)"
+  ],
+  [
+   14,
+   "Level meter (peak hold)"
+  ],
+  [
+   15,
+   "Fader level"
+  ],
+  [
+   16,
+   "Track name and colour"
+  ]
+ ],
+ "piano-roll-bars.jpg": [
+  [
+   1,
+   "View: Piano Roll, Score, Step Editor"
+  ],
+  [
+   2,
+   "Step input"
+  ],
+  [
+   3,
+   "Quantize"
+  ],
+  [
+   4,
+   "Quantize grid"
+  ],
+  [
+   5,
+   "Quantize strength"
+  ],
+  [
+   6,
+   "Scale quantize"
+  ],
+  [
+   7,
+   "MIDI Transform"
+  ],
+  [
+   8,
+   "Lane under the notes"
+  ],
+  [
+   9,
+   "Close"
+  ],
+  [
+   10,
+   "Tool: Draw"
+  ],
+  [
+   11,
+   "Tool: Paint"
+  ],
+  [
+   12,
+   "Tool: Delete"
+  ],
+  [
+   13,
+   "Tool: Mute"
+  ],
+  [
+   14,
+   "Tool: Slice"
+  ],
+  [
+   15,
+   "Tool: Select"
+  ],
+  [
+   16,
+   "Tool: Zoom"
+  ],
+  [
+   17,
+   "Stamp (chords)"
+  ],
+  [
+   18,
+   "Snap"
+  ],
+  [
+   19,
+   "Scale highlight"
+  ],
+  [
+   20,
+   "Ghost notes"
+  ],
+  [
+   21,
+   "Tools menu"
+  ]
+ ],
+ "piano-roll.jpg": [
+  [
+   1,
+   "The two bars (see the picture above)"
+  ],
+  [
+   2,
+   "Keyboard: click to hear a note"
+  ],
+  [
+   3,
+   "Notes: drag to move, drag the end to lengthen"
+  ],
+  [
+   4,
+   "Velocity (or another lane: choose it in the bar)"
+  ]
+ ],
+ "nemix-sound.jpg": [
+  [
+   1,
+   "Logo"
+  ],
+  [
+   2,
+   "Previous / next sound"
+  ],
+  [
+   3,
+   "INIT: a plain starting sound"
+  ],
+  [
+   4,
+   "Sound name, type and styles"
+  ],
+  [
+   5,
+   "SAVE your own sound"
+  ],
+  [
+   6,
+   "Pages"
+  ],
+  [
+   7,
+   "MASTER volume"
+  ],
+  [
+   8,
+   "Oscillator A"
+  ],
+  [
+   9,
+   "Oscillator B"
+  ],
+  [
+   10,
+   "Oscillator C"
+  ],
+  [
+   11,
+   "Recorded instruments, sub and noise"
+  ],
+  [
+   12,
+   "Filter 1"
+  ],
+  [
+   13,
+   "Filter 2"
+  ],
+  [
+   14,
+   "Macros"
+  ],
+  [
+   15,
+   "Envelopes (drag a tab onto a knob)"
+  ],
+  [
+   16,
+   "LFOs (drag a tab onto a knob)"
+  ],
+  [
+   17,
+   "Other modulation sources"
+  ]
+ ],
+ "nemix-sample.jpg": [
+  [
+   1,
+   "Recorded instrument on"
+  ],
+  [
+   2,
+   "Choose the instrument"
+  ],
+  [
+   3,
+   "Level"
+  ],
+  [
+   4,
+   "Pan"
+  ],
+  [
+   5,
+   "Start"
+  ],
+  [
+   6,
+   "Tune (semitones, cents)"
+  ],
+  [
+   7,
+   "Route: direct or through the filters"
+  ]
+ ]
+}

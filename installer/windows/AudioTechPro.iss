@@ -41,6 +41,7 @@ Name: "desktopicon"; Description: "Make a desktop shortcut"; GroupDescription: "
 Source: "{#BuildDir}\Audio Tech Pro.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#BuildDir}\Nemix Library\*"; DestDir: "{app}\Nemix Library"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#BuildDir}\Manual\*"; DestDir: "{app}\Manual"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\Audio Tech Pro"; Filename: "{app}\Audio Tech Pro.exe"

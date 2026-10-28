@@ -2,6 +2,7 @@
 // be checked on a build machine. Build with -DRIFF_BUILD_SNAPSHOTS=ON, then:
 //     Snapshots <output folder>
 
+#include "../Source/ui/ManualPanel.h"
 #include "../Source/ui/Skin.h"
 #include "../Source/ui/NemixPanel.h"
 #include "../Source/engine/nemix/Nemix.h"
@@ -734,6 +735,18 @@ public:
         pump (main, 2500);
         pump (main, 200);
         save (main, "arrange.png");
+        layout (main, "arrange", { { "File menu", &main.fileButton }, { "Undo and Redo", &main.undoButton }, { "Add tracks", &main.addTrackButton },
+                                   { "Audio settings", &main.settingsButton }, { "Go to start", &main.rewindButton }, { "Stop", &main.stopButton },
+                                   { "Play", &main.playButton }, { "Record", &main.recordButton }, { "Cycle (loop)", &main.cycleButton },
+                                   { "Count-in", &main.countInButton }, { "Metronome", &main.clickButton }, { "Punch in/out", &main.punchButton },
+                                   { "Bypass all (compare)", &main.compareButton }, { "Position (bars and beats)", &main.positionLabel },
+                                   { "Tempo", &main.tempoLabel }, { "Time signature and key", &main.signatureLabel },
+                                   { "Mixer", &main.mixerButton }, { "Editor (piano roll)", &main.editorButton }, { "Library", &main.libraryButton },
+                                   { "Smart Controls", &main.smartButton }, { "Quick Help", &main.helpButton }, { "Loops", &main.loopsButton },
+                                   { "Generate (drummer, bass, keys)", &main.generateButton }, { "Screen recording", &main.screenButton },
+                                   { "Claude assistant", &main.claudeButton }, { "Tool menu", &main.toolBox }, { "Snap", &main.snapBox },
+                                   { "Track headers", &main.headers }, { "Tracks area (regions)", &main.canvas },
+                                   { "Input and output meters", &main.inputMeter }, { "Master volume", &main.masterSlider } });
 
         if (juce::SystemStats::getEnvironmentVariable ("RIFF_BENCH", {}).isNotEmpty())
             return bench (main);
@@ -741,6 +754,7 @@ public:
         main.showMixer();
         pump (main, 200);
         save (main, "mixer.png");
+        layout (main, "mixer", { { "A channel strip", findById (main.mixer, "strip0") }, { "Mixer button", &main.mixerButton } });
         main.mixer.narrowButton.setToggleState (true, juce::sendNotificationSync);
         pump (main, 100);
         save (main, "mixer-narrow.png");
@@ -792,6 +806,16 @@ public:
                 }
         pump (main, 200);
         save (main, "pianoroll.png");
+        {
+            auto& r = main.pianoRoll;
+            std::vector<std::pair<juce::String, juce::Component*>> parts { { "View: Piano Roll, Score, Step Editor", &r.viewBox }, { "Step input", &r.stepButton },
+                { "Quantize", &r.quantizeButton }, { "Quantize grid", &r.gridBox }, { "Quantize strength", &r.strengthBox }, { "Lane under the notes", &r.laneBox },
+                { "Scale quantize", &r.scaleButton }, { "MIDI Transform", &r.transformButton }, { "Stamp (chords)", &r.stampBox }, { "Snap", &r.snapBox },
+                { "Scale highlight", &r.scaleHighlightButton }, { "Ghost notes", &r.ghostButton }, { "Tools menu", &r.toolsButton } };
+            for (int t = 0; t < r.toolButtons.size(); ++t)
+                parts.push_back ({ "Tool: " + r.toolButtons[t]->getName(), r.toolButtons[t] });
+            layout (main, "pianoroll", parts);
+        }
         {
             // FL Studio-style tools: the scale shaded, the other regions as ghosts, a muted note, the Paint tool
             auto& roll = main.pianoRoll;
@@ -1905,6 +1929,26 @@ private:
         }
     }
 
+    /** Where named parts sit in a screenshot (for the manual's numbered call-outs): name.layout.json beside it. */
+    void layout (juce::Component& root, const juce::String& name, const std::vector<std::pair<juce::String, juce::Component*>>& parts)
+    {
+        juce::Array<juce::var> list;
+        for (const auto& [label, c] : parts)
+        {
+            if (c == nullptr || c->getWidth() <= 0 || c->getHeight() <= 0) continue;
+            bool visible = true;
+            for (auto* p = c; p != nullptr && p != &root; p = p->getParentComponent())
+                visible = visible && p->isVisible();
+            if (! visible) continue;
+            const auto r = root.getLocalArea (c, c->getLocalBounds());
+            auto o = std::make_unique<juce::DynamicObject>();
+            o->setProperty ("label", label);
+            o->setProperty ("x", r.getX()); o->setProperty ("y", r.getY()); o->setProperty ("w", r.getWidth()); o->setProperty ("h", r.getHeight());
+            list.add (juce::var (o.release()));
+        }
+        out.getChildFile (name + ".layout.json").replaceWithText (juce::JSON::toString (list));
+    }
+
     void save (juce::Component& c, const juce::String& name, float scale = 1.0f)
     {
         const auto image = c.createComponentSnapshot (c.getLocalBounds(), true, scale);
@@ -2127,6 +2171,86 @@ int main (int argc, char* argv[])
         std::cout << "converted " << done << ", failed " << failed << std::endl;
         return failed > 0 ? 1 : 0;
     }
+    if (argc > 2 && juce::String (argv[1]) == "docsdump")
+    {
+        // The facts the manual is made from: every command (with its keys), every stock effect, Nemix's sounds
+        const auto keyText = [] (const juce::KeyPress& k)
+        {
+            juce::StringArray parts;
+            const auto m = k.getModifiers();
+            if (m.isCtrlDown() && m.isCommandDown()) {}
+            if (m.isCommandDown()) parts.add ("Cmd/Ctrl");
+           #if ! JUCE_MAC
+           #endif
+            if (m.isAltDown()) parts.add ("Option/Alt");
+            if (m.isShiftDown()) parts.add ("Shift");
+            parts.add (juce::KeyPress (k.getKeyCode()).getTextDescription().toUpperCase());
+            return parts.joinIntoString ("+");
+        };
+        auto root = std::make_unique<juce::DynamicObject>();
+        juce::Array<juce::var> commandList;
+        for (const auto& c : riff::commands::all())
+        {
+            auto o = std::make_unique<juce::DynamicObject>();
+            o->setProperty ("name", juce::String (c.name));
+            o->setProperty ("menu", juce::String (c.category));
+            o->setProperty ("description", juce::String (c.description));
+            juce::Array<juce::var> keys;
+            for (const auto& k : riff::commands::keysFor (riff::commands::presetNames()[0], c.id))
+                keys.add (keyText (k));
+            o->setProperty ("keys", keys);
+            commandList.add (juce::var (o.release()));
+        }
+        root->setProperty ("commands", commandList);
+        juce::Array<juce::var> effects;
+        for (const auto& e : riff::builtInEffects())
+        {
+            auto o = std::make_unique<juce::DynamicObject>();
+            o->setProperty ("type", e.type);
+            o->setProperty ("name", e.name);
+            o->setProperty ("category", e.category);
+            juce::Array<juce::var> ps;
+            for (const auto& p : e.params)
+            {
+                if (p.id.startsWith ("learn") || p.id.startsWith ("tpl") || p.id.startsWith ("cur")) continue;
+                auto q = std::make_unique<juce::DynamicObject>();
+                q->setProperty ("id", p.id);
+                q->setProperty ("name", p.name);
+                q->setProperty ("unit", p.suffix.trim());
+                q->setProperty ("min", p.min);
+                q->setProperty ("max", p.max);
+                q->setProperty ("default", p.defaultValue);
+                juce::Array<juce::var> choices;
+                for (const auto& c : p.choices) choices.add (c);
+                q->setProperty ("choices", choices);
+                ps.add (juce::var (q.release()));
+            }
+            o->setProperty ("params", ps);
+            effects.add (juce::var (o.release()));
+        }
+        root->setProperty ("effects", effects);
+        juce::Array<juce::var> presets;
+        for (const auto& p : riff::nemix::factoryPresets())
+        {
+            auto o = std::make_unique<juce::DynamicObject>();
+            o->setProperty ("name", p.name);
+            o->setProperty ("category", p.category);
+            o->setProperty ("genres", p.genres.joinIntoString (", "));
+            o->setProperty ("recorded", p.needsLibrary);
+            presets.add (juce::var (o.release()));
+        }
+        root->setProperty ("nemixPresets", presets);
+        juce::Array<juce::var> library;
+        for (const auto& e : riff::nemix::samples::catalogue())
+            library.add (e.name + "|" + e.category);
+        root->setProperty ("library", library);
+        juce::Array<juce::var> tables;
+        for (const auto& t : riff::nemix::tableNames()) tables.add (t);
+        root->setProperty ("wavetables", tables);
+        juce::File (juce::String (argv[2])).replaceWithText (juce::JSON::toString (juce::var (root.release())));
+        std::cout << "wrote " << argv[2] << std::endl;
+        return 0;
+    }
     if (argc > 3 && juce::String (argv[1]) == "nemixdemo")
     {
         // A short demo of a sound: chords for keys and pads, a line for basses, a beat for kits (120 BPM, 4 bars)
@@ -2226,6 +2350,38 @@ int main (int argc, char* argv[])
             std::cout << name << ": " << ms / 100.0 << " % of one core (4 notes)" << std::endl;
         }
         return 0;
+    }
+    if (argc > 2 && juce::String (argv[1]) == "manual")
+    {
+        // The manual window: a few chapters, and a search
+        const auto dir = juce::File (juce::String (argv[2]));
+        dir.createDirectory();
+        int result = 0;
+        {
+            riff::ManualPanel panel;
+            panel.setSize (1180, 820);
+            const auto shot = [&] (const juce::String& name)
+            {
+                const auto image = panel.createComponentSnapshot (panel.getLocalBounds());
+                auto file = dir.getChildFile (name);
+                file.deleteFile();
+                juce::FileOutputStream stream (file);
+                juce::PNGImageFormat().writeImageToStream (image, stream);
+                std::cout << "wrote " << file.getFullPathName() << "\n";
+            };
+            std::cout << riff::manual::chapters().size() << " chapters in " << riff::manual::folder().getFullPathName() << "\n";
+            if (riff::manual::chapters().empty()) result = 1;
+            shot ("manual-start.png");
+            for (const auto* title : { "The Main Window", "The Mixer", "Nemix", "Dynamics Effects", "Key Commands" })
+            {
+                panel.showChapter (title);
+                shot ("manual-" + riff::manual::Chapter { {}, title }.title.toLowerCase().replaceCharacter (' ', '-') + ".png");
+            }
+            panel.showChapter ("take folder");
+            shot ("manual-search.png");
+        }
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        return result;
     }
     if (argc > 2 && juce::String (argv[1]) == "nemix")
     {

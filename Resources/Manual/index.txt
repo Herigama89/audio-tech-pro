@@ -1,0 +1,42 @@
+# Audio Tech Pro manual: tab|file|title (in order)
+Start|01-welcome-and-quick-start.md|Welcome and Quick Start
+Start|02-the-main-window.md|The Main Window
+Start|03-projects-and-files.md|Projects and Files
+Record & Edit|04-recording.md|Recording
+Record & Edit|05-tracks-and-regions.md|Tracks and Regions
+Record & Edit|06-piano-roll-and-midi.md|Piano Roll and MIDI
+Record & Edit|07-audio-editing-flex-and-pitch.md|Audio Editing, Flex and Pitch
+Record & Edit|08-automation.md|Automation
+Mix|09-the-mixer.md|The Mixer
+Mix|10-the-channel-strip.md|The Channel Strip
+Mix|11-using-effects-and-plugins.md|Using Effects and Plugins
+Mix|12-mixing-tools.md|Mixing Tools
+Mix|13-mastering-and-exporting.md|Mastering and Exporting
+Instruments|14-instruments.md|Instruments
+Instruments|15-nemix.md|Nemix
+Instruments|16-session-players-and-generate.md|Session Players and Generate
+Instruments|17-live-loops.md|Live Loops
+Instruments|18-nemix-sounds.md|Nemix Sounds
+Instruments|19-recorded-instruments.md|Recorded Instruments
+Plugins|20-eq-effects.md|EQ Effects
+Plugins|21-dynamics-effects.md|Dynamics Effects
+Plugins|22-delay-effects.md|Delay Effects
+Plugins|23-reverb-effects.md|Reverb Effects
+Plugins|24-modulation-effects.md|Modulation Effects
+Plugins|25-distortion-effects.md|Distortion Effects
+Plugins|26-filter-effects.md|Filter Effects
+Plugins|27-amps-and-pedals.md|Amps and Pedals
+Plugins|28-pitch-effects.md|Pitch Effects
+Plugins|29-imaging-effects.md|Imaging Effects
+Plugins|30-multi-effects.md|Multi Effects
+Plugins|31-specialized-effects.md|Specialized Effects
+Plugins|32-utility-effects.md|Utility Effects
+Plugins|33-meters-and-mastering.md|Meters and Mastering
+Plugins|34-legacy-effects.md|Legacy Effects
+More|35-looks-and-themes.md|Looks and Themes
+More|36-settings-and-performance.md|Settings and Performance
+More|37-the-claude-assistant.md|The Claude Assistant
+More|38-screen-recording.md|Screen Recording
+More|39-troubleshooting.md|Troubleshooting
+More|40-key-commands.md|Key Commands
+More|41-piano-roll-keys.md|Piano Roll Keys

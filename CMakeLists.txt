@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
 endif()
 
-project(AudioTechPro VERSION 1.6.0 LANGUAGES C CXX)
+project(AudioTechPro VERSION 1.7.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -265,6 +265,7 @@ set(RIFF_UI_SOURCES
     Source/ui/PianoRoll.cpp
     Source/ui/InstrumentWindows.cpp
     Source/ui/NemixPanel.cpp
+    Source/ui/ManualPanel.cpp
     Source/ui/EffectFace.cpp
     Source/ui/EffectDesigns.cpp
     Source/ui/Mixer.cpp
@@ -311,15 +312,19 @@ target_link_libraries(AudioTechPro
         juce::juce_recommended_warning_flags
 )
 
-# Nemix's recorded instruments (Resources/NemixLibrary) go with the app: inside the bundle on a Mac, next to the program elsewhere
+# Nemix's recorded instruments (Resources/NemixLibrary) and the manual (Resources/Manual) go with the app: inside the bundle on a Mac, next to the program elsewhere
 if(APPLE)
     add_custom_command(TARGET AudioTechPro POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/Resources/NemixLibrary"
-                "$<TARGET_BUNDLE_CONTENT_DIR:AudioTechPro>/Resources/Nemix Library")
+                "$<TARGET_BUNDLE_CONTENT_DIR:AudioTechPro>/Resources/Nemix Library"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Manual"
+                "$<TARGET_BUNDLE_CONTENT_DIR:AudioTechPro>/Resources/Manual")
 else()
     add_custom_command(TARGET AudioTechPro POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/Resources/NemixLibrary"
-                "$<TARGET_FILE_DIR:AudioTechPro>/Nemix Library")
+                "$<TARGET_FILE_DIR:AudioTechPro>/Nemix Library"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Manual"
+                "$<TARGET_FILE_DIR:AudioTechPro>/Manual")
 endif()
 
 # ---------------------------------------------------------------------------

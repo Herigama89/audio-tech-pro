@@ -1,0 +1,31 @@
+TOOLS
+P  Draw (pencil; it remembers the last note's length)
+B  Paint (drag to lay notes along the grid)
+D  Delete      C  Slice      T  the tool menu (T again: Mute)
+E  Select      Z  Zoom (Option-click zooms out)
+Right-click or right-drag: delete notes, with any tool
+
+EDITING
+Arrows: Up/Down a semitone (Shift: an octave), Left/Right a grid step
+Q  Quantize      Delete  delete the selected notes
+ctrl + A  Select all      Esc  deselect
+ctrl + C / ctrl + X / ctrl + V  Copy, cut, paste (at the playhead)
+ctrl + D  Duplicate
+Option-scroll: taller or shorter rows      Cmd-scroll: zoom in time
+
+NOTE TOOLS (on the selected notes, or all)
+ctrl + L  Quick Legato
+alt + U  Chop (at the quantize grid)
+ctrl + G  Glue
+alt + S  Strum...
+alt + A  Arpeggiate...
+alt + F  Flam
+alt + R  Randomize...
+alt + X  Scale Levels (velocity)...
+alt + K  Limit (fold into a range)...
+alt + C  Claw Machine (thin out)...
+alt + L  Articulate (note lengths)...
+alt + M  Mute / Unmute
+alt + Y  Flip Horizontally (reverse)
+shift + alt + Y  Flip Vertically (invert)
+ctrl + B  Duplicate (also Cmd+D)

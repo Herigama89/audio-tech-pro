@@ -151,6 +151,8 @@ const std::vector<Info>& all()
         { combineInterfaces,      "Combine Audio Interfaces...", "View",     "Use several audio interfaces at once, as one" },
         { recordScreen,           "Record Screen...",           "View",      "Record the app (or the whole screen) to a video with the mix's sound; again to stop" },
         { showAssistant,          "Claude Assistant",           "View",      "Show or hide the Claude panel: ask questions, or tell it what to do" },
+        { showManual,             "Manual",                     "Help",      "The manual: every part of the app and every plugin, how to use them, with pictures (tabs, chapters and search)" },
+        { openManualPdf,          "Manual (PDF)",               "Help",      "The same manual as a PDF, to print or read on another device" },
     };
 
     return list;
@@ -306,6 +308,7 @@ namespace
             case audioSettings:          return { key (',', cmd) };
             case calibrateLatency:       return {};
             case scanPlugins:            return {};
+            case showManual:             return { key (KeyPress::F1Key) };
             default:                     return {};
         }
     }
@@ -317,6 +320,7 @@ namespace
         {
             case keyCommands:   return { key ('k', opt) };
             case audioSettings: return { key (',', cmd) };
+            case showManual:    return { key (KeyPress::F1Key) };
             case cutRegions:    return { key ('x', cmd) };
             case copyRegions:   return { key ('c', cmd) };
             case pasteRegions:  return { key ('v', cmd) };
