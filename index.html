@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audio Tech Pro Web</title>
+<meta name="description" content="Audio Tech Pro in the browser: open, mix, record and export projects that open in the desktop app too.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">Audio Tech Pro <span>Web</span></div>
+  <nav class="files">
+    <button id="newBtn" title="New project">New</button>
+    <button id="openBtn" title="Open a project .zip (from the desktop app's Save a Copy, or saved here)">Open…</button>
+    <button id="saveBtn" title="Save the project and its audio as a .zip that opens in the desktop app">Save .zip</button>
+    <button id="importBtn" title="Add audio files as new tracks">Import Audio…</button>
+    <button id="exportBtn" title="Bounce the mix to a WAV file">Export WAV</button>
+  </nav>
+  <div class="transport">
+    <button id="homeBtn" class="icon" title="Go to start (Return)">⏮</button>
+    <button id="playBtn" class="icon play" title="Play / Stop (Space)">▶</button>
+    <button id="recBtn" class="icon rec" title="Record a new track (R)">●</button>
+    <div class="lcd"><div id="posBars">1.1.1</div><div id="posTime">0:00.000</div></div>
+    <div class="lcd small"><div id="tempoView">120</div><div>BPM</div></div>
+  </div>
+  <div class="view">
+    <button id="zoomOut" class="icon" title="Zoom out (−)">−</button>
+    <button id="zoomIn" class="icon" title="Zoom in (+)">+</button>
+    <button id="mixerBtn" title="Show or hide the mixer (X)">Mixer</button>
+  </div>
+</header>
+
+<main id="arrange">
+  <div id="headers">
+    <div class="ruler-corner"><button id="addTrackBtn" title="New audio track">+ Track</button></div>
+    <div id="headerList"></div>
+  </div>
+  <div id="timelineWrap">
+    <canvas id="ruler"></canvas>
+    <div id="lanes"><canvas id="timeline"></canvas></div>
+  </div>
+  <div id="dropHint">Drop audio files or a project .zip</div>
+</main>
+
+<section id="mixer" hidden>
+  <div id="strips"></div>
+  <div class="strip master" id="masterStrip">
+    <div class="inserts" id="masterInserts"></div>
+    <div class="body2"><div class="meter"><canvas width="22" height="160"></canvas></div>
+      <input type="range" class="fader" id="masterFader" min="-60" max="6" step="0.1" value="-1.9"></div>
+    <div class="db" id="masterDb">-1.9</div>
+    <div class="name" style="--c:#c9a24a">Master</div>
+  </div>
+</section>
+
+<div id="fxPanel" class="fx" hidden>
+  <div class="fx-head"><span id="fxTitle"></span>
+    <button id="fxBypass" title="Bypass">Bypass</button><button id="fxRemove" title="Remove this effect">Remove</button><button id="fxClose" class="icon" title="Close">✕</button></div>
+  <div id="fxParams"></div>
+</div>
+<div id="fxMenu" class="menu" hidden></div>
+
+<footer class="status"><span id="status">Starting the engine…</span><span id="hint">Space: play · R: record · Delete: remove region · X: mixer</span></footer>
+
+<div id="startOverlay" class="overlay">
+  <div class="card">
+    <h1>Audio Tech Pro <span>Web</span></h1>
+    <p>Open a project you saved from the desktop app (File › Save a Copy, as a .zip), start a new one, or drop audio files here.
+       Your work stays in this browser until you save it.</p>
+    <div class="row">
+      <button id="startNew" class="primary">New Project</button>
+      <button id="startOpen">Open .zip…</button>
+    </div>
+    <p class="fine">Built-in effects and instruments play here. Third-party plugins stay in the project for the desktop app
+       and are shown as placeholders.</p>
+  </div>
+</div>
+
+<input type="file" id="zipInput" accept=".zip,application/zip" hidden>
+<input type="file" id="audioInput" accept="audio/*,.wav,.aif,.aiff,.flac,.ogg,.mp3,.m4a" multiple hidden>
+<script src="app.js"></script>
+</body>
+</html>
