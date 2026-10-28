@@ -641,6 +641,94 @@ TEST_CASE ("Import: a Logic project's audio and settings", "[import]")
     REQUIRE_THAT ((double) regionsOf (trackNamed (project, "Gtr"))[0][ids::start], WithinAbs (0.0, 1.0e-9));
 }
 
+TEST_CASE ("Import: a Logic project's arrangement (ProjectData)", "[import]")
+{
+    const auto dir = juce::File (TEST_DATA_DIR).getChildFile ("logic");
+    const auto read = [&] (const char* name)
+    {
+        interchange::Project p;
+        juce::String error;
+        const bool ok = projectimport::read (dir.getChildFile (name), p, error);
+        INFO (name << ": " << error);
+        REQUIRE (ok);
+        return p;
+    };
+
+    // A MIDI region at bar 2 with three notes (C1, C3, C5; velocities 32, 64, 100; 16th, 8th, quarter)
+    {
+        const auto p = read ("F4c_midinotes_bar2.logicx");
+        REQUIRE (p.tracks.size() == 1);
+        REQUIRE (p.tracks[0].name == "Inst 1");
+        REQUIRE (p.tracks[0].kind == interchange::Track::Kind::instrument);
+        REQUIRE (p.tracks[0].regions.size() == 1);
+        const auto& r = p.tracks[0].regions[0];
+        REQUIRE (r.midi);
+        REQUIRE_THAT (r.start.value, WithinAbs (4.0, 1.0e-9));
+        REQUIRE (r.notes.size() == 3);
+        REQUIRE (r.notes[0].pitch == 36);  REQUIRE (r.notes[0].velocity == 32);  REQUIRE_THAT (r.notes[0].length, WithinAbs (0.25, 1.0e-9));
+        REQUIRE (r.notes[1].pitch == 60);  REQUIRE_THAT (r.notes[1].start, WithinAbs (1.0, 1.0e-9));
+        REQUIRE (r.notes[2].pitch == 84);  REQUIRE (r.notes[2].velocity == 100); REQUIRE_THAT (r.notes[2].length, WithinAbs (1.0, 1.0e-9));
+    }
+    // Four instrument tracks with MIDI regions and three audio tracks with audio regions, in Logic's order
+    {
+        const auto p = read ("F23_av.logicx");
+        REQUIRE (p.tracks.size() == 7);
+        REQUIRE (p.tracks[0].name == "Inst 1");
+        REQUIRE (p.tracks[4].name == "047");
+        REQUIRE (p.tracks[4].kind == interchange::Track::Kind::audio);
+        REQUIRE (p.tracks[4].regions.size() == 1);
+        REQUIRE (! p.tracks[4].regions[0].midi);
+        REQUIRE ((p.tracks[4].regions[0].missingFile == "047.wav" || p.tracks[4].regions[0].file.getFileName() == "047.wav"));
+        REQUIRE_THAT (p.tracks[4].regions[0].length.value, WithinAbs (9546.0 / 44100.0, 1.0e-6));
+        REQUIRE (p.tracks[1].regions.size() == 1);
+        REQUIRE (p.tracks[1].regions[0].midi);
+    }
+    // Six audio regions on one track, a bar apart, their files in the package
+    {
+        const auto p = read ("6 regions.logicx");
+        REQUIRE (p.tracks.size() == 1);
+        REQUIRE (p.tracks[0].regions.size() == 6);
+        for (int i = 0; i < 6; ++i)
+        {
+            REQUIRE (p.tracks[0].regions[(size_t) i].file.existsAsFile());
+            REQUIRE_THAT (p.tracks[0].regions[(size_t) i].start.value, WithinAbs (4.0 * i, 1.0e-9));
+        }
+    }
+    // Tempo changes, signature changes, markers
+    {
+        const auto p = read ("F2_tempomap.logicx");
+        REQUIRE_THAT (p.bpm, WithinAbs (120.0, 1.0e-9));
+        REQUIRE (p.tempoChanges.size() == 1);
+        REQUIRE_THAT (p.tempoChanges[0].beat, WithinAbs (16.0, 1.0e-9));
+        REQUIRE_THAT (p.tempoChanges[0].bpm, WithinAbs (90.0, 1.0e-9));
+    }
+    {
+        const auto p = read ("F10_sigs.logicx");
+        REQUIRE (p.numerator == 4);
+        REQUIRE (p.signatureChanges.size() == 3);   // 5/8 at bar 2, 9/16 at bar 4, 11/2 at bar 6
+        REQUIRE (p.signatureChanges[0].numerator == 5);
+        REQUIRE (p.signatureChanges[0].denominator == 8);
+        REQUIRE (p.signatureChanges[1].numerator == 9);
+        REQUIRE (p.signatureChanges[1].denominator == 16);
+        REQUIRE_THAT (p.signatureChanges[1].beat, WithinAbs (9.0, 1.0e-9));
+        REQUIRE (p.signatureChanges[2].numerator == 11);
+        REQUIRE (p.signatureChanges[2].denominator == 2);
+    }
+    {
+        const auto p = read ("F11_markers.logicx");
+        REQUIRE (p.markers.size() == 3);
+        REQUIRE (p.markers[0].name == "MARKERONE");
+        REQUIRE (p.markers[2].name == "MARKERTHREE");
+    }
+
+    // And as one of our projects
+    juce::StringArray notes;
+    juce::String error;
+    const auto project = projectimport::open (dir.getChildFile ("F23_av.logicx"), {}, notes, error);
+    REQUIRE (project.isValid());
+    REQUIRE (model::numTracks (project) == 7);
+}
+
 TEST_CASE ("Import: a Cubase project's audio files", "[import]")
 {
     TempFolder temp;
@@ -736,4 +824,25 @@ TEST_CASE ("Import: Pro Tools session summary", "[.ptinfo]")
             std::cout << "\n";
         }
     }
+}
+
+TEST_CASE ("Import: every Logic project in a folder reads (LOGIC_FIXTURES)", "[import][logicfixtures]")
+{
+    const auto folder = juce::SystemStats::getEnvironmentVariable ("LOGIC_FIXTURES", {});
+    if (folder.isEmpty())
+        return;
+    int n = 0;
+    for (const auto& entry : juce::RangedDirectoryIterator (juce::File (folder), true, "*.logicx", juce::File::findDirectories))
+    {
+        interchange::Project p;
+        juce::String error;
+        const bool ok = projectimport::read (entry.getFile(), p, error);
+        int regions = 0, notesCount = 0;
+        for (const auto& t : p.tracks) { regions += (int) t.regions.size(); for (const auto& r : t.regions) notesCount += (int) r.notes.size(); }
+        std::cout << entry.getFile().getFileName() << ": " << (ok ? "ok" : error) << ", " << p.tracks.size() << " tracks, "
+                  << regions << " regions, " << notesCount << " notes, " << p.bpm << " bpm, " << p.markers.size() << " markers"
+                  << (p.notes.isEmpty() ? "" : (p.notes[0].startsWith ("Logic: this project's arrangement couldn't") ? " [FALLBACK]" : "")) << "\n";
+        ++n;
+    }
+    CHECK (n > 0);
 }

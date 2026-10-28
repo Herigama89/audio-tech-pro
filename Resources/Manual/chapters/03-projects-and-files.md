@@ -28,6 +28,8 @@ A **project** is your song: its tracks, regions, mixer, plugins and settings, sa
 
 **File > Open Project from Another Program...** opens projects from Ableton Live, FL Studio, Studio One, Pro Tools, Logic, Cubase, DAWproject files and standard MIDI files. Tracks, regions, tempo and as much of the mix as the file holds come in.
 
+From **Logic Pro** (a `.logicx` project), the tracks with their names, the audio regions, the MIDI regions with their notes, the tempo changes, the time signatures and the markers come in. Logic keeps its plugins, instruments and mix settings in a form Apple hasn't published, so instrument tracks start on the built-in synth (choose Nemix or your plugin for each) and the faders at 0 dB. In Logic you can also use **File > Export > All Tracks as Audio Files** and open the result here, to bring each track's sound exactly as you mixed it.
+
 **File > Import Tracks from Project...** brings chosen tracks - their regions, plugins, sends and automation - from another of your projects into this one.
 
 

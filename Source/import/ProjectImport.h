@@ -10,7 +10,7 @@
       FL Studio (.flp)             channels, patterns and their notes, the playlist, audio clips, tempo, markers
       Studio One (.song)           tracks, audio and note events, tempo, markers, mix
       Pro Tools (.ptx .ptf .pts)   audio tracks and regions as edited, MIDI notes
-      Logic Pro (.logicx)          the project's audio files, tempo, key and signature (its arrangement can't be read)
+      Logic Pro (.logicx)          tracks, audio and MIDI regions, notes, tempo, signatures, markers (not plugins or mix)
       Cubase / Nuendo (.cpr .npr)  the audio files it uses (the rest can't be read; export DAWproject for all of it)
       MIDI files (.mid)            tracks, notes, tempo, time signatures, markers
 */
