@@ -13,6 +13,21 @@ namespace
         return 0;
     }
 
+    /** The library's instruments in their fixed order (as its instruments.txt lists them: only ever added to at the end). */
+    const char* const libraryOrder[] {
+        "grand-piano", "upright-piano", "rhodes", "electric-grand", "finger-bass", "pick-bass", "jazz-bass", "fashion-bass", "swag-bass",
+        "killer-bass", "nylon-guitar", "steel-guitar", "clean-electric", "emily-guitar", "rock-kit", "violins", "violas", "cellos",
+        "violin-pizz", "cello-pizz", "upright-bass", "violin-tremolo", "trumpet", "horn", "trombone", "tuba", "trumpet-stac", "flute",
+        "oboe", "clarinet", "bassoon", "glockenspiel", "marimba", "harp"
+    };
+    int libraryIndex (const char* id)
+    {
+        for (size_t i = 0; i < std::size (libraryOrder); ++i)
+            if (juce::String (libraryOrder[i]) == id) return (int) i;
+        jassertfalse;
+        return 0;
+    }
+
     /** Builds a preset by parameter id, and routes in the matrix. */
     struct B
     {
@@ -80,6 +95,13 @@ namespace
         B& arp (int mode, int rate, int octaves, float gate = 0.6f) { return set ("arOn", 1.0f).set ("arMode", (float) mode).set ("arRate", (float) rate).set ("arOct", (float) octaves - 1.0f).set ("arGate", gate); }
         B& master (float m) { return set ("master", m); }
         B& phaser_on (float mix = 0.4f) { return set ("phOn", 1.0f).set ("phMix", mix); }
+        /** A recorded instrument from the library (by id; see libraryOrder), the oscillators off. */
+        B& sample (const char* id, float release = 0.3f)
+        {
+            p.needsLibrary = true;
+            return set ("aOn", 0.0f).set ("smpOn", 1.0f).set ("smpInst", (float) libraryIndex (id)).set ("voices", 24.0f)
+                  .amp (0.0005f, 1.0f, 1.0f, release).set ("velAmp", 0.35f);
+        }
         operator Preset() const { return p; }
     };
 
@@ -485,6 +507,93 @@ namespace
              .mod (srcEnv2, "aSemi", 0.35f).noise (1, 0.15f, 0.4f).reverb (0.25f));
         add (B ("Perc Wood Block", "Percussion", { "Latin", "Afrobeats", "Reggaeton" }).tbl ("a", "FM Bells", 0.05f).set ("aOct", 1.0f).amp (0.0005f, 0.08f, 0.0f, 0.05f)
              .filt (1, BP12, 2000.0f, 0.3f).set ("f1Key", 1.0f));
+
+        //======================================================================
+        // Recorded instruments (the Nemix Library)
+        // Pianos and keys
+        add (B ("Grand Piano", "Piano", { "Pop", "R&B", "Gospel", "Jazz", "Cinematic", "Orchestral" }).sample ("grand-piano", 0.5f).reverb (0.18f, 2.2f));
+        add (B ("Grand Piano Concert Hall", "Piano", { "Orchestral", "Cinematic", "Ambient" }).sample ("grand-piano", 0.8f).reverb (0.38f, 4.5f, 0.9f).set ("rvPre", 25.0f));
+        add (B ("Grand Piano Ballad", "Piano", { "Pop", "R&B", "Soul", "Gospel" }).sample ("grand-piano", 0.7f).eq (1.5f, 120.0f, -2.0f, 7000.0f).reverb (0.3f, 3.2f).set ("velAmp", 0.55f));
+        add (B ("Bright Pop Piano", "Piano", { "Pop", "EDM", "House", "Reggaeton" }).sample ("grand-piano", 0.4f).eq (-2.0f, 150.0f, 4.0f, 5000.0f).squash (0.25f).reverb (0.15f));
+        add (B ("Lo-Fi Grand", "Piano", { "Lo-Fi", "Hip Hop", "Chill" }).sample ("grand-piano", 0.5f).dist (CRUSH, 0.25f, 0.35f).set ("ffOn", 1.0f).set ("ffCutoff", 3500.0f)
+             .chorus (0.2f, 0.5f, 0.25f).reverb (0.22f));
+        add (B ("Trap Piano Dark", "Piano", { "Trap", "Drill", "Hip Hop" }).sample ("grand-piano", 0.6f).eq (2.0f, 120.0f, -5.0f, 4000.0f).reverb (0.3f, 3.0f).delay (0.12f, ED));
+        add (B ("Upright Piano", "Piano", { "Pop", "Folk", "Jazz", "Soul" }).sample ("upright-piano", 0.4f).reverb (0.15f, 1.8f));
+        add (B ("Upright Jazz Club", "Piano", { "Jazz", "Blues", "Soul" }).sample ("upright-piano", 0.4f).eq (1.0f, 200.0f, -2.0f, 6000.0f).reverb (0.22f, 1.6f, 0.4f));
+        add (B ("Honky Tonk Upright", "Piano", { "Rock", "Country", "Blues" }).sample ("upright-piano", 0.35f).chorus (0.35f, 0.25f, 0.7f).set ("chDelay", 14.0f).reverb (0.12f));
+        add (B ("Rhodes Classic", "Keys", { "Soul", "R&B", "Jazz", "Neo Soul" }).sample ("rhodes", 0.4f).reverb (0.16f));
+        add (B ("Rhodes Tremolo Soul", "Keys", { "Soul", "R&B", "Gospel", "Neo Soul" }).sample ("rhodes", 0.45f).lfo (1, SINE, FREE, 4.8f, 0).mod (srcLfo1, "smpPan", 0.6f).reverb (0.2f));
+        add (B ("Rhodes Lo-Fi", "Keys", { "Lo-Fi", "Hip Hop", "Chill" }).sample ("rhodes", 0.4f).dist (CRUSH, 0.3f, 0.35f).chorus (0.3f, 0.6f, 0.3f).reverb (0.2f));
+        add (B ("Rhodes Phaser Funk", "Keys", { "Funk", "Jazz", "Fusion" }).sample ("rhodes", 0.35f).phaser_on (0.5f).set ("phRate", 0.4f).dist (TUBE, 0.2f, 0.5f).reverb (0.12f));
+        add (B ("Electric Grand 80s", "Keys", { "80s", "Pop", "Synthwave" }).sample ("electric-grand", 0.5f).chorus (0.35f).reverb (0.25f));
+        add (B ("Electric Grand Ballad", "Keys", { "Pop", "R&B" }).sample ("electric-grand", 0.6f).reverb (0.3f, 3.0f).delay (0.1f, QD));
+
+        // Basses
+        add (B ("Finger Bass", "Bass", { "Pop", "Funk", "Soul", "R&B", "Reggae" }).sample ("finger-bass", 0.12f).set ("voices", 6.0f));
+        add (B ("Finger Bass Funk", "Bass", { "Funk", "Soul", "Disco" }).sample ("finger-bass", 0.1f).squash (0.3f, 0.5f, 0.6f).eq (2.0f, 90.0f, 2.0f, 2500.0f));
+        add (B ("Reggae Dub Finger Bass", "Bass", { "Reggae", "Dub", "Dancehall" }).sample ("finger-bass", 0.15f).set ("smpRoute", 0.0f).filt (1, LP24, 650.0f, 0.15f).eq (4.0f, 80.0f, -4.0f, 3000.0f));
+        add (B ("Pick Bass Rock", "Bass", { "Rock", "Punk", "Pop" }).sample ("pick-bass", 0.1f).dist (TUBE, 0.25f, 0.4f).eq (1.0f, 100.0f, 2.0f, 2000.0f));
+        add (B ("Motown Pick Bass", "Bass", { "Soul", "Funk", "Pop" }).sample ("pick-bass", 0.12f).set ("smpRoute", 0.0f).filt (1, LP12, 1400.0f, 0.1f));
+        add (B ("Jazz Bass", "Bass", { "Jazz", "Funk", "R&B", "Pop" }).sample ("jazz-bass", 0.15f));
+        add (B ("Jazz Bass Warm R&B", "Bass", { "R&B", "Neo Soul", "Gospel" }).sample ("jazz-bass", 0.2f).set ("smpRoute", 0.0f).filt (1, LP12, 1000.0f, 0.1f).squash (0.2f));
+        add (B ("Mirror Bass", "Bass", { "Pop", "Rock", "Funk" }).sample ("fashion-bass", 0.15f));
+        add (B ("Studio Bass", "Bass", { "Pop", "R&B", "Hip Hop", "Latin" }).sample ("swag-bass", 0.15f));
+        add (B ("Reggaeton Live Bass", "Bass", { "Reggaeton", "Latin", "Afrobeats" }).sample ("swag-bass", 0.1f).squash (0.3f).eq (3.0f, 70.0f, -2.0f, 4000.0f));
+        add (B ("Killer Finger Bass", "Bass", { "Funk", "Rock", "Fusion" }).sample ("killer-bass", 0.12f));
+        add (B ("Upright Jazz Bass", "Bass", { "Jazz", "Blues", "Lo-Fi", "Swing" }).sample ("upright-bass", 0.2f).reverb (0.12f, 1.5f));
+        add (B ("Upright Bass Lo-Fi", "Bass", { "Lo-Fi", "Hip Hop", "Jazz" }).sample ("upright-bass", 0.2f).set ("smpRoute", 0.0f).filt (1, LP12, 900.0f, 0.1f).dist (CRUSH, 0.2f, 0.3f));
+
+        // Guitars
+        add (B ("Nylon Guitar", "Guitar", { "Latin", "Pop", "Jazz", "Bossa Nova", "Reggaeton" }).sample ("nylon-guitar", 0.5f).reverb (0.15f));
+        add (B ("Spanish Guitar Reggaeton", "Guitar", { "Reggaeton", "Latin", "Pop" }).sample ("nylon-guitar", 0.4f).reverb (0.2f).delay (0.12f, ED));
+        add (B ("Bossa Nylon", "Guitar", { "Bossa Nova", "Jazz", "Latin" }).sample ("nylon-guitar", 0.45f).eq (1.0f, 150.0f, -2.0f, 6000.0f).reverb (0.18f));
+        add (B ("Steel Acoustic Guitar", "Guitar", { "Pop", "Folk", "Country", "Rock" }).sample ("steel-guitar", 0.5f).reverb (0.15f));
+        add (B ("Acoustic Pop Shimmer", "Guitar", { "Pop", "R&B", "Ambient" }).sample ("steel-guitar", 0.6f).chorus (0.25f).reverb (0.3f, 3.0f).delay (0.15f, QD));
+        add (B ("Clean Electric Guitar", "Guitar", { "Pop", "Rock", "Funk", "R&B" }).sample ("clean-electric", 0.3f).reverb (0.15f));
+        add (B ("Clean Chorus R&B Guitar", "Guitar", { "R&B", "Neo Soul", "Gospel", "Pop" }).sample ("clean-electric", 0.35f).chorus (0.4f, 0.45f, 0.6f).reverb (0.22f));
+        add (B ("Funk Clean Guitar", "Guitar", { "Funk", "Disco", "Soul" }).sample ("clean-electric", 0.15f).squash (0.3f).eq (-2.0f, 200.0f, 3.0f, 3000.0f));
+        add (B ("Afrobeats Clean Guitar", "Guitar", { "Afrobeats", "Amapiano", "Highlife" }).sample ("clean-electric", 0.15f).amp (0.0005f, 0.4f, 0.0f, 0.15f).delay (0.15f, ED).reverb (0.15f));
+        add (B ("Reggae Skank Guitar", "Guitar", { "Reggae", "Dub", "Ska" }).sample ("clean-electric", 0.08f).amp (0.0005f, 0.12f, 0.0f, 0.06f).delay (0.25f, ED, 0.45f).reverb (0.15f));
+        add (B ("Crunch Guitar", "Guitar", { "Rock", "Blues", "Indie" }).sample ("clean-electric", 0.25f).dist (TUBE, 0.55f).eq (-3.0f, 120.0f, -3.0f, 6000.0f).reverb (0.15f));
+        add (B ("Rock Drive Guitar", "Guitar", { "Rock", "Metal", "Punk" }).sample ("clean-electric", 0.25f).dist (HARD, 0.75f).eq (-4.0f, 120.0f, -5.0f, 5500.0f).reverb (0.12f));
+        add (B ("Hollow Jazz Guitar", "Guitar", { "Jazz", "Blues", "Soul" }).sample ("emily-guitar", 0.3f).set ("smpRoute", 0.0f).filt (1, LP12, 2200.0f, 0.1f).reverb (0.18f));
+        add (B ("Lo-Fi Guitar", "Guitar", { "Lo-Fi", "Hip Hop", "Chill" }).sample ("emily-guitar", 0.35f).dist (CRUSH, 0.25f, 0.35f).chorus (0.3f, 0.6f, 0.3f).reverb (0.2f));
+
+        // Acoustic drums (General MIDI keys: kick C1, snare D1, hats F#1 / G#1 / A#1, toms, crash C#2, ride D#2)
+        add (B ("Rock Kit", "Drums", { "Rock", "Pop", "Indie", "Funk" }).sample ("rock-kit", 0.1f).set ("voices", 32.0f).set ("velAmp", 0.2f));
+        add (B ("Rock Kit Room", "Drums", { "Rock", "Indie", "Pop" }).sample ("rock-kit", 0.1f).set ("voices", 32.0f).set ("velAmp", 0.2f).reverb (0.22f, 1.4f, 0.4f));
+        add (B ("Rock Kit Crushed", "Drums", { "Rock", "Hip Hop", "Trap" }).sample ("rock-kit", 0.1f).set ("voices", 32.0f).set ("velAmp", 0.2f).squash (0.6f).dist (TUBE, 0.3f, 0.4f));
+        add (B ("Live Kit Tight Pop", "Drums", { "Pop", "R&B", "Gospel", "Latin" }).sample ("rock-kit", 0.1f).set ("voices", 32.0f).set ("velAmp", 0.2f).squash (0.3f).eq (2.0f, 80.0f, 3.0f, 8000.0f));
+        add (B ("Lo-Fi Live Kit", "Drums", { "Lo-Fi", "Hip Hop", "Chill" }).sample ("rock-kit", 0.1f).set ("voices", 32.0f).set ("velAmp", 0.2f).dist (CRUSH, 0.3f, 0.5f)
+             .set ("ffOn", 1.0f).set ("ffCutoff", 5000.0f).squash (0.3f));
+
+        // The orchestra
+        add (B ("Violin Section", "Strings", { "Orchestral", "Cinematic", "Pop", "R&B" }).sample ("violins", 0.5f).set ("e1Attack", 0.06f).reverb (0.3f, 3.0f));
+        add (B ("Viola Section", "Strings", { "Orchestral", "Cinematic" }).sample ("violas", 0.5f).set ("e1Attack", 0.06f).reverb (0.3f, 3.0f));
+        add (B ("Cello Section", "Strings", { "Orchestral", "Cinematic", "Trap" }).sample ("cellos", 0.5f).set ("e1Attack", 0.06f).reverb (0.3f, 3.0f));
+        add (B ("Cinematic Cellos", "Strings", { "Cinematic", "Trap", "Drill" }).sample ("cellos", 0.8f).set ("e1Attack", 0.15f).reverb (0.45f, 5.0f, 0.9f));
+        add (B ("Tremolo Violins", "Strings", { "Cinematic", "Orchestral", "Trap" }).sample ("violin-tremolo", 0.5f).reverb (0.35f, 3.5f));
+        add (B ("Pizzicato Violins", "Strings", { "Orchestral", "Pop", "Cinematic" }).sample ("violin-pizz", 0.3f).reverb (0.25f, 2.0f));
+        add (B ("Pizzicato Cellos", "Strings", { "Orchestral", "Cinematic", "Pop" }).sample ("cello-pizz", 0.3f).reverb (0.25f, 2.0f));
+        add (B ("Drill Pizzicato", "Strings", { "Drill", "Trap" }).sample ("violin-pizz", 0.3f).reverb (0.3f, 2.5f).delay (0.15f, ED));
+        add (B ("Harp", "Strings", { "Orchestral", "Cinematic", "Pop" }).sample ("harp", 0.8f).reverb (0.3f, 3.0f));
+        add (B ("Harp Dream", "Strings", { "Ambient", "Cinematic", "R&B" }).sample ("harp", 1.0f).reverb (0.45f, 5.0f).delay (0.2f, QD));
+        add (B ("Trumpet", "Brass", { "Jazz", "Latin", "Orchestral", "Ska" }).sample ("trumpet", 0.3f).reverb (0.2f));
+        add (B ("Trumpet Staccato", "Brass", { "Latin", "Salsa", "Funk", "Ska" }).sample ("trumpet-stac", 0.15f).reverb (0.2f));
+        add (B ("Salsa Brass Stabs", "Brass", { "Salsa", "Latin", "Reggaeton" }).sample ("trumpet-stac", 0.15f).squash (0.25f).reverb (0.22f, 1.6f));
+        add (B ("French Horn", "Brass", { "Orchestral", "Cinematic" }).sample ("horn", 0.5f).set ("e1Attack", 0.03f).reverb (0.35f, 3.5f));
+        add (B ("Epic Horns", "Brass", { "Cinematic", "Trap", "Orchestral" }).sample ("horn", 0.7f).set ("e1Attack", 0.05f).reverb (0.45f, 5.0f, 0.9f).eq (2.0f, 120.0f, 1.0f, 4000.0f));
+        add (B ("Trombone", "Brass", { "Jazz", "Orchestral", "Ska" }).sample ("trombone", 0.3f).reverb (0.2f));
+        add (B ("Tuba", "Brass", { "Orchestral", "Cinematic", "Banda" }).sample ("tuba", 0.3f).reverb (0.2f));
+        add (B ("Flute", "Winds", { "Orchestral", "Jazz", "Latin", "Pop" }).sample ("flute", 0.3f).set ("e1Attack", 0.02f).reverb (0.25f, 2.5f));
+        add (B ("Drill Flute (real)", "Winds", { "Drill", "Trap", "Hip Hop" }).sample ("flute", 0.3f).set ("e1Attack", 0.02f).reverb (0.3f, 3.0f).delay (0.18f, ED));
+        add (B ("Oboe", "Winds", { "Orchestral", "Cinematic" }).sample ("oboe", 0.3f).set ("e1Attack", 0.02f).reverb (0.25f, 2.5f));
+        add (B ("Clarinet", "Winds", { "Jazz", "Orchestral", "Klezmer" }).sample ("clarinet", 0.3f).set ("e1Attack", 0.02f).reverb (0.22f, 2.2f));
+        add (B ("Bassoon", "Winds", { "Orchestral", "Cinematic" }).sample ("bassoon", 0.3f).reverb (0.22f, 2.2f));
+        add (B ("Glockenspiel", "Mallets", { "Orchestral", "Pop", "Cinematic", "Trap" }).sample ("glockenspiel", 1.0f).reverb (0.25f, 2.5f));
+        add (B ("Trap Glock", "Mallets", { "Trap", "Drill", "Hip Hop" }).sample ("glockenspiel", 1.0f).reverb (0.3f, 3.0f).delay (0.2f, ED));
+        add (B ("Marimba", "Mallets", { "Afrobeats", "Latin", "Pop", "Orchestral" }).sample ("marimba", 0.8f).reverb (0.18f));
+        add (B ("Afro Marimba", "Mallets", { "Afrobeats", "Amapiano", "Dancehall" }).sample ("marimba", 0.8f).delay (0.15f, ED).reverb (0.2f));
 
         return v;
     }

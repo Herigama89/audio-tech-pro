@@ -14,6 +14,7 @@ namespace riff::nemix
         juce::StringArray genres;
         nemixstate::Sound sound;
         bool user = false;
+        bool needsLibrary = false;   // (uses a recorded instrument from the Nemix Library)
         juce::File file {};
     };
 

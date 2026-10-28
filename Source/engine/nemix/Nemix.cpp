@@ -120,6 +120,8 @@ void Nemix::setParameter (int index, float value) noexcept
     for (const auto& o : ix().osc)
         if (index == o.table)
             wt::get (juce::roundToInt (value));
+    if (index == ix().smpInst || (index == ix().smpOn && value > 0.5f))
+        samples::request (juce::roundToInt (index == ix().smpInst ? value : getParameter (ix().smpInst)));
     values[(size_t) index].store (value, std::memory_order_relaxed);
 }
 
@@ -193,6 +195,9 @@ void Nemix::readSettings() noexcept
     blk.velAmp = base[(size_t) x.velAmp];
     blk.master = base[(size_t) x.master];
     blk.serial = base[(size_t) x.filterSerial] > 0.5f;
+    blk.sampleOn = base[(size_t) x.smpOn] > 0.5f;
+    blk.samplesOnly = blk.sampleOn && base[(size_t) x.subOn] < 0.5f && base[(size_t) x.nzOn] < 0.5f
+                      && base[(size_t) x.osc[0].on] < 0.5f && base[(size_t) x.osc[1].on] < 0.5f && base[(size_t) x.osc[2].on] < 0.5f;
 }
 
 float Nemix::eff (const Voice& v, int index) const noexcept
@@ -404,6 +409,22 @@ void Nemix::renderVoice (Voice& v, float* left, float* right, int start, int cou
     const auto nzRoute = juce::roundToInt (base[(size_t) x.nzRoute]);
     const auto colourLow = 1.0f - std::exp (-twoPi * (200.0f + 18000.0f * colour * colour) / (float) rate);
     const auto colourHigh = 1.0f - std::exp (-twoPi * (20.0f + 6000.0f * std::max (0.0f, colour - 0.5f) * 2.0f) / (float) rate);
+
+    // The sample layer: its step through the recording (pitch from the note, the region's root and tune), level and pan
+    const auto* smpRec = (! v.smpDone && v.smpRegion != nullptr && v.smpIns != nullptr) ? &v.smpIns->recordings[(size_t) v.smpRegion->recording] : nullptr;
+    double smpStep = 0.0;
+    float smpGL = 0.0f, smpGR = 0.0f;
+    const auto smpRoute = juce::roundToInt (base[(size_t) x.smpRoute]);
+    if (smpRec != nullptr && smpRec->length > 1)
+    {
+        const auto semis = (v.pitch + bendSemis) - v.smpRegion->root + v.smpRegion->tuneCents * 0.01 + eff (v, x.smpTune) + eff (v, x.smpFine) * 0.01;
+        smpStep = std::pow (2.0, semis / 12.0) * 44100.0 / rate;
+        const auto g = std::pow (10.0f, v.smpRegion->gainDb * 0.05f) * eff (v, x.smpLevel);
+        panGains (eff (v, x.smpPan) + v.smpRegion->pan, smpGL, smpGR);
+        smpGL *= g; smpGR *= g;
+    }
+    else
+        smpRec = nullptr;
 
     // The filters' coefficients
     Coeffs fc[2];
@@ -646,6 +667,30 @@ void Nemix::renderVoice (Voice& v, float* left, float* right, int start, int cou
             if (nzRoute == 3)                 { busL[2] += c * nzL; busR[2] += c * nzR; }
         }
 
+        if (smpRec != nullptr && ! v.smpDone)
+        {
+            const auto i0 = (int) v.smpPos;
+            if (i0 + 1 >= smpRec->length)
+                v.smpDone = true;
+            else
+            {
+                const auto f = (float) (v.smpPos - (double) i0);
+                const auto l0 = smpRec->at (0, i0), l1 = smpRec->at (0, i0 + 1);
+                const auto r0 = smpRec->at (1, i0), r1 = smpRec->at (1, i0 + 1);
+                auto sl = (l0 + f * (l1 - l0)) * smpGL, sr = (r0 + f * (r1 - r0)) * smpGR;
+                if (v.choking)
+                {
+                    v.choke *= 0.9985f;   // (a choked cymbal or open hat: gone in a few milliseconds)
+                    sl *= v.choke; sr *= v.choke;
+                    if (v.choke < 0.001f) v.smpDone = true;
+                }
+                v.smpPos += smpStep;
+                if (smpRoute == 0 || smpRoute == 2) { busL[0] += sl; busR[0] += sr; }
+                if (smpRoute == 1 || smpRoute == 2) { busL[1] += sl; busR[1] += sr; }
+                if (smpRoute == 3)                  { busL[2] += sl; busR[2] += sr; }
+            }
+        }
+
         // The filters, in series (1 into 2) or side by side
         float outL = busL[2], outR = busR[2];
         float f1L = busL[0], f1R = busR[0];
@@ -673,6 +718,9 @@ void Nemix::renderVoice (Voice& v, float* left, float* right, int start, int cou
     }
 
     if (v.env[0].stage == 0)
+        v.active = false;
+    // (only a recording sounds and it has ended: the voice is free)
+    if (blk.samplesOnly && v.smpDone)
         v.active = false;
 }
 
@@ -729,6 +777,32 @@ void Nemix::startVoice (Voice& v, int note, float velocity, bool retrigger) noex
             std::memset (f.formant, 0, sizeof (f.formant));
             for (auto& b : f.comb) std::fill (b.begin(), b.end(), 0.0f);
             f.combLow[0] = f.combLow[1] = 0.0f;
+        }
+    }
+    // The sample layer: the recording for this key and velocity (round robins in turn), choking what it should
+    v.smpDone = true;
+    v.smpRegion = nullptr;
+    v.choking = false;
+    v.choke = 1.0f;
+    if (blk.sampleOn)
+    {
+        const auto* ins = samples::find (juce::roundToInt (base[(size_t) x.smpInst]));
+        if (ins != nullptr && ins->ready.load (std::memory_order_acquire))
+        {
+            const auto vel = juce::jlimit (1, 127, juce::roundToInt (velocity * 127.0f));
+            const auto* region = ins->pick (note, vel, roundRobin[(size_t) note]++);
+            if (region != nullptr && region->recording < (int) ins->recordings.size())
+            {
+                v.smpIns = ins;
+                v.smpRegion = region;
+                v.smpDone = false;
+                const auto& rec = ins->recordings[(size_t) region->recording];
+                v.smpPos = (double) base[(size_t) x.smpStart] * std::min (rec.length - 2, 22050);
+                if (region->group > 0)
+                    for (auto& other : voices)
+                        if (&other != &v && other.active && ! other.smpDone && other.smpRegion != nullptr && other.smpRegion->offBy == region->group)
+                            other.choking = true;
+            }
         }
     }
     computeModulation (v, 0);
@@ -810,6 +884,8 @@ void Nemix::noteOff (int note) noexcept
     for (auto& v : voices)
         if (v.active && v.gate && v.note == note)
         {
+            if (blk.samplesOnly && v.smpIns != nullptr && v.smpIns->oneShot && ! v.smpDone)
+                continue;   // (a drum hit plays to its end)
             if (sustainPedal) v.held = false;
             else releaseVoice (v);
         }

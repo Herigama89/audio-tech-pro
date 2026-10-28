@@ -1,0 +1,21 @@
+Nemix Library: recorded instruments from free sample libraries, converted for Nemix.
+
+Every recording is in the public domain (CC0) except the Salamander Grand Piano, which is
+Creative Commons Attribution 3.0 (CC-BY 3.0): Alexander Holm.
+
+Sources:
+  - Big Rusty Drums, Karoryfer Samples (CC0)
+  - CC0 finger bass from the Discord SFZ GM bank
+  - Electric Bass YR, FreePats (CC0)
+  - Electric grand by Greg Sullivan (CC0)
+  - Emilyguitar, Karoryfer Samples (CC0)
+  - FSBS Electric Guitar Clean, FreePats (CC0)
+  - Fashionbass, Karoryfer Samples (CC0)
+  - Growlybass, Karoryfer Samples (CC0)
+  - Martin HD28 by Jeff Learman (CC0)
+  - Rhodes Mark I by Jeff Learman (CC0)
+  - Salamander Grand Piano by Alexander Holm (CC-BY 3.0)
+  - Spanish Classical Guitar, FreePats (CC0)
+  - Swagbass, Karoryfer Samples (CC0)
+  - Upright Piano KW, FreePats (CC0)
+  - Versilian Studios VSCO 2 CE (CC0)

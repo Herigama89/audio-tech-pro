@@ -7,6 +7,7 @@
 #include "../Source/engine/nemix/Nemix.h"
 #include "../Source/model/NemixState.h"
 #include "../Source/engine/nemix/NemixPresets.h"
+#include "../Source/engine/nemix/SampleLibrary.h"
 #include "../Source/ui/ThemePack.h"
 #include "../Source/ui/LiveLoopsGrid.h"
 #include "../Source/ui/ToolIcons.h"
@@ -110,6 +111,8 @@ public:
         auto synth = std::make_shared<Nemix>();
         NemixPanel panel (track, um, [synth] { return synth; });
         panel.loadPresetNamed (presetName.isNotEmpty() ? presetName : juce::String ("Dubstep Growl Yoy"));
+        if (const auto* inst = riff::nemix::samples::find (juce::roundToInt (riff::nemixstate::valueOf (riff::nemixstate::of (track), riff::nemix::ix().smpInst)))) juce::ignoreUnused (inst);
+        riff::nemix::samples::waitUntilLoaded (juce::roundToInt (riff::nemixstate::valueOf (riff::nemixstate::of (track), riff::nemix::ix().smpInst)));
         for (const auto& [index, value] : nemixstate::soundOf (nemixstate::of (track)))
             synth->setParameter (index, value);
         synth->prepare (48000.0, 512);
@@ -2047,6 +2050,160 @@ int main (int argc, char* argv[])
         const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).effectsOnly (types);
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         return r;
+    }
+    if (argc > 2 && juce::String (argv[1]) == "nmxconvert")
+    {
+        // The sound library's audio: each line "out|maxSeconds|startSample|gainDb|in@gainDb+in@gainDb...":
+        // the inputs mixed (mono goes to both sides), trimmed where it has died away, capped, faded, 44.1 kHz, Ogg Vorbis
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+        juce::OggVorbisAudioFormat ogg;
+        int done = 0, failed = 0;
+        for (const auto& line : juce::StringArray::fromLines (juce::File (juce::String (argv[2])).loadFileAsString()))
+        {
+            const auto parts = juce::StringArray::fromTokens (line, "|", "");
+            if (parts.size() < 5) continue;
+            const juce::File out (parts[0]);
+            const auto maxSeconds = parts[1].getDoubleValue();
+            const auto start = parts[2].getLargeIntValue();
+            const auto gain = juce::Decibels::decibelsToGain (parts[3].getFloatValue());
+            juce::AudioBuffer<float> mix;
+            double rate = 0.0;
+            bool ok = true;
+            for (const auto& input : juce::StringArray::fromTokens (parts[4], "+", ""))
+            {
+                const auto path = input.upToLastOccurrenceOf ("@", false, false);
+                const auto g = juce::Decibels::decibelsToGain (input.fromLastOccurrenceOf ("@", false, false).getFloatValue());
+                std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (juce::File (path)));
+                if (reader == nullptr) { ok = false; std::cout << "cannot read " << path << std::endl; break; }
+                const auto from = juce::jlimit ((juce::int64) 0, reader->lengthInSamples, start);
+                const auto length = (int) std::min (reader->lengthInSamples - from, (juce::int64) (reader->sampleRate * (maxSeconds + 0.5)));
+                juce::AudioBuffer<float> b ((int) std::min (2u, reader->numChannels), std::max (1, length));
+                reader->read (&b, 0, length, from, true, true);
+                if (rate == 0.0) rate = reader->sampleRate;
+                if (mix.getNumSamples() == 0) mix.setSize (2, b.getNumSamples(), false, true, false), mix.clear();
+                if (b.getNumSamples() > mix.getNumSamples()) mix.setSize (2, b.getNumSamples(), true, true, false);
+                for (int c = 0; c < 2; ++c)
+                    mix.addFrom (c, 0, b, std::min (c, b.getNumChannels() - 1), 0, b.getNumSamples(), g * gain);
+            }
+            if (! ok || mix.getNumSamples() == 0 || rate <= 0.0) { ++failed; continue; }
+            // mono if both sides are the same
+            bool mono = true;
+            for (int i = 0; i < mix.getNumSamples() && mono; ++i)
+                mono = std::abs (mix.getSample (0, i) - mix.getSample (1, i)) < 1.0e-5f;
+            // to 44.1 kHz
+            if (std::abs (rate - 44100.0) > 1.0)
+            {
+                const auto ratio = rate / 44100.0;
+                juce::AudioBuffer<float> r (2, (int) (mix.getNumSamples() / ratio));
+                for (int c = 0; c < 2; ++c)
+                {
+                    juce::LagrangeInterpolator li;
+                    li.process (ratio, mix.getReadPointer (c), r.getWritePointer (c), r.getNumSamples());
+                }
+                mix = std::move (r);
+                rate = 44100.0;
+            }
+            // where it has died away (60 dB under its peak, for good), capped
+            const auto peak = std::max (mix.getMagnitude (0, 0, mix.getNumSamples()), 1.0e-6f);
+            int end = mix.getNumSamples();
+            const auto floor = peak * 0.001f;
+            while (end > 0 && std::abs (mix.getSample (0, end - 1)) < floor && std::abs (mix.getSample (1, end - 1)) < floor) --end;
+            end = std::min (end + (int) (0.05 * rate), mix.getNumSamples());
+            const auto capped = (int) (maxSeconds * rate);
+            const auto fade = end > capped ? (int) (0.4 * rate) : (int) (0.02 * rate);
+            end = std::min (end, capped);
+            mix.setSize (2, std::max (1, end), true);
+            mix.applyGainRamp (0, std::max (0, end - fade), std::min (fade, end), 1.0f, 0.0f);
+            out.getParentDirectory().createDirectory();
+            out.deleteFile();
+            auto stream = std::make_unique<juce::FileOutputStream> (out);
+            std::unique_ptr<juce::AudioFormatWriter> writer (ogg.createWriterFor (stream.get(), 44100.0, mono ? 1u : 2u, 16, {}, mono ? 4 : 5));
+            if (writer == nullptr) { ++failed; continue; }
+            stream.release();
+            writer->writeFromAudioSampleBuffer (mix, 0, mix.getNumSamples());
+            ++done;
+        }
+        std::cout << "converted " << done << ", failed " << failed << std::endl;
+        return failed > 0 ? 1 : 0;
+    }
+    if (argc > 3 && juce::String (argv[1]) == "nemixdemo")
+    {
+        // A short demo of a sound: chords for keys and pads, a line for basses, a beat for kits (120 BPM, 4 bars)
+        const juce::String name (argv[2]);
+        const riff::nemix::Preset* preset = nullptr;
+        for (const auto& p : riff::nemix::factoryPresets())
+            if (p.name == name) preset = &p;
+        if (preset == nullptr) { std::cout << "no preset " << name << std::endl; return 1; }
+        riff::Nemix synth;
+        for (const auto& [i, v] : preset->sound) synth.setParameter (i, v);
+        if (preset->needsLibrary)
+            riff::nemix::samples::waitUntilLoaded (juce::roundToInt (synth.getParameter (riff::nemix::indexOf ("smpInst"))));
+        constexpr double rate = 44100.0;
+        synth.prepare (rate, 512);
+        struct Note { double at, length; int key; float velocity; };
+        std::vector<Note> notes;
+        const auto beat = 0.5;
+        const auto& c = preset->category;
+        if (c == "Drums")
+        {
+            for (int bar = 0; bar < 4; ++bar)
+                for (int s = 0; s < 8; ++s)
+                {
+                    const auto t = (bar * 8 + s) * beat * 0.5;
+                    notes.push_back ({ t, 0.1, s == 7 && bar == 3 ? 46 : 42, s % 2 == 0 ? 0.8f : 0.55f });
+                    if (s == 0 || s == 3 || s == 5) notes.push_back ({ t, 0.1, 36, 0.9f });
+                    if (s == 2 || s == 6) notes.push_back ({ t, 0.1, 38, 0.85f });
+                }
+            notes.push_back ({ 0.0, 0.1, 49, 0.9f });
+        }
+        else if (c == "Bass")
+        {
+            const int roots[] { 36, 33, 29, 31 };
+            for (int bar = 0; bar < 4; ++bar)
+                for (int s = 0; s < 4; ++s)
+                    notes.push_back ({ (bar * 4 + s) * beat, beat * 0.8, roots[bar] + (s == 3 ? 7 : 0), s == 0 ? 0.9f : 0.7f });
+        }
+        else
+        {
+            const int chords[4][3] { { 60, 64, 67 }, { 57, 60, 64 }, { 53, 57, 60 }, { 55, 59, 62 } };
+            const auto melodic = c == "Strings" || c == "Brass" || c == "Winds";
+            for (int bar = 0; bar < 4; ++bar)
+            {
+                if (melodic)
+                    for (int s = 0; s < 3; ++s) notes.push_back ({ bar * 4 * beat + s * beat * 1.33, beat * 1.2, chords[bar][s] + (c == "Brass" || c == "Winds" ? 0 : 0), 0.8f });
+                else
+                    for (const auto k : chords[bar]) notes.push_back ({ bar * 4 * beat, beat * 3.6, k, 0.8f });
+            }
+        }
+        const auto seconds = 4 * 4 * beat + 2.5;
+        juce::AudioBuffer<float> out (2, (int) (seconds * rate));
+        out.clear();
+        std::vector<float> l (512), r (512);
+        for (int pos = 0; pos < out.getNumSamples(); pos += 512)
+        {
+            const auto n = std::min (512, out.getNumSamples() - pos);
+            juce::MidiBuffer midi;
+            for (const auto& note : notes)
+            {
+                const auto on = (int) (note.at * rate) - pos, off = (int) ((note.at + note.length) * rate) - pos;
+                if (on >= 0 && on < n) midi.addEvent (juce::MidiMessage::noteOn (1, note.key, note.velocity), on);
+                if (off >= 0 && off < n) midi.addEvent (juce::MidiMessage::noteOff (1, note.key), off);
+            }
+            synth.setPosition (pos, true, 120.0);
+            synth.render (l.data(), r.data(), n, midi);
+            out.copyFrom (0, pos, l.data(), n);
+            out.copyFrom (1, pos, r.data(), n);
+        }
+        const auto file = juce::File (juce::String (argv[3]));
+        file.deleteFile();
+        auto stream = std::make_unique<juce::FileOutputStream> (file);
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::AudioFormatWriter> writer (wav.createWriterFor (stream.get(), rate, 2, 16, {}, 0));
+        stream.release();
+        writer->writeFromAudioSampleBuffer (out, 0, out.getNumSamples());
+        std::cout << "wrote " << file.getFullPathName() << " peak " << out.getMagnitude (0, out.getNumSamples()) << std::endl;
+        return 0;
     }
     if (argc > 1 && juce::String (argv[1]) == "nemixperf")
     {

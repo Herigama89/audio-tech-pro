@@ -50,6 +50,7 @@ namespace riff::nemix
         struct Osc { int on, table, pos, oct, semi, fine, unison, detune, blend, width, level, pan, phase, rand, warp, warpAmt, route; } osc[3];
         int subOn, subShape, subOct, subLevel, subPan, subDirect;
         int nzOn, nzType, nzLevel, nzPan, nzColour, nzRoute;
+        int smpOn, smpInst, smpLevel, smpPan, smpTune, smpFine, smpStart, smpRoute;
         struct Filter { int on, type, cutoff, res, drive, keytrack, mix, pan; } filter[2];
         int filterSerial;
         struct Env { int attack, hold, decay, sustain, release, curve; } env[4];

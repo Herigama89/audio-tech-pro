@@ -2,6 +2,7 @@
 #include "../engine/nemix/Nemix.h"
 #include "../engine/nemix/NemixPresets.h"
 #include "../model/NemixState.h"
+#include "../engine/nemix/SampleLibrary.h"
 #include "BinaryData.h"
 #include <complex>
 #include <cstring>
@@ -986,24 +987,66 @@ struct NemixPanel::Impl final : public Host,
             label (pg, "OUT", R (x + 172, 294, 60, 14));
             choice (pg, p + "Route", R (x + 170, 310, 112, 22));
         }
-        // Sub and noise
+        // Sub, noise and the sample layer: one at a time, by tab
         {
             const auto x = 910;
-            pg.boxes.push_back ({ R (x, 8, 280, 170), "SUB", col::red });
-            toggle (pg, "subOn", "ON", col::red, R (x + 60, 12, 40, 20));
-            choice (pg, "subShape", R (x + 108, 11, 90, 22));
-            choice (pg, "subOct", R (x + 204, 11, 64, 22));
-            knob (pg, "subLevel", col::red, R (x + 10, 44, 64, 74), "Level");
-            knob (pg, "subPan", col::red, R (x + 78, 44, 64, 74), "Pan");
-            label (pg, "DIRECT OUT", R (x + 152, 54, 110, 14));
-            toggle (pg, "subDirect", "NO FILTER", col::red, R (x + 150, 72, 112, 24));
-            pg.boxes.push_back ({ R (x, 186, 280, 174), "NOISE", col::pink });
-            toggle (pg, "nzOn", "ON", col::pink, R (x + 70, 190, 40, 20));
-            choice (pg, "nzType", R (x + 118, 189, 150, 22));
-            knob (pg, "nzLevel", col::pink, R (x + 10, 222, 64, 74), "Level");
-            knob (pg, "nzColour", col::pink, R (x + 78, 222, 64, 74), "Colour");
-            knob (pg, "nzPan", col::pink, R (x + 146, 222, 64, 74), "Pan");
-            choice (pg, "nzRoute", R (x + 14, 316, 140, 22));
+            pg.boxes.push_back ({ R (x, 8, 280, 352), {}, col::red });
+            const char* tabNames[] { "SAMPLE", "SUB", "NOISE" };
+            const juce::Colour tabColours[] { col::yellow, col::red, col::pink };
+            for (int t = 0; t < 3; ++t)
+            {
+                auto* b = make<juce::TextButton> (tabNames[t]);
+                b->setClickingTogglesState (true);
+                b->setRadioGroupId (9201);
+                b->getProperties().set ("accent", tabColours[t].toString());
+                b->setBounds (x + 10 + t * 88, 14, 84, 24);
+                b->onClick = [this, t] { showLayer (t); };
+                pg.addAndMakeVisible (b);
+                layerTabs[(size_t) t] = b;
+            }
+            auto& smp = layerControls[0];
+            smp.push_back (toggle (pg, "smpOn", "ON", col::yellow, R (x + 12, 50, 44, 24)));
+            instrumentBox = make<juce::ComboBox>();
+            instrumentBox->setBounds (x + 62, 50, 206, 24);
+            instrumentBox->setTooltip ("A recorded instrument from the Nemix Library");
+            fillInstruments();
+            instrumentBox->onChange = [this]
+            {
+                if (updatingInstrument || instrumentBox->getSelectedId() <= 0) return;
+                beginGesture ("Sample instrument");
+                set (ix().smpInst, (float) (instrumentBox->getSelectedId() - 1));
+                if (get (ix().smpOn) < 0.5f) set (ix().smpOn, 1.0f);
+            };
+            pg.addAndMakeVisible (instrumentBox);
+            smp.push_back (instrumentBox);
+            const char* ids[] { "smpLevel", "smpPan", "smpStart", "smpTune", "smpFine" };
+            const char* names[] { "Level", "Pan", "Start", "Semi", "Fine" };
+            for (int k = 0; k < 5; ++k)
+                smp.push_back (knob (pg, ids[k], col::yellow, R (x + 8 + (k % 3) * 88, 86 + (k / 3) * 92, 84, 88), names[k]));
+            smp.push_back (choice (pg, "smpRoute", R (x + 190, 214, 78, 24)));
+            instrumentInfo = make<juce::Label>();
+            instrumentInfo->setFont (font (11.0f));
+            instrumentInfo->setColour (juce::Label::textColourId, col::dim);
+            instrumentInfo->setJustificationType (juce::Justification::topLeft);
+            instrumentInfo->setBounds (x + 12, 280, 256, 72);
+            pg.addAndMakeVisible (instrumentInfo);
+            smp.push_back (instrumentInfo);
+
+            auto& sub = layerControls[1];
+            sub.push_back (toggle (pg, "subOn", "ON", col::red, R (x + 12, 50, 44, 24)));
+            sub.push_back (choice (pg, "subShape", R (x + 62, 50, 110, 24)));
+            sub.push_back (choice (pg, "subOct", R (x + 180, 50, 88, 24)));
+            sub.push_back (knob (pg, "subLevel", col::red, R (x + 10, 90, 84, 92), "Level"));
+            sub.push_back (knob (pg, "subPan", col::red, R (x + 98, 90, 84, 92), "Pan"));
+            sub.push_back (toggle (pg, "subDirect", "NO FILTER", col::red, R (x + 14, 200, 120, 26)));
+
+            auto& nz = layerControls[2];
+            nz.push_back (toggle (pg, "nzOn", "ON", col::pink, R (x + 12, 50, 44, 24)));
+            nz.push_back (choice (pg, "nzType", R (x + 62, 50, 206, 24)));
+            nz.push_back (knob (pg, "nzLevel", col::pink, R (x + 8, 90, 84, 92), "Level"));
+            nz.push_back (knob (pg, "nzColour", col::pink, R (x + 96, 90, 84, 92), "Colour"));
+            nz.push_back (knob (pg, "nzPan", col::pink, R (x + 184, 90, 84, 92), "Pan"));
+            nz.push_back (choice (pg, "nzRoute", R (x + 14, 200, 140, 24)));
         }
         // Two filters and the macros
         for (int f = 0; f < 2; ++f)
@@ -1086,6 +1129,63 @@ struct NemixPanel::Impl final : public Host,
         }
         showEnv (0);
         showLfo (0);
+        showLayer (get (ix().smpOn) > 0.5f ? 0 : get (ix().subOn) > 0.5f ? 1 : get (ix().nzOn) > 0.5f ? 2 : 0);
+    }
+
+    std::array<juce::TextButton*, 3> layerTabs {};
+    std::array<std::vector<juce::Component*>, 3> layerControls;
+    juce::ComboBox* instrumentBox = nullptr;
+    juce::Label* instrumentInfo = nullptr;
+    bool updatingInstrument = false;
+
+    void showLayer (int t)
+    {
+        for (int k = 0; k < 3; ++k)
+        {
+            layerTabs[(size_t) k]->setToggleState (k == t, juce::dontSendNotification);
+            for (auto* c : layerControls[(size_t) k]) c->setVisible (k == t);
+        }
+    }
+
+    /** The library's instruments, by kind. */
+    void fillInstruments()
+    {
+        instrumentBox->clear (juce::dontSendNotification);
+        const auto& cat = samples::catalogue();
+        if (cat.empty())
+        {
+            instrumentBox->setTextWhenNothingSelected ("Library not installed");
+            return;
+        }
+        instrumentBox->setTextWhenNothingSelected ("Choose an instrument");
+        juce::StringArray kinds;
+        for (const auto& e : cat) kinds.addIfNotAlreadyThere (e.category);
+        for (const auto& kind : kinds)
+        {
+            instrumentBox->addSectionHeading (kind);
+            for (size_t i = 0; i < cat.size(); ++i)
+                if (cat[i].category == kind)
+                    instrumentBox->addItem (cat[i].name, (int) i + 1);
+        }
+        refreshInstrument();
+    }
+
+    void refreshInstrument()
+    {
+        if (instrumentBox == nullptr || instrumentInfo == nullptr) return;
+        const juce::ScopedValueSetter<bool> busy (updatingInstrument, true);
+        const auto index = juce::roundToInt (get (ix().smpInst));
+        const auto& cat = samples::catalogue();
+        instrumentBox->setSelectedId (index < (int) cat.size() ? index + 1 : 0, juce::dontSendNotification);
+        juce::String info;
+        if (cat.empty())
+            info = "The Nemix Library (recorded pianos, basses, guitars, drums and orchestra) isn't installed.";
+        else if (const auto* ins = samples::find (index))
+            info = ins->ready.load() ? ins->credit + (ins->oneShot ? "\nOne-shot: each hit plays to its end." : juce::String())
+                                     : juce::String ("Loading...");
+        else if (get (ix().smpOn) > 0.5f)
+            info = "Loading...";
+        instrumentInfo->setText (info, juce::dontSendNotification);
     }
 
     void showEnv (int e)
@@ -1407,6 +1507,8 @@ struct NemixPanel::Impl final : public Host,
         for (auto* k : knobs) k->refresh();
         for (auto* c : choices) c->refresh();
         for (auto* t : toggles) t->refresh();
+        refreshInstrument();
+        if (get (ix().smpOn) > 0.5f) showLayer (0);
         refreshRows();
         refreshHeader();
         list.repaint();
@@ -1422,6 +1524,7 @@ struct NemixPanel::Impl final : public Host,
         for (auto* k : knobs) if (k->getIndex() == index) k->refresh();
         for (auto* c : choices) if (c->getIndex() == index) c->refresh();
         for (auto* t : toggles) if (t->getIndex() == index) t->refresh();
+        if (index == ix().smpInst || index == ix().smpOn) refreshInstrument();
         if (params()[(size_t) index].id.startsWith ("m") && ! params()[(size_t) index].id.startsWith ("macro") && ! params()[(size_t) index].id.startsWith ("mono"))
         {
             for (auto* k : knobs) k->repaint();
@@ -1433,6 +1536,8 @@ struct NemixPanel::Impl final : public Host,
 
     void timerCallback() override
     {
+        if (instrumentInfo != nullptr && instrumentInfo->getText() == "Loading...")
+            refreshInstrument();
         auto synth = live ? live() : nullptr;
         const auto playing = synth != nullptr && synth->activeVoices() > 0;
         if (playing || wasPlaying)

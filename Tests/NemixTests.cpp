@@ -2,6 +2,7 @@
 #include "../Source/engine/nemix/Nemix.h"
 #include "../Source/engine/nemix/Wavetables.h"
 #include "../Source/model/NemixState.h"
+#include "../Source/engine/nemix/SampleLibrary.h"
 
 using namespace riff;
 
@@ -223,23 +224,69 @@ TEST_CASE ("A Nemix sound goes to text and back", "[nemix]")
 TEST_CASE ("Every Nemix factory sound plays, finite and at a sensible level", "[nemix][presets]")
 {
     const auto& presets = nemix::factoryPresets();
-    REQUIRE (presets.size() >= 150);
+    REQUIRE (presets.size() >= 200);
     std::set<juce::String> names;
     const auto report = juce::SystemStats::getEnvironmentVariable ("NEMIX_LEVELS", {}).isNotEmpty();
     for (const auto& p : presets)
     {
         CHECK (names.insert (p.name).second);
         CHECK (nemix::presetCategories().contains (p.category));
+        if (p.needsLibrary && nemix::samples::catalogue().empty())
+            continue;   // (a recorded instrument, and the library isn't here)
         Nemix n;
         for (const auto& [index, value] : p.sound)
             n.setParameter (index, value);
+        if (p.needsLibrary)
+            REQUIRE (nemix::samples::waitUntilLoaded (juce::roundToInt (n.getParameter (nemix::indexOf ("smpInst")))));
         const auto drums = p.category == "Drums" || p.category == "Percussion";
-        const auto r = play (n, drums ? std::vector<int> { 60 } : std::vector<int> { 48, 55, 60, 64 }, p.category == "FX" ? 3.0 : 1.5, 1.0, true);
+        const auto kit = drums && p.needsLibrary;   // (a recorded kit: General MIDI keys)
+        const auto r = play (n, kit ? std::vector<int> { 36, 38, 42 } : drums ? std::vector<int> { 60 } : std::vector<int> { 48, 55, 60, 64 },
+                             p.category == "FX" ? 3.0 : 1.5, 1.0, true);
         INFO (p.name);
         CHECK (r.finite);
         CHECK (r.peak < 2.0f);
         CHECK (r.rms > 1.0e-4f);
         if (report)
             std::cout << "LEVEL|" << p.name << "|" << juce::Decibels::gainToDecibels (r.rms) << "|" << juce::Decibels::gainToDecibels (r.peak) << std::endl;
+    }
+}
+
+
+TEST_CASE ("Nemix plays recorded instruments from its library", "[nemix][library]")
+{
+    // (needs the library: NEMIX_LIBRARY, or installed next to the app)
+    if (nemix::samples::catalogue().empty())
+    {
+        WARN ("Nemix Library not found: skipped");
+        return;
+    }
+    for (size_t i = 0; i < nemix::samples::catalogue().size(); ++i)
+    {
+        const auto& entry = nemix::samples::catalogue()[i];
+        INFO (entry.name);
+        const auto report = juce::SystemStats::getEnvironmentVariable ("NEMIX_LEVELS", {}).isNotEmpty();
+        REQUIRE (nemix::samples::waitUntilLoaded ((int) i));
+        const auto* ins = nemix::samples::find ((int) i);
+        REQUIRE (ins != nullptr);
+        CHECK (! ins->regions.empty());
+        for (const auto& rec : ins->recordings)
+            CHECK (rec.length > 100);
+        Nemix n;
+        set (n, "aOn", 0.0f);
+        set (n, "smpOn", 1.0f);
+        set (n, "smpInst", (float) i);
+        set (n, "voices", 32.0f);
+        set (n, "e1Release", 0.3f);
+        const auto drums = entry.category == "Drums";
+        // (notes in the instrument's own range)
+        int lo = 127, hi = 0;
+        for (const auto& reg : ins->regions) { lo = std::min (lo, reg.root); hi = std::max (hi, reg.root); }
+        const auto mid = (lo + hi) / 2;
+        const auto r = play (n, drums ? std::vector<int> { 36, 38, 42 } : std::vector<int> { mid, mid + 4, mid + 7 }, 1.5, 1.0);
+        if (report)
+            std::cout << "SAMPLELEVEL|" << entry.id << "|" << juce::Decibels::gainToDecibels (r.rms) << "|" << juce::Decibels::gainToDecibels (r.peak) << std::endl;
+        CHECK (r.finite);
+        CHECK (r.rms > 1.0e-4f);
+        CHECK (r.peak < 2.0f);
     }
 }

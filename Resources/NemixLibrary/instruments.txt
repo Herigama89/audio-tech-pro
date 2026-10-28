@@ -1,0 +1,35 @@
+# Nemix Library 1
+grand-piano|Grand Piano|Piano
+upright-piano|Upright Piano|Piano
+rhodes|Electric Piano (Rhodes)|Keys
+electric-grand|Electric Grand|Keys
+finger-bass|Finger Bass|Bass
+pick-bass|Pick Bass|Bass
+jazz-bass|Jazz Bass|Bass
+fashion-bass|Mirror Bass|Bass
+swag-bass|Studio Bass|Bass
+killer-bass|Killer Finger Bass|Bass
+nylon-guitar|Nylon Guitar|Guitar
+steel-guitar|Steel Acoustic Guitar|Guitar
+clean-electric|Clean Electric Guitar|Guitar
+emily-guitar|Hollow Electric Guitar|Guitar
+rock-kit|Rock Kit|Drums
+violins|Violin Section|Strings
+violas|Viola Section|Strings
+cellos|Cello Section|Strings
+violin-pizz|Pizzicato Violins|Strings
+cello-pizz|Pizzicato Cellos|Strings
+upright-bass|Upright Bass (Jazz)|Bass
+violin-tremolo|Tremolo Violins|Strings
+trumpet|Trumpet|Brass
+horn|French Horn|Brass
+trombone|Trombone|Brass
+tuba|Tuba|Brass
+trumpet-stac|Trumpet Staccato|Brass
+flute|Flute|Winds
+oboe|Oboe|Winds
+clarinet|Clarinet|Winds
+bassoon|Bassoon|Winds
+glockenspiel|Glockenspiel|Mallets
+marimba|Marimba|Mallets
+harp|Harp|Strings

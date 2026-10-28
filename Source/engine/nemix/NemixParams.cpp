@@ -137,6 +137,15 @@ namespace
             knob ("nzPan", "Noise Pan", "", -1.0f, 1.0f, 0.0f, 0.0f);
             knob ("nzColour", "Noise Colour", "", 0.0f, 1.0f, 0.5f, 0.5f);
             choice ("nzRoute", "Noise Output", routes, 0);
+            // The sample layer: a recorded instrument from the library (piano, bass, guitar, drums, orchestra...)
+            choice ("smpOn", "Sample On", offOn, 0);
+            whole ("smpInst", "Sample Instrument", "", 0.0f, 255.0f, 0.0f);
+            knob ("smpLevel", "Sample Level", "", 0.0f, 1.0f, 0.8f, 0.5f);
+            knob ("smpPan", "Sample Pan", "", -1.0f, 1.0f, 0.0f, 0.0f);
+            knob ("smpTune", "Sample Semi", " st", -24.0f, 24.0f, 0.0f, 0.0f);
+            knob ("smpFine", "Sample Fine", " ct", -100.0f, 100.0f, 0.0f, 0.0f);
+            knob ("smpStart", "Sample Start", "", 0.0f, 1.0f, 0.0f, 0.5f);
+            choice ("smpRoute", "Sample Output", routes, 3);
 
             // The filters
             for (int f = 1; f <= 2; ++f)
@@ -323,6 +332,8 @@ const Index& ix()
                          at (p + "Rand"), at (p + "Warp"), at (p + "WarpAmt"), at (p + "Route") };
         }
         x.subOn = at ("subOn"); x.subShape = at ("subShape"); x.subOct = at ("subOct"); x.subLevel = at ("subLevel"); x.subPan = at ("subPan"); x.subDirect = at ("subDirect");
+        x.smpOn = at ("smpOn"); x.smpInst = at ("smpInst"); x.smpLevel = at ("smpLevel"); x.smpPan = at ("smpPan");
+        x.smpTune = at ("smpTune"); x.smpFine = at ("smpFine"); x.smpStart = at ("smpStart"); x.smpRoute = at ("smpRoute");
         x.nzOn = at ("nzOn"); x.nzType = at ("nzType"); x.nzLevel = at ("nzLevel"); x.nzPan = at ("nzPan"); x.nzColour = at ("nzColour"); x.nzRoute = at ("nzRoute");
         for (int f = 0; f < 2; ++f)
         {

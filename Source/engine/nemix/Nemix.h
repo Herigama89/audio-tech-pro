@@ -4,6 +4,7 @@
 #include "NemixParams.h"
 #include "NemixFx.h"
 #include "Wavetables.h"
+#include "SampleLibrary.h"
 #include <array>
 #include <atomic>
 
@@ -84,6 +85,13 @@ private:
         std::array<FilterState, 2> filter;
         std::array<float, 32> offsets {};        // the modulation of each destination in use, 0..1 of its range
         float ampNow = 0.0f;
+        // the sample layer: the recording playing, where in it, and whether a choke is fading it out
+        const nemix::samples::Instrument* smpIns = nullptr;
+        const nemix::samples::Region* smpRegion = nullptr;
+        double smpPos = 0.0;
+        bool smpDone = true;
+        float choke = 1.0f;
+        bool choking = false;
     };
 
     // Per block: the settings, and the modulation in use
@@ -124,6 +132,7 @@ private:
     bool sustainPedal = false;
     int lastNote = -1;
     std::array<bool, 128> keyDown {};
+    std::array<int, 128> roundRobin {};
     std::array<float, 128> keyVelocity {};
     std::vector<int> monoStack;                 // (mono: the notes held, newest last)
     juce::Random random;
@@ -157,6 +166,8 @@ private:
         bool mono = false, legato = false;
         float glide = 0.0f, bendRange = 2.0f, velAmp = 0.6f, master = 0.7f;
         bool serial = true;
+        bool samplesOnly = false;   // (only the sample layer sounds: a one-shot plays to its end)
+        bool sampleOn = false;
     } blk;
 };
 
