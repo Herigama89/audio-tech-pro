@@ -123,6 +123,13 @@ namespace
             addRow (ecoMode, "Eco mode", { "Off", "On (for slower computers)", "When on battery" },
                     juce::jlimit (0, 2, props.getIntValue ("ecoMode", 0)) + 1,
                     [this] (int id) { props.setValue ("ecoMode", id - 1); });
+            addRow (processRange, "Process buffer range", { "Off (all at the I/O buffer)", "Small", "Medium", "Large" },
+                    juce::jlimit (0, 3, props.getIntValue ("processBufferRange", 2)) + 1,
+                    [this] (int id) { props.setValue ("processBufferRange", id - 1); });
+            processRange.setTooltip ("As Logic's: the tracks you aren't playing live are processed ahead of time in larger blocks, "
+                                     "on their own thread, so the load stays steady and a small I/O buffer doesn't click. The track "
+                                     "you play, armed and monitored tracks stay at the I/O buffer. Large: steadiest; Small: changes "
+                                     "(a fader, a plugin knob) heard soonest. Off: everything in the audio callback.");
 
             openLast.setButtonText ("Open the last project when the app starts");
             openLast.setToggleState (props.getBoolValue ("openLastProject", false), juce::dontSendNotification);
@@ -167,7 +174,7 @@ namespace
 
         juce::PropertiesFile& props;
         std::function<void()> onChange;
-        juce::ComboBox autosave, backups, autoBackup, bitDepth, stopBehaviour, ecoMode;
+        juce::ComboBox autosave, backups, autoBackup, bitDepth, stopBehaviour, ecoMode, processRange;
         juce::ToggleButton openLast;
         std::vector<Row> rows;
     };
@@ -228,6 +235,17 @@ void MainComponent::showPreferences()
         setStopReturnsToStart (props->getBoolValue ("stopReturnsToStart", false));
         eco::mode = juce::jlimit (0, 2, props->getIntValue ("ecoMode", 0));
         eco::batteryNow = eco::runningOnBattery();
+        // A new process buffer range takes effect as the audio device starts again
+        if (const auto chunk = processBufferChunk (props->getIntValue ("processBufferRange", 2)); chunk != engine.getProcessAhead())
+        {
+            engine.setProcessAhead (chunk);
+            auto& devices = engine.getDeviceManager();
+            if (devices.getCurrentAudioDevice() != nullptr)
+            {
+                devices.closeAudioDevice();
+                devices.restartLastAudioDevice();
+            }
+        }
         props->saveIfNeeded();
     }), "Settings", this);
 }
@@ -1253,7 +1271,8 @@ void MainComponent::updatePerformance()
     const auto load = engine.takeLoad();
     const auto diskSeconds = juce::Time::highResolutionTicksToSeconds (player.getReadAhead().busyTicks.exchange (0));
     PerformanceReading r;
-    r.cpu = load.now;
+    r.cpu = load.average;     // (steady: the load over the last moment, as Logic's meter shows it)
+    r.peakNow = load.now;     // the single heaviest block since then
     r.peak = load.peak;
     r.overloads = load.overloads;
     r.disk = elapsed > 0.0 ? (float) juce::jlimit (0.0, 1.0, diskSeconds / elapsed) : 0.0f;
@@ -1285,7 +1304,7 @@ void MainComponent::updatePerformance()
         r.device = "No audio device open";
 
     lastReading = std::move (r);
-    performanceMeter.setReading (lastReading.cpu, lastReading.disk);
+    performanceMeter.setReading (lastReading.cpu, lastReading.disk, lastReading.peakNow);
 }
 
 void MainComponent::showMultiMeter()

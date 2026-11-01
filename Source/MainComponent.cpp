@@ -616,6 +616,7 @@ MainComponent::MainComponent (bool openAudioDevice)
             combineError = aggregate::create (aggregateSetup);
 
         const auto saved = appProperties.getUserSettings()->getXmlValue ("audioDevice");
+        engine.setProcessAhead (processBufferChunk (appProperties.getUserSettings()->getIntValue ("processBufferRange", 2)));
         startupError = engine.initialise (saved.get());
         updateInputLabels();
 

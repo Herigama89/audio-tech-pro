@@ -9,7 +9,8 @@ namespace riff
 /** What the Performance meter shows (filled in by the main window from the engine). */
 struct PerformanceReading
 {
-    float cpu = 0.0f;        // share of each buffer's time the audio took (0..1+)
+    float cpu = 0.0f;        // share of the time the audio took, averaged over the last moment (0..1+)
+    float peakNow = 0.0f;    // the heaviest single block in that moment
     float peak = 0.0f;       // the highest since reset
     int overloads = 0;       // buffers that took longer than they play (you'd hear a click)
     float disk = 0.0f;       // share of time spent reading audio from disk
@@ -28,11 +29,14 @@ class PerformanceMeter final : public juce::Component, public juce::SettableTool
 public:
     PerformanceMeter() { setTooltip ("Performance: how hard the computer works to play the song (click for details)"); }
 
-    void setReading (float cpuNow, float diskNow)
+    void setReading (float cpuNow, float diskNow, float peakNow = 0.0f)
     {
-        // Rises at once, falls back gently (like Logic's meter).
-        cpu = juce::jmax (cpuNow, cpu * 0.9f);
+        // The average load, eased (a steady bar, as Logic's); the heaviest recent block as a thin mark that
+        // holds a moment and falls back
+        cpu += (cpuNow - cpu) * (cpuNow > cpu ? 0.5f : 0.15f);
         disk = juce::jmax (diskNow, disk * 0.9f);
+        if (peakNow >= peakMark) { peakMark = peakNow; peakHold = 20; }
+        else if (--peakHold < 0) peakMark = juce::jmax (cpu, peakMark * 0.92f);
         repaint();
     }
 
@@ -73,11 +77,19 @@ public:
                 g.setColour (colourFor (level));
                 g.fillRoundedRectangle (row.getX() + (float) i * w + 0.5f, row.getY(), w - 1.0f, row.getHeight(), 1.0f);
             }
+            if (juce::String (label) == "CPU" && peakMark > value + 0.5f / (float) segments)
+            {
+                // the heaviest recent block
+                const auto x = row.getX() + row.getWidth() * juce::jlimit (0.0f, 1.0f, peakMark) - 1.5f;
+                g.setColour (colourFor (peakMark).withAlpha (0.9f));
+                g.fillRect (x, row.getY(), 2.0f, row.getHeight());
+            }
         }
     }
 
 private:
-    float cpu = 0.0f, disk = 0.0f;
+    float cpu = 0.0f, disk = 0.0f, peakMark = 0.0f;
+    int peakHold = 0;
 };
 
 /** The Performance window: the load, its peak and overloads, the disk, the device, and which tracks cost the most. */
@@ -130,7 +142,7 @@ public:
         g.drawText ("Peak " + juce::String (juce::roundToInt (reading.peak * 100.0f)) + "%   Overloads: " + juce::String (reading.overloads),
                     info.withTrimmedRight (70), juce::Justification::centredLeft, true);
         if (reading.overloads > 0)
-            g.drawText ("Clicks? Try a larger buffer in Audio settings, or freeze the heaviest tracks.",
+            g.drawText ("Clicks? Try Large for Process buffer range (Settings), a larger I/O buffer, or freeze the heaviest tracks.",
                         r.removeFromTop (18), juce::Justification::centredLeft, true);
         r.removeFromTop (8);
 
@@ -169,7 +181,7 @@ private:
     {
         if (reader)
             reading = reader();
-        smoothedCpu = juce::jmax (reading.cpu, smoothedCpu * 0.8f);
+        smoothedCpu += (reading.cpu - smoothedCpu) * (reading.cpu > smoothedCpu ? 0.5f : 0.2f);   // (steady, as Logic's)
         smoothedDisk = juce::jmax (reading.disk, smoothedDisk * 0.8f);
         repaint();
     }

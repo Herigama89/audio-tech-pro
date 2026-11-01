@@ -45,6 +45,10 @@
 #include "ui/AudioEditorPanel.h"
 #include "ui/PitchEditor.h"
 #include <deque>
+#include "engine/AudioFileCache.h"
+#include "engine/InstrumentRack.h"
+#include "engine/ProjectPlayer.h"
+#include "engine/AudioEngine.h"
 #include "ui/ConsoleLook.h"
 
 namespace riff
@@ -2349,6 +2353,111 @@ int main (int argc, char* argv[])
             const auto ms = juce::Time::getMillisecondCounterHiRes() - start;
             std::cout << name << ": " << ms / 100.0 << " % of one core (4 notes)" << std::endl;
         }
+        return 0;
+    }
+    if (argc > 1 && juce::String (argv[1]) == "audiojitter")
+    {
+        // How steady the audio thread's load is: a heavy song (Nemix tracks with chords, effects, two buses), each
+        // device block's processing time against the time it plays for, as a device would call it (in real time).
+        const int numTracks = argc > 2 ? juce::String (argv[2]).getIntValue() : 16;
+        const int block = argc > 3 ? juce::String (argv[3]).getIntValue() : 128;
+        const int ahead = argc > 4 ? juce::String (argv[4]).getIntValue() : 0;
+        const double rate = 48000.0, seconds = juce::SystemStats::getEnvironmentVariable ("RIFF_JITTER_SECONDS", "12").getDoubleValue();
+        riff::AudioEngine engine;
+        riff::AudioFileCache cache { engine.getFormatManager() };
+        riff::InstrumentRack rack;
+        riff::ProjectPlayer player { engine, cache, &rack };
+        auto project = riff::model::createProject();
+        project.setProperty (riff::ids::tempo, 120.0, nullptr);
+        const char* sounds[] { "Supersaw Lead", "Warm Analog Pad", "Future Bass Supersaw Chords", "808 Classic", "Grand Piano",
+                               "Finger Bass", "Rock Kit Room", "Dubstep Growl Yoy" };
+        auto reverbBus = riff::model::addTrack (project, "Reverb", nullptr, -1, riff::model::busKind);
+        riff::model::addBuiltinInsert (riff::model::chainFor (project, reverbBus[riff::ids::id].toString()), "studioReverb", -1, nullptr);
+        auto delayBus = riff::model::addTrack (project, "Delay", nullptr, -1, riff::model::busKind);
+        riff::model::addBuiltinInsert (riff::model::chainFor (project, delayBus[riff::ids::id].toString()), "stereoDelay", -1, nullptr);
+        for (int t = 0; t < numTracks; ++t)
+        {
+            auto track = riff::model::addTrack (project, "T" + juce::String (t), nullptr, -1, riff::model::instrumentKind);
+            track.setProperty (riff::ids::instrument, "nemix", nullptr);
+            const juce::String name (sounds[t % 8]);
+            for (const auto& pr : riff::nemix::factoryPresets())
+                if (pr.name == name)
+                    riff::nemixstate::load (riff::nemixstate::getOrCreate (track, nullptr), pr.sound, pr.name, nullptr);
+            auto region = riff::model::addMidiRegion (track, 0.0, seconds + 2.0, nullptr);
+            // chords every half bar, staggered per track so voices start at different blocks
+            for (double beat = 0.0; beat < (seconds + 2.0) * 2.0; beat += 2.0)
+                for (int k = 0; k < 3; ++k)
+                    riff::model::addNote (region, 48 + (t % 4) * 5 + k * 4, beat + 0.03 * (t % 7), 1.8, 100, nullptr);
+            const auto chain = riff::model::chainFor (project, track[riff::ids::id].toString());
+            riff::model::addBuiltinInsert (chain, "channelEq", -1, nullptr);
+            riff::model::addBuiltinInsert (chain, "studioComp", -1, nullptr);
+            riff::model::addSend (chain, reverbBus[riff::ids::id].toString(), 0.3, nullptr);
+            if (t % 3 == 0) riff::model::addSend (chain, delayBus[riff::ids::id].toString(), 0.2, nullptr);
+        }
+        for (int i = 0; i < 64; ++i) riff::nemix::samples::waitUntilLoaded (i, 20000);
+        engine.setProcessAhead (ahead);
+        if (const auto w = juce::SystemStats::getEnvironmentVariable ("RIFF_WORKERS", {}); w.isNotEmpty()) engine.setRenderThreads (w.getIntValue());
+        engine.prepare (rate, block);
+        player.setProject (project);
+        player.rebuildNow();
+        engine.play();
+
+        const int blocks = (int) (seconds * rate / block);
+        std::vector<double> took ((size_t) blocks);
+        juce::AudioBuffer<float> out (2, block);
+        const double period = block / rate;
+        auto due = juce::Time::getMillisecondCounterHiRes() / 1000.0;
+        std::atomic<bool> doneFlag { false };
+        // The device: a realtime thread calling every `period`
+        struct Device final : juce::Thread
+        {
+            std::function<void()> body;
+            Device() : juce::Thread ("device") {}
+            void run() override { body(); }
+        } device;
+        int lastOverloads = 0;
+        const bool dumpGaps = juce::SystemStats::getEnvironmentVariable ("RIFF_JITTER_GAPS", {}).isNotEmpty();
+        device.body = [&]
+        {
+            for (int b = 0; b < blocks; ++b)
+            {
+                due += period;
+                const auto t0 = juce::Time::getHighResolutionTicks();
+                engine.render (nullptr, 0, out.getArrayOfWritePointers(), 2, block);
+                took[(size_t) b] = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - t0) / period;
+                if (const auto o = engine.takeLoad().overloads; o != lastOverloads)
+                {
+                    lastOverloads = o;
+                    if (dumpGaps) std::cout << "gap at block " << b << " (" << juce::String (b * period, 3) << " s)" << std::endl;
+                }
+                for (;;)
+                {
+                    const auto wait = due - juce::Time::getMillisecondCounterHiRes() / 1000.0;
+                    if (wait <= 0.0) break;
+                    if (wait > 0.0012) juce::Thread::sleep (1); else juce::Thread::sleep (0);
+                }
+            }
+            doneFlag = true;
+        };
+        device.startRealtimeThread (juce::Thread::RealtimeOptions{}.withApproximateAudioProcessingTime (block, rate));
+        while (! doneFlag) juce::Thread::sleep (50);
+        device.stopThread (1000);
+
+        if (juce::SystemStats::getEnvironmentVariable ("RIFF_JITTER_DUMP", {}).isNotEmpty())
+            for (int b = 0; b < blocks; ++b)
+                if (took[(size_t) b] > 0.35) std::cout << "block " << b << " (" << juce::String (b * period, 3) << " s, beat " << juce::String (b * period * 2.0, 2) << "): " << juce::String (took[(size_t) b] * 100, 1) << "%" << std::endl;
+        // Skip the first second (sounds loading, voices starting)
+        std::vector<double> v (took.begin() + juce::jmin ((int) took.size(), (int) (rate / block)), took.end());
+        std::sort (v.begin(), v.end());
+        double mean = 0; for (auto x : v) mean += x; mean /= juce::jmax ((size_t) 1, v.size());
+        const auto pct = [&] (double p) { return v.empty() ? 0.0 : v[(size_t) juce::jlimit (0, (int) v.size() - 1, (int) (p * (double) v.size()))]; };
+        int over = 0; for (auto x : v) if (x > 1.0) ++over;
+        std::cout << "tracks " << numTracks << ", block " << block << ", ahead " << ahead << ", workers " << engine.getRenderThreads()
+                  << ": mean " << juce::String (mean * 100, 1) << "%, p50 " << juce::String (pct (0.5) * 100, 1)
+                  << "%, p90 " << juce::String (pct (0.9) * 100, 1) << "%, p99 " << juce::String (pct (0.99) * 100, 1)
+                  << "%, max " << juce::String ((v.empty() ? 0.0 : v.back()) * 100, 1) << "%, overloads " << over << " of " << v.size()
+                  << ", engine-counted overloads " << engine.takeLoad().overloads << std::endl;
+        engine.stop();
         return 0;
     }
     if (argc > 2 && juce::String (argv[1]) == "manual")

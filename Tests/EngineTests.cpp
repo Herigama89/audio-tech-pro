@@ -940,14 +940,16 @@ TEST_CASE ("Sends feed aux buses, before or after the fader", "[engine][routing]
     renderLeft (f.engine, 4800);
     CHECK_THAT (renderLeft (f.engine, 4800)[2000], WithinAbs (0.0f, 1e-4));
 
-    // ...but a pre-fader send keeps going.
+    // ...but a pre-fader send keeps going. (Rendering ahead, a change is heard a process buffer later.)
     send.setProperty (ids::pre, true, nullptr);
     f.router.rebuildNow();
+    renderLeft (f.engine, 4800);
     CHECK_THAT (renderLeft (f.engine, 4800)[2000], WithinAbs (0.25f * 0.8f, 1e-4));
 
     // Muting the track silences its sends, pre-fader or not.
     track.setProperty (ids::mute, true, nullptr);
     f.router.rebuildNow();
+    renderLeft (f.engine, 4800);
     CHECK_THAT (renderLeft (f.engine, 4800)[2000], WithinAbs (0.0f, 1e-4));
 }
 
@@ -2168,6 +2170,8 @@ TEST_CASE ("Moving a fader or pan is heard at once, without rebuilding the graph
 TEST_CASE ("The Performance meter counts each track's processing time", "[engine]")
 {
     Fixture f;
+    f.engine.setProcessAhead (0);   // (counts each block the callback renders: as the device plays it)
+    f.engine.prepare (48000.0, 512);
     const auto loud = writeConstantWav (f.temp.dir.getChildFile ("loud.wav"), 48000.0, 96000, 0.5f);
     auto a = model::addTrack (f.project, "A", nullptr);
     model::addRegion (a, loud, 0.0, 2.0, nullptr);
@@ -2493,6 +2497,8 @@ TEST_CASE ("Plug-ins on a silent track rest until sound comes, after their tail 
     };
 
     Fixture f;
+    f.engine.setProcessAhead (0);   // (counts each block the callback renders: as the device plays it)
+    f.engine.prepare (48000.0, 512);
     auto counting = std::make_shared<Counting>();
     auto makeGraph = [&] (bool withLiveInput)
     {
@@ -2833,4 +2839,132 @@ TEST_CASE ("Compare: every channel's and the master's processing heard bypassed,
 
     engine.setCompare (false);
     CHECK_THAT (level(), WithinAbs (processed, 0.005));
+}
+
+TEST_CASE ("Render ahead (Process Buffer Range): the same mix as rendering everything in the callback", "[engine][ahead]")
+{
+    // Eight noise tracks with their own effects and sends to two buses, an instrument playing notes, a cycle:
+    // rendered with everything in the callback, and with the tracks rendered ahead in 512-sample chunks
+    auto renderWith = [] (int aheadChunk, bool liveInstrument)
+    {
+        RoutingFixture f;
+        f.engine.setProcessAhead (aheadChunk);
+        f.engine.setAheadWaitForever (true);
+        f.engine.prepare (48000.0, 512);
+        auto busA = model::addTrack (f.project, "Verb", nullptr, -1, model::busKind);
+        auto busB = model::addTrack (f.project, "Parallel", nullptr, -1, model::busKind);
+        model::addBuiltinInsert (model::chainFor (f.project, busA[ids::id]), "compressor", 0, nullptr);
+        for (int t = 0; t < 8; ++t)
+        {
+            const auto file = f.temp.dir.getChildFile ("noise" + juce::String (t) + ".wav");
+            {
+                juce::Random r (200 + t);
+                juce::AudioBuffer<float> data (2, 96000);
+                for (int c = 0; c < 2; ++c)
+                    for (int i = 0; i < 96000; ++i)
+                        data.setSample (c, i, (r.nextFloat() - 0.5f) * 0.3f);
+                std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
+                juce::WavAudioFormat wav;
+                auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (48000.0).withNumChannels (2).withBitsPerSample (32)
+                                                               .withSampleFormat (juce::AudioFormatWriterOptions::SampleFormat::floatingPoint));
+                writer->writeFromAudioSampleBuffer (data, 0, 96000);
+            }
+            auto track = f.audioTrack ("T" + juce::String (t), file);
+            track.setProperty (ids::volume, 0.3 + 0.08 * t, nullptr);
+            auto chain = model::chainFor (f.project, track[ids::id]);
+            model::addBuiltinInsert (chain, t % 2 == 0 ? "compressor" : "channelEq", 0, nullptr);
+            auto send = model::addSend (chain, (t % 3 == 0 ? busB : busA)[ids::id], 0.4, nullptr);
+            if (t % 3 == 0)
+                send.setProperty (ids::pre, true, nullptr);
+        }
+        auto keys = model::addTrack (f.project, "Keys", nullptr, -1, model::instrumentKind);
+        auto region = model::addMidiRegion (keys, 0.0, 2.0, nullptr);
+        for (int k = 0; k < 8; ++k)
+            model::addNote (region, 48 + k * 3, k * 0.5, 0.4, 100, nullptr);
+        model::addSend (model::chainFor (f.project, keys[ids::id]), busA[ids::id], 0.5, nullptr);
+        f.project.setProperty (ids::cycleEnabled, true, nullptr);
+        f.project.setProperty (ids::cycleStart, 0.25, nullptr);
+        f.project.setProperty (ids::cycleEnd, 0.75, nullptr);
+        f.router.setProject (f.project);
+        if (liveInstrument)
+            f.router.setLiveMidiTrack (keys[ids::id].toString());   // (played live in the callback, its bus too)
+        f.router.rebuildNow();
+        f.engine.play();
+        std::vector<float> out;
+        juce::AudioBuffer<float> block (2, 128);
+        for (int done = 0; done < 72000; done += 128)
+        {
+            f.engine.render (nullptr, 0, block.getArrayOfWritePointers(), 2, 128);
+            out.insert (out.end(), block.getReadPointer (0), block.getReadPointer (0) + 128);
+            out.insert (out.end(), block.getReadPointer (1), block.getReadPointer (1) + 128);
+        }
+        return std::pair { out, f.engine.getPlayheadSeconds() };
+    };
+
+    for (const bool live : { false, true })
+    {
+        INFO ("the instrument played live: " << (live ? "yes" : "no"));
+        const auto [direct, directPlayhead] = renderWith (0, live);
+        const auto [ahead, aheadPlayhead] = renderWith (512, live);
+        REQUIRE (direct.size() == ahead.size());
+        CHECK_THAT (aheadPlayhead, WithinAbs (directPlayhead, 1.0e-9));   // (the cycle wraps at the same sample)
+        float loudest = 0.0f, worst = 0.0f;
+        size_t firstDiff = direct.size();
+        for (size_t i = 0; i < direct.size(); ++i)
+        {
+            loudest = std::max (loudest, std::abs (direct[i]));
+            worst = std::max (worst, std::abs (direct[i] - ahead[i]));
+            if (firstDiff == direct.size() && std::abs (direct[i] - ahead[i]) >= 1.0e-4f)
+                firstDiff = i;
+        }
+        INFO ("first difference at sample " << (firstDiff / 256) * 128 + (firstDiff % 256) % 128 << " (channel " << (firstDiff % 256) / 128 << ")");
+        CHECK (loudest > 0.05f);
+        CHECK (worst < 1.0e-3f);   // (the synth's note-off after the cycle wrap lands in a chunk of another size)
+    }
+}
+
+TEST_CASE ("Render ahead: an armed track is heard live while the rest plays from the ring, and stop and locate land at once", "[engine][ahead]")
+{
+    Fixture f;
+    f.engine.setProcessAhead (512);
+    f.engine.setAheadWaitForever (true);
+    f.engine.prepare (48000.0, 512);
+    const auto wav = writeConstantWav (f.temp.dir.getChildFile ("a.wav"), 48000.0, 96000, 0.25f);
+    model::addRegion (model::addTrack (f.project, "Playback", nullptr), wav, 0.0, 2.0, nullptr);
+    auto vocal = model::addTrack (f.project, "Vocal", nullptr);
+    vocal.setProperty (ids::monitor, true, nullptr);
+    f.player.setProject (f.project);
+    f.player.rebuildNow();
+    f.engine.play();
+
+    // The input (0.5) comes through in the same block it arrives in, on top of the playback (0.25)
+    juce::AudioBuffer<float> in (1, 128), out (2, 128);
+    for (int b = 0; b < 40; ++b)
+    {
+        in.clear();
+        if (b == 30)
+            for (int i = 0; i < 128; ++i) in.setSample (0, i, 0.5f);
+        f.engine.render (in.getArrayOfReadPointers(), 1, out.getArrayOfWritePointers(), 2, 128);
+        if (b == 30)
+            CHECK_THAT (out.getSample (0, 64), WithinAbs ((0.25f + 0.5f) * 0.8f, 1.0e-4));
+        if (b == 29)
+            CHECK_THAT (out.getSample (0, 64), WithinAbs (0.25f * 0.8f, 1.0e-4));
+    }
+
+    // Stop: silent at once (the region doesn't go on playing from the ring)
+    f.engine.stop();
+    f.engine.render (in.getArrayOfReadPointers(), 1, out.getArrayOfWritePointers(), 2, 128);
+    f.engine.render (in.getArrayOfReadPointers(), 1, out.getArrayOfWritePointers(), 2, 128);
+    CHECK (std::abs (out.getSample (0, 64)) < 1.0e-6f);
+
+    // Locate past the region's end and play: silent; back into it: heard at once, from there
+    f.engine.setPlayheadSeconds (3.0);
+    f.engine.play();
+    f.engine.render (in.getArrayOfReadPointers(), 1, out.getArrayOfWritePointers(), 2, 128);
+    CHECK (std::abs (out.getSample (0, 64)) < 1.0e-6f);
+    CHECK_THAT (f.engine.getPlayheadSeconds(), WithinAbs (3.0 + 128.0 / 48000.0, 1.0e-9));
+    f.engine.setPlayheadSeconds (1.0);
+    f.engine.render (in.getArrayOfReadPointers(), 1, out.getArrayOfWritePointers(), 2, 128);
+    CHECK_THAT (out.getSample (0, 64), WithinAbs (0.25f * 0.8f, 1.0e-4));
+    CHECK_THAT (f.engine.getPlayheadSeconds(), WithinAbs (1.0 + 128.0 / 48000.0, 1.0e-9));
 }

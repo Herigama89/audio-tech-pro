@@ -167,6 +167,8 @@ private:
     void toggleAutopunch();
     void showUndoHistory();
     void showPreferences();
+    /** Logic's Process Buffer Range: 0 off, 1 small, 2 medium (the default), 3 large -> the render-ahead chunk. */
+    static int processBufferChunk (int range) { return range <= 0 ? 0 : range == 1 ? 256 : range == 3 ? 1024 : 512; }
     void saveAsTemplate();
     void newAlternative();
     void showEventList();

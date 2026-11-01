@@ -12,6 +12,8 @@
 #include "MixAnalysis.h"
 #include "ScreenAudioTap.h"
 #include <optional>
+#include <bitset>
+#include <mutex>
 
 namespace riff
 {
@@ -39,6 +41,11 @@ public:
         0 just the audio thread. Takes effect when the audio device next starts. */
     void setRenderThreads (int count) noexcept { wantedRenderThreads.store (count); }
     int getRenderThreads() const noexcept { return renderThreads.workers(); }
+
+    /** Logic's Process Buffer Range: tracks you aren't playing live are rendered this many samples ahead, in
+        blocks this large, on their own thread (0: everything at the device's buffer, in its callback). */
+    void setProcessAhead (int samples) noexcept { processAheadWanted.store (samples); }
+    int getProcessAhead() const noexcept { return processAheadWanted.load(); }
 
     AudioEngine();
     ~AudioEngine() override;
@@ -79,7 +86,9 @@ public:
     /** Like setPlayheadSeconds but allows negative times, for a count-in before bar 1. */
     void setPlayheadSecondsAllowingNegative (double seconds) noexcept
     {
-        playheadSample.store ((juce::int64) std::llround (seconds * sampleRate.load()));
+        const auto at = (juce::int64) std::llround (seconds * sampleRate.load());
+        playheadSample.store (at);
+        locateRequest.store (at);
     }
 
     double getSampleRate() const noexcept     { return sampleRate.load(); }
@@ -301,12 +310,18 @@ public:
         the highest since reset, how many buffers ran late, and each track's share. */
     struct Load
     {
-        float now = 0.0f, peak = 0.0f;
+        float now = 0.0f, peak = 0.0f;   // the worst block since the last look, and since reset
+        float average = 0.0f;             // the load averaged since the last look
         int overloads = 0;
     };
     Load takeLoad() noexcept
     {
         Load l;
+        // The average over the time since the meter last looked (the device callback's, or the render-ahead
+        // thread's when it does more), so the meter is steady; the single worst block goes to `peak`.
+        const auto busy = callbackBusy.exchange (0.0), span = callbackSpan.exchange (0.0);
+        const auto aBusy = aheadBusy.exchange (0.0), aSpan = aheadSpan.exchange (0.0);
+        l.average = (float) juce::jmax (span > 0.0 ? busy / span : 0.0, aSpan > 0.0 ? aBusy / aSpan : 0.0);
         l.now = loadNow.exchange (0.0f);
         l.peak = loadPeak.load();
         l.overloads = overloads.load();
@@ -392,27 +407,100 @@ private:
     };
     std::atomic<bool> stopOnClip { false }, recordClipped { false };
 
-    juce::int64 chunkPosition = 0;   // where the song is for the chunk being rendered, for plugins' playheads
-    bool chunkPlaying = false;
-    double chunkBpm = 120.0;
-    void renderChunk (const PlaybackGraph& graph, const float* const* inputs, int numInputs, int inputOffset,
-                      float* mixL, float* mixR, int numSamples, bool playingNow,
-                      bool resetNotes, bool withLiveMidi) noexcept;
     /** One thread's scratch space for rendering a track (each render thread has its own). */
     struct Scratch
     {
         juce::AudioBuffer<float> track, region, stream, dry;
         juce::MidiBuffer midi;
     };
+    using SlotSet = std::bitset<PlaybackGraph::maxTracks>;
+
+    /** One rendering pass: where the song is for it, its own sums and buses, and which tracks it plays.
+        The device callback has one; the render-ahead thread (Process Buffer Range) has the other, so the
+        tracks you play live and the rest are processed at the same time without sharing anything. */
+    struct Pass
+    {
+        juce::int64 position = 0;            // where the song is for this chunk (also the plugins' playhead)
+        bool playing = false;
+        double bpm = 120.0;
+        juce::AudioBuffer<float> direct, bus;
+        std::unique_ptr<DelayLine> directDelay;
+        std::vector<int> parallel;           // this chunk's tracks done on several cores (indices into the graph's), pre-sized
+        std::array<bool, PlaybackGraph::maxTracks + 64> routeAfter {}, inParallel {};
+        bool usePool = false;                // the render threads help (only one pass at a time uses them)
+        Scratch* scratch = nullptr;          // the calling thread's
+        const SlotSet* slots = nullptr;      // just these tracks (nullptr: every track)...
+        bool exclude = false;                // ...or every track but these
+        std::array<const float*, PlaybackGraph::maxBuses * 2> busPreload {};   // what other passes sent the buses (added first)
+
+        bool plays (int slot) const noexcept
+        {
+            if (slots == nullptr) return true;
+            const bool in = juce::isPositiveAndBelow (slot, PlaybackGraph::maxTracks) && slots->test ((size_t) slot);
+            return exclude ? ! in : in;
+        }
+    };
+    Pass mainPass, livePass;
+    Scratch liveScratch;
+
+    void renderChunk (const PlaybackGraph& graph, Pass& pass, const float* const* inputs, int numInputs, int inputOffset,
+                      float* mixL, float* mixR, int numSamples, bool resetNotes, bool withLiveMidi) noexcept;
     void collectNotes (const PlaybackGraph::Track& track, juce::int64 from, juce::int64 to, juce::MidiBuffer& into) noexcept;
     /** A track up to and through its fader (into its slot's output); false when there's nothing for it to send on. */
-    bool processTrack (const PlaybackGraph::Track& track, const float* const* inputs, int numInputs, int inputOffset,
-                       int numSamples, bool playingNow, bool resetNotes, bool withLiveMidi, Scratch& scratch) noexcept;
+    bool processTrack (const PlaybackGraph::Track& track, Pass& pass, const float* const* inputs, int numInputs, int inputOffset,
+                       int numSamples, bool resetNotes, bool withLiveMidi, Scratch& scratch) noexcept;
     /** Then its sends and its output: into the buses, the interface's other outputs or the mix (in the song's order). */
-    void routeTrack (const PlaybackGraph::Track& track, int inputOffset, float* outL, float* outR, int numSamples) noexcept;
-    void renderTrack (const PlaybackGraph::Track& track, const float* const* inputs, int numInputs, int inputOffset,
-                      float* outL, float* outR, int numSamples, bool playingNow,
-                      bool resetNotes, bool withLiveMidi) noexcept;
+    void routeTrack (const PlaybackGraph::Track& track, Pass& pass, int inputOffset, float* outL, float* outR, int numSamples) noexcept;
+    void renderTrack (const PlaybackGraph::Track& track, Pass& pass, const float* const* inputs, int numInputs, int inputOffset,
+                      float* outL, float* outR, int numSamples, bool resetNotes, bool withLiveMidi) noexcept;
+
+    // --- Render ahead (Logic's Process Buffer Range) ---------------------------------------------------
+    // The tracks you aren't playing live are rendered ahead of time on their own thread, in larger blocks, into a ring
+    // of chunks; the device callback plays the live tracks (armed, monitoring, the one your keyboard plays, and what
+    // they feed) at the device's buffer and adds the rest from the ring. A heavy block no longer has to finish within
+    // one small buffer: the load evens out over the lookahead, so it stays steady.
+    static constexpr int aheadSlots = 32, aheadMaxChunk = 1024, aheadBusCarry = 8;
+    struct AheadChunk
+    {
+        juce::uint32 serial = 0;
+        juce::int64 position = 0;
+        bool playing = false;
+        int n = 0, read = 0;
+        SlotSet live;
+        std::array<int, aheadBusCarry> carriedBus {};   // which buses' sends from the ahead tracks it carries (-1: none)
+        juce::AudioBuffer<float> audio { 2 + 2 * aheadBusCarry, aheadMaxChunk };   // the mix of the ahead tracks, then each carried bus
+    };
+    std::array<AheadChunk, aheadSlots> aheadRing;
+    std::atomic<juce::uint64> aheadWritten { 0 }, aheadRead { 0 };
+    std::atomic<juce::uint32> aheadSerial { 0 };            // bumped by the callback for a restart
+    std::atomic<juce::int64> aheadStartPosition { 0 };
+    std::atomic<bool> aheadStartPlaying { false };
+    std::atomic<bool> aheadPark { true }, aheadParked { true };
+    std::atomic<juce::uint64> aheadCounter { 0 };            // bumped each chunk (old graphs are freed after it moves on)
+    std::atomic<int> aheadChunk { 0 }, aheadLookahead { 0 }, deviceBlock { 128 };
+    std::atomic<juce::int64> locateRequest { std::numeric_limits<juce::int64>::min() };
+    std::atomic<bool> aheadNeedsRestart { true };
+    bool aheadSessionPlaying = false;                        // (audio thread)
+    bool aheadPrefetching = false;                           // (audio thread) waiting for the first chunk after a restart
+    const PlaybackGraph* aheadGraphSeen = nullptr;           // (audio thread) the graph the live set below is from
+    SlotSet aheadRequired;                                   // (audio thread) what that graph needs live
+    std::atomic<bool> aheadWaitForever { false };            // (tests: no deadline when waiting for a chunk)
+    std::atomic<double> aheadBusy { 0.0 }, aheadSpan { 0.0 };// the ahead thread's processing time and the audio time it made
+    class AheadThread;
+    std::unique_ptr<AheadThread> aheadThread;
+    void runAhead (AheadThread& self);                        // the ahead thread's loop
+    SlotSet liveSlotsOf (const PlaybackGraph& graph, SlotSet sticky, std::array<int, aheadBusCarry>& carried) const noexcept;
+    AheadChunk* aheadFront (double deadline) noexcept;
+    bool aheadActive() const noexcept { return aheadThread != nullptr && ! bouncing.load (std::memory_order_relaxed); }
+    void parkAhead();
+    void unparkAhead();
+    std::array<std::atomic<bool>, PlaybackGraph::maxTracks> recordSourceSlot {};
+    std::array<std::atomic<float>, PlaybackGraph::maxTracks> trackCost {};   // each track's last chunk's processing time (the heaviest go first)   // tracks another take records (kept live)
+
+public:
+    /** Tests: wait however long the render-ahead thread takes, instead of playing silence past the device's deadline. */
+    void setAheadWaitForever (bool on) noexcept { aheadWaitForever.store (on); }
+private:
     static bool canRunInParallel (const PlaybackGraph::Track& track) noexcept;
     void recordChunk (const float* const* inputs, int numInputs, int inputOffset, int numSamples, bool fromTracks = false) noexcept;
     void renderClick (const PlaybackGraph& graph, float* mixL, float* mixR, int numSamples) noexcept;
@@ -428,7 +516,7 @@ private:
     std::atomic<juce::uint64> callbackCounter { 0 };
     std::atomic<bool> deviceRunning { false };
 
-    struct Retired { std::unique_ptr<PlaybackGraph> graph; juce::uint64 retiredAt; };
+    struct Retired { std::unique_ptr<PlaybackGraph> graph; juce::uint64 retiredAt, aheadAt; };
     std::vector<Retired> retired;           // message thread only
 
     // --- Transport -------------------------------------------------------------
@@ -478,7 +566,7 @@ private:
     int measurePos = 0, measureInput = 0;
 
     // --- Audio-thread state (sized in prepare) --------------------------------
-    juce::AudioBuffer<float> mixBuffer, silence, directBuffer, busBuffer;
+    juce::AudioBuffer<float> mixBuffer, silence;
     std::vector<std::unique_ptr<Scratch>> scratches;   // [0] the audio thread's, then one per render thread
     juce::AudioBuffer<float> preFaderOutputs;          // tracks with pre-fader sends: their sound before the fader, by slot
     std::array<bool, PlaybackGraph::maxTracks> preFaderReady {};
@@ -486,8 +574,6 @@ private:
     RenderThreads renderThreads;
     std::atomic<int> wantedRenderThreads { -1 };   // -1: as many as suit this computer
     int startedRenderThreads = -2;
-    std::vector<int> parallelTracks;               // this chunk's tracks done in parallel (indices into the graph's), pre-sized
-    std::array<bool, PlaybackGraph::maxTracks + 64> routeAfter {};
 public:
     static constexpr int maxHardwareOutputs = 64;
 private:
@@ -496,7 +582,7 @@ private:
     juce::AudioBuffer<float> slotOutputs;   // every track's output (after its fader) this block, by slot: side chains and track inputs
     juce::AudioBuffer<float> slotInputs;    // armed tracks' input through their printed inserts, this block, by slot
     std::array<bool, PlaybackGraph::maxTracks> slotInputReady {};
-    void printInputs (const PlaybackGraph& graph, const float* const* inputs, int numInputs, int inputOffset, int n) noexcept;
+    void printInputs (const PlaybackGraph& graph, Pass& pass, const float* const* inputs, int numInputs, int inputOffset, int n) noexcept;
     const float* slotOutput (int slot, int channel) const noexcept
     {
         return juce::isPositiveAndBelow (slot, PlaybackGraph::maxTracks) && slot * 2 + 1 < slotOutputs.getNumChannels()
@@ -510,7 +596,6 @@ private:
     DelayLine masterDryDelay;
     /** Compare: towards dry (or back), over 20 ms, blending `wet` with `dry` in place. Returns the new mix. */
     static float blendCompare (float* wetL, float* wetR, const float* dryL, const float* dryR, int n, float mix, bool toDry, double rate) noexcept;
-    std::unique_ptr<DelayLine> directDelayLine;
     struct TrackState
     {
         juce::SmoothedValue<float> gainL, gainR;
@@ -554,7 +639,9 @@ private:
     std::array<std::atomic<float>, PlaybackGraph::maxTracks> volumeMix {}, panMix {};             // NaN: the graph's own value
     std::atomic<float> masterMix { std::numeric_limits<float>::quiet_NaN() };
     std::atomic<float> loadNow { 0.0f }, loadPeak { 0.0f };
+    std::atomic<double> callbackBusy { 0.0 }, callbackSpan { 0.0 };   // summed since the meter last looked
     std::atomic<int> overloads { 0 };
+    std::atomic<int> processAheadWanted { 0 };
     std::array<std::atomic<juce::int64>, PlaybackGraph::maxTracks> trackTicks {}, trackSamples {};
     bool measuring = false;                       // only while measureMix renders
     juce::AudioBuffer<float>* stemCapture = nullptr;   // only while renderStems renders: 2 channels per slot
