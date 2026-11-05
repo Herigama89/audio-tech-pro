@@ -30,31 +30,31 @@ One band of EQ, of the type you choose: low cut, high cut, low shelf, high shelf
 
 ![Console EQ](img/fx-consoleEq.jpg)
 
-A British-console style EQ: a stepped high pass, a low shelf (four frequencies), a mid bell (six frequencies) and a 12 kHz high shelf, with a drive that adds the circuit's colour, and output.
+A British-console style EQ on the channel's own panel: a stepped high pass (the blue knob), a low shelf and a mid bell (each a grey gain knob inside a silver frequency ring), a 12 kHz high shelf (the grey knob on its own), the red preamp gain (drive: the circuit's colour) and Level. The Ø button turns the polarity over, EQ takes the EQ in and out (its lamp shows it in), and the meter shows the output in dBu. Silk, as on the transformer preamps: RED adds harmonics to the highs and upper mids (presence, air), BLUE thickens the lows; press the lit one again for none. The harder the red gain drives it, the more Silk there is.
 
 ### Controls
 
-**High Pass** (Off, 50 Hz, 80 Hz, 160 Hz, 300 Hz) · **Low Freq** (35 Hz, 60 Hz, 110 Hz, 220 Hz) · **Low** (-16 to 16 dB) · **Mid Freq** (360 Hz, 700 Hz, 1.6 kHz, 3.2 kHz, 4.8 kHz, 7.2 kHz) · **Mid** (-18 to 18 dB) · **High (12k)** (-16 to 16 dB) · **Drive** (0 to 10) · **Output** (-18 to 18 dB)
+**High Pass** (Off, 50 Hz, 80 Hz, 160 Hz, 300 Hz) · **Low Freq** (35 Hz, 60 Hz, 110 Hz, 220 Hz) · **Low** (-16 to 16 dB) · **Mid Freq** (360 Hz, 700 Hz, 1.6 kHz, 3.2 kHz, 4.8 kHz, 7.2 kHz) · **Mid** (-18 to 18 dB) · **High (12k)** (-16 to 16 dB) · **Drive** (0 to 10) · **Output** (-18 to 18 dB) · **EQ** (Out, In) · **Phase** (Normal, Invert) · **Silk** (Off, Red, Blue)
 
 ## Graphic EQ
 
 ![Graphic EQ](img/fx-graphicEq.jpg)
 
-A ten-band graphic EQ, one slider per octave from 31 Hz to 16 kHz, and output. Quick broad tone shaping.
+A ten-band graphic EQ (31 Hz to 16 kHz, 12 dB of boost or cut each): slide the caps along their slots, to the right to boost, to the left to cut; the 1 kHz cap is red. IN takes the EQ in and out (its lamp lights while in).
 
 ### Controls
 
-**31** (-12 to 12 dB) · **63** (-12 to 12 dB) · **125** (-12 to 12 dB) · **250** (-12 to 12 dB) · **500** (-12 to 12 dB) · **1k** (-12 to 12 dB) · **2k** (-12 to 12 dB) · **4k** (-12 to 12 dB) · **8k** (-12 to 12 dB) · **16k** (-12 to 12 dB) · **Output** (-12 to 12 dB)
+**31** (-12 to 12 dB) · **63** (-12 to 12 dB) · **125** (-12 to 12 dB) · **250** (-12 to 12 dB) · **500** (-12 to 12 dB) · **1k** (-12 to 12 dB) · **2k** (-12 to 12 dB) · **4k** (-12 to 12 dB) · **8k** (-12 to 12 dB) · **16k** (-12 to 12 dB) · **Output** (-12 to 12 dB) · **In** (Out, In)
 
 ## Tube EQ
 
 ![Tube EQ](img/fx-tubeEq.jpg)
 
-A passive tube program EQ: low boost and low attenuation at the same frequency (boost both for the famous tight low end), a high boost with its bandwidth, a separate high attenuation, and output through the tube stage.
+A passive tube program EQ on its blue panel: low boost and low attenuation at the same frequency (CPS: 20, 30, 60 or 100 Hz; boost both for the famous tight low end), a high boost (KCS: 3 to 16 kHz) with its bandwidth (sharp to broad), a separate high attenuation (ATTEN SEL: 5, 10 or 20 kHz). The IN switch takes the EQ in and out; OFF/ON switches the tubes (the lamp lights): on, the tube stage adds its warmth; off, it's clean.
 
 ### Controls
 
-**Low Freq** (20 Hz, 30 Hz, 60 Hz, 100 Hz) · **Low Boost** (0 to 10) · **Low Atten** (0 to 10) · **High Freq** (3 kHz, 4 kHz, 5 kHz, 8 kHz, 10 kHz, 12 kHz, 16 kHz) · **High Boost** (0 to 10) · **Bandwidth** (0 to 10) · **Atten Sel** (5 kHz, 10 kHz, 20 kHz) · **High Atten** (0 to 10) · **Output** (-12 to 12 dB)
+**Low Freq** (20 Hz, 30 Hz, 60 Hz, 100 Hz) · **Low Boost** (0 to 10) · **Low Atten** (0 to 10) · **High Freq** (3 kHz, 4 kHz, 5 kHz, 8 kHz, 10 kHz, 12 kHz, 16 kHz) · **High Boost** (0 to 10) · **Bandwidth** (0 to 10) · **Atten Sel** (5 kHz, 10 kHz, 20 kHz) · **High Atten** (0 to 10) · **Output** (-12 to 12 dB) · **In** (Out, In) · **Tubes** (Off, On)
 
 ## Linear Phase EQ
 

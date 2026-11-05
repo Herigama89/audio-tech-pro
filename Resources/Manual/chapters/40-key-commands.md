@@ -159,3 +159,8 @@ Every command, by menu, with its keys. `Cmd/Ctrl` is Cmd on a Mac and Ctrl on Wi
 - **Combine Audio Interfaces...** - Use several audio interfaces at once, as one
 - **Record Screen...** - Record the app (or the whole screen) to a video with the mix's sound; again to stop
 - **Claude Assistant** - Show or hide the Claude panel: ask questions, or tell it what to do
+
+## Help
+
+- **Manual** `F1` - The manual: every part of the app and every plugin, how to use them, with pictures (tabs, chapters and search)
+- **Manual (PDF)** - The same manual as a PDF, to print or read on another device

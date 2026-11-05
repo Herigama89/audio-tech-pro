@@ -71,6 +71,14 @@ public:
     }
     void mouseDrag (const juce::MouseEvent& e) override { if (! menuClick) juce::Slider::mouseDrag (e); }
     void mouseUp (const juce::MouseEvent& e) override   { if (! std::exchange (menuClick, false)) juce::Slider::mouseUp (e); }
+    /** (a knob inside a ring: only clicks on it, the rest go to the ring under it) */
+    bool hitTest (int x, int y) override
+    {
+        const auto radius = (float) getProperties()["hitRadius"];
+        if (radius <= 0.0f)
+            return juce::Slider::hitTest (x, y);
+        return getLocalBounds().toFloat().getCentre().getDistanceFrom ({ (float) x, (float) y }) <= radius;
+    }
 private:
     bool menuClick = false;
 };

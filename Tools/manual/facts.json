@@ -986,6 +986,20 @@
       "menu": "View",
       "description": "Show or hide the Claude panel: ask questions, or tell it what to do",
       "keys": []
+    },
+    {
+      "name": "Manual",
+      "menu": "Help",
+      "description": "The manual: every part of the app and every plugin, how to use them, with pictures (tabs, chapters and search)",
+      "keys": [
+        "F1"
+      ]
+    },
+    {
+      "name": "Manual (PDF)",
+      "menu": "Help",
+      "description": "The same manual as a PDF, to print or read on another device",
+      "keys": []
     }
   ],
   "effects": [
@@ -1775,6 +1789,43 @@
           "max": 18.0,
           "default": 0.0,
           "choices": []
+        },
+        {
+          "id": "eqIn",
+          "name": "EQ",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Out",
+            "In"
+          ]
+        },
+        {
+          "id": "phase",
+          "name": "Phase",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Normal",
+            "Invert"
+          ]
+        },
+        {
+          "id": "silk",
+          "name": "Silk",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "Red",
+            "Blue"
+          ]
         }
       ]
     },
@@ -1881,6 +1932,18 @@
           "max": 12.0,
           "default": 0.0,
           "choices": []
+        },
+        {
+          "id": "eqIn",
+          "name": "In",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Out",
+            "In"
+          ]
         }
       ]
     },
@@ -1986,6 +2049,30 @@
           "max": 12.0,
           "default": 0.0,
           "choices": []
+        },
+        {
+          "id": "eqIn",
+          "name": "In",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Out",
+            "In"
+          ]
+        },
+        {
+          "id": "tubes",
+          "name": "Tubes",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
         }
       ]
     },
@@ -27141,7 +27228,42 @@
       "recorded": true
     }
   ],
-  "library": [],
+  "library": [
+    "Grand Piano|Piano",
+    "Upright Piano|Piano",
+    "Electric Piano (Rhodes)|Keys",
+    "Electric Grand|Keys",
+    "Finger Bass|Bass",
+    "Pick Bass|Bass",
+    "Jazz Bass|Bass",
+    "Mirror Bass|Bass",
+    "Studio Bass|Bass",
+    "Killer Finger Bass|Bass",
+    "Nylon Guitar|Guitar",
+    "Steel Acoustic Guitar|Guitar",
+    "Clean Electric Guitar|Guitar",
+    "Hollow Electric Guitar|Guitar",
+    "Rock Kit|Drums",
+    "Violin Section|Strings",
+    "Viola Section|Strings",
+    "Cello Section|Strings",
+    "Pizzicato Violins|Strings",
+    "Pizzicato Cellos|Strings",
+    "Upright Bass (Jazz)|Bass",
+    "Tremolo Violins|Strings",
+    "Trumpet|Brass",
+    "French Horn|Brass",
+    "Trombone|Brass",
+    "Tuba|Brass",
+    "Trumpet Staccato|Brass",
+    "Flute|Winds",
+    "Oboe|Winds",
+    "Clarinet|Winds",
+    "Bassoon|Winds",
+    "Glockenspiel|Mallets",
+    "Marimba|Mallets",
+    "Harp|Strings"
+  ],
   "wavetables": [
     "Basic Shapes",
     "Pulse Width",

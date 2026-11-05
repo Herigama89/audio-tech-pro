@@ -2361,6 +2361,205 @@ namespace
     }
 
 
+    //==============================================================================
+    // Photographed faces: the hardware's own front panel, its moving parts cut out of the photo
+    // (Tools/effect_skins) and turned or slid to the settings. Positions are the photo's pixels.
+    //==============================================================================
+    Sprite turning (const char* image, float cx, float cy, float r, float photographed, std::vector<float> angles)
+    {
+        Sprite s;
+        s.image = image;
+        s.rect = RF (cx - r, cy - r, r * 2.0f, r * 2.0f);
+        s.pivot = { cx, cy };
+        s.angle = photographed;
+        s.angles = std::move (angles);
+        return s;
+    }
+
+    R onFace (RF photoRect, float scale)
+    {
+        return photoRect.transformedBy (juce::AffineTransform::scale (scale)).getSmallestIntegerContainer();
+    }
+
+    Control photoControl (const char* id, Kind kind, Sprite sprite, float scale)
+    {
+        Control c;
+        c.id = id;
+        c.kind = kind;
+        c.label = "-";
+        c.bounds = onFace (sprite.rect, scale);
+        c.sprite = std::move (sprite);
+        return c;
+    }
+
+    /** An invisible button over a button in the photo (the face shows its state: a lamp, a lit cap). */
+    Control photoButton (const char* id, RF rect, float scale, int choice = -1)
+    {
+        Sprite s;
+        s.rect = rect;
+        s.pivot = rect.getCentre();
+        s.choice = choice;
+        Control c;
+        c.id = id;
+        c.kind = Kind::hotspot;
+        c.label = "-";
+        c.bounds = onFace (rect, scale);
+        c.sprite = s;
+        return c;
+    }
+
+    void drawPart (juce::Graphics& g, const char* name, RF photoRect, float scale, float alpha = 1.0f)
+    {
+        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+        g.setOpacity (alpha);
+        g.drawImage (skinImage (name), photoRect.transformedBy (juce::AffineTransform::scale (scale)));
+        g.setOpacity (1.0f);
+    }
+
+    void addPhotoDesigns (std::map<juce::String, Design>& d)
+    {
+        const auto setCommon = [] (Design& c)
+        {
+            c.knobs = KnobStyle::black;
+            c.label = juce::Colours::white; c.value = juce::Colours::white; c.accent = juce::Colours::white; c.track = juce::Colours::black;
+            c.valueAbove = false;
+        };
+        {
+            // Graphic EQ: the ten-band 500-series graphic, its caps slide along their slots (-12 to +12 dB)
+            constexpr float s = 0.85f;
+            Design c;
+            setCommon (c);
+            c.photoScale = s;
+            c.width = 248; c.height = 872;
+            static const char* ids[] { "b16k", "b8k", "b4k", "b2k", "b1k", "b500", "b250", "b125", "b63", "b31" };
+            static const char* caps[] { "graphic_cap0_png", "graphic_cap1_png", "graphic_cap2_png", "graphic_cap3_png", "graphic_cap4_png",
+                                        "graphic_cap5_png", "graphic_cap6_png", "graphic_cap7_png", "graphic_cap8_png", "graphic_cap9_png" };
+            // (each cap's picture: where it sits in the photo, and its centre across)
+            const float cap[10][5] { { 132, 158, 52, 28, 158.0f }, { 132, 232, 50, 26, 157.0f }, { 131, 306, 49, 26, 155.5f }, { 130, 380, 52, 28, 156.0f },
+                                     { 129, 454, 51, 29, 154.5f }, { 131, 528, 49, 28, 155.5f }, { 130, 602, 50, 29, 155.0f }, { 130, 675, 51, 30, 155.5f },
+                                     { 129, 749, 50, 31, 154.0f }, { 128, 822, 51, 32, 153.5f } };
+            const float slotTop[10] { 159, 233, 307, 381, 455, 529, 603, 676, 750, 823 };
+            for (int k = 0; k < 10; ++k)
+            {
+                Sprite sp;
+                sp.image = caps[k];
+                sp.rect = RF (cap[k][0], cap[k][1], cap[k][2], cap[k][3]);
+                sp.pivot = { cap[k][4], cap[k][1] + cap[k][3] * 0.5f };
+                sp.slides = true;
+                sp.from = 61.0f;   // (the -12 line)
+                sp.to = 223.0f;    // (the +12 line)
+                auto ctl = photoControl (ids[k], Kind::fader, sp, s);
+                ctl.bounds = onFace (RF (34.0f, slotTop[k] - 3.0f, 222.0f, 36.0f), s);
+                c.controls.push_back (ctl);
+            }
+            c.controls.push_back (photoButton ("eqIn", RF (86.0f, 886.0f, 42.0f, 46.0f), s));
+            c.paint = [] (juce::Graphics& g, R b, const EffectInfo& fx, const float* v, float)
+            {
+                g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+                g.drawImage (skinImage ("graphic_panel_jpg"), b.toFloat());
+                if (valueOf (fx, v, "eqIn", 1.0f) > 0.5f)
+                    drawPart (g, "graphic_lamp_png", RF (190.0f, 886.0f, 28.0f, 28.0f), s);
+            };
+            d["graphicEq"] = c;
+        }
+        {
+            // Tube EQ: the passive program EQ's blue panel. The big knobs' pointer lines turn (the knobs stay as
+            // photographed, lit as they were); the frequency switches turn whole; OFF/ON switches the tubes, with the lamp
+            const float s = 1400.0f / 2152.0f;
+            Design c;
+            setCommon (c);
+            c.photoScale = s;
+            c.width = 1400; c.height = 407;
+            const std::vector<float> scale { -140, -114, -86, -56, -27, 3, 32, 59, 87, 111, 135 };   // (where 0 to 10 are printed)
+            c.controls = {
+                photoControl ("lowBoost", Kind::knob, turning ("tube_ptr_lowBoost_png", 572, 158, 100, 128.2f, scale), s),
+                photoControl ("lowAtten", Kind::knob, turning ("tube_ptr_lowAtten_png", 866, 158, 100, -1.6f, scale), s),
+                photoControl ("highBoost", Kind::knob, turning ("tube_ptr_highBoost_png", 1272, 162, 100, 33.6f, scale), s),
+                photoControl ("highAtten", Kind::knob, turning ("tube_ptr_highAtten_png", 1567, 163, 100, 88.1f, scale), s),
+                photoControl ("bandwidth", Kind::knob, turning ("tube_ptr_bandwidth_png", 1071, 473, 100, -0.3f, { -135.0f, 135.0f }), s),
+                photoControl ("lowFreq", Kind::knob, turning ("tube_knob_lowFreq_png", 724, 458, 116, 9.7f, { -47.6f, -15.0f, 18.4f, 52.5f }), s),
+                photoControl ("highFreq", Kind::knob, turning ("tube_knob_highFreq_png", 1416, 460, 116, 0.0f, { -96.0f, -66.7f, -35.3f, 0.0f, 32.8f, 66.2f, 96.4f }), s),
+                photoControl ("attenFreq", Kind::knob, turning ("tube_knob_attenFreq_png", 1856, 160, 96, -1.7f, { -37.0f, -3.0f, 33.0f }), s),
+            };
+            auto tubes = turning ("tube_knob_tubes_png", 1884, 469, 52, 50.0f, {});
+            tubes.onAngle = 50.0f; tubes.offAngle = -4.0f;
+            c.controls.push_back (photoControl ("tubes", Kind::hotspot, tubes, s));
+            auto in = turning ("tube_knob_eqIn_png", 441, 463, 52, 0.0f, {});
+            in.onAngle = 0.0f; in.offAngle = 180.0f;   // (the bat thrown the other way)
+            c.controls.push_back (photoControl ("eqIn", Kind::hotspot, in, s));
+            c.paint = [s] (juce::Graphics& g, R b, const EffectInfo& fx, const float* v, float)
+            {
+                g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+                g.drawImage (skinImage ("tube_panel_jpg"), b.toFloat());
+                // (the pilot lamp, as photographed lit; dark with the tubes off)
+                if (valueOf (fx, v, "tubes", 1.0f) < 0.5f)
+                    drawPart (g, "tube_lampoff_png", RF (1743.0f, 269.0f, 92.0f, 92.0f), s);
+            };
+            d["tubeEq"] = c;
+        }
+        {
+            // Console EQ: the British channel's 1U panel. Gain knobs and the frequency rings: their pointer lines turn;
+            // the preamp gain and the high pass (finned knobs) turn whole. The right-hand buttons are Silk: Red and Blue
+            constexpr float s = 1.0f;
+            Design c;
+            setCommon (c);
+            c.photoScale = s;
+            c.width = 1396; c.height = 194;
+            c.meters = true;
+            const std::vector<float> gain { 57.0f, 303.0f };   // (minus at upper right, round the bottom, plus at upper left)
+            auto midGain = turning ("console_ptr_midGain_png", 418, 104, 43, 178.4f, gain);
+            midGain.hitRadius = 40.0f;
+            auto lowGain = turning ("console_ptr_lowGain_png", 573, 104, 43, 181.4f, gain);
+            lowGain.hitRadius = 40.0f;
+            c.controls = {
+                photoControl ("drive", Kind::knob, turning ("console_knob_drive_png", 109, 101, 60, 180.0f, { 198.0f, 484.0f }), s),
+                photoControl ("highGain", Kind::knob, turning ("console_ptr_highGain_png", 262, 101, 44, 181.8f, gain), s),
+                photoControl ("midFreq", Kind::knob, turning ("console_ptr_midFreq_png", 418, 104, 60, 180.5f, { 116.0f, 150.0f, 180.0f, 214.0f, 244.0f, 273.0f }), s),
+                photoControl ("midGain", Kind::knob, midGain, s),
+                photoControl ("lowFreq", Kind::knob, turning ("console_ptr_lowFreq_png", 573, 104, 60, 180.3f, { 118.0f, 150.0f, 180.0f, 215.0f }), s),
+                photoControl ("lowGain", Kind::knob, lowGain, s),
+                photoControl ("hpf", Kind::knob, turning ("console_knob_hpf_png", 726, 102, 61, 178.0f, { 88.0f, 117.0f, 147.0f, 180.0f, 214.0f }), s),
+                photoControl ("output", Kind::knob, turning ("console_knob_output_png", 1125, 104, 28, 180.0f, { 45.0f, 315.0f }), s),
+                photoButton ("phase", RF (823, 29, 33, 64), s),
+                photoButton ("eqIn", RF (823, 97, 33, 65), s),
+                photoButton ("silk", RF (876, 32, 32, 63), s, 1),
+                photoButton ("silk", RF (876, 99, 32, 65), s, 2),
+            };
+            c.paint = [] (juce::Graphics& g, R b, const EffectInfo& fx, const float* v, float)
+            {
+                g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+                g.drawImage (skinImage ("console_panel_jpg"), b.toFloat());
+                const auto led = [&g] (const char* colour, float cx, float cy) { drawPart (g, colour, RF (cx - 13.0f, cy - 13.0f, 26.0f, 26.0f), s); };
+                // (a latched button sits a little deeper)
+                if (valueOf (fx, v, "phase") > 0.5f)
+                {
+                    g.setColour (juce::Colours::black.withAlpha (0.16f));
+                    g.fillRect (RF (823, 29, 33, 64));
+                }
+                if (valueOf (fx, v, "eqIn", 1.0f) > 0.5f)
+                {
+                    g.setColour (juce::Colours::black.withAlpha (0.12f));
+                    g.fillRect (RF (823, 97, 33, 65));
+                    led ("console_led_green_png", 1015, 99);
+                }
+                const auto silk = juce::roundToInt (valueOf (fx, v, "silk"));
+                if (silk == 1) drawPart (g, "console_cap_red_png", RF (873, 29, 38, 69), s);
+                if (silk == 2) drawPart (g, "console_cap_blue_png", RF (873, 96, 38, 71), s);
+                // The output meter: dBu on the panel (0 dBFS = +24 dBu)
+                const auto db = meterAt (0) + 24.0f;
+                const struct { float at, x, y; const char* colour; } meter[] {
+                    { -26.0f, 1039, 167, "console_led_green_png" }, { -10.0f, 1065, 167, "console_led_green_png" },
+                    { 0.0f, 1092, 167, "console_led_yellow_png" }, { 5.0f, 1119, 166, "console_led_yellow_png" },
+                    { 14.0f, 1145, 166, "console_led_yellow_png" }, { 18.0f, 1172, 166, "console_led_red_png" },
+                    { 23.5f, 1199, 166, "console_led_red_png" } };
+                for (const auto& m : meter)
+                    if (db >= m.at)
+                        led (m.colour, m.x, m.y);
+            };
+            d["consoleEq"] = c;
+        }
+    }
+
     void addHardwareDesigns (std::map<juce::String, Design>& d)
     {
         const auto knob = Kind::knob;
@@ -3544,9 +3743,11 @@ namespace
             d["delayDesigner"] = c;
         }
         addHardwareDesigns (d);
+        addPhotoDesigns (d);
 
         // The vintage EQs: under their faces, a screen with the curve they make and the live spectrum behind it
-        for (const char* type : { "consoleEq", "graphicEq", "tubeEq" })
+        // (not under the narrow graphic EQ)
+        for (const char* type : { "consoleEq", "tubeEq" })
         {
             auto& c = d[type];
             const auto faceHeight = c.height;
@@ -3644,6 +3845,15 @@ void drawSpectrum (juce::Graphics& g, juce::Rectangle<float> screen, const std::
     g.strokePath (line, juce::PathStrokeType (1.2f));
 }
 
+juce::Image skinImage (const char* name)
+{
+    int size = 0;
+    if (const auto* data = BinaryData::getNamedResource (name, size))
+        return juce::ImageCache::getFromMemory (data, size);
+    jassertfalse;   // (not in Resources/effects?)
+    return {};
+}
+
 const Design* designFor (const juce::String& type)
 {
     // Hand-made faces where they exist, the standard Logic look for every other stock effect
@@ -3707,10 +3917,60 @@ juce::Label* DesignLook::createSliderTextBox (juce::Slider& s)
     return l;
 }
 
+namespace
+{
+    /** A sprite's angle at a position: its settings' own angles, or smoothly between evenly spaced ones. */
+    float angleAt (const std::vector<float>& angles, float pos, int settings)
+    {
+        const auto n = (int) angles.size();
+        if (n == 1)
+            return angles[0];
+        if (settings > 1 && n == settings)
+            return angles[(size_t) juce::jlimit (0, n - 1, juce::roundToInt (pos * (float) (n - 1)))];
+        const auto x = juce::jlimit (0.0f, 1.0f, pos) * (float) (n - 1);
+        const auto i = std::min ((int) x, n - 2);
+        return angles[(size_t) i] + (x - (float) i) * (angles[(size_t) i + 1] - angles[(size_t) i]);
+    }
+
+    int settingsOf (const juce::Slider& s)
+    {
+        return s.textFromValueFunction != nullptr && s.getInterval() >= 1.0 ? juce::roundToInt (s.getMaximum() - s.getMinimum()) + 1 : 0;
+    }
+}
+
+void DesignLook::drawSprite (juce::Graphics& g, juce::Component& c, const Sprite& sp, float pos, bool on, int settings)
+{
+    if (sp.image == nullptr)
+        return;
+    const auto image = skinImage (sp.image);
+    if (! image.isValid())
+        return;
+    float degrees = 0.0f, dx = 0.0f;
+    if (sp.slides)
+        dx = sp.from + juce::jlimit (0.0f, 1.0f, pos) * (sp.to - sp.from) - sp.pivot.x;
+    else if (sp.angles.empty())
+        degrees = (on ? sp.onAngle : sp.offAngle) - sp.angle;
+    else
+        degrees = angleAt (sp.angles, pos, settings) - sp.angle;
+    const auto origin = c.getPosition().toFloat();
+    const auto t = juce::AffineTransform::scale (sp.rect.getWidth() / (float) image.getWidth(), sp.rect.getHeight() / (float) image.getHeight())
+                       .translated (sp.rect.getX() + dx, sp.rect.getY())
+                       .rotated (juce::degreesToRadians (degrees), sp.pivot.x + dx, sp.pivot.y)
+                       .scaled (design.photoScale)
+                       .translated (-origin.x, -origin.y);
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+    g.drawImageTransformed (image, t);
+}
+
 void DesignLook::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float start, float end, juce::Slider& s)
 {
     if (s.getProperties()["field"])
         return;   // (a value field: just its number)
+    if (s.getProperties().contains ("sprite"))
+    {
+        drawSprite (g, s, design.controls[(size_t) (int) s.getProperties()["sprite"]].sprite, pos, false, settingsOf (s));
+        return;
+    }
     const auto size = (float) std::min (w, h);
     const auto bounds = RF (size, size).withCentre (R (x, y, w, h).toFloat().getCentre());
     const auto centre = bounds.getCentre();
@@ -3889,6 +4149,12 @@ void DesignLook::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h
 void DesignLook::drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float, float,
                                    juce::Slider::SliderStyle style, juce::Slider& s)
 {
+    if (s.getProperties().contains ("sprite"))
+    {
+        drawSprite (g, s, design.controls[(size_t) (int) s.getProperties()["sprite"]].sprite,
+                    (float) s.valueToProportionOfLength (s.getValue()), false, settingsOf (s));
+        return;
+    }
     if (style != juce::Slider::LinearVertical)
     {
         LookAndFeel_V4::drawLinearSlider (g, x, y, w, h, pos, 0.0f, 0.0f, style, s);
@@ -3935,6 +4201,12 @@ juce::Colour DesignLook::hardwareLamp() const
 
 void DesignLook::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down)
 {
+    if (b.getProperties().contains ("sprite"))
+    {
+        // (a photographed switch: its part of the photo, thrown; a button: the face shows it)
+        drawSprite (g, b, design.controls[(size_t) (int) b.getProperties()["sprite"]].sprite, 0.0f, b.getToggleState(), 0);
+        return;
+    }
     if (b.getProperties()["hotspot"])
     {
         if (over)
@@ -3994,7 +4266,7 @@ void DesignLook::drawButtonBackground (juce::Graphics& g, juce::Button& b, const
 
 void DesignLook::drawButtonText (juce::Graphics& g, juce::TextButton& b, bool, bool)
 {
-    if (b.getProperties()["hotspot"])
+    if (b.getProperties()["hotspot"] || b.getProperties().contains ("sprite"))
         return;
     const auto on = b.getToggleState();
     juce::Colour colour;

@@ -27,6 +27,15 @@ namespace
         }
     };
 
+    /** The colour an EQ adds after its filters: a console's drive, a tube stage, Silk's harmonics, the polarity. */
+    struct Tone
+    {
+        float drive = 0.0f;   // soft saturation (0 for none)
+        int silk = 0;         // 0 off, 1 Red (harmonics in the highs and upper mids), 2 Blue (weight in the lows)
+        float texture = 0.0f; // how much Silk adds
+        bool invert = false;  // the polarity (the console's phase button)
+    };
+
     /** Base for the EQs: recalculates the filters when a knob moved, then runs them on both channels. */
     template <size_t N, void (*Design) (const float*, double, FilterSet<N>&), bool Saturates = false>
     class EqEffectBase : public BuiltInEffect
@@ -40,6 +49,12 @@ namespace
             for (auto& f : set.filters)
                 f.reset();
             last.fill (std::numeric_limits<float>::quiet_NaN());
+            silkLow = { 0.0f, 0.0f };
+            silkHigh = { 0.0f, 0.0f };
+            // (Silk's bands: the highs above about 2.5 kHz, the lows below about 220 Hz)
+            highCoef = (float) std::exp (-juce::MathConstants<double>::twoPi * 2500.0 / rate);
+            lowCoef = (float) std::exp (-juce::MathConstants<double>::twoPi * 220.0 / rate);
+            meterDecay = (float) std::exp (-1.0 / (0.3 * rate));
         }
 
         void process (float* l, float* r, int n) noexcept override
@@ -61,28 +76,43 @@ namespace
                     f.z2 = z2;
                 }
                 set.outputGain = fresh.outputGain;
-                drive = Saturates ? driveFrom (v.data()) : 0.0f;
+                tone = toneFrom (v.data());
                 last = v;
             }
+            auto peak = meterPeak;
             for (int i = 0; i < n; ++i)
             {
-                auto a = l[i], b = r[i];
-                for (auto& f : set.filters)
+                float s[2] { l[i], r[i] };
+                for (int ch = 0; ch < 2; ++ch)
                 {
-                    a = f.process (a, 0);
-                    b = f.process (b, 1);
-                }
-                if constexpr (Saturates)
-                {
-                    if (drive > 0.0f)
+                    auto a = s[ch];
+                    for (auto& f : set.filters)
+                        a = f.process (a, ch);
+                    if constexpr (Saturates)
                     {
-                        a = saturate (a * (1.0f + drive)) / (1.0f + drive * 0.6f);
-                        b = saturate (b * (1.0f + drive)) / (1.0f + drive * 0.6f);
+                        if (tone.drive > 0.0f)
+                            a = saturate (a * (1.0f + tone.drive)) / (1.0f + tone.drive * 0.6f);
+                        if (tone.silk != 0)
+                            a = silk (a, ch);
+                        if (tone.invert)
+                            a = -a;
                     }
+                    s[ch] = a * set.outputGain;
                 }
-                l[i] = a * set.outputGain;
-                r[i] = b * set.outputGain;
+                l[i] = s[0];
+                r[i] = s[1];
+                peak = std::max (peak * meterDecay, std::max (std::abs (s[0]), std::abs (s[1])));
             }
+            meterPeak = peak;
+            meterLevel.store (peak, std::memory_order_relaxed);
+        }
+
+        int readMeters (float* dest, int capacity) const noexcept override
+        {
+            if (capacity < 1)
+                return 0;
+            dest[0] = gainToDb (meterLevel.load (std::memory_order_relaxed));   // (the output's peak, held a little)
+            return 1;
         }
 
         static double response (const float* v, double freq, double rate)
@@ -92,12 +122,40 @@ namespace
             return s.responseDb (freq, rate);
         }
 
-        static float driveFrom (const float* v);
+        static Tone toneFrom (const float* v);
 
     private:
+        /**
+            Silk, as on the transformer-coupled preamps: Red puts a little second-and-third harmonic colour into
+            the highs and upper mids (presence, air); Blue thickens the lows. Texture sets how much.
+        */
+        float silk (float x, int ch) noexcept
+        {
+            const auto t = tone.texture;
+            if (tone.silk == 1)
+            {
+                auto& lp = silkHigh[(size_t) ch];
+                lp = x + highCoef * (lp - x);
+                const auto high = x - lp;
+                const auto h = high * 2.2f;
+                // (even harmonics from the bias, odd from the curve; a little lift of the band itself)
+                const auto colour = 0.16f * h * std::abs (h) + (saturate (h) - h) * 0.5f;
+                return x + t * (colour / 2.2f + 0.09f * high);
+            }
+            auto& lp = silkLow[(size_t) ch];
+            lp = x + lowCoef * (lp - x);
+            const auto low = lp * 1.8f;
+            const auto colour = 0.22f * low * std::abs (low) + (saturate (low) - low) * 0.35f;
+            return x + t * (colour / 1.8f + 0.11f * lp);
+        }
+
         FilterSet<N> set;
         std::array<float, maxParams> last {};
-        float drive = 0.0f;
+        Tone tone;
+        std::array<float, 2> silkLow {}, silkHigh {};
+        float highCoef = 0.0f, lowCoef = 0.0f;
+        float meterDecay = 0.999f, meterPeak = 0.0f;
+        std::atomic<float> meterLevel { 0.0f };
     };
 
     //==============================================================================
@@ -316,6 +374,14 @@ namespace
         static const float lows[] { 35.0f, 60.0f, 110.0f, 220.0f };
         static const float mids[] { 360.0f, 700.0f, 1600.0f, 3200.0f, 4800.0f, 7200.0f };
         auto& f = s.filters;
+        s.outputGain = dbToGain (v[7]);
+        if (v[8] < 0.5f)
+        {
+            // (the EQ button out: only the preamp)
+            for (auto& filter : f)
+                filter.setIdentity();
+            return;
+        }
         const auto h = juce::jlimit (0, 4, juce::roundToInt (v[0]));
         if (h > 0) { f[0].setHighPass (rate, hpf[h], 0.6); f[1].setHighPass (rate, hpf[h], 0.9); }
         else { f[0].setIdentity(); f[1].setIdentity(); }
@@ -324,15 +390,16 @@ namespace
         // The bell gets narrower as it's turned up, as on the console
         f[3].setPeak (rate, mids[juce::jlimit (0, 5, juce::roundToInt (v[3]))], v[4], 0.7 + std::abs (v[4]) / 18.0 * 0.8);
         f[4].setHighShelf (rate, 12000.0, v[5], 0.8);
-        s.outputGain = dbToGain (v[7]);
     }
 
     // Graphic EQ: ten octave bands
     const float graphicBands[] { 31.0f, 63.0f, 125.0f, 250.0f, 500.0f, 1000.0f, 2000.0f, 4000.0f, 8000.0f, 16000.0f };
     void designGraphic (const float* v, double rate, FilterSet<10>& s)
     {
+        const auto in = v[11] > 0.5f;   // (the IN button)
         for (size_t i = 0; i < 10; ++i)
-            s.filters[i].setPeak (rate, graphicBands[i], v[i], 1.4 + std::abs (v[i]) / 12.0 * 0.8);
+            if (in) s.filters[i].setPeak (rate, graphicBands[i], v[i], 1.4 + std::abs (v[i]) / 12.0 * 0.8);
+            else s.filters[i].setIdentity();
         s.outputGain = dbToGain (v[10]);
     }
 
@@ -343,19 +410,35 @@ namespace
         static const float highs[] { 3000.0f, 4000.0f, 5000.0f, 8000.0f, 10000.0f, 12000.0f, 16000.0f };
         static const float attens[] { 5000.0f, 10000.0f, 20000.0f };
         auto& f = s.filters;
+        s.outputGain = dbToGain (v[8]);
+        if (v[9] < 0.5f)
+        {
+            // (the IN switch off: straight through the tube stage)
+            for (auto& filter : f)
+                filter.setIdentity();
+            return;
+        }
         const auto lowF = lows[juce::jlimit (0, 3, juce::roundToInt (v[0]))];
         f[0].setLowShelf (rate, lowF, v[1] * 1.35, 0.5);           // boost: up to 13.5 dB
         f[1].setLowShelf (rate, lowF * 1.6, -v[2] * 1.75, 0.6);     // cut, a little higher: the dip above the boost
         const auto bandwidth = juce::jlimit (0.0f, 10.0f, v[5]);
         f[2].setPeak (rate, highs[juce::jlimit (0, 6, juce::roundToInt (v[3]))], v[4] * 1.8, 2.5 - bandwidth * 0.22);
         f[3].setHighShelf (rate, attens[juce::jlimit (0, 2, juce::roundToInt (v[6]))], -v[7] * 1.6, 0.7);
-        s.outputGain = dbToGain (v[8]);
     }
 
-    template <> float EqEffectBase<5, designConsole, true>::driveFrom (const float* v) { return v[6] * 0.25f; }
-    template <> float EqEffectBase<4, designTube, true>::driveFrom (const float*)     { return 0.15f; }   // (always a little warm)
-    template <> float EqEffectBase<2, designSingle, false>::driveFrom (const float*)   { return 0.0f; }
-    template <> float EqEffectBase<10, designGraphic, false>::driveFrom (const float*) { return 0.0f; }
+    template <> Tone EqEffectBase<5, designConsole, true>::toneFrom (const float* v)
+    {
+        Tone t;
+        t.drive = v[6] * 0.25f;
+        t.silk = juce::jlimit (0, 2, juce::roundToInt (v[10]));
+        t.texture = 0.45f + v[6] * 0.055f;   // (more Silk the harder the preamp is driven, as on the hardware)
+        t.invert = v[9] > 0.5f;
+        return t;
+    }
+    // (the tubes on: always a little warm; off: clean)
+    template <> Tone EqEffectBase<4, designTube, true>::toneFrom (const float* v)       { Tone t; t.drive = v[10] > 0.5f ? 0.15f : 0.0f; return t; }
+    template <> Tone EqEffectBase<2, designSingle, false>::toneFrom (const float*)   { return {}; }
+    template <> Tone EqEffectBase<10, designGraphic, false>::toneFrom (const float*) { return {}; }
 
     using SingleEq = EqEffectBase<2, designSingle>;
     using ConsoleEq = EqEffectBase<5, designConsole, true>;
@@ -428,7 +511,10 @@ const std::vector<StockEffect>& stockEqEffects()
               { "midGain", "Mid", dB, -18.0f, 18.0f, 0.0f, 0.0f },
               { "highGain", "High (12k)", dB, -16.0f, 16.0f, 0.0f, 0.0f },
               { "drive", "Drive", "", 0.0f, 10.0f, 2.0f, 5.0f },
-              { "output", "Output", dB, -18.0f, 18.0f, 0.0f, 0.0f } }, "EQ", ConsoleEq::response, { 1, 2, 2, 1, 2 } },
+              { "output", "Output", dB, -18.0f, 18.0f, 0.0f, 0.0f },
+              { "eqIn", "EQ", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Out", "In" } },
+              { "phase", "Phase", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Normal", "Invert" } },
+              { "silk", "Silk", "", 0.0f, 2.0f, 0.0f, 1.0f, { "Off", "Red", "Blue" } } }, "EQ", ConsoleEq::response, { 1, 2, 2, 1, 2, 3 } },
           make<ConsoleEq> },
 
         { { "graphicEq", "Graphic EQ", {
@@ -437,7 +523,8 @@ const std::vector<StockEffect>& stockEqEffects()
               { "b500", "500", dB, -12.0f, 12.0f, 0.0f, 0.0f }, { "b1k", "1k", dB, -12.0f, 12.0f, 0.0f, 0.0f },
               { "b2k", "2k", dB, -12.0f, 12.0f, 0.0f, 0.0f }, { "b4k", "4k", dB, -12.0f, 12.0f, 0.0f, 0.0f },
               { "b8k", "8k", dB, -12.0f, 12.0f, 0.0f, 0.0f }, { "b16k", "16k", dB, -12.0f, 12.0f, 0.0f, 0.0f },
-              { "output", "Output", dB, -12.0f, 12.0f, 0.0f, 0.0f } }, "EQ", GraphicEq::response },
+              { "output", "Output", dB, -12.0f, 12.0f, 0.0f, 0.0f },
+              { "eqIn", "In", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Out", "In" } } }, "EQ", GraphicEq::response },
           make<GraphicEq> },
 
         { { "tubeEq", "Tube EQ", {
@@ -449,7 +536,9 @@ const std::vector<StockEffect>& stockEqEffects()
               { "bandwidth", "Bandwidth", "", 0.0f, 10.0f, 5.0f, 5.0f },
               { "attenFreq", "Atten Sel", "", 0.0f, 2.0f, 1.0f, 1.0f, { "5 kHz", "10 kHz", "20 kHz" } },
               { "highAtten", "High Atten", "", 0.0f, 10.0f, 0.0f, 5.0f },
-              { "output", "Output", dB, -12.0f, 12.0f, 0.0f, 0.0f } }, "EQ", TubeEq::response, { 3, 3, 2, 1 } },
+              { "output", "Output", dB, -12.0f, 12.0f, 0.0f, 0.0f },
+              { "eqIn", "In", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Out", "In" } },
+              { "tubes", "Tubes", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } } }, "EQ", TubeEq::response, { 3, 3, 2, 1, 2 } },
           make<TubeEq> },
     };
     return effects;

@@ -1334,3 +1334,69 @@ TEST_CASE ("MultiMeter: a band-pass per third octave; pink noise level, a tone a
     }
 }
 
+
+TEST_CASE ("Vintage EQs: the IN switches, the tubes, the console's polarity and Silk", "[stockfx]")
+{
+    // IN out: the boost is gone (curve and sound)
+    for (const auto* type : { "graphicEq", "tubeEq", "consoleEq" })
+    {
+        INFO (type);
+        auto e = make (type);
+        const juce::String boost = juce::String (type) == "graphicEq" ? "b1k" : juce::String (type) == "tubeEq" ? "highBoost" : "midGain";
+        set (*e, boost.toRawUTF8(), juce::String (type) == "tubeEq" ? 10.0f : 12.0f);
+        if (juce::String (type) == "tubeEq") set (*e, "highFreq", 0.0f);   // (3 kHz)
+        if (juce::String (type) == "consoleEq") { set (*e, "midFreq", 2.0f); set (*e, "drive", 0.0f); }
+        const double at = juce::String (type) == "tubeEq" ? 3000.0 : 1000.0 + (juce::String (type) == "consoleEq" ? 600.0 : 0.0);
+        const auto [bl, br] = run (*e, sine (at, 0.5, 0.05f), sine (at, 0.5, 0.05f));
+        CHECK (peakOf (bl, 12000) > 0.1f);
+        set (*e, "eqIn", 0.0f);
+        const auto [ol, orr] = run (*e, sine (at, 0.5, 0.05f), sine (at, 0.5, 0.05f));
+        CHECK_THAT (peakOf (ol, 12000), Catch::Matchers::WithinAbs (0.05, 0.004));
+    }
+    // The console's phase button turns the signal over
+    auto ph = make ("consoleEq");
+    set (*ph, "drive", 0.0f);
+    set (*ph, "phase", 1.0f);
+    const auto [pl, pr] = run (*ph, sine (1000.0, 0.5, 0.1f), sine (1000.0, 0.5, 0.1f));
+    const auto input = sine (1000.0, 0.5, 0.1f);
+    double dot = 0.0;
+    for (size_t i = 12000; i < pl.size(); ++i)
+        dot += (double) pl[i] * input[i];
+    CHECK (dot < 0.0);
+    // Silk Red adds harmonics to a high tone, Blue to a low one; off adds none
+    const auto harmonics = [] (const std::vector<float>& x, double freq)
+    {
+        // (energy at the 2nd and 3rd harmonics, by correlation)
+        double e = 0.0;
+        for (const auto h : { 2.0, 3.0 })
+        {
+            double s = 0.0, c = 0.0;
+            for (size_t i = 12000; i < x.size(); ++i)
+            {
+                const auto ph = juce::MathConstants<double>::twoPi * freq * h * (double) i / rate;
+                s += x[i] * std::sin (ph);
+                c += x[i] * std::cos (ph);
+            }
+            e += std::hypot (s, c) / (double) (x.size() - 12000);
+        }
+        return e;
+    };
+    for (const auto [silk, freq] : { std::pair { 1.0f, 3000.0 }, std::pair { 2.0f, 80.0 } })
+    {
+        auto plain = make ("consoleEq");
+        set (*plain, "drive", 0.0f);
+        auto coloured = make ("consoleEq");
+        set (*coloured, "drive", 0.0f);
+        set (*coloured, "silk", silk);
+        const auto [a, a2] = run (*plain, sine (freq, 0.5, 0.5f), sine (freq, 0.5, 0.5f));
+        const auto [b, b2] = run (*coloured, sine (freq, 0.5, 0.5f), sine (freq, 0.5, 0.5f));
+        CHECK (harmonics (b, freq) > harmonics (a, freq) * 4.0 + 1.0e-5);
+    }
+    // The tubes off: cleaner than on
+    auto on = make ("tubeEq");
+    auto off = make ("tubeEq");
+    set (*off, "tubes", 0.0f);
+    const auto [tl, tr] = run (*on, sine (200.0, 0.5, 0.8f), sine (200.0, 0.5, 0.8f));
+    const auto [fl, fr] = run (*off, sine (200.0, 0.5, 0.8f), sine (200.0, 0.5, 0.8f));
+    CHECK (harmonics (fl, 200.0) < harmonics (tl, 200.0) * 0.5);
+}

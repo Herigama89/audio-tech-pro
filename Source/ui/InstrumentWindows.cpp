@@ -367,6 +367,17 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                 }
                 if (c.kind != effectdesign::Kind::field && ! c.colour.isTransparent())
                     k->slider.getProperties().set ("cap", c.colour.toString());   // (the knob's or fader cap's own colour)
+                if (c.sprite.image != nullptr)
+                {
+                    // A photographed face: the part cut from the photo turns (or slides) to the value, shown while dragged
+                    k->slider.getProperties().set ("sprite", (int) (&c - design->controls.data()));
+                    if (c.sprite.slides)
+                        k->slider.setSliderStyle (juce::Slider::LinearHorizontal);
+                    k->slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+                    k->slider.setPopupDisplayEnabled (true, true, this);
+                    if (c.sprite.hitRadius > 0.0f)
+                        k->slider.getProperties().set ("hitRadius", c.sprite.hitRadius * design->photoScale);
+                }
                 k->slider.lookAndFeelChanged();
                 placed.component = &k->slider;
                 break;
@@ -406,6 +417,23 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                 b->setWantsKeyboardFocus (false);
                 if (c.kind == effectdesign::Kind::hotspot)
                     b->getProperties().set ("hotspot", true);
+                if (design->photoScale > 0.0f)
+                    b->getProperties().set ("sprite", (int) (&c - design->controls.data()));
+                if (c.sprite.choice >= 0)
+                {
+                    // One setting of a switch (e.g. Silk's Red): lit at it; a click picks it, or goes back to the first setting
+                    b->onClick = [setValue, current, id = c.id, name = p->name, choice = c.sprite.choice]
+                    {
+                        setValue (id, name, juce::roundToInt (current (id)) == choice ? 0.0f : (float) choice);
+                    };
+                    addAndMakeVisible (b);
+                    refreshers.push_back ([b, current, id = c.id, choice = c.sprite.choice]
+                    {
+                        b->setToggleState (juce::roundToInt (current (id)) == choice, juce::dontSendNotification);
+                    });
+                    placed.component = b;
+                    break;
+                }
                 const auto onText = caption ? c.label.substring (1) : p->choices.size() > 1 ? p->choices.back() : juce::String ("ON");
                 const auto offText = caption ? c.label.substring (1) : p->choices.size() > 1 ? p->choices.front() : juce::String ("OFF");
                 b->onClick = [setValue, current, id = c.id, name = p->name] { setValue (id, name, current (id) > 0.5f ? 0.0f : 1.0f); };

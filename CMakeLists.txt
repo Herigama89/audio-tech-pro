@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
 endif()
 
-project(AudioTechPro VERSION 1.8.2 LANGUAGES C CXX)
+project(AudioTechPro VERSION 1.9.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -181,6 +181,8 @@ juce_add_gui_app(AudioTechPro
 juce_generate_juce_header(AudioTechPro)
 
 # Artwork compiled into the app
+# (the photographed effect faces and their moving parts, cut by Tools/effect_skins)
+file(GLOB RIFF_EFFECT_SKINS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Resources/effects/*.png ${CMAKE_CURRENT_SOURCE_DIR}/Resources/effects/*.jpg)
 juce_add_binary_data(AudioTechProData
     HEADER_NAME BinaryData.h
     NAMESPACE   BinaryData
@@ -198,6 +200,7 @@ juce_add_binary_data(AudioTechProData
                 Resources/skin/fader_cap.png
                 Resources/skin/knob_black.png
                 Resources/skin/knob_white.png
+                ${RIFF_EFFECT_SKINS}
                 Resources/skin/knob_bus.png
                 Resources/skin/vu_face.png
                 Resources/skin/panel.png

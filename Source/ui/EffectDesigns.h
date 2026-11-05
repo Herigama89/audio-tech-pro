@@ -39,6 +39,26 @@ namespace riff::effectdesign
         juce::String left {}, right {};
     };
 
+    /**
+        A part of a photographed face that moves (a knob, a knob's pointer line, a fader's cap, a switch), cut from
+        the photo: it is drawn turned round its pivot, or slid along, to show the parameter's value.
+        Everything is in the photo's pixels (the face draws the photo at its photoScale).
+    */
+    struct Sprite
+    {
+        const char* image = nullptr;          // its picture (a BinaryData resource name); nullptr: an invisible button over the photo
+        juce::Rectangle<float> rect;          // where the picture sits on the photo
+        juce::Point<float> pivot;             // what it turns round
+        float angle = 0.0f;                   // where it points as photographed (degrees clockwise from 12 o'clock)
+        std::vector<float> angles;            // where it points at the lowest .. highest value (two: smoothly between;
+                                              //  more: for evenly spaced values, or one for each setting of a switch)
+        bool slides = false;                  // a fader's cap: slides across instead of turning
+        float from = 0.0f, to = 0.0f;         //  its pivot's x at the lowest and highest value
+        float onAngle = 0.0f, offAngle = 0.0f;// a two-way switch: where it points when on and off
+        int choice = -1;                      // a button for one setting of a switch: lit at it; a click picks it, or goes back to the first
+        float hitRadius = 0.0f;               // takes clicks only this far from the pivot (a knob inside a ring)
+    };
+
     struct Control
     {
         juce::String id;
@@ -47,6 +67,7 @@ namespace riff::effectdesign
         juce::String label {};                  // (empty: the parameter's name; "-" for none; a toggle's "=TEXT": its caption)
         juce::Colour colour {};                 // (fields: the band's colour)
         int page = 0;                           // (0: always shown; otherwise only on that page of the face)
+        Sprite sprite {};                       // (a photographed face: the moving part, cut from the photo)
     };
 
     enum class KnobStyle { silver, dark, light, black, white, chrome };
@@ -54,6 +75,7 @@ namespace riff::effectdesign
     struct Design
     {
         int width = 800, height = 500;
+        float photoScale = 0.0f;                // a photographed face: its photo's pixels to the face's (0: a drawn face)
         std::vector<Control> controls;
         KnobStyle knobs = KnobStyle::dark;
         juce::Colour label, value, accent, track;
@@ -101,6 +123,9 @@ namespace riff::effectdesign
     /** Draws the spectrum into a screen (0 dB at the top, -84 dB at the bottom), x from a frequency. */
     void drawSpectrum (juce::Graphics&, juce::Rectangle<float> screen, const std::function<float (double)>& xOf, juce::Colour colour);
 
+    /** A picture compiled into the app, by its BinaryData resource name (cached). */
+    juce::Image skinImage (const char* name);
+
     /** The hand-made face for an effect, or nullptr (it gets the standard face). */
     const Design* designFor (const juce::String& type);
 
@@ -121,6 +146,8 @@ namespace riff::effectdesign
         juce::Label* createSliderTextBox (juce::Slider&) override;
         juce::Slider::SliderLayout getSliderLayout (juce::Slider&) override;
         juce::Colour hardwareLamp() const;
+        /** Draws a control's photographed moving part at a position (0..1) or on/off. */
+        void drawSprite (juce::Graphics&, juce::Component&, const Sprite&, float pos, bool on, int settings);
 
         const Design& design;
     };
