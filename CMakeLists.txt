@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
 endif()
 
-project(AudioTechPro VERSION 1.8.0 LANGUAGES C CXX)
+project(AudioTechPro VERSION 1.8.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -148,6 +148,13 @@ endif()
 if(MSVC)
     add_compile_options(/bigobj /utf-8 /MP)
     add_compile_definitions(NOMINMAX _USE_MATH_DEFINES)
+endif()
+
+# ASIO (Windows): the audio interface's own low-latency driver, from the ASIO SDK headers JUCE bundles
+# (Steinberg's, under GPL v3 here, as JUCE itself is used under the AGPL; a commercial release would sign
+# Steinberg's free ASIO licence agreement instead).
+if(WIN32)
+    list(APPEND RIFF_DEFINITIONS JUCE_ASIO=1)
 endif()
 
 # Audio Units exist only on macOS.

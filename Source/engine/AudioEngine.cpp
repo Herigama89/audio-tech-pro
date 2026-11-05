@@ -121,6 +121,37 @@ juce::String AudioEngine::initialise (const juce::XmlElement* savedState)
     if (error.isNotEmpty())
         error = deviceManager.initialiseWithDefaultDevices (0, 2);
 
+   #if JUCE_WINDOWS && JUCE_ASIO
+    // First time on Windows: the interface's own ASIO driver, when one is installed (the lowest latency).
+    // The ASIO4ALL-style generic wrappers come after a maker's own driver.
+    if (savedState == nullptr)
+        for (auto* type : deviceManager.getAvailableDeviceTypes())
+            if (type->getTypeName() == "ASIO")
+            {
+                type->scanForDevices();
+                auto names = type->getDeviceNames();
+                std::stable_partition (names.begin(), names.end(), [] (const juce::String& n)
+                                       { return ! n.containsIgnoreCase ("ASIO4ALL") && ! n.containsIgnoreCase ("FlexASIO") && ! n.containsIgnoreCase ("Generic"); });
+                if (names.isEmpty())
+                    break;
+                const auto before = deviceManager.getAudioDeviceSetup();
+                const auto beforeType = deviceManager.getCurrentAudioDeviceType();
+                deviceManager.setCurrentAudioDeviceType ("ASIO", true);
+                auto setup = deviceManager.getAudioDeviceSetup();
+                setup.outputDeviceName = setup.inputDeviceName = names[0];
+                setup.useDefaultInputChannels = setup.useDefaultOutputChannels = true;
+                if (deviceManager.setAudioDeviceSetup (setup, true).isNotEmpty())
+                {
+                    // (it wouldn't open: back to what worked)
+                    deviceManager.setCurrentAudioDeviceType (beforeType, true);
+                    deviceManager.setAudioDeviceSetup (before, true);
+                }
+                else
+                    error.clear();
+                break;
+            }
+   #endif
+
     deviceManager.addAudioCallback (this);
 
     // Listen to every MIDI keyboard, including ones plugged in later.

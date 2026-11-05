@@ -4,7 +4,7 @@
 
 Click **Audio** at the top right, or choose **Audio Settings...** (`Cmd/Ctrl+,`):
 
-- **Device** - your interface. On Mac it's Core Audio, on Windows choose the ASIO driver for the lowest delay.
+- **Device** - your interface. On Mac it's Core Audio. On Windows, set **Audio device type** to **ASIO** and choose your interface's driver (installed with the interface; get it from the maker's website) for the lowest delay; **Control Panel** opens the driver's own settings, where its buffer size is set. The app picks ASIO by itself the first time when one is installed.
 - **Sample rate** - 44.1 or 48 kHz for most music.
 - **Buffer size** - 64 or 128 samples while recording (you hear yourself with little delay); 512 or 1024 while mixing with many plugins.
 
