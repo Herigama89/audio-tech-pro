@@ -19,7 +19,8 @@ permissions:
 
 jobs:
   mac:
-    runs-on: macos-15
+    # (the Intel image: the Apple-silicon runners have been unavailable; the app is built universal either way)
+    runs-on: macos-15-intel
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
