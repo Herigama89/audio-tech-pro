@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
 endif()
 
-project(AudioTechPro VERSION 1.8.1 LANGUAGES C CXX)
+project(AudioTechPro VERSION 1.8.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -380,6 +380,10 @@ if(RIFF_BUILD_TESTS)
 
     target_include_directories(AudioTechProTests PRIVATE Source)
     target_compile_definitions(AudioTechProTests PRIVATE ${RIFF_DEFINITIONS})
+    if(WIN32)
+        target_sources(AudioTechProTests PRIVATE Source/ui/ScreenRecorder_win.cpp)
+        target_link_libraries(AudioTechProTests PRIVATE mfplat mfreadwrite mfuuid ole32 gdi32 user32)
+    endif()
 
     # Two tiny CLAP plugins the tests load.
     add_library(TestClapPlugins MODULE Tests/clap/TestClapPlugins.cpp)
@@ -407,6 +411,12 @@ if(RIFF_BUILD_TESTS)
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
     )
+endif()
+
+# Screen recording on Windows: Media Foundation's encoders
+if(WIN32)
+    target_sources(AudioTechPro PRIVATE Source/ui/ScreenRecorder_win.cpp)
+    target_link_libraries(AudioTechPro PRIVATE mfplat mfreadwrite mfuuid ole32 gdi32 user32)
 endif()
 
 # Hosting Audio Units needs CoreAudioKit (for the generic plugin view).

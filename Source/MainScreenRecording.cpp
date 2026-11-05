@@ -154,7 +154,13 @@ void MainComponent::stopScreenRecording (const juce::String& failure)
 
         safe->messageBox = juce::AlertWindow::showScopedAsync (
             juce::MessageBoxOptions::makeOptionsOkCancel (juce::MessageBoxIconType::InfoIcon, "Screen recording saved", text,
-                                                          "Show in Finder", "OK", safe.getComponent()),
+                                                          
+                                                         #if JUCE_WINDOWS
+                                                          "Show in Explorer",
+                                                         #else
+                                                          "Show in Finder",
+                                                         #endif
+                                                          "OK", safe.getComponent()),
             [file] (int result) { if (result == 1) file.revealToUser(); });
     });
 }

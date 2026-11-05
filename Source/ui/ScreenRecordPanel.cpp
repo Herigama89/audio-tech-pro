@@ -133,8 +133,11 @@ ScreenRecordPanel::ScreenRecordPanel (const ScreenRecordSettings& initial, const
     help.setText (unavailable.isNotEmpty()
                       ? unavailable
                       : "Records an MP4 (H.264 video, AAC audio). The sound comes straight from the mix, so it's clean; "
-                        "the mic is only in the video, not in your speakers. Click the Screen key again to stop. "
-                        "The first time, macOS asks to allow screen recording.",
+                        "the mic is only in the video, not in your speakers. Click the Screen key again to stop."
+                       #if JUCE_MAC
+                        " The first time, macOS asks to allow screen recording."
+                       #endif
+                        ,
                   juce::dontSendNotification);
     help.setFont (juce::FontOptions (12.0f));
     help.setColour (juce::Label::textColourId, unavailable.isNotEmpty() ? juce::Colour (0xffff8a80) : theme::dimText);

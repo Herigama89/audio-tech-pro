@@ -1,7 +1,7 @@
-// Everything except macOS: screen recording isn't there yet.
+// Everything but macOS and Windows: screen recording isn't there yet.
 #include "ScreenRecorder.h"
 
-#if ! JUCE_MAC
+#if ! JUCE_MAC && ! JUCE_WINDOWS
 
 namespace riff
 {
@@ -12,7 +12,7 @@ namespace
     {
     public:
         bool isAvailable() const override { return false; }
-        juce::String unavailableReason() const override { return "Screen recording is on the Mac for now; Windows comes later."; }
+        juce::String unavailableReason() const override { return "Screen recording is on the Mac and Windows."; }
 
         void start (const Options&, ScreenAudioTap&, std::function<void (const juce::String&)> started) override
         {
