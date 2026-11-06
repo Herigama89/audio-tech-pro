@@ -260,69 +260,62 @@ void ConsoleChannel::runDynamics (float* l, float* r, int numSamples, const floa
     const bool external = settings.externalKey && keyL != nullptr;
     const bool filtered = settings.filtersToSidechain && settings.filtersActive();
     const bool equalised = settings.eqToSidechain && settings.eqIn;
-    for (int start = 0; start < numSamples; start += sideBlock)
+    // (the side chain, sample by sample: the key - its own sound or another track's - through the filters and the
+    //  EQ if they're sent there; no buffers, so a strip on every track stays small)
+    const auto keyed = [&] (float x, int ch) noexcept
     {
-        const auto n = juce::jmin (sideBlock, numSamples - start);
-        auto* L = l + start;
-        auto* R = r + start;
-        // The side chain: the key (its own sound or another track's), through the filters and the EQ if they're sent there
-        const auto* kl = external ? keyL + start : L;
-        const auto* kr = external ? (keyR != nullptr ? keyR + start : keyL + start) : R;
-        const float* dl = kl;
-        const float* dr = kr;
-        if (filtered || equalised)
+        if (filtered)
         {
-            std::copy (kl, kl + n, sideL.begin());
-            std::copy (kr, kr + n, sideR.begin());
-            if (filtered)
-            {
-                if (settings.hpf > 0.0f) { runFilter (sideHpf1, sideL.data(), sideR.data(), n); runFilter (sideHpf2, sideL.data(), sideR.data(), n); }
-                if (settings.lpf > 0.0f) runFilter (sideLpf, sideL.data(), sideR.data(), n);
-            }
-            if (equalised)
-            {
-                if (std::abs (settings.lf) > 0.01f)  runFilter (sideLf, sideL.data(), sideR.data(), n);
-                if (std::abs (settings.lmf) > 0.01f) runFilter (sideLmf, sideL.data(), sideR.data(), n);
-                if (std::abs (settings.hmf) > 0.01f) runFilter (sideHmf, sideL.data(), sideR.data(), n);
-                if (std::abs (settings.hf) > 0.01f)  runFilter (sideHf, sideL.data(), sideR.data(), n);
-            }
-            dl = sideL.data();
-            dr = sideR.data();
+            if (settings.hpf > 0.0f) x = sideHpf2.process (sideHpf1.process (x, ch), ch);
+            if (settings.lpf > 0.0f) x = sideLpf.process (x, ch);
         }
-
-        for (int i = 0; i < n; ++i)
+        if (equalised)
         {
-            const auto linked = juce::jmax (std::abs (dl[i]), std::abs (dr[i]));
-            float g = 1.0f;
-            if (gate)
-            {
-                const auto below = juce::jmax (0.0f, settings.gateThreshold - toDb (linked));
-                const auto target = -juce::jmin (settings.gateRange, settings.gateExpander ? below : (below > 0.0f ? settings.gateRange : 0.0f));
-                gateGainDb = target + (target > gateGainDb ? open : close) * (gateGainDb - target);
-                g = juce::Decibels::decibelsToGain (gateGainDb);
-            }
-            if (! comp)
-            {
-                L[i] *= g;
-                R[i] *= g;
-                continue;
-            }
-            if (settings.link)
-            {
-                follow (envelopeDb, reduction (toDb (linked)));
-                const auto c = g * juce::Decibels::decibelsToGain (-envelopeDb) * makeup;
-                L[i] *= c;
-                R[i] *= c;
-            }
-            else
-            {
-                // (unlinked: each side compressed by its own level)
-                follow (channelEnvelope[0], reduction (toDb (std::abs (dl[i]))));
-                follow (channelEnvelope[1], reduction (toDb (std::abs (dr[i]))));
-                envelopeDb = juce::jmax (channelEnvelope[0], channelEnvelope[1]);
-                L[i] *= g * juce::Decibels::decibelsToGain (-channelEnvelope[0]) * makeup;
-                R[i] *= g * juce::Decibels::decibelsToGain (-channelEnvelope[1]) * makeup;
-            }
+            if (std::abs (settings.lf) > 0.01f)  x = sideLf.process (x, ch);
+            if (std::abs (settings.lmf) > 0.01f) x = sideLmf.process (x, ch);
+            if (std::abs (settings.hmf) > 0.01f) x = sideHmf.process (x, ch);
+            if (std::abs (settings.hf) > 0.01f)  x = sideHf.process (x, ch);
+        }
+        return x;
+    };
+    auto* L = l;
+    auto* R = r;
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const auto kl = external ? keyL[i] : L[i];
+        const auto kr = external ? (keyR != nullptr ? keyR[i] : keyL[i]) : R[i];
+        const auto sl = (filtered || equalised) ? keyed (kl, 0) : kl;
+        const auto sr = (filtered || equalised) ? keyed (kr, 1) : kr;
+        const auto linked = juce::jmax (std::abs (sl), std::abs (sr));
+        float g = 1.0f;
+        if (gate)
+        {
+            const auto below = juce::jmax (0.0f, settings.gateThreshold - toDb (linked));
+            const auto target = -juce::jmin (settings.gateRange, settings.gateExpander ? below : (below > 0.0f ? settings.gateRange : 0.0f));
+            gateGainDb = target + (target > gateGainDb ? open : close) * (gateGainDb - target);
+            g = juce::Decibels::decibelsToGain (gateGainDb);
+        }
+        if (! comp)
+        {
+            L[i] *= g;
+            R[i] *= g;
+            continue;
+        }
+        if (settings.link)
+        {
+            follow (envelopeDb, reduction (toDb (linked)));
+            const auto c = g * juce::Decibels::decibelsToGain (-envelopeDb) * makeup;
+            L[i] *= c;
+            R[i] *= c;
+        }
+        else
+        {
+            // (unlinked: each side compressed by its own level)
+            follow (channelEnvelope[0], reduction (toDb (std::abs (sl))));
+            follow (channelEnvelope[1], reduction (toDb (std::abs (sr))));
+            envelopeDb = juce::jmax (channelEnvelope[0], channelEnvelope[1]);
+            L[i] *= g * juce::Decibels::decibelsToGain (-channelEnvelope[0]) * makeup;
+            R[i] *= g * juce::Decibels::decibelsToGain (-channelEnvelope[1]) * makeup;
         }
     }
 }

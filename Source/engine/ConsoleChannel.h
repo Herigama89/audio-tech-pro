@@ -110,8 +110,6 @@ private:
     std::array<float, 2> channelEnvelope {};   // (unlinked: each side's own)
     float deEssLow[2] {}, deEssEnv = 0.0f, deEssDb = 0.0f;
     bool filtersValid = false;
-    static constexpr int sideBlock = 256;
-    std::array<float, sideBlock> sideL {}, sideR {};
 };
 
 } // namespace riff
