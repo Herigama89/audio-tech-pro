@@ -42,6 +42,8 @@ public:
             std::lock_guard<std::mutex> lock (groupLock);
             if (group)
                 group.join (token);
+            else
+                token.reset();   // (no device: leave the old one's, here on this thread)
         }
     }
 
@@ -51,6 +53,10 @@ public:
     {
         juce::FloatVectorOperations::disableDenormalisedNumberSupport (true);
         engine.runAhead (*this);
+        // Leave the device's workgroup before the thread ends, on this thread: macOS only lets the thread that joined
+        // leave (the token left to the destructor, on the thread that ends us - when you choose another audio
+        // interface - crashed the app)
+        token.reset();
     }
 
 private:
