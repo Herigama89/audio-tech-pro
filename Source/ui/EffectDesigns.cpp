@@ -2453,12 +2453,33 @@ namespace
                 c.controls.push_back (ctl);
             }
             c.controls.push_back (photoButton ("eqIn", RF (86.0f, 886.0f, 42.0f, 46.0f), s));
-            c.paint = [] (juce::Graphics& g, R b, const EffectInfo& fx, const float* v, float)
+            // The module stands in a dark rack as wide as the window (whose bar is wider than the module),
+            // so it keeps its own shape instead of being stretched
+            constexpr int module = 248;
+            c.width = 572;
+            c.photoOffset = { (c.width - module) / 2, 0 };
+            for (auto& ctl : c.controls)
+                ctl.bounds.translate (c.photoOffset.x, c.photoOffset.y);
+            c.paint = [offset = c.photoOffset] (juce::Graphics& g, R b, const EffectInfo& fx, const float* v, float)
             {
+                // (the rack: dark, with the shadow the module casts on it)
+                g.setGradientFill (juce::ColourGradient (juce::Colour (0xff202226), 0.0f, 0.0f, juce::Colour (0xff121315), 0.0f, (float) b.getHeight(), false));
+                g.fillRect (b);
+                const auto face = R (offset.x, offset.y, module, b.getHeight() - offset.y);
+                for (int k = 1; k <= 6; ++k)
+                {
+                    g.setColour (juce::Colours::black.withAlpha (0.07f));
+                    g.fillRect (face.expanded (k, 0).translated (0, 0));
+                }
                 g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-                g.drawImage (skinImage ("graphic_panel_jpg"), b.toFloat());
+                g.setOpacity (1.0f);   // (drawImage uses the current colour's alpha)
+                g.drawImage (skinImage ("graphic_panel_jpg"), face.toFloat());
                 if (valueOf (fx, v, "eqIn", 1.0f) > 0.5f)
+                {
+                    juce::Graphics::ScopedSaveState keep (g);
+                    g.addTransform (juce::AffineTransform::translation ((float) offset.x, (float) offset.y));
                     drawPart (g, "graphic_lamp_png", RF (190.0f, 886.0f, 28.0f, 28.0f), s);
+                }
             };
             d["graphicEq"] = c;
         }
@@ -3957,7 +3978,7 @@ void DesignLook::drawSprite (juce::Graphics& g, juce::Component& c, const Sprite
                        .translated (sp.rect.getX() + dx, sp.rect.getY())
                        .rotated (juce::degreesToRadians (degrees), sp.pivot.x + dx, sp.pivot.y)
                        .scaled (design.photoScale)
-                       .translated (-origin.x, -origin.y);
+                       .translated ((float) design.photoOffset.x - origin.x, (float) design.photoOffset.y - origin.y);
     g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
     g.drawImageTransformed (image, t);
 }

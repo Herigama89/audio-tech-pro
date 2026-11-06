@@ -76,6 +76,7 @@ namespace riff::effectdesign
     {
         int width = 800, height = 500;
         float photoScale = 0.0f;                // a photographed face: its photo's pixels to the face's (0: a drawn face)
+        juce::Point<int> photoOffset;           //  where the photo's top left sits on the face (a narrow module, centred in a wider window)
         std::vector<Control> controls;
         KnobStyle knobs = KnobStyle::dark;
         juce::Colour label, value, accent, track;
