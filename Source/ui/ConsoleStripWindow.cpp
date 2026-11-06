@@ -1,97 +1,278 @@
 #include "ConsoleStripWindow.h"
 #include "Eco.h"
-#include "ConsoleLook.h"
 #include "Theme.h"
-#include "Skin.h"
+#include "EffectDesigns.h"
 #include "../model/Identifiers.h"
+#include "../model/Project.h"
 
 namespace riff
 {
 
 namespace
 {
-    juce::String hz (double v)  { return v >= 1000.0 ? juce::String (v / 1000.0, v >= 10000.0 ? 1 : 2) + " kHz" : juce::String (juce::roundToInt (v)) + " Hz"; }
-    juce::String db (double v)  { return (v > 0.05 ? "+" : "") + juce::String (v, 1) + " dB"; }
-    juce::String sec (double v) { return v < 1.0 ? juce::String (juce::roundToInt (v * 1000.0)) + " ms" : juce::String (v, 2) + " s"; }
+    juce::String hz (float v)  { return v >= 1000.0f ? juce::String (v / 1000.0f, v >= 10000.0f ? 1 : 2) + " kHz" : juce::String (juce::roundToInt (v)) + " Hz"; }
+    juce::String db (float v)  { return (v > 0.05f ? "+" : "") + juce::String (v, 1) + " dB"; }
+    juce::String sec (float v) { return v < 1.0f ? juce::String (juce::roundToInt (v * 1000.0f)) + " ms" : juce::String (v, 2) + " s"; }
 
-    constexpr int cellWidth = 92, cellHeight = 84, headerHeight = 22, margin = 10, curveHeight = 200, optionsHeight = 26;
-
-    // A classic console strip's colours: the panel, its print, and the knob caps.
-    // (The panel and its print follow the theme: the studio skin's console grey, or the flat skin's dark panel.)
-    juce::Colour panelColour() { return theme::imageSkin() ? theme::stripFace : theme::panel; }
-    juce::Colour headingBand() { return theme::imageSkin() ? theme::stripFace.darker (0.9f) : theme::toolbarDark; }
-    juce::Colour headingText() { return theme::imageSkin() ? juce::Colours::white : theme::accent.brighter (0.3f); }
-    const juce::Colour capRed { 0xffc23b30 }, capGreen { 0xff3d8a4c }, capBlue { 0xff2f5ea3 }, capBrown { 0xff4a3426 },
-                       capBlack { 0xff1e1f21 }, capGrey { 0xff9c9fa2 }, capWhite { 0xffe8e6df };
+    constexpr int margin = 8, optionsHeight = 26, curveHeight = 190;
 
     // Options shared by every strip window this session
     SpectrumAnalyzer::Options& analyzerOptions() { static SpectrumAnalyzer::Options o; return o; }
 
-    // The rows of each section, by control name ("" leaves a gap).
-    struct RowSpec { const char* section; std::vector<const char*> cells; };
-    const std::vector<RowSpec>& layout()
+    juce::Image part (const juce::String& name) { return effectdesign::skinImage ((name + "_png").toRawUTF8()); }
+
+    // The lamps' places on the photo (twice the size shown), from Tools/effect_skins/strip_layout.json
+    const std::pair<const char*, juce::Point<int>> lampPlaces[] {
+        { "phantom", { 102, 144 } }, { "pad", { 158, 144 } }, { "phase", { 228, 268 } }, { "line", { 284, 268 } },
+        { "deEssIn", { 357, 144 } }, { "de10", { 406, 81 } }, { "de6", { 406, 112 } }, { "de3", { 406, 144 } },
+        { "knee", { 473, 144 } }, { "compFast", { 529, 144 } }, { "linRel", { 624, 268 } },
+        { "gr3", { 746, 51 } }, { "gr6", { 776, 51 } }, { "gr10", { 806, 51 } }, { "gr14", { 836, 52 } }, { "gr20", { 865, 52 } },
+        { "gg3", { 746, 104 } }, { "gg6", { 776, 104 } }, { "gg10", { 806, 104 } }, { "gg14", { 836, 104 } }, { "gg20", { 865, 104 } },
+        { "dynIn", { 806, 268 } }, { "exp", { 988, 268 } }, { "gateFast", { 1111, 144 } },
+        { "filtSc", { 1199, 144 } }, { "filtIn", { 1255, 144 } }, { "lpfOn", { 1297, 144 } }, { "hpfOn", { 1197, 268 } },
+        { "lfBell", { 1482, 144 } }, { "black", { 1904, 144 } }, { "eqIn", { 1960, 144 } }, { "eqSc", { 2016, 144 } },
+        { "hfBell", { 2435, 144 } }, { "dynPost", { 2537, 144 } }, { "deEssPost", { 2593, 144 } }, { "ext", { 2537, 268 } },
+        { "link", { 2593, 268 } }, { "insIn", { 2652, 268 } }, { "insOp", { 2708, 268 } },
+        { "o24", { 2785, 47 } }, { "o12", { 2785, 79 } }, { "o0", { 2785, 111 } }, { "om12", { 2785, 142 } }, { "om24", { 2785, 174 } },
+        { "mtrInp", { 2785, 268 } } };
+    constexpr int lampRadius = 17;
+    const juce::Point<int> powerPlace { 2916, 160 };
+    constexpr int powerRadius = 62;
+
+    juce::Rectangle<int> onFace (int x, int y, int w, int h)
     {
-        static const std::vector<RowSpec> rows {
-            { "INPUT / OUTPUT", { "Input", "Output", "EQ in", "DYN in" } },
-            { "FILTERS",        { "HPF", "LPF" } },
-            { "EQ",             { "HF", "HF Freq", "HF Bell" } },
-            { "",               { "HMF", "HMF Freq", "HMF Q" } },
-            { "",               { "LMF", "LMF Freq", "LMF Q" } },
-            { "",               { "LF", "LF Freq", "LF Bell" } },
-            { "COMPRESSOR",     { "Comp", "Ratio", "Release", "Fast" } },
-            { "GATE / EXPANDER",{ "Threshold", "Range", "Gate Rel", "Exp" } },
-        };
-        return rows;
+        return juce::Rectangle<float> ((float) x, (float) y, (float) w, (float) h).transformedBy (juce::AffineTransform::scale (0.5f)).getSmallestIntegerContainer();
     }
 }
 
+//==============================================================================
+float ConsoleStripWindow::Scale::valueAt (float angle) const noexcept
+{
+    if (angle < offBelow)
+        return offValue;
+    if (points.empty())
+        return 0.0f;
+    if (angle <= points.front().first)
+        return points.front().second;
+    for (size_t i = 1; i < points.size(); ++i)
+        if (angle <= points[i].first)
+        {
+            const auto [a0, v0] = points[i - 1];
+            const auto [a1, v1] = points[i];
+            const auto t = (angle - a0) / (a1 - a0);
+            return logarithmic ? v0 * std::pow (v1 / v0, t) : v0 + t * (v1 - v0);
+        }
+    return points.back().second;
+}
+
+float ConsoleStripWindow::Scale::angleOf (float value) const noexcept
+{
+    if (offBelow > -999.0f && std::abs (value - offValue) < 1.0e-4f)
+        return -135.0f;
+    for (size_t i = 1; i < points.size(); ++i)
+    {
+        const auto [a0, v0] = points[i - 1];
+        const auto [a1, v1] = points[i];
+        const bool inside = (v0 <= v1) ? (value >= v0 && value <= v1) : (value <= v0 && value >= v1);
+        if (inside)
+        {
+            const auto t = logarithmic ? std::log (value / v0) / std::log (v1 / v0) : (value - v0) / (v1 - v0);
+            return a0 + (float) t * (a1 - a0);
+        }
+    }
+    // (outside the printed scale: the nearer end)
+    const bool rising = points.back().second >= points.front().second;
+    return (rising ? value < points.front().second : value > points.front().second) ? points.front().first : points.back().first;
+}
+
+//==============================================================================
+/** A knob on the panel: its pointer line, cut from the photo, turned to the value. */
+class ConsoleStripWindow::Knob final : public juce::Slider
+{
+public:
+    Knob (const char* spriteName, Scale s) : sprite (part (spriteName)), scale (std::move (s))
+    {
+        setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+        setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+        setRotaryParameters (juce::degreesToRadians (225.0f), juce::degreesToRadians (495.0f), true);
+        setRange (0.0, 1.0);
+        setMouseDragSensitivity (180);
+        setVelocityBasedMode (false);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        if (! sprite.isValid())
+            return;
+        const auto angle = -135.0f + 270.0f * (float) getValue();
+        const auto area = getLocalBounds().toFloat();
+        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+        g.drawImageTransformed (sprite, juce::AffineTransform::scale (area.getWidth() / (float) sprite.getWidth(), area.getHeight() / (float) sprite.getHeight())
+                                            .rotated (juce::degreesToRadians (angle), area.getCentreX(), area.getCentreY()));
+    }
+
+    float propertyValue() const { return scale.valueAt (-135.0f + 270.0f * (float) getValue()); }
+    void showValue (float v) { setValue ((scale.angleOf (v) + 135.0f) / 270.0f, juce::dontSendNotification); }
+
+    juce::Identifier property;
+    juce::String name;
+    float fallback = 0.0f;
+    std::function<juce::String (float)> text;
+
+private:
+    juce::Image sprite;
+    Scale scale;
+};
+
+/** A key on the panel (the photo's own, under an invisible button): its lamp shows it. */
+class ConsoleStripWindow::Key final : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    void mouseDown (const juce::MouseEvent&) override { pressed = true; repaint(); }
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        pressed = false;
+        repaint();
+        if (contains (e.getPosition()) && onClick)
+            onClick();
+    }
+    void paint (juce::Graphics& g) override
+    {
+        // (pressed: the key goes down a little)
+        if (pressed)
+        {
+            g.setColour (juce::Colours::black.withAlpha (0.25f));
+            g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 3.0f);
+        }
+    }
+    bool hitTest (int x, int y) override
+    {
+        if (! round)
+            return true;
+        return getLocalBounds().toFloat().getCentre().getDistanceFrom ({ (float) x, (float) y }) <= (float) getWidth() * 0.47f;
+    }
+
+    juce::Identifier property;
+    juce::String name, led;
+    bool defaultOn = false, pressed = false, round = false;
+    std::function<void()> onClick;
+};
+
+//==============================================================================
 ConsoleStripWindow::ConsoleStripWindow (juce::ValueTree t, juce::UndoManager& um,
                                         std::function<int (float*, int)> analyzerSource, std::function<double()> sampleRate,
                                         Levels levelSource)
     : track (t), undoManager (um), analyzer (std::move (analyzerSource), std::move (sampleRate)), levels (std::move (levelSource))
 {
-    // Cap colours as on a classic console: red, green, blue and brown for the bands; grey filters; black dynamics; green gate.
-    const auto white = capWhite, neon = capBlue, amber = capBlack, green = capGreen;
+    for (const auto& [name, at] : lampPlaces)
+        leds[name] = at;
 
-    addKnob (ids::consoleInput, "Input", -20.0, 20.0, 0.0, 0.0, db, capRed);
-    addKnob (ids::consoleOutput, "Output", -20.0, 20.0, 0.0, 0.0, db, capGrey);
-    addSwitch (ids::consoleIn, "EQ in", true);
-    addSwitch (ids::consoleDynIn, "DYN in", true);
+    const auto lin = [] (float a, float b) { Scale s; s.points = { { -135.0f, a }, { 135.0f, b } }; return s; };
+    const auto lg = [] (std::vector<std::pair<float, float>> p) { Scale s; s.points = std::move (p); s.logarithmic = true; return s; };
+    const auto g = ConsoleChannel::maxGainDb;
 
-    // Filters: all the way down (HPF) or up (LPF) is off.
-    auto& hpf = addKnob (ids::consoleHPF, "HPF", 16.0, 350.0, 16.0, 60.0, [] (double v) { return v <= 16.5 ? juce::String ("Off") : hz (v); }, white);
-    hpf.toProperty = [] (double v) { return v <= 16.5 ? 0.0 : v; };
-    hpf.fromProperty = [] (double v) { return v <= 0.0 ? 16.0 : v; };
-    auto& lpf = addKnob (ids::consoleLPF, "LPF", 3000.0, 22000.0, 22000.0, 9000.0, [] (double v) { return v >= 21900.0 ? juce::String ("Off") : hz (v); }, white);
-    lpf.toProperty = [] (double v) { return v >= 21900.0 ? 0.0 : v; };
-    lpf.fromProperty = [] (double v) { return v <= 0.0 ? 22000.0 : v; };
+    // INPUT
+    addKnob (ids::consoleMicGain, "Mic gain", "strip_ptr_mic", 98, 213, 34, lin (20.0f, 70.0f), 20.0f,
+             [this] (float v) { return "+" + juce::String (juce::roundToInt (v)) + " dB" + (on (ids::consoleLine, true) ? " (LINE is on: off for the mic)" : ""); });
+    addKnob (ids::consoleInput, "Trim", "strip_ptr_trim", 227, 86, 37, lin (-20.0f, 20.0f), 0.0f, db);
+    addKey (ids::consolePhantom, "48V (its lamp only: no microphone here needs power)", "phantom", false);
+    addKey (ids::consolePad, "PAD: 20 dB down at the input", "pad", false);
+    addKey (ids::consolePhase, "Polarity", "phase", false);
+    addKey (ids::consoleLine, "LINE: the line input (off: the mic preamp, its gain and colour)", "line", true);
+    // DE-ESS
+    addKnob (ids::consoleDeEssThreshold, "De-ess threshold", "strip_ptr_deEss", 355, 212, 35, lin (10.0f, -20.0f), 0.0f, db);
+    addKey (ids::consoleDeEss, "De-esser in", "deEssIn", false);
+    // COMP
+    {
+        Scale thresh = lin (0.0f, ConsoleChannel::maxDynamics);
+        addKnob (ids::consoleDynamics, "Compressor threshold", "strip_ptr_thresh", 604, 84, 36, thresh, 0.0f,
+                 [] (float v) { return v < 0.05f ? juce::String ("Off") : juce::String (-3.0f * v, 1) + " dB"; });
+        Scale ratio = lg ({ { -135.0f, 1.0f }, { 135.0f, 20.0f } });
+        ratio.offBelow = -128.0f;   // (all the way left: Auto, the ratio follows the threshold)
+        addKnob (ids::consoleCompRatio, "Ratio", "strip_ptr_ratio", 505, 211, 36, ratio, 0.0f,
+                 [] (float v) { return v < 1.0f ? juce::String ("Auto") : v >= 19.5f ? juce::String::fromUTF8 ("\xe2\x88\x9e:1 (limit)") : juce::String (v, 1) + ":1"; });
+        addKnob (ids::consoleCompRelease, "Release", "strip_ptr_release", 700, 212, 36, lg ({ { -135.0f, 0.1f }, { 135.0f, 4.0f } }), 0.15f, sec);
+        addKey (ids::consoleCompKnee, "Soft knee", "knee", false);
+        addKey (ids::consoleCompFast, "Fast attack", "compFast", false);
+        addKey (ids::consoleCompLinear, "Linear release", "linRel", false);
+        addKey (ids::consoleDynIn, "Dynamics in", "dynIn", true);
+    }
+    // GATE
+    {
+        Scale gate;
+        gate.points = { { -128.0f, -60.0f }, { 135.0f, 0.0f } };
+        gate.offBelow = -128.0f;
+        gate.offValue = -80.0f;
+        addKnob (ids::consoleGateThreshold, "Gate threshold", "strip_ptr_gate", 975, 87, 34, gate, -80.0f,
+                 [] (float v) { return v <= -79.9f ? juce::String ("Off") : db (v); });
+        addKnob (ids::consoleGateRange, "Range", "strip_ptr_range", 880, 214, 34, lin (0.0f, 40.0f), 20.0f,
+                 [] (float v) { return juce::String (juce::roundToInt (v)) + " dB"; });
+        addKnob (ids::consoleGateRelease, "Gate release", "strip_ptr_gateRel", 1072, 214, 34, lg ({ { -135.0f, 0.1f }, { 135.0f, 4.0f } }), 0.25f, sec);
+        addKey (ids::consoleGateExpander, "Expander (gentler than the gate)", "exp", false);
+        addKey (ids::consoleGateFast, "Gate fast attack", "gateFast", false);
+    }
+    // FILTERS (all the way left: out)
+    {
+        auto hpf = lg ({ { -90.0f, 20.0f }, { -45.0f, 70.0f }, { 45.0f, 200.0f }, { 90.0f, 300.0f }, { 135.0f, 500.0f } });
+        hpf.offBelow = -112.0f;
+        addKnob (ids::consoleHPF, "High pass", "strip_ptr_hpf", 1250, 211, 36, hpf, 0.0f, [] (float v) { return v <= 0.0f ? juce::String ("Out") : hz (v); });
+        auto lpf = lg ({ { -90.0f, 12000.0f }, { -45.0f, 8000.0f }, { 45.0f, 4000.0f }, { 90.0f, 3500.0f }, { 135.0f, 3000.0f } });
+        lpf.offBelow = -112.0f;
+        addKnob (ids::consoleLPF, "Low pass", "strip_ptr_lpf", 1360, 85, 36, lpf, 0.0f, [] (float v) { return v <= 0.0f ? juce::String ("Out") : hz (v); });
+        addKey (ids::consoleFiltersToSidechain, "Filters into the dynamics' side chain only", "filtSc", false);
+        addKey (ids::consoleFiltersAtInput, "Filters at the input (off: after the EQ)", "filtIn", true);
+    }
+    // EQ
+    addKnob (ids::consoleLF, "LF gain", "strip_ptr_lf", 1585, 88, 37, lin (-g, g), 0.0f, db);
+    addKnob (ids::consoleLFFreq, "LF frequency", "strip_ptr_lfFreq", 1483, 216, 37,
+             lg ({ { -135.0f, 30.0f }, { -90.0f, 50.0f }, { -45.0f, 100.0f }, { 45.0f, 300.0f }, { 90.0f, 400.0f }, { 135.0f, 450.0f } }), 100.0f, hz);
+    addKey (ids::consoleLFBell, "LF bell (off: shelf)", "lfBell", false);
+    addKnob (ids::consoleLMF, "LMF gain", "strip_ptr_lmf", 1794, 85, 33, lin (-g, g), 0.0f, db);
+    addKnob (ids::consoleLMFFreq, "LMF frequency", "strip_ptr_lmfFreq", 1697, 212, 33,
+             lg ({ { -135.0f, 200.0f }, { -90.0f, 300.0f }, { -45.0f, 800.0f }, { 45.0f, 1500.0f }, { 90.0f, 2000.0f }, { 135.0f, 2500.0f } }), 400.0f, hz);
+    addKnob (ids::consoleLMFQ, "LMF Q", "strip_ptr_lmfQ", 1890, 212, 33, lg ({ { -135.0f, 0.1f }, { 0.0f, 1.0f }, { 135.0f, 4.0f } }), 1.0f,
+             [] (float v) { return "Q " + juce::String (v, 2); });
+    addKnob (ids::consoleHMFQ, "HMF Q", "strip_ptr_hmfQ", 2051, 211, 35, lg ({ { -135.0f, 0.1f }, { 0.0f, 1.0f }, { 135.0f, 4.0f } }), 1.0f,
+             [] (float v) { return "Q " + juce::String (v, 2); });
+    addKnob (ids::consoleHMF, "HMF gain", "strip_ptr_hmf", 2148, 87, 34, lin (-g, g), 0.0f, db);
+    addKnob (ids::consoleHMFFreq, "HMF frequency", "strip_ptr_hmfFreq", 2245, 214, 34,
+             lg ({ { -135.0f, 600.0f }, { -90.0f, 800.0f }, { -45.0f, 1500.0f }, { 45.0f, 4500.0f }, { 90.0f, 6000.0f }, { 135.0f, 7000.0f } }), 2500.0f, hz);
+    addKnob (ids::consoleHF, "HF gain", "strip_ptr_hf", 2356, 86, 33, lin (-g, g), 0.0f, db);
+    addKnob (ids::consoleHFFreq, "HF frequency", "strip_ptr_hfFreq", 2457, 213, 33,
+             lg ({ { -135.0f, 1500.0f }, { -90.0f, 2000.0f }, { -45.0f, 5000.0f }, { 45.0f, 10000.0f }, { 90.0f, 14000.0f }, { 135.0f, 16000.0f } }), 8000.0f, hz);
+    addKey (ids::consoleHFBell, "HF bell (off: shelf)", "hfBell", false);
+    addKey (ids::consoleBlackEq, "Black-knob EQ: the bells narrow as they boost or cut", "black", false);
+    addKey (ids::consoleIn, "EQ in", "eqIn", true);
+    addKey (ids::consoleEqToSidechain, "EQ into the dynamics' side chain only", "eqSc", false);
+    // ROUTE
+    addKey (ids::consoleDynPostEq, "Dynamics after the EQ (off: before it)", "dynPost", true);
+    addKey (ids::consoleDeEssPostEq, "De-esser after the EQ (off: before it)", "deEssPost", true);
+    addKey (ids::consoleExternalKey, "External key: another track's sound keys the dynamics (choose it under the panel)", "ext", false);
+    addKey (ids::consoleLink, "Stereo link (off: each side compressed by its own level)", "link", true);
+    // OUT, INSERT, meter
+    addKnob (ids::consoleOutput, "Output", "strip_ptr_out", 2707, 84, 36, lin (-20.0f, 20.0f), 0.0f, db);
+    addKey (ids::consoleInsertIn, "Inserts in (the track's plug-ins)", "insIn", true);
+    addKey (ids::consoleInsertsPost, "Inserts after the strip (off: before it)", "insOp", true);
+    addKey (ids::consoleMeterInput, "Meter the input (off: the output)", "mtrInp", false);
 
-    const auto g = (double) ConsoleChannel::maxGainDb;
-    juce::ignoreUnused (neon);
-    addKnob (ids::consoleHF, "HF", -g, g, 0.0, 0.0, db, capRed);
-    addKnob (ids::consoleHFFreq, "HF Freq", 1500.0, 16000.0, 8000.0, 5000.0, hz, capRed);
-    addSwitch (ids::consoleHFBell, "HF Bell", false);
-    addKnob (ids::consoleHMF, "HMF", -g, g, 0.0, 0.0, db, capGreen);
-    addKnob (ids::consoleHMFFreq, "HMF Freq", 600.0, 7000.0, 2500.0, 2000.0, hz, capGreen);
-    addKnob (ids::consoleHMFQ, "HMF Q", 0.1, 4.0, 1.0, 1.0, [] (double v) { return juce::String (v, 2); }, capGreen);
-    addKnob (ids::consoleLMF, "LMF", -g, g, 0.0, 0.0, db, capBlue);
-    addKnob (ids::consoleLMFFreq, "LMF Freq", 200.0, 2500.0, 400.0, 700.0, hz, capBlue);
-    addKnob (ids::consoleLMFQ, "LMF Q", 0.1, 4.0, 1.0, 1.0, [] (double v) { return juce::String (v, 2); }, capBlue);
-    addKnob (ids::consoleLF, "LF", -g, g, 0.0, 0.0, db, capBrown);
-    addKnob (ids::consoleLFFreq, "LF Freq", 30.0, 450.0, 100.0, 120.0, hz, capBrown);
-    addSwitch (ids::consoleLFBell, "LF Bell", false);
+    // The power: the whole strip in or out
+    power = std::make_unique<Key>();
+    power->property = ids::stripIn;
+    power->name = "Power: the channel strip in or out";
+    power->defaultOn = true;
+    power->round = true;
+    power->setTooltip (power->name);
+    power->onClick = [this]
+    {
+        undoManager.beginNewTransaction ("Channel strip power");
+        track.setProperty (ids::stripIn, ! on (ids::stripIn, true), &undoManager);
+    };
+    addAndMakeVisible (*power);
 
-    addKnob (ids::consoleDynamics, "Comp", 0.0, ConsoleChannel::maxDynamics, 0.0, 0.0, [] (double v) { return juce::String (v, 1); }, amber);
-    auto& ratio = addKnob (ids::consoleCompRatio, "Ratio", 1.0, 20.0, 1.0, 4.0, [] (double v) { return v < 1.05 ? juce::String ("Auto") : juce::String (v, 1) + ":1"; }, amber);
-    ratio.toProperty = [] (double v) { return v < 1.05 ? 0.0 : v; };
-    ratio.fromProperty = [] (double v) { return v < 1.0 ? 1.0 : v; };
-    addKnob (ids::consoleCompRelease, "Release", 0.05, 4.0, 0.15, 0.6, sec, amber);
-    addSwitch (ids::consoleCompFast, "Fast", false);
-
-    addKnob (ids::consoleGateThreshold, "Threshold", -80.0, 0.0, -80.0, 0.0, [] (double v) { return v <= -79.9 ? juce::String ("Off") : db (v); }, green);
-    addKnob (ids::consoleGateRange, "Range", 0.0, 40.0, 20.0, 0.0, [] (double v) { return juce::String (v, 0) + " dB"; }, green);
-    addKnob (ids::consoleGateRelease, "Gate Rel", 0.05, 4.0, 0.25, 0.6, sec, green);
-    addSwitch (ids::consoleGateExpander, "Exp", false);
+    // External key: which track keys it (EXT turns it on)
+    keyButton.setTooltip ("The track whose sound keys the strip's dynamics when EXT is on");
+    keyButton.onClick = [this] { showKeyMenu(); };
+    addAndMakeVisible (keyButton);
 
     // The analyzer behind the curve, and its settings
     addAndMakeVisible (analyzer);
@@ -116,19 +297,89 @@ ConsoleStripWindow::ConsoleStripWindow (juce::ValueTree t, juce::UndoManager& um
     track.addListener (this);
     refresh();
 
-    int height = curveHeight + optionsHeight + 2 * margin + margin;
-    for (const auto& row : layout())
-        height += (juce::String (row.section).isNotEmpty() ? headerHeight : 0) + cellHeight;
-    setSize (margin * 2 + cellWidth * 4 + (levels ? meterWidth : 0), height + margin);
+    setSize (faceWidth, faceHeight + margin + optionsHeight + curveHeight + margin);
     if (levels)
         startTimerHz (30);
 }
 
-juce::Rectangle<int> ConsoleStripWindow::meterArea() const
+ConsoleStripWindow::~ConsoleStripWindow()
 {
-    if (! levels)
-        return {};
-    return { getWidth() - meterWidth, margin, meterWidth - margin, getHeight() - margin * 2 };
+    track.removeListener (this);
+}
+
+void ConsoleStripWindow::addKnob (const juce::Identifier& property, const juce::String& name, const char* sprite, int cx, int cy, int r,
+                                  Scale scale, float fallback, std::function<juce::String (float)> text)
+{
+    auto k = std::make_unique<Knob> (sprite, std::move (scale));
+    k->property = property;
+    k->name = name;
+    k->fallback = fallback;
+    k->text = std::move (text);
+    k->setBounds (onFace (cx - r, cy - r, r * 2, r * 2));
+    auto* raw = k.get();
+    k->textFromValueFunction = [raw] (double) { return raw->name + ": " + raw->text (raw->propertyValue()); };
+    k->setPopupDisplayEnabled (true, true, this);
+    k->setTooltip (name);
+    k->onDragStart = [this, name] { undoManager.beginNewTransaction ("Channel strip " + name); };
+    k->onValueChange = [this, raw] { track.setProperty (raw->property, raw->propertyValue(), &undoManager); };
+    k->setDoubleClickReturnValue (false, 0.0);
+    addAndMakeVisible (*k);
+    knobs.push_back (std::move (k));
+}
+
+void ConsoleStripWindow::addKey (const juce::Identifier& property, const juce::String& name, const char* led, bool defaultOn)
+{
+    auto k = std::make_unique<Key>();
+    k->property = property;
+    k->name = name;
+    k->led = led;
+    k->defaultOn = defaultOn;
+    k->setTooltip (name);
+    const auto at = leds[led];
+    k->setBounds (onFace (at.x - 25, at.y - 46 - 22, 50, 44));   // (the key sits just above its lamp)
+    auto* raw = k.get();
+    k->onClick = [this, raw]
+    {
+        undoManager.beginNewTransaction ("Channel strip " + raw->name.upToFirstOccurrenceOf (":", false, false));
+        const auto turningOn = ! on (raw->property, raw->defaultOn);
+        track.setProperty (raw->property, turningOn, &undoManager);
+        if (raw->property == ids::consoleExternalKey && turningOn && ! model::findById (track.getParent(), track[ids::consoleKey].toString()).isValid())
+            showKeyMenu();   // (EXT with no key yet: choose one)
+    };
+    addAndMakeVisible (*k);
+    keys.push_back (std::move (k));
+}
+
+void ConsoleStripWindow::showKeyMenu()
+{
+    juce::PopupMenu menu;
+    const auto project = track.getParent();
+    const auto current = track[ids::consoleKey].toString();
+    auto set = [this] (const juce::String& id)
+    {
+        undoManager.beginNewTransaction ("Channel strip key");
+        track.setProperty (ids::consoleKey, id, &undoManager);
+        track.setProperty (ids::consoleExternalKey, id.isNotEmpty(), &undoManager);
+    };
+    menu.addSectionHeader ("Key the dynamics with");
+    menu.addItem ("None (its own sound)", true, current.isEmpty(), [set] { set ({}); });
+    menu.addSeparator();
+    for (const auto& other : project)
+    {
+        if (! other.hasType (ids::TRACK) || model::isVcaTrack (other) || other == track)
+            continue;
+        const auto id = other[ids::id].toString();
+        menu.addItem ((model::isBusTrack (other) ? "Bus: " : "") + other[ids::name].toString(), true, id == current, [set, id] { set (id); });
+    }
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&keyButton));
+}
+
+void ConsoleStripWindow::refresh()
+{
+    for (auto& k : knobs)
+        k->showValue (track.hasProperty (k->property) ? (float) (double) track[k->property] : k->fallback);
+    const auto key = model::findById (track.getParent(), track[ids::consoleKey].toString());
+    keyButton.setButtonText ("Key: " + (key.isValid() ? key[ids::name].toString() : juce::String ("none")));
 }
 
 void ConsoleStripWindow::timerCallback()
@@ -140,145 +391,30 @@ void ConsoleStripWindow::timerCallback()
     const auto in = juce::Decibels::gainToDecibels (now[0], -100.0f), out = juce::Decibels::gainToDecibels (now[1], -100.0f);
     inDb = juce::jmax (in, inDb - 1.5f);    // (they fall back gently)
     outDb = juce::jmax (out, outDb - 1.5f);
-    const auto gr = std::abs (now[2]);
-    grDb += (gr - grDb) * (gr > grDb ? 0.6f : 0.2f);
-    repaint (meterArea());
+    const auto ease = [] (float& shown, float v) { shown += (v - shown) * (v > shown ? 0.6f : 0.2f); };
+    ease (grDb, std::abs (now[2]));
+    ease (deEssDb, std::abs (now[3]));
+    ease (gateDb, std::abs (now[4]));
+    repaint (0, 0, faceWidth, faceHeight);
 }
 
-void ConsoleStripWindow::paintLeds (juce::Graphics& g)
+void ConsoleStripWindow::lamp (juce::Graphics& g, const juce::String& name) const
 {
-    const auto area = meterArea().toFloat();
-    if (area.isEmpty())
+    const auto it = leds.find (name);
+    if (it == leds.end())
         return;
-    g.setColour (theme::consoleDark.withAlpha (0.85f));
-    g.fillRoundedRectangle (area, 6.0f);
-
-    // Three ladders: IN and OUT (level, dBFS, green to red), GR between them (amber, down from 0)
-    constexpr int leds = 18;
-    const float levelSteps[leds] { -60, -48, -42, -36, -30, -27, -24, -21, -18, -15, -12, -9, -6, -4, -3, -2, -1, 0 };
-    const float grSteps[leds] { 0.5f, 1, 1.5f, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 24 };
-    auto columns = area.reduced (8.0f, 10.0f);
-    const auto captions = columns.removeFromTop (16.0f);
-    const auto values = columns.removeFromBottom (16.0f);
-    const auto w = columns.getWidth() / 3.0f;
-    const juce::String names[] { "IN", "GR", "OUT" };
-    for (int c = 0; c < 3; ++c)
-    {
-        const auto col = columns.withX (columns.getX() + w * (float) c).withWidth (w);
-        g.setColour (theme::text);
-        g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
-        g.drawText (names[c], captions.withX (col.getX()).withWidth (w), juce::Justification::centred, false);
-        const auto step = col.getHeight() / (float) leds;
-        for (int i = 0; i < leds; ++i)
-        {
-            const auto led = juce::Rectangle<float> (col.getCentreX() - w * 0.28f, col.getBottom() - step * (float) (i + 1) + 1.5f, w * 0.56f, step - 3.0f);
-            juce::Colour colour;
-            bool on;
-            if (c == 1)
-            {
-                // Gain reduction lights from the top down, as on a console
-                const auto j = leds - 1 - i;
-                on = grDb >= grSteps[j];
-                colour = theme::meterAmber;
-            }
-            else
-            {
-                on = (c == 0 ? inDb : outDb) >= levelSteps[i];
-                colour = levelSteps[i] >= -1.0f ? theme::meterRed : levelSteps[i] >= -9.0f ? theme::meterAmber : theme::meterGreen;
-            }
-            g.setColour (on ? colour : colour.withAlpha (0.12f));
-            g.fillRoundedRectangle (led, 1.5f);
-            if (on)
-            {
-                g.setColour (colour.withAlpha (0.3f));
-                g.fillRoundedRectangle (led.expanded (1.5f), 2.5f);
-            }
-        }
-        g.setColour (theme::lcdText);
-        g.setFont (juce::FontOptions (11.0f));
-        const auto v = c == 1 ? (grDb > 0.05f ? "-" + juce::String (grDb, 1) : juce::String ("0.0"))
-                              : ((c == 0 ? inDb : outDb) > -99.0f ? juce::String (c == 0 ? inDb : outDb, 1) : juce::String::fromUTF8 ("-\xe2\x88\x9e"));
-        g.drawText (v, values.withX (col.getX()).withWidth (w), juce::Justification::centred, false);
-    }
-}
-
-ConsoleStripWindow::~ConsoleStripWindow()
-{
-    track.removeListener (this);
-}
-
-ConsoleStripWindow::Control& ConsoleStripWindow::addKnob (const juce::Identifier& property, const juce::String& name, double min, double max,
-                                                          double fallback, double skewMid, std::function<juce::String (double)> text,
-                                                          juce::Colour ring)
-{
-    auto c = std::make_unique<Control>();
-    c->property = property;
-    c->name = name;
-    c->text = std::move (text);
-    c->toProperty = [] (double v) { return v; };
-    c->fromProperty = [] (double v) { return v; };
-    c->knob = std::make_unique<strip::PointerKnob> (ring);
-    // The console look: a knob with a coloured cap (silver for the filters)
-    c->knob->useSkin (ring == capWhite ? skin::knobWhite() : skin::knobBlack(), juce::Colours::white);
-    if (ring != capWhite)
-        c->knob->setCap (ring);
-    c->knob->setRange (min, max, 0.0);
-    if (skewMid > min && skewMid < max)
-        c->knob->setSkewFactorFromMidPoint (skewMid);
-    c->knob->setDoubleClickReturnValue (true, fallback);
-    c->knob->setPopupDisplayEnabled (true, true, this);
-    auto* raw = c.get();
-    c->knob->textFromValueFunction = [raw] (double v) { return raw->text (v); };
-    c->knob->setTooltip (name);
-    c->knob->onDragStart = [this, name] { undoManager.beginNewTransaction ("Channel strip " + name); };
-    c->knob->onValueChange = [this, raw]
-    {
-        track.setProperty (raw->property, raw->toProperty (raw->knob->getValue()), &undoManager);
-    };
-    c->knob->getProperties().set ("fallback", fallback);
-    addAndMakeVisible (*c->knob);
-    controls.push_back (std::move (c));
-    return *controls.back();
-}
-
-void ConsoleStripWindow::addSwitch (const juce::Identifier& property, const juce::String& name, bool defaultOn)
-{
-    auto s = std::make_unique<Switch>();
-    s->property = property;
-    s->defaultOn = defaultOn;
-    s->name = name;
-    s->key = std::make_unique<strip::LampKey> (name, name.endsWith ("in") ? juce::Colour (0xff4fd07a) : juce::Colour (0xffffb22e));
-    s->key->setTooltip (name);
-    auto* raw = s.get();
-    s->key->onClick = [this, raw]
-    {
-        undoManager.beginNewTransaction ("Channel strip " + raw->name);
-        track.setProperty (raw->property, ! (bool) track.getProperty (raw->property, raw->defaultOn), &undoManager);
-    };
-    addAndMakeVisible (*s->key);
-    switches.push_back (std::move (s));
-}
-
-void ConsoleStripWindow::refresh()
-{
-    for (auto& c : controls)
-    {
-        const auto fallback = (double) c->knob->getProperties()["fallback"];
-        const auto stored = track.hasProperty (c->property) ? (double) track[c->property] : c->toProperty (fallback);
-        c->knob->setValue (c->fromProperty (stored), juce::dontSendNotification);
-    }
-    for (auto& s : switches)
-        s->key->setToggleState ((bool) track.getProperty (s->property, s->defaultOn), juce::dontSendNotification);
-}
-
-juce::Rectangle<int> ConsoleStripWindow::curveArea() const
-{
-    return { margin, margin, getWidth() - margin * 2 - (levels ? meterWidth - margin : 0), curveHeight };
+    const auto image = part ("strip_led_" + name);
+    g.drawImage (image, onFace (it->second.x - lampRadius, it->second.y - lampRadius, lampRadius * 2, lampRadius * 2).toFloat());
 }
 
 juce::Rectangle<int> ConsoleStripWindow::optionsArea() const
 {
-    return { margin, curveArea().getBottom() + 4, curveArea().getWidth(), optionsHeight - 4 };
+    return { margin, faceHeight + margin, getWidth() - margin * 2, optionsHeight - 4 };
+}
+
+juce::Rectangle<int> ConsoleStripWindow::curveArea() const
+{
+    return { margin, optionsArea().getBottom() + 4, getWidth() - margin * 2, curveHeight };
 }
 
 void ConsoleStripWindow::applyAnalyzerOptions()
@@ -295,70 +431,59 @@ void ConsoleStripWindow::applyAnalyzerOptions()
 
 void ConsoleStripWindow::resized()
 {
-    sections.clear();
     analyzer.setBounds (curveArea().reduced (2));
-    {
-        auto row = optionsArea();
-        const auto w = row.getWidth() / 5;
-        for (auto* box : { &modeBox, &fftBox, &rangeBox, &releaseBox, &holdBox })
-            box->setBounds (row.removeFromLeft (w).reduced (2, 0));
-    }
-    auto y = optionsArea().getBottom() + margin;
-
-    for (const auto& row : layout())
-    {
-        if (juce::String (row.section).isNotEmpty())
-        {
-            sections.push_back ({ row.section, { margin, y, cellWidth * 4, headerHeight } });
-            y += headerHeight;
-        }
-
-        for (size_t i = 0; i < row.cells.size(); ++i)
-        {
-            const juce::Rectangle<int> cell (margin + (int) i * cellWidth, y, cellWidth, cellHeight);
-            const juce::String name (row.cells[i]);
-
-            for (auto& c : controls)
-                if (c->name == name)
-                {
-                    c->knob->setBounds (cell.withSizeKeepingCentre (knobSize, knobSize).withY (cell.getY() + 4));
-                    c->labelArea = cell.withTrimmedTop (knobSize + 6);
-                }
-            for (auto& s : switches)
-                if (s->name == name)
-                    s->key->setBounds (cell.withSizeKeepingCentre (40, 30).withY (cell.getY() + 12));
-        }
-        y += cellHeight;
-    }
+    auto row = optionsArea();
+    keyButton.setBounds (row.removeFromRight (220).reduced (2, 0));
+    const auto w = juce::jmin (130, row.getWidth() / 5);
+    for (auto* box : { &modeBox, &fftBox, &rangeBox, &releaseBox, &holdBox })
+        box->setBounds (row.removeFromLeft (w).reduced (2, 0));
+    power->setBounds (onFace (powerPlace.x - 58, powerPlace.y - 58, 116, 116));
 }
 
 void ConsoleStripWindow::paint (juce::Graphics& g)
 {
-    // A classic console strip's grey panel (or the flat skin's panel)
-    const auto print = theme::imageSkin() ? theme::stripInk : theme::text;
-    g.fillAll (panelColour());
-    if (theme::xenonSkin())
-        skin::tileTexture (g, skin::xenonPanel(), getLocalBounds(), 0.6f);
-    if (theme::imageSkin())
+    g.fillAll (juce::Colour (0xff141518));
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+    g.drawImage (effectdesign::skinImage ("strip_panel_jpg"), juce::Rectangle<float> (0.0f, 0.0f, (float) faceWidth, (float) faceHeight));
+
+    const bool powered = on (ids::stripIn, true);
+    if (powered)
     {
-        juce::Random grain (7);
-        for (int yy = 0; yy < getHeight(); yy += 2)
+        g.drawImage (part ("strip_power_on"), onFace (powerPlace.x - powerRadius, powerPlace.y - powerRadius, powerRadius * 2, powerRadius * 2).toFloat());
+
+        // The keys' lamps
+        for (const auto& k : keys)
+            if (on (k->property, k->defaultOn))
+                lamp (g, k->led);
+        if ((double) track.getProperty (ids::consoleHPF, 0.0) > 0.0) lamp (g, "hpfOn");
+        if ((double) track.getProperty (ids::consoleLPF, 0.0) > 0.0) lamp (g, "lpfOn");
+
+        // The meters: gain reduction (compressor on top, the gate under it), the de-esser's, the level
+        const float steps[] { 3.0f, 6.0f, 10.0f, 14.0f, 20.0f };
+        const char* comp[] { "gr3", "gr6", "gr10", "gr14", "gr20" };
+        const char* gate[] { "gg3", "gg6", "gg10", "gg14", "gg20" };
+        for (int i = 0; i < 5; ++i)
         {
-            g.setColour ((grain.nextBool() ? juce::Colours::white : juce::Colours::black).withAlpha (0.02f + grain.nextFloat() * 0.02f));
-            g.fillRect (0, yy, getWidth(), 1);
+            if (grDb >= steps[i]) lamp (g, comp[i]);
+            if (gateDb >= steps[i]) lamp (g, gate[i]);
         }
+        if (deEssDb >= 3.0f) lamp (g, "de3");
+        if (deEssDb >= 6.0f) lamp (g, "de6");
+        if (deEssDb >= 10.0f) lamp (g, "de10");
+        const auto level = on (ids::consoleMeterInput, false) ? inDb : outDb;
+        const std::pair<float, const char*> meter[] { { -42.0f, "om24" }, { -30.0f, "om12" }, { -18.0f, "o0" }, { -9.0f, "o12" }, { -0.5f, "o24" } };
+        for (const auto& [at, name] : meter)
+            if (level >= at)
+                lamp (g, name);
     }
 
-    // The EQ curve, from 20 Hz to 20 kHz, +-18 dB.
+    // The screen under the panel: the EQ curve over the spectrum, 20 Hz to 20 kHz, +-18 dB
     const auto area = curveArea().toFloat();
     g.setColour (theme::lcd);
     g.fillRoundedRectangle (area, 4.0f);
     g.setColour (theme::outline);
     g.drawRoundedRectangle (area, 4.0f, 1.0f);
-
     const auto xOf = [&area] (double f) { return area.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * area.getWidth(); };
-    const auto yOf = [&area] (double dbValue) { return area.getCentreY() - (float) (juce::jlimit (-18.0, 18.0, dbValue) / 18.0) * (area.getHeight() * 0.5f - 6.0f); };
-
     g.setFont (juce::FontOptions (9.5f));
     for (double f : { 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0 })
     {
@@ -369,74 +494,38 @@ void ConsoleStripWindow::paint (juce::Graphics& g)
                     juce::Justification::centredLeft, false);
     }
     g.setColour (juce::Colours::white.withAlpha (0.15f));
-    g.fillRect (area.getX(), yOf (0.0), area.getWidth(), 1.0f);
-
-    // Section headings: white print on a dark band, as on the console
-    for (const auto& s : sections)
-    {
-        g.setColour (headingBand());
-        g.fillRect (s.area.withTrimmedBottom (3));
-        g.setColour (headingText());
-        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-        g.drawText (s.name, s.area.withTrimmedBottom (3).withTrimmedLeft (6), juce::Justification::centredLeft, false);
-    }
-
-    // Each knob's printed scale, and its name and value
-    for (const auto& c : controls)
-    {
-        const auto kb = c->knob->getBounds().toFloat();
-        const auto centre = kb.getCentre();
-        const auto radius = kb.getWidth() * 0.5f + 3.0f;
-        g.setColour (print.withAlpha (theme::imageSkin() ? 0.75f : 0.0f));   // (the flat skin's knobs have their own ring)
-        for (int i = 0; i <= 10 && theme::imageSkin(); ++i)
-        {
-            const auto a = juce::degreesToRadians (-140.0f + 28.0f * (float) i);
-            const auto len = (i == 0 || i == 5 || i == 10) ? 5.0f : 3.0f;
-            g.drawLine (centre.x + radius * std::sin (a), centre.y - radius * std::cos (a),
-                        centre.x + (radius + len) * std::sin (a), centre.y - (radius + len) * std::cos (a), 1.0f);
-        }
-        g.setColour (print);
-        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-        g.drawText (c->name, c->labelArea.withHeight (14), juce::Justification::centred, false);
-        g.setColour (print.withAlpha (0.75f));
-        g.setFont (juce::FontOptions (10.5f));
-        g.drawText (c->text (c->knob->getValue()), c->labelArea.withHeight (14).translated (0, 14), juce::Justification::centred, false);
-    }
-    for (const auto& s : switches)
-    {
-        g.setColour (print);
-        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-        g.drawText (s->name, s->key->getBounds().translated (0, 34).withHeight (14).expanded (20, 0), juce::Justification::centred, false);
-    }
-
+    g.fillRect (area.getX(), area.getCentreY(), area.getWidth(), 1.0f);
 }
 
 void ConsoleStripWindow::paintOverChildren (juce::Graphics& g)
 {
-    paintLeds (g);
-
     // The EQ curve over the analyzer
     const auto area = curveArea().toFloat();
     const auto xOf = [&area] (double f) { return area.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * area.getWidth(); };
     const auto yOf = [&area] (double dbValue) { return area.getCentreY() - (float) (juce::jlimit (-18.0, 18.0, dbValue) / 18.0) * (area.getHeight() * 0.5f - 6.0f); };
     const auto settings = ConsoleChannel::fromTrack (track);
     juce::Path curve;
-    for (int i = 0; i <= 200; ++i)
+    for (int i = 0; i <= 300; ++i)
     {
-        const auto f = 20.0 * std::pow (1000.0, i / 200.0);
+        const auto f = 20.0 * std::pow (1000.0, i / 300.0);
         const auto y = settings.enabled ? yOf (ConsoleChannel::responseDb (settings, f)) : yOf (0.0);
         if (i == 0) curve.startNewSubPath (xOf (f), y);
         else        curve.lineTo (xOf (f), y);
     }
     g.setColour (settings.enabled ? theme::neon : theme::dimText);
     g.strokePath (curve, juce::PathStrokeType (2.0f));
-
-    // The EQ's range on the left of the curve
     g.setFont (juce::FontOptions (9.0f));
     for (int d : { 12, 6, -6, -12 })
     {
         g.setColour (theme::neon.withAlpha (0.7f));
         g.drawText ((d > 0 ? "+" : "") + juce::String (d), juce::Rectangle<float> (area.getX() + 3.0f, yOf (d) - 6.0f, 24.0f, 12.0f), juce::Justification::centredLeft, false);
+    }
+
+    // Powered off: the panel goes dark
+    if (! settings.enabled)
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.25f));
+        g.fillRect (0, 0, powerPlace.x / 2 - 34, faceHeight);   // (all but the power button)
     }
 }
 

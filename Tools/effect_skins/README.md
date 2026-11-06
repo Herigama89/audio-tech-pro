@@ -15,3 +15,8 @@ those numbers, in the photo's pixels.
   silver frequency rings) keep the photo: only their pointer line is cut out and turned.
 - Knobs with a fin or bar (chicken heads, the red and blue knobs) turn whole.
 - Fader caps slide along their slots; lamps, LEDs and lit buttons are drawn over the panel when on.
+
+The channel strip window (`Source/ui/ConsoleStripWindow.cpp`) is the same idea: `python3 strip.py` cuts
+`photos/strip.png` (cropped to the panel, doubled in size): every knob's pointer line (the cap filled in from
+its own surface turned round), every lamp unlit in the panel and lit as its own picture, the power key lit and
+unlit. The lamps' and knobs' places are in `strip_layout.json`.

@@ -1339,7 +1339,85 @@ TEST_CASE ("The console EQ and Dynamics", "[console]")
         const auto read = ConsoleChannel::fromTrack (track);
         CHECK (read.hf == ConsoleChannel::maxGainDb);
         CHECK (read.dynamics == 3.0f);
-        CHECK_FALSE (read.enabled);
+        CHECK_FALSE (read.eqIn);     // (EQ IN takes out only the EQ)
+        CHECK (read.enabled);
+        track.setProperty (ids::stripIn, false, nullptr);
+        CHECK_FALSE (ConsoleChannel::fromTrack (track).enabled);   // (the power: the whole strip)
+    }
+}
+
+TEST_CASE ("The console strip's panel: pad, polarity, mic, de-esser, routing, side chain", "[console]")
+{
+    const auto fresh = [] (ConsoleChannel::Settings s)
+    {
+        auto c = std::make_unique<ConsoleChannel>();
+        c->prepare (48000.0);
+        c->setSettings (s);
+        return c;
+    };
+    ConsoleChannel::Settings flat;
+
+    // PAD: 20 dB down; Ø: the polarity over; MIC: its gain
+    {
+        auto s = flat; s.pad = true;
+        CHECK_THAT (sinePeakThrough (*fresh (s), 1000.0), Catch::Matchers::WithinAbs (0.025, 0.002));
+        s = flat; s.phase = true;
+        auto c = fresh (s);
+        std::vector<float> l (64, 0.5f), r (64, 0.5f);
+        c->process (l.data(), r.data(), 64);
+        CHECK (l[10] < -0.49f);
+        s = flat; s.line = false; s.micGain = 26.0f;   // (+6 dB: a quiet tone twice as loud, its peaks a little rounder)
+        CHECK_THAT (sinePeakThrough (*fresh (s), 1000.0, 0.05f), Catch::Matchers::WithinAbs (0.1, 0.004));
+    }
+    // The de-esser: loud highs come down, the lows don't
+    {
+        auto s = flat; s.deEss = true; s.deEssThreshold = -10.0f;
+        CHECK (sinePeakThrough (*fresh (s), 8000.0, 0.5f) < 0.35f);
+        CHECK (sinePeakThrough (*fresh (s), 200.0, 0.5f) > 0.48f);
+    }
+    // EQ IN off: no EQ; the dynamics still work
+    {
+        auto s = flat; s.hf = 12.0f; s.eqIn = false; s.dynamics = 6.0f;
+        auto c = fresh (s);
+        const auto peak = sinePeakThrough (*c, 10000.0, 0.5f);
+        CHECK (c->getGainReductionDb() > 3.0f);
+        CHECK (peak < 1.0f);
+    }
+    // The EQ in the side chain only: the sound unchanged, the compressor hearing the boost
+    {
+        auto s = flat; s.hf = 15.0f; s.hfFreq = 1500.0f; s.eqToSidechain = true;
+        CHECK_THAT (sinePeakThrough (*fresh (s), 10000.0, 0.1f), Catch::Matchers::WithinAbs (0.1, 0.003));
+        s.dynamics = 4.0f;   // threshold -12 dB: the tone's -20 dB, boosted 15 dB in the key, is over it
+        auto keyed = fresh (s);
+        sinePeakThrough (*keyed, 10000.0, 0.1f);
+        auto plain = s; plain.eqToSidechain = false; plain.hf = 0.0f;
+        auto unkeyed = fresh (plain);
+        sinePeakThrough (*unkeyed, 10000.0, 0.1f);
+        CHECK (keyed->getGainReductionDb() > unkeyed->getGainReductionDb() + 2.0f);
+    }
+    // EXT: keyed by another track's sound
+    {
+        auto s = flat; s.dynamics = 8.0f; s.externalKey = true;
+        auto c = fresh (s);
+        std::vector<float> l (480), r (480), key (480, 0.9f);
+        for (int b = 0; b < 40; ++b)
+        {
+            std::fill (l.begin(), l.end(), 0.01f); std::fill (r.begin(), r.end(), 0.01f);
+            c->process (l.data(), r.data(), 480, key.data(), key.data());
+        }
+        CHECK (c->getGainReductionDb() > 10.0f);   // (its own sound is far below the threshold)
+        CHECK (l[400] < 0.01f);
+    }
+    // Soft knee: some reduction just under the threshold; hard: none
+    {
+        auto s = flat; s.dynamics = 4.0f; s.compRatio = 4.0f;   // threshold -12 dB
+        auto hard = fresh (s);
+        sinePeakThrough (*hard, 1000.0, 0.2f);                // -14 dB
+        s.compKnee = true;
+        auto soft = fresh (s);
+        sinePeakThrough (*soft, 1000.0, 0.2f);
+        CHECK (hard->getGainReductionDb() < 0.05f);
+        CHECK (soft->getGainReductionDb() > 0.1f);
     }
 }
 
@@ -1358,6 +1436,34 @@ TEST_CASE ("The console section runs on a track in the engine", "[console]")
     f.engine.play();
     const auto out = renderLeft (f.engine, 24000);
     CHECK_THAT (out[20000], WithinAbs (0.5 * 0.8 * juce::Decibels::decibelsToGain (6.0), 0.01));
+}
+
+TEST_CASE ("The strip's dynamics keyed by another track (EXT) in the engine", "[console]")
+{
+    // A quiet track under a loud one: keyed by the loud one, its compressor clamps down
+    const auto level = [] (bool keyed)
+    {
+        Fixture f;
+        const auto quiet = writeConstantWav (f.temp.dir.getChildFile ("quiet.wav"), 48000.0, 48000, 0.02f);
+        const auto loud = writeConstantWav (f.temp.dir.getChildFile ("loud.wav"), 48000.0, 48000, 0.9f);
+        auto key = model::addTrack (f.project, "Key", nullptr);
+        model::addRegion (key, loud, 0.0, 1.0, nullptr);
+        auto track = model::addTrack (f.project, "A", nullptr);
+        model::addRegion (track, quiet, 0.0, 1.0, nullptr);
+        track.setProperty (ids::consoleDynamics, 8.0, nullptr);
+        if (keyed)
+        {
+            track.setProperty (ids::consoleExternalKey, true, nullptr);
+            track.setProperty (ids::consoleKey, key[ids::id].toString(), nullptr);
+        }
+        f.player.setProject (f.project);
+        f.player.rebuildNow();
+        f.engine.play();
+        renderLeft (f.engine, 24000);
+        return f.engine.getConsoleGainReduction (f.player.slotOf (track[ids::id].toString()));
+    };
+    CHECK (level (false) < 0.1f);    // (its own sound is far under the threshold)
+    CHECK (level (true) > 10.0f);    // (the key's is far over it)
 }
 
 TEST_CASE ("A bus compressor plugin on the master replaces the built-in one", "[console-mode]")

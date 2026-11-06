@@ -124,6 +124,7 @@ struct PlaybackGraph
         bool receivesLiveMidi = false;            // the track your MIDI keyboard plays
 
         ConsoleChannel::Settings console;               // the strip's EQ and Dynamics, before the inserts
+        bool insertsBeforeStrip = false;                // (the strip's INSERT OP off: the inserts before it)
         TapeSaturator::Settings tape;                   // tape saturation, after the inserts
         PreampSaturator::Settings preamp;               // the analog preamp: first, before the EQ and the inserts
         std::vector<std::shared_ptr<Effect>> stripPlugins;  // console mode: the user's channel strip plugin, instead of `console`
@@ -140,7 +141,7 @@ struct PlaybackGraph
         std::vector<ParamAutomation> paramAutomation;
 
         /** Side chains: an insert, and the slot of the track whose output keys it. */
-        struct Sidechain { Effect* effect = nullptr; int sourceSlot = -1; };
+        struct Sidechain { Effect* effect = nullptr; int sourceSlot = -1; };   // (effect nullptr: the built-in strip's dynamics)
         std::vector<Sidechain> sidechains;
 
         int inputTrackSlot = -1;    // its input is another track's output (that track's slot), not the device's

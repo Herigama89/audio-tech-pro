@@ -40,16 +40,34 @@ public:
         float gateThreshold = -80.0f, gateRange = 20.0f, gateRelease = 0.25f;   // dB, dB, s (-80: off)
         bool gateExpander = false;
 
+        // The rest of the panel (the strip window's photographed face)
+        bool eqIn = true;                   // the EQ in (EQ IN); `enabled` is the whole strip (its power)
+        bool pad = false, phase = false;    // -20 dB in; the polarity turned over
+        bool line = true;                   // line in; off: the mic preamp, its gain and its colour
+        float micGain = 20.0f;              // dB, +20..+70 (the mic preamp)
+        bool deEss = false;
+        float deEssThreshold = 0.0f;        // as printed, +10..-20 (dBFS: 20 below)
+        bool compKnee = false, compLinear = false, link = true, externalKey = false;
+        bool gateFast = false;
+        bool filtersToSidechain = false, filtersAtInput = true;
+        bool blackEq = false, eqToSidechain = false;
+        bool dynPostEq = true, deEssPostEq = true;
+
         bool operator== (const Settings&) const = default;
 
         bool gateOn() const noexcept { return gateThreshold > -79.9f; }
+        bool eqActive() const noexcept
+        {
+            return eqIn && (std::abs (hf) > 0.01f || std::abs (hmf) > 0.01f || std::abs (lmf) > 0.01f || std::abs (lf) > 0.01f);
+        }
+        bool filtersActive() const noexcept { return hpf > 0.0f || lpf > 0.0f; }
+        bool dynActive() const noexcept { return dynEnabled && (dynamics > 0.01f || gateOn()); }
 
         /** True if it would change the sound at all. */
         bool isActive() const noexcept
         {
-            return enabled && (std::abs (hf) > 0.01f || std::abs (hmf) > 0.01f || std::abs (lmf) > 0.01f
-                                || std::abs (lf) > 0.01f || (dynEnabled && (dynamics > 0.01f || gateOn()))
-                                || std::abs (inputDb) > 0.01f || std::abs (outputDb) > 0.01f || hpf > 0.0f || lpf > 0.0f);
+            return enabled && (eqActive() || dynActive() || deEss || pad || phase || ! line
+                                || std::abs (inputDb) > 0.01f || std::abs (outputDb) > 0.01f || filtersActive());
         }
     };
 
@@ -65,21 +83,35 @@ public:
     /** Recomputes the filters only when something changed. Audio thread. */
     void setSettings (const Settings& s) noexcept;
 
-    void process (float* left, float* right, int numSamples) noexcept;
+    /** `keyLeft/keyRight`: another track's sound, keying the dynamics (with externalKey; nullptr: its own). */
+    void process (float* left, float* right, int numSamples, const float* keyLeft = nullptr, const float* keyRight = nullptr) noexcept;
 
     /** Gain reduction of the Dynamics section, dB (positive), for tests and meters. */
     float getGainReductionDb() const noexcept { return envelopeDb; }
+    /** ... of the de-esser and of the gate (dB, positive). */
+    float getDeEssReductionDb() const noexcept { return deEssDb; }
+    float getGateReductionDb() const noexcept { return -gateGainDb; }
 
     static constexpr double hfFrequency = 8000.0, hmfFrequency = 2500.0, lmfFrequency = 400.0, lfFrequency = 100.0;
 
 private:
     void updateFilters() noexcept;
+    void runEq (float* l, float* r, int n) noexcept;
+    void runFilters (float* l, float* r, int n) noexcept;
+    void runDeEss (float* l, float* r, int n) noexcept;
+    void runDynamics (float* l, float* r, int n, const float* keyL, const float* keyR) noexcept;
 
     Settings settings;
     double sampleRate = 48000.0;
     Biquad hfFilter, hmfFilter, lmfFilter, lfFilter, hpf1, hpf2, lpf1;
+    // (the same filters again, for the side chain: their own memory)
+    Biquad sideHf, sideHmf, sideLmf, sideLf, sideHpf1, sideHpf2, sideLpf;
     float envelopeDb = 0.0f, gateGainDb = 0.0f;
+    std::array<float, 2> channelEnvelope {};   // (unlinked: each side's own)
+    float deEssLow[2] {}, deEssEnv = 0.0f, deEssDb = 0.0f;
     bool filtersValid = false;
+    static constexpr int sideBlock = 256;
+    std::array<float, sideBlock> sideL {}, sideR {};
 };
 
 } // namespace riff

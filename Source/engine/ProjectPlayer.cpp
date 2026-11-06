@@ -293,6 +293,14 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
             if (const auto key = model::findById (project, insert[ids::sidechain].toString()); key.isValid() && key != track)
                 if (auto it = effectsById.find (insert[ids::id].toString()); it != effectsById.end() && it->second != nullptr)
                     t.sidechains.push_back ({ it->second.get(), slotFor (key[ids::id].toString()) });
+        // The built-in strip's dynamics keyed by another track (its EXT key)
+        if ((bool) track.getProperty (ids::consoleExternalKey, false))
+            if (const auto key = model::findById (project, track[ids::consoleKey].toString()); key.isValid() && key != track)
+                t.sidechains.push_back ({ nullptr, slotFor (key[ids::id].toString()) });
+        // Its INSERT keys: the inserts out of the signal (still loaded), or before the strip
+        if (! (bool) track.getProperty (ids::consoleInsertIn, true))
+            t.inserts.clear();
+        t.insertsBeforeStrip = ! (bool) track.getProperty (ids::consoleInsertsPost, true);
         t.stripPlugins = buildChain (model::stripOwner (trackId), sampleRate, insertIds, effectsById);
         if (model::stripPlugin (project, trackId).isValid())
             t.console.enabled = false;   // the plugin replaces the built-in strip (dry while it loads)

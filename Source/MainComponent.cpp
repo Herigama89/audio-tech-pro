@@ -758,7 +758,9 @@ MainComponent::MainComponent (bool openAudioDevice)
                                                                                     [this, slot = player.slotOf (track[ids::id].toString())]
                                                                                     {
                                                                                         const auto [in, out] = engine.takeStripLevels (slot);
-                                                                                        return std::array<float, 3> { in, out, engine.getConsoleGainReduction (slot) };
+                                                                                        return std::array<float, 5> { in, out, engine.getConsoleGainReduction (slot),
+                                                                                                                      engine.getConsoleDeEssReduction (slot),
+                                                                                                                      engine.getConsoleGateReduction (slot) };
                                                                                     }),
                                                             false, closer, "pinStripWindow");
     };

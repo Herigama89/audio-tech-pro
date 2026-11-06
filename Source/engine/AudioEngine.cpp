@@ -2069,6 +2069,28 @@ bool AudioEngine::processTrack (const PlaybackGraph::Track& track, Pass& pass, c
         pre.process (tL, tR, n);
     }
 
+    const auto runInserts = [&]
+    {
+        for (const auto& effect : track.inserts)
+        {
+            if (suspended)
+                break;
+            effect->setPosition (pass.position, pass.playing, pass.bpm);
+            const PlaybackGraph::Track::Sidechain* side = nullptr;
+            for (const auto& s : track.sidechains)
+                if (s.effect == effect.get())
+                    side = &s;
+            if (side != nullptr && side->sourceSlot != track.slot)
+                effect->setSidechain (slotOutput (side->sourceSlot, 0), slotOutput (side->sourceSlot, 1));
+            effect->process (tL, tR, n);
+            effect->tapOutput (tL, tR, n);   // (for its window's analyzer, while one is open)
+            if (side != nullptr)
+                effect->setSidechain (nullptr, nullptr);
+        }
+    };
+    if (track.insertsBeforeStrip)
+        runInserts();
+
     if (! suspended)
         for (const auto& effect : track.stripPlugins)
         {
@@ -2081,8 +2103,19 @@ bool AudioEngine::processTrack (const PlaybackGraph::Track& track, Pass& pass, c
     {
         auto& console = consoles[(size_t) track.slot];
         console.setSettings (track.console);
-        console.process (tL, tR, n);
+        // (its EXT key: another track's sound, this block)
+        const float* keyL = nullptr;
+        const float* keyR = nullptr;
+        for (const auto& side : track.sidechains)
+            if (side.effect == nullptr && side.sourceSlot != track.slot && juce::isPositiveAndBelow (side.sourceSlot, PlaybackGraph::maxTracks))
+            {
+                keyL = slotOutput (side.sourceSlot, 0);
+                keyR = slotOutput (side.sourceSlot, 1);
+            }
+        console.process (tL, tR, n, keyL, keyR);
     }
+    else
+        consoles[(size_t) track.slot].reset();
 
     storeMax (stripOutPeaks[(size_t) track.slot], peakOf (tL, tR));
 
@@ -2096,22 +2129,8 @@ bool AudioEngine::processTrack (const PlaybackGraph::Track& track, Pass& pass, c
             analyzerBuffer[(size_t) (scope.startIndex2 + i)] = 0.5f * (tL[scope.blockSize1 + i] + tR[scope.blockSize1 + i]);
     }
 
-    for (const auto& effect : track.inserts)
-    {
-        if (suspended)
-            break;
-        effect->setPosition (pass.position, pass.playing, pass.bpm);
-        const PlaybackGraph::Track::Sidechain* side = nullptr;
-        for (const auto& s : track.sidechains)
-            if (s.effect == effect.get())
-                side = &s;
-        if (side != nullptr && side->sourceSlot != track.slot)
-            effect->setSidechain (slotOutput (side->sourceSlot, 0), slotOutput (side->sourceSlot, 1));
-        effect->process (tL, tR, n);
-        effect->tapOutput (tL, tR, n);   // (for its window's analyzer, while one is open)
-        if (side != nullptr)
-            effect->setSidechain (nullptr, nullptr);
-    }
+    if (! track.insertsBeforeStrip)
+        runInserts();
 
     // Tape saturation: the channel (or bus) through its tape machine
     if (track.tape.enabled && ! suspended)

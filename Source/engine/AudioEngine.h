@@ -238,6 +238,15 @@ public:
     {
         return juce::isPositiveAndBelow (slot, PlaybackGraph::maxTracks) ? consoles[(size_t) slot].getGainReductionDb() : 0.0f;
     }
+    /** The strip's de-esser's and gate's gain reduction (dB, positive), for its window's lamps. */
+    float getConsoleDeEssReduction (int slot) const noexcept
+    {
+        return juce::isPositiveAndBelow (slot, PlaybackGraph::maxTracks) ? consoles[(size_t) slot].getDeEssReductionDb() : 0.0f;
+    }
+    float getConsoleGateReduction (int slot) const noexcept
+    {
+        return juce::isPositiveAndBelow (slot, PlaybackGraph::maxTracks) ? consoles[(size_t) slot].getGateReductionDb() : 0.0f;
+    }
 
     /** Console mode: the loudest RMS going into and coming out of the bus compressor plugin since the last call. */
     std::pair<float, float> takeBusPluginLevels() noexcept;

@@ -238,7 +238,30 @@ namespace riff::ids
     RIFF_DECLARE_ID (consoleGateThreshold)   // dB, -80 = off
     RIFF_DECLARE_ID (consoleGateRange)    // dB
     RIFF_DECLARE_ID (consoleGateRelease)  // seconds
-    RIFF_DECLARE_ID (consoleGateExpander) // expander (gentle) instead of gate         // TRACK: the whole channel strip (built-in or plugin) in
+    RIFF_DECLARE_ID (consoleGateExpander) // expander (gentle) instead of gate
+    // ... and the rest of the full strip's panel (its window):
+    RIFF_DECLARE_ID (consolePhantom)      // 48V (its lamp only: no microphone here needs power)
+    RIFF_DECLARE_ID (consolePad)          // -20 dB at the input
+    RIFF_DECLARE_ID (consolePhase)        // the polarity turned over
+    RIFF_DECLARE_ID (consoleLine)         // line input (default true); off: the mic preamp and its gain
+    RIFF_DECLARE_ID (consoleMicGain)      // the mic preamp's gain, dB (+20..+70)
+    RIFF_DECLARE_ID (consoleDeEss)        // the de-esser in
+    RIFF_DECLARE_ID (consoleDeEssThreshold)   // its threshold, as printed (+10..-20)
+    RIFF_DECLARE_ID (consoleCompKnee)     // the compressor's soft knee
+    RIFF_DECLARE_ID (consoleCompLinear)   // linear release
+    RIFF_DECLARE_ID (consoleLink)         // stereo link (default true)
+    RIFF_DECLARE_ID (consoleExternalKey)  // the dynamics keyed by another track (consoleKey)
+    RIFF_DECLARE_ID (consoleKey)          // that track's id
+    RIFF_DECLARE_ID (consoleGateFast)     // the gate's fast attack
+    RIFF_DECLARE_ID (consoleFiltersToSidechain)  // the filters in the dynamics' side chain only
+    RIFF_DECLARE_ID (consoleFiltersAtInput)      // the filters first (default true); off: after the EQ
+    RIFF_DECLARE_ID (consoleBlackEq)      // the black-knob EQ: steeper bells as the gain goes up
+    RIFF_DECLARE_ID (consoleEqToSidechain)       // the EQ in the dynamics' side chain only
+    RIFF_DECLARE_ID (consoleDynPostEq)    // the dynamics after the EQ (default true)
+    RIFF_DECLARE_ID (consoleDeEssPostEq)  // the de-esser after the EQ (default true)
+    RIFF_DECLARE_ID (consoleInsertIn)     // the track's insert plug-ins in (default true)
+    RIFF_DECLARE_ID (consoleInsertsPost)  // the inserts after the strip (default true); off: before it
+    RIFF_DECLARE_ID (consoleMeterInput)   // the strip's meter shows the input         // TRACK: the whole channel strip (built-in or plugin) in
     RIFF_DECLARE_ID (hidden)          // TRACK: hidden in the tracks area (Logic's Hide; it still plays)
     RIFF_DECLARE_ID (height)          // TRACK: its height in the tracks area (pixels; view only)
     RIFF_DECLARE_ID (showAutomation)

@@ -181,6 +181,31 @@ public:
         {
             // ("type:id=value,id=value" sets parameters; the picture is named after the whole spec)
             const auto type = spec.upToFirstOccurrenceOf (":", false, false);
+            if (type == "strip")
+            {
+                // The channel strip window: "strip:property=value,..." sets the track's strip
+                for (const auto& pair : juce::StringArray::fromTokens (spec.fromFirstOccurrenceOf (":", false, false), ",", ""))
+                    if (pair.contains ("="))
+                        track.setProperty (juce::Identifier (pair.upToFirstOccurrenceOf ("=", false, false)), pair.fromFirstOccurrenceOf ("=", false, false).getFloatValue(), nullptr);
+                ConsoleStripWindow strip (track, um, [] (float* dest, int count)
+                {
+                    juce::Random random (1);
+                    float lp = 0.0f;
+                    const int n = juce::jmin (count, 4096);
+                    for (int i = 0; i < n; ++i)
+                    {
+                        lp += 0.08f * (random.nextFloat() * 2.0f - 1.0f - lp);
+                        dest[i] = 0.25f * lp;
+                        for (int h = 1; h <= 8; ++h)
+                            dest[i] += 0.2f / (float) h * std::sin (juce::MathConstants<float>::twoPi * 110.0f * (float) h * (float) i / 48000.0f);
+                    }
+                    return n;
+                }, [] { return 48000.0; }, [] { return std::array<float, 5> { 0.5f, 0.45f, 7.5f, 4.0f, 3.5f }; });
+                for (int i = 0; i < 12; ++i)
+                    juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
+                save (strip, "fx-" + spec.replaceCharacters (":=,", "_-_").substring (0, 120) + ".png");
+                continue;
+            }
             auto insert = model::addBuiltinInsert (chain, type, -1, nullptr);
             for (const auto& pair : juce::StringArray::fromTokens (spec.fromFirstOccurrenceOf (":", false, false), ",", ""))
                 if (pair.contains ("="))
@@ -895,7 +920,7 @@ public:
                               + 0.08f * (float) std::sin (*phase * 2.0 * juce::MathConstants<double>::pi * 2500.0 / 48000.0);
                 }
                 return n;
-            }, [] { return 48000.0; }, [] { return std::array<float, 3> { 0.55f, 0.42f, 4.5f }; });
+            }, [] { return 48000.0; }, [] { return std::array<float, 5> { 0.55f, 0.42f, 7.5f, 4.0f, 3.5f }; });
             for (int i = 0; i < 20; ++i)
                 pump (main, 40);
             save (panel, "strip-window.png");
@@ -1348,7 +1373,7 @@ public:
                 // The channel EQ window in the flat skin.
                 auto t0 = main.project.getChild (0);
                 ConsoleStripWindow eq (t0, main.undoManager, [] (float*, int) { return 0; }, [] { return 48000.0; },
-                                        [] { return std::array<float, 3> { 0.5f, 0.32f, 4.5f }; });
+                                        [] { return std::array<float, 5> { 0.5f, 0.32f, 4.5f, 0.0f, 0.0f }; });
                 pump (main, 30);
                 save (eq, "flat-strip-window.png");
             }
