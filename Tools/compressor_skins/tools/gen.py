@@ -5,11 +5,11 @@ kinds = {'turn': 0, 'pointer': 1, 'needle': 2, 'lamp': 3, 'region': 4, 'bar': 5,
 lines = ['#pragma once', '', '// Made by Tools/compressor_skins/tools/gen.py from the faces cut from the photos: do not edit.', '',
          'namespace riff::effectdesign::photo', '{', '    enum PartKind { turn, pointer, needle, lamp, region, bar, arc, ring };', '',
          '    struct Part { const char* name; const char* image; int kind; float cx, cy, R, angle; int x, y, w, h; int wx0, wy0, wx1, wy1; };',
-         '    struct Face { const char* name; const char* panel; int width, height; };', '', '    inline const Face faces[] {']
+         '    struct Face { const char* name; const char* panel; int width, height, originX, originY; };', '', '    inline const Face faces[] {']
 faces = []
 for f in ['plat', 'svca', 'sfet', 'cvca', 'vvca', 'vfet', 'vopto']:
     m = json.load(open(f'{out}/{f}.json')); faces.append((f, m))
-    lines.append(f'        {{ "{f}", "{m["panel"]}", {m["size"][0]}, {m["size"][1]} }},')
+    lines.append(f'        {{ "{f}", "{m["panel"]}", {m["size"][0]}, {m["size"][1]}, {m["origin"][0]}, {m["origin"][1]} }},')
 lines += ['    };', '', '    inline const Part parts[] {']
 for f, m in faces:
     for k, p in m['parts'].items():

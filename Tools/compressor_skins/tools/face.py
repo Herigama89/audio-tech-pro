@@ -29,19 +29,24 @@ class Face:
         self.layout['parts'][key] = info
 
     # --- removing things from the panel ---------------------------------------------------------------
-    def smooth_fill(self, mask, sigma=(40, 14)):
+    def smooth_fill(self, mask, sigma=(40, 14), feather=0.0):
         """Fills a plain painted panel under mask: its own colour from round it (smoothly), with a little grain."""
         keep = (cv2.dilate(mask, np.ones((5, 5), np.uint8)) == 0).astype(np.float32)
         est = None
         for sg in sigma:
-            num = cv2.GaussianBlur(self.bg * keep[..., None], (0, 0), sg); den = cv2.GaussianBlur(keep, (0, 0), sg)[..., None]
+            sx, sy = sg if isinstance(sg, tuple) else (sg, sg)
+            num = cv2.GaussianBlur(self.bg * keep[..., None], (0, 0), sx, sigmaY=sy); den = cv2.GaussianBlur(keep, (0, 0), sx, sigmaY=sy)[..., None]
             e = num / np.maximum(den, 1e-6); w = np.clip(den / 0.2, 0, 1)
             est = e if est is None else est * (1 - w) + e * w
         est = est + self.rng.normal(0, 1.1, est.shape)
-        m = np.maximum(mask.astype(np.float32), cv2.GaussianBlur(mask.astype(np.float32), (0, 0), 1.2))[..., None]
+        if feather > 0:
+            inner = cv2.erode(mask, np.ones((int(feather * 2) | 1, int(feather * 2) | 1), np.uint8)).astype(np.float32)
+            m = np.clip(cv2.GaussianBlur(inner, (0, 0), feather) * 1.2, 0, 1)[..., None]
+        else:
+            m = np.maximum(mask.astype(np.float32), cv2.GaussianBlur(mask.astype(np.float32), (0, 0), 1.2))[..., None]
         self.bg = self.bg * (1 - m) + est * m
 
-    def erase(self, rects, brushed=False, threshold=None, dilate=3, radius=5, smooth=False, sigma=(40, 14)):
+    def erase(self, rects, brushed=False, threshold=None, dilate=3, radius=5, smooth=False, sigma=(40, 14), feather=0.0):
         """Takes out what's in the rectangles (text, logos): with threshold, only the pixels that differ from the
         panel's own colour round them by more than that; filled from round them (brushed: with horizontal grain)."""
         mask = np.zeros((self.H, self.W), np.uint8)
@@ -58,7 +63,7 @@ class Face:
                 d = np.abs(self.bg[y0:y1, x0:x1] - ref).sum(2)
                 mask[y0:y1, x0:x1] = (d > threshold).astype(np.uint8)
         if dilate: mask = cv2.dilate(mask, np.ones((dilate, dilate), np.uint8))
-        if smooth: self.smooth_fill(mask, sigma)
+        if smooth: self.smooth_fill(mask, sigma, feather)
         else: self.fill(mask, brushed, radius)
         return mask
 
@@ -177,8 +182,8 @@ class Face:
         wide = (t > -3) & (t < L + 3) & (dist < width * 2.6)
         em = ((np.abs(dd) > 7) & wide).astype(np.uint8)
         em = cv2.dilate(em, np.ones((3, 3), np.uint8)) & wide.astype(np.uint8)
-        # (filled across the line from each side: the scale's own texture either side)
-        self.fill(em, radius=6)
+        # (filled with the face's own colour from round it: no smear of the scale's print along it)
+        self.smooth_fill(cv2.dilate(em, np.ones((3, 3), np.uint8)), sigma=(9, 4))
         # straighten: turn the photo round the needle's base so the needle stands upright, take its strip
         ang = math.degrees(math.atan2(ux, -uy))   # (its angle from straight up)
         M = cv2.getRotationMatrix2D((float(bx), float(by)), ang, 1.0)
@@ -238,7 +243,33 @@ class Face:
 
     def write(self, quality=93):
         x0, y0, x1, y1 = [int(round(self.S(v))) for v in self.crop]
+        # (the photo's edges: lines of another colour - the backdrop, a bright rim - trimmed off)
+        def edge(lines, inward):
+            ref = np.median(np.stack([lines(inward * k) for k in range(10, 20)]), axis=0)
+            cut = 0
+            for k in range(0, 16):
+                if np.abs(lines(inward * k) - ref).mean() > 22: cut = k + 1
+            return cut
+        lum = self.bg.mean(2)
+        y0 += edge(lambda k: lum[y0 + k, x0:x1], 1); y1 -= edge(lambda k: lum[y1 - 1 + k, x0:x1], -1)
+        x0 += edge(lambda k: lum[y0:y1, x0 + k], 1); x1 -= edge(lambda k: lum[y0:y1, x1 - 1 + k], -1)
+        self.crop = (x0 / self.scale, y0 / self.scale, x1 / self.scale, y1 / self.scale)
         self.bg = self.bg[y0:y1, x0:x1]
+        # the white backdrop showing through (round the panel, in the rack ears' holes): the rack's dark
+        b = self.bg; l = b.mean(2); sat = b.max(2) - b.min(2)
+        white = ((l > 236) & (sat < 16)).astype(np.uint8)
+        n, lab, st, _ = cv2.connectedComponentsWithStats(white)
+        h, w = l.shape
+        drop = np.zeros_like(white)
+        for i in range(1, n):
+            x, y, ww, hh, area = st[i]
+            touches = x == 0 or y == 0 or x + ww >= w or y + hh >= h
+            inEar = (x < 90 or x + ww > w - 90) and area < 4000 and area > 30
+            if touches or inEar:
+                drop[lab == i] = 1
+        if drop.any():
+            a = cv2.GaussianBlur(cv2.dilate(drop, np.ones((3, 3), np.uint8)).astype(np.float32), (3, 3), 0.8)[..., None]
+            self.bg = b * (1 - a) + np.array([20, 21, 24], np.float32) * a
         for p in self.layout['parts'].values():
             for k in ('cx', 'x'):
                 if k in p: p[k] -= x0
@@ -247,6 +278,7 @@ class Face:
             if p.get('window'):
                 p['window'] = [p['window'][0] - x0, p['window'][1] - y0, p['window'][2] - x0, p['window'][3] - y0]
         self.layout['size'] = [x1 - x0, y1 - y0]
+        self.layout['origin'] = [x0, y0]   # (the panel's top left in the photo: for places given in the photo's pixels)
         Image.fromarray(np.clip(self.bg, 0, 255).astype(np.uint8)).save(f'{self.out}/{self.name}_panel.jpg', quality=quality, subsampling=0)
         self.layout['panel'] = f'{self.name}_panel_jpg'
         json.dump(self.layout, open(f'{self.out}/{self.name}.json', 'w'), indent=1)
@@ -398,7 +430,7 @@ def _ring(self, key, cx, cy, r0, r1, tint, boost=1.8, info=None, dim_lit=True):
     a = np.maximum(a, cv2.GaussianBlur(a, (0, 0), 2.0) * 0.6)
     self.save_part(key, lit, a, dict(info or {}, cx=icx, cy=icy, R=R, kind='ring'))
 
-def _arc(self, key, cx, cy, r0, r1, lit_angle, unlit_angle, info=None, unlit_from=None):
+def _arc(self, key, cx, cy, r0, r1, lit_angle, unlit_angle, info=None, unlit_from=None, lit_from=None):
     """A lit arc round a knob (its value from the lowest setting): the lit look swept round the whole circle as the
     picture (the app draws it from the start to the setting); the panel's ring unlit all round."""
     cx, cy, r0, r1 = self.S(cx), self.S(cy), self.S(r0), self.S(r1)
@@ -407,18 +439,16 @@ def _arc(self, key, cx, cy, r0, r1, lit_angle, unlit_angle, info=None, unlit_fro
     gy, gx = np.mgrid[-R:R, -R:R].astype(np.float32)
     d = np.hypot(gx, gy)
     ann = np.clip((d - r0) / 1.0 + 0.5, 0, 1) * np.clip((r1 - d) / 1.0 + 0.5, 0, 1)
-    def profile(angle, at=None):
-        t = math.radians(angle)
-        ox, oy = (self.S(at[0]), self.S(at[1])) if at else (cx, cy)
-        rs = np.arange(0, R + 1, 0.5)
-        xs = ox + rs * math.sin(t); ys = oy - rs * math.cos(t)
-        vals = np.stack([cv2.getRectSubPix(self.src, (1, 1), (float(x), float(y)))[0, 0] for x, y in zip(xs, ys)])
-        return rs, vals
-    def sweep(angle, at=None):
-        rs, vals = profile(angle, at)
-        idx = np.clip((d / 0.5).astype(int), 0, len(vals) - 1)
-        return vals[idx]
-    lit = sweep(lit_angle); unlit = sweep(unlit_angle, unlit_from)
+    d = d.astype(np.float32)
+    def sweep(angle, src=None):
+        # the ring's look along one ray, by its place across the ring (src: another knob's ring, (cx, cy, r0, r1))
+        scx, scy, sr0, sr1 = (self.S(src[0]), self.S(src[1]), self.S(src[2]), self.S(src[3])) if src else (cx, cy, r0, r1)
+        t = (d - r0) / (r1 - r0)
+        rs = sr0 + t * (sr1 - sr0)
+        th = math.radians(angle)
+        xs = (scx + rs * math.sin(th)).astype(np.float32); ys = (scy - rs * math.cos(th)).astype(np.float32)
+        return cv2.remap(self.src, xs, ys, cv2.INTER_LINEAR)
+    lit = sweep(lit_angle, lit_from); unlit = sweep(unlit_angle, unlit_from)
     self.save_part(key, lit, ann, dict(info or {}, cx=icx, cy=icy, R=R, kind='arc'))
     patch = self.bg[icy - R:icy + R, icx - R:icx + R]
     self.bg[icy - R:icy + R, icx - R:icx + R] = patch * (1 - ann[..., None]) + unlit * ann[..., None]

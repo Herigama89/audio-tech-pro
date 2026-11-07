@@ -235,6 +235,34 @@ TEST_CASE ("Studio Compressor: circuits differ, the limiter holds its threshold,
     CHECK (peakOf (nl, 12000) < 0.01f);
 }
 
+TEST_CASE ("Studio Compressor: input and gain turned right up colour the sound but never break it up", "[stockfx]")
+{
+    for (int model = 0; model < 7; ++model)
+        for (const auto* knob : { "input", "makeup" })
+        {
+            INFO ("model " << model << " " << knob);
+            auto c = make ("studioComp");
+            set (*c, "model", (float) model);
+            set (*c, knob, 24.0f);
+            const auto [l, r] = run (*c, sine (500.0, 0.5, 0.5f), sine (500.0, 0.5, 0.5f));
+            // the fundamental against the rest: what's left after taking the 500 Hz tone out
+            double s = 0.0, co = 0.0, total = 0.0;
+            const size_t from = 12000;
+            for (size_t i = from; i < l.size(); ++i)
+            {
+                const auto ph = juce::MathConstants<double>::twoPi * 500.0 * (double) i / rate;
+                s += l[i] * std::sin (ph);
+                co += l[i] * std::cos (ph);
+                total += (double) l[i] * l[i];
+            }
+            const auto n = (double) (l.size() - from);
+            const auto fundamental = 2.0 * (s * s + co * co) / (n * n);   // (its power)
+            const auto rest = std::max (0.0, total / n - fundamental);
+            CHECK (std::sqrt (rest / std::max (fundamental, 1.0e-12)) < 0.12);   // under 12 % distortion
+            CHECK (peakOf (l, from) < 32.0f);
+        }
+}
+
 TEST_CASE ("Studio Compressor: the hardware faces' keys - power, compressor in, link, opto switch, S/C HPF, readings", "[stockfx]")
 {
     // Power off: the sound straight through, whatever the settings

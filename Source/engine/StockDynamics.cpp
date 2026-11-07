@@ -119,6 +119,7 @@ namespace
             lastHpfStep = -1;
             lastEmphasis = -1.0f;
             airReady = false;
+            smoothed = false;
         }
 
         void process (float* l, float* r, int n) noexcept override
@@ -141,10 +142,11 @@ namespace
             const auto attackMs = circuitAttack (model, value (iAttack));
             const auto releaseMs = circuitRelease (model, value (iRelease));
             const auto autoRelease = choice (iAutoRelease) == 1 && circuitHas (model, "autoRelease");
-            const auto input = dbToGain (value (iInput));
+            // (input, output and make-up glide to new settings over the block: no zipper noise as they're turned)
+            const auto inputTarget = dbToGain (value (iInput));
             const auto mix = value (iMix) * 0.01f;
             const auto distortion = choice (iDistortion);
-            const auto output = dbToGain (value (iOutput));
+            const auto outputTarget = dbToGain (value (iOutput));
             const auto limit = choice (iLimiter) == 1;
             const auto limitGain = dbToGain (value (iLimThr));
             const auto sum = choice (iDetect) == 1;
@@ -184,11 +186,21 @@ namespace
             updateKeyFilter();
             updateTone (model);
             float pin[2] {}, pout[2] {};
+            const auto makeupTarget = dbToGain (makeup);
+            if (! smoothed)
+            {
+                inputNow = inputTarget; outputNow = outputTarget; makeupNow = makeupTarget;
+                smoothed = true;
+            }
+            const auto step = 1.0f / (float) std::max (1, n);
+            const auto inputStep = (inputTarget - inputNow) * step, outputStep = (outputTarget - outputNow) * step, makeupStep = (makeupTarget - makeupNow) * step;
 
             for (int i = 0; i < n; ++i)
             {
                 pin[0] = std::max (pin[0], std::abs (l[i]));
                 pin[1] = std::max (pin[1], std::abs (r[i]));
+                inputNow += inputStep; outputNow += outputStep; makeupNow += makeupStep;
+                const auto input = inputNow, output = outputNow;
                 auto inL = l[i] * input, inR = r[i] * input;
                 if (transformer)
                 {
@@ -286,7 +298,7 @@ namespace
                 lastGainCh[1] = gains[1];
                 lastGain = gains[0];
 
-                const auto mk = dbToGain (makeup);
+                const auto mk = makeupNow;
                 auto a = inL * gains[0] * mk, b = inR * gains[1] * mk;
                 // The VCA driven harder (the bus compressor's VCA DRIVE): its odd harmonics come up
                 if (vcaDrive > 0.001f)
@@ -300,8 +312,8 @@ namespace
                 if (console)
                 {
                     // (the console's output transformer: gentle second harmonic, the peaks rounded)
-                    a = a + 0.05f * a * std::abs (a) - 0.02f * a * a * a;
-                    b = b + 0.05f * b * std::abs (b) - 0.02f * b * b * b;
+                    a = a + 0.06f * (std::tanh (a * 1.5f) / 1.5f - a);
+                    b = b + 0.06f * (std::tanh (b * 1.5f) / 1.5f - b);
                 }
                 switch (distortion)
                 {
@@ -398,7 +410,8 @@ namespace
         float dcL = 0.0f, dcR = 0.0f;
         float lastScKey = -1.0f, scLevel = 1.0f;
         Biquad scFilter, scHpf, scEmphasis, airFilter;
-        bool hpfOn = false, emphasisOn = false, airOn = false, airReady = false;
+        bool hpfOn = false, emphasisOn = false, airOn = false, airReady = false, smoothed = false;
+        float inputNow = 1.0f, outputNow = 1.0f, makeupNow = 1.0f;
         int lastHpfStep = -1;
         float lastEmphasis = -1.0f, limiting = 0.0f;
         mutable std::array<std::atomic<float>, 4> peaks {};
@@ -441,17 +454,29 @@ namespace
             float y = x;
             switch (model)
             {
-                case studioVca:   y = x + 0.015f * work * (std::tanh (x * 1.5f) / 1.5f - x) * 40.0f * std::abs (x); break;
-                case studioFet:   y = x + 0.06f * work * (x * std::abs (x)) + 0.03f * work * (x * x); break;
+                // (every shape bounded: however hard it's driven, the colour stays a colour, never a break-up)
+                case studioVca:   y = x + 0.02f * work * (std::tanh (x * 1.5f) / 1.5f - x); break;
+                case studioFet:
+                {
+                    const auto t = std::tanh (x);
+                    y = x + 0.035f * work * t * t + 0.03f * work * (std::tanh (x * 1.3f) / 1.3f - x);
+                    break;
+                }
                 case classicVca:  y = x + 0.03f * work * (std::tanh (x * 2.0f) * 0.5f - x); break;
                 case vintageVca:  y = x + 0.05f * work * (std::tanh (x * 1.8f) / 1.8f - x) * 2.0f; break;
                 case vintageFet:
                 {
                     const auto d = 1.0f + 0.25f * work;
-                    y = std::tanh (d * x + 0.12f * work * x * x) / d;
+                    const auto t = std::tanh (x);
+                    y = x + 0.6f * (std::tanh (d * x + 0.1f * work * t * t) / d - x);
                     break;
                 }
-                case vintageOpto: y = x + 0.08f * work * x * x - 0.02f * work * x * x * x; break;
+                case vintageOpto:
+                {
+                    const auto t = std::tanh (x);
+                    y = x + 0.06f * work * t * t + 0.02f * work * (std::tanh (x * 1.2f) / 1.2f - x);
+                    break;
+                }
                 default: return x;
             }
             // (even harmonics push a little DC: a slow high pass takes it out, as the transformers would)

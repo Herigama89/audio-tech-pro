@@ -2617,7 +2617,10 @@ namespace
             float scale;
             juce::Point<float> origin;
             int height;
+            juce::Point<float> photoOrigin {};   // (the panel's top left in the photo)
             juce::Point<float> at (float x, float y) const { return origin + juce::Point<float> (x, y) * scale; }
+            /** A place given in the photo's own pixels (before its edges were trimmed). */
+            RF photo (float x, float y, float w, float h) const { return rect (x - photoOrigin.x, y - photoOrigin.y, w, h); }
             RF rect (float x, float y, float w, float h) const { return RF (origin.x + x * scale, origin.y + y * scale, w * scale, h * scale); }
             std::string key (const char* p) const { return std::string (face) + "." + p; }
         };
@@ -2627,6 +2630,7 @@ namespace
             static const char* names[] { "plat", "svca", "sfet", "cvca", "vvca", "vfet", "vopto" };
             const auto& f = faceOf (names[juce::jlimit (0, 6, circuit)]);
             Page p { f.name, 1.0f, {}, 0 };
+            p.photoOrigin = { (float) f.originX, (float) f.originY };
             if (f.height > f.width)
             {
                 // (the 500-series module: upright, in a rack as wide as the window)
@@ -2785,6 +2789,8 @@ namespace
         /** ... with no picture of its own (its arc, or the face, shows it): just where it's dragged. */
         Control blindKnob (const Page& pg, int pageNumber, const char* id, float cx, float cy, float r, std::vector<std::pair<float, float>> map, bool logMap = false)
         {
+            cx -= pg.photoOrigin.x;   // (its place in the photo's pixels)
+            cy -= pg.photoOrigin.y;
             Sprite s;
             s.rect = RF (cx - r, cy - r, r * 2.0f, r * 2.0f);
             s.pivot = { cx, cy };
@@ -3165,7 +3171,7 @@ namespace
                     {
                         // (the meter's lamp out)
                         g.setColour (juce::Colours::black.withAlpha (0.45f));
-                        g.fillRect (pg.rect (949.0f, 81.0f, 253.0f, 111.0f));
+                        g.fillRect (pg.photo (949.0f, 81.0f, 253.0f, 111.0f));
                     }
                     break;
                 }
@@ -3202,7 +3208,7 @@ namespace
                     if (! powered || mode == 3)
                     {
                         g.setColour (juce::Colours::black.withAlpha (0.45f));
-                        g.fillRect (pg.rect (1151.0f, 77.0f, 248.0f, 108.0f));
+                        g.fillRect (pg.photo (1151.0f, 79.0f, 248.0f, 108.0f));
                     }
                     break;
                 }
@@ -3215,7 +3221,7 @@ namespace
                     if (! powered)
                     {
                         g.setColour (juce::Colours::black.withAlpha (0.4f));
-                        g.fillRect (pg.rect (720.0f, 120.0f, 276.0f, 142.0f));
+                        g.fillRect (pg.photo (720.0f, 132.0f, 276.0f, 130.0f));
                     }
                     break;
                 }

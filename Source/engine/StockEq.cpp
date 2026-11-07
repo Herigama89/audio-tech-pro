@@ -139,13 +139,15 @@ namespace
                 const auto high = x - lp;
                 const auto h = high * 2.2f;
                 // (even harmonics from the bias, odd from the curve; a little lift of the band itself)
-                const auto colour = 0.16f * h * std::abs (h) + (saturate (h) - h) * 0.5f;
+                const auto th = juce::jlimit (-1.5f, 1.5f, h);   // (bounded: driven hard it stays a colour)
+                const auto colour = 0.16f * th * std::abs (th) + (saturate (h) - h) * 0.5f;
                 return x + t * (colour / 2.2f + 0.09f * high);
             }
             auto& lp = silkLow[(size_t) ch];
             lp = x + lowCoef * (lp - x);
             const auto low = lp * 1.8f;
-            const auto colour = 0.22f * low * std::abs (low) + (saturate (low) - low) * 0.35f;
+            const auto tl = juce::jlimit (-1.5f, 1.5f, low);
+            const auto colour = 0.22f * tl * std::abs (tl) + (saturate (low) - low) * 0.35f;
             return x + t * (colour / 1.8f + 0.11f * lp);
         }
 
