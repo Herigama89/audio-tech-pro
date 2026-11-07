@@ -483,3 +483,58 @@ def _pressed(self, key, rect, k=0.55, info=None):
     self.save_part(key, pushed, np.ones(crop.shape[:2], np.float32), dict(info or {}, x=x0, y=y0, w=x1 - x0, h=y1 - y0, kind='region'))
 
 Face.pressed = _pressed
+
+def _toggle(self, key, cx, cy, R, rn, threshold=40, info=None):
+    """A bat toggle switch: as photographed (bat up) and thrown (bat down: the bat mirrored about the nut, the panel
+    where it was) - two pictures, nothing turned (its light stays on the right side)."""
+    cx, cy, R, rn = self.S(cx), self.S(cy), self.S(R), self.S(rn)
+    Ri = int(math.ceil(R)) + 2
+    icx, icy = int(round(cx)), int(round(cy))
+    crop = self.src[icy - Ri:icy + Ri, icx - Ri:icx + Ri].copy()
+    gy, gx = np.mgrid[-Ri:Ri, -Ri:Ri].astype(np.float32)
+    d = np.hypot(gx, gy)
+    # thrown: the whole switch mirrored top to bottom (its light stays on the same side); the bat a little darker
+    down = crop[::-1].copy()
+    top = (gy > rn * 0.3).astype(np.float32)[..., None]   # (where the bat is now)
+    down = down * (1 - top * 0.12)
+    alpha = np.clip((R - d) / 1.2 + 0.5, 0, 1)
+    self.save_part(key + '_up', crop, alpha, dict(info or {}, cx=icx, cy=icy, R=Ri, kind='turn'))
+    self.save_part(key + '_down', down, alpha, dict(info or {}, cx=icx, cy=icy, R=Ri, kind='turn'))
+
+Face.toggle = _toggle
+
+def _boost(self, key, gain=1.35, glow=(255, 60, 40), amount=0.5):
+    """A lamp's lit picture made brighter, with a glow of its colour (a lamp that's lit only faintly in the photo)."""
+    p = self.layout['parts'][key]
+    fn = f"{self.out}/{p['image'][:-4]}.png"
+    im = np.array(Image.open(fn)).astype(np.float32)
+    rgb, a = im[..., :3], im[..., 3] / 255.0
+    R = rgb.shape[0] / 2
+    d = np.hypot(*np.mgrid[-R:R, -R:R])
+    inner = (d < R * 0.62).astype(np.float32)
+    rgb = rgb * (1 + (gain - 1) * inner[..., None]) + np.array(glow, np.float32) * inner[..., None] * 0.15
+    halo = np.clip(1 - d / R, 0, 1) ** 1.5 * amount
+    rgb = rgb * a[..., None] + np.array(glow, np.float32) * (1 - a[..., None])
+    a = np.maximum(a, halo)
+    Image.fromarray(np.dstack([np.clip(rgb, 0, 255), a * 255]).astype(np.uint8), 'RGBA').save(fn)
+
+Face.boost = _boost
+
+def _arc_over(self, key, cx, cy, r0, r1, lit_from, lit_angle, info=None):
+    """A lit arc over a printed ring (the panel's ring left as it is): the lit look from another knob's ring."""
+    cx, cy, r0, r1 = self.S(cx), self.S(cy), self.S(r0), self.S(r1)
+    R = int(math.ceil(r1)) + 3
+    icx, icy = int(round(cx)), int(round(cy))
+    gy, gx = np.mgrid[-R:R, -R:R].astype(np.float32)
+    d = np.hypot(gx, gy)
+    ann = np.clip((d - r0) / 1.0 + 0.5, 0, 1) * np.clip((r1 - d) / 1.0 + 0.5, 0, 1)
+    scx, scy, sr0, sr1 = [self.S(v) for v in lit_from]
+    t = (d - r0) / (r1 - r0)
+    rs = sr0 + t * (sr1 - sr0)
+    th = math.radians(lit_angle)
+    lit = cv2.remap(self.src, (scx + rs * math.sin(th)).astype(np.float32), (scy - rs * math.cos(th)).astype(np.float32), cv2.INTER_LINEAR)
+    # (only the lit colour: how much brighter than dark it is)
+    a = ann * np.clip((lit.max(2) - 40) / 120, 0, 1)
+    self.save_part(key, lit, a, dict(info or {}, cx=icx, cy=icy, R=R, kind='arc'))
+
+Face.arc_over = _arc_over

@@ -2699,6 +2699,17 @@ juce::ValueTree fromJson (const juce::String& json, const juce::File& projectFil
         else
             mixer = juce::ValueTree (ids::MIXER);
         tree.appendChild (mixer, nullptr);
+
+        // Older files: a compressor keyed by another track had no key switch (it now starts off); it keeps its key
+        std::function<void (juce::ValueTree)> keys = [&keys] (juce::ValueTree node)
+        {
+            if (node.hasType (ids::INSERT) && node[ids::effect].toString() == "studioComp"
+                && node[ids::sidechain].toString().isNotEmpty() && ! node.hasProperty ("extSc"))
+                node.setProperty ("extSc", 1.0f, nullptr);
+            for (auto child : node)
+                keys (child);
+        };
+        keys (tree);
     }
 
     return tree;

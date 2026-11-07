@@ -20,6 +20,9 @@ f.arc('arcHp1',1290.6,95.6,23.5,32,lit_angle=-118,unlit_angle=124,lit_from=(676.
 f.arc('arcHp2',1375,95.6,23.5,32,lit_angle=-118,unlit_angle=124,lit_from=(676.7,106.7,37.5,47.5),unlit_from=(1193.7,103,36,48))
 f.ring('ringThreshold',340,106.7,29,43,tint=(255,196,70))
 f.ring('ringRatio',441.7,106.7,29,43,tint=(255,196,70))
+del f.layout['parts']['ringThreshold']; del f.layout['parts']['ringRatio']   # (kept only for dimming the photo's lit numbers)
+f.arc_over('arcThreshold',340,106.7,39.5,44,lit_from=(676.7,106.7,40,46),lit_angle=-120)
+f.arc_over('arcRatio',441.7,106.7,39.5,44,lit_from=(676.7,106.7,40,46),lit_angle=-120)
 # keys: their lamp strips
 keys={'kRms':(316.7,205),'kSum':(366,205),'kScFilter':(415,205),'kAutoRel':(316.7,235.7),'kListen':(366,235.7),'kLimit':(415,235.7),
       'kOhm':(316.7,267.3),'kConsole':(366,267.3),'kAir':(702.3,235.7),'kDrive':(702.3,267.3),

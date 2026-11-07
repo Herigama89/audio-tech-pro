@@ -47,6 +47,7 @@ namespace riff::effectdesign
     struct Sprite
     {
         const char* image = nullptr;          // its picture (a BinaryData resource name); nullptr: an invisible button over the photo
+        const char* offImage = nullptr;       // (a switch photographed both ways: its picture when off; nothing turns)
         juce::Rectangle<float> rect;          // where the picture sits on the photo
         juce::Point<float> pivot;             // what it turns round
         float angle = 0.0f;                   // where it points as photographed (degrees clockwise from 12 o'clock)

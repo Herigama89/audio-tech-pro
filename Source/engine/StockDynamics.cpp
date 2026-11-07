@@ -112,8 +112,9 @@ namespace
             lastGain = 1.0f;
             envCh = rmsCh = slowCh = {};
             lastGainCh = { 1.0f, 1.0f };
-            for (auto* f : { &scFilter, &scHpf, &scEmphasis, &airFilter })
+            for (auto* f : { &scFilter, &scHpf, &scEmphasis, &airFilter, &bottom })
                 f->reset();
+            lastBottomModel = -1;
             dcL = dcR = 0.0f;
             lastScKey = -1.0f;
             lastHpfStep = -1;
@@ -166,10 +167,10 @@ namespace
             {
                 case platinum:    rmsDetect = choice (iPeakRms) == 1; break;
                 case studioVca:   rmsDetect = true; break;
-                case studioFet:   feedback = true; break;
+                case studioFet:   break;   // (as the 1176's: turn the input up and it digs in, 20 dB and more)
                 case classicVca:  rmsDetect = true; knee = 4.0f; break;
                 case vintageVca:  rmsDetect = true; feedback = true; knee = 3.0f; break;
-                case vintageFet:  feedback = true; knee = ratio >= 30.0f ? 0.0f : 2.0f; break;
+                case vintageFet:  knee = ratio >= 30.0f ? 0.0f : 2.0f; break;
                 case vintageOpto: rmsDetect = true; feedback = true; knee = 14.0f; break;
             }
             const auto attack = coeffMs (attackMs, sampleRate);
@@ -329,6 +330,11 @@ namespace
                     a = airFilter.process (a, 0);
                     b = airFilter.process (b, 1);
                 }
+                if (bottomOn)
+                {
+                    a = bottom.process (a, 0);
+                    b = bottom.process (b, 1);
+                }
                 a *= output;
                 b *= output;
                 if (limit)
@@ -398,6 +404,15 @@ namespace
             if (emphasisOn && std::abs (emph - lastEmphasis) > 1.0e-4f)
                 scEmphasis.setHighShelf (sampleRate, 3000.0, emph * 12.0, 0.7);
             lastEmphasis = emph;
+            // The output transformers' weight in the lows: a little bottom on the vintage circuits and the FETs
+            static const float bottomDb[] { 0.0f, 0.3f, 0.7f, 0.5f, 1.0f, 0.8f, 1.3f };
+            static const float bottomHz[] { 60.0f, 80.0f, 100.0f, 70.0f, 60.0f, 90.0f, 80.0f };
+            if (model != lastBottomModel)
+            {
+                bottomOn = bottomDb[model] > 0.01f;
+                if (bottomOn) bottom.setLowShelf (sampleRate, bottomHz[model], bottomDb[model], 0.8);
+                lastBottomModel = model;
+            }
             // Air: a gentle lift at the very top (as the preamp's Air)
             airOn = choice (iAir) == 1;
             if (airOn && ! airReady)
@@ -409,7 +424,9 @@ namespace
         std::array<float, 2> envCh {}, rmsCh {}, slowCh {}, lastGainCh { 1.0f, 1.0f };
         float dcL = 0.0f, dcR = 0.0f;
         float lastScKey = -1.0f, scLevel = 1.0f;
-        Biquad scFilter, scHpf, scEmphasis, airFilter;
+        Biquad scFilter, scHpf, scEmphasis, airFilter, bottom;
+        bool bottomOn = false;
+        int lastBottomModel = -1;
         bool hpfOn = false, emphasisOn = false, airOn = false, airReady = false, smoothed = false;
         float inputNow = 1.0f, outputNow = 1.0f, makeupNow = 1.0f;
         int lastHpfStep = -1;
@@ -459,22 +476,25 @@ namespace
                 case studioFet:
                 {
                     const auto t = std::tanh (x);
-                    y = x + 0.035f * work * t * t + 0.03f * work * (std::tanh (x * 1.3f) / 1.3f - x);
+                    // (the FET and its class A output stage: a forward, slightly gritty midrange as it works)
+                    y = x + 0.07f * work * t * t + 0.08f * work * (std::tanh (x * 1.5f) / 1.5f - x);
                     break;
                 }
-                case classicVca:  y = x + 0.03f * work * (std::tanh (x * 2.0f) * 0.5f - x); break;
+                // (the classic bus VCA: firm odd harmonics, the "glue", a little more as it works)
+                case classicVca:  y = x + 0.05f * work * (std::tanh (x * 2.0f) * 0.5f - x); break;
                 case vintageVca:  y = x + 0.05f * work * (std::tanh (x * 1.8f) / 1.8f - x) * 2.0f; break;
                 case vintageFet:
                 {
                     const auto d = 1.0f + 0.25f * work;
                     const auto t = std::tanh (x);
-                    y = x + 0.6f * (std::tanh (d * x + 0.1f * work * t * t) / d - x);
+                    y = x + 0.75f * (std::tanh (d * x + 0.14f * work * t * t) / d - x);
                     break;
                 }
                 case vintageOpto:
                 {
                     const auto t = std::tanh (x);
-                    y = x + 0.06f * work * t * t + 0.02f * work * (std::tanh (x * 1.2f) / 1.2f - x);
+                    // (the valve make-up stage: warm second harmonic, a soft top)
+                    y = x + 0.11f * work * t * t + 0.035f * work * (std::tanh (x * 1.3f) / 1.3f - x);
                     break;
                 }
                 default: return x;
@@ -1243,7 +1263,7 @@ const std::vector<StockEffect>& stockDynamicsEffects()
               { "compIn", "Compressor In", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Out", "In" } },
               { "meterMode", "Meter", "", 0.0f, 3.0f, 0.0f, 1.5f, { "GR", "+4", "+8", "Off" } },   // (the opto's +10 is +8's place)
               { "link", "Stereo Link", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
-              { "extSc", "External Side Chain", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } },
+              { "extSc", "External Side Chain", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
               { "air", "Air", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
               { "console", "Console", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
               { "vcaDrive", "VCA Drive", "", 0.0f, 1.0f, 0.0f, 0.5f },

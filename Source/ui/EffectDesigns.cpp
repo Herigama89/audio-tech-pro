@@ -2832,15 +2832,15 @@ namespace
             const auto r = p.R * grow;
             return key (pg, pageNumber, id, p.cx - r, p.cy - r, r * 2.0f, r * 2.0f);
         }
-        /** A toggle switch: its bat turned over (down: off, unless upIsOff). */
+        /** A toggle switch, photographed bat up and thrown down (up: on, unless upIsOn is false). */
         Control toggle (const Page& pg, int pageNumber, const char* id, const char* partName, bool upIsOn = true)
         {
-            const auto& p = part (pg.key (partName).c_str());
-            auto c = key (pg, pageNumber, id, p.cx - p.R, p.cy - p.R, p.R * 2.0f, p.R * 2.0f);
-            c.sprite.image = p.image;
-            c.sprite.pivot = { p.cx, p.cy };
-            c.sprite.onAngle = upIsOn ? 0.0f : 180.0f;
-            c.sprite.offAngle = upIsOn ? 180.0f : 0.0f;
+            const auto& up = part (pg.key ((juce::String (partName) + "_up").toRawUTF8()).c_str());
+            const auto& down = part (pg.key ((juce::String (partName) + "_down").toRawUTF8()).c_str());
+            auto c = key (pg, pageNumber, id, up.cx - up.R, up.cy - up.R, up.R * 2.0f, up.R * 2.0f);
+            c.sprite.image = upIsOn ? up.image : down.image;
+            c.sprite.offImage = upIsOn ? down.image : up.image;
+            c.sprite.pivot = { up.cx, up.cy };
             return c;
         }
 
@@ -2879,15 +2879,8 @@ namespace
             const auto pg = pageFor (platinum);
             constexpr int n = platinum + 1;
             // gold knobs: threshold in steps (the ring's lit number), ratio
-            {
-                std::vector<std::pair<float, float>> steps;
-                for (int i = 0; i < 8; ++i)
-                    steps.push_back ({ -150.0f + 300.0f * (float) i / 7.0f, -60.0f * (float) i / 7.0f });
-                auto k = blindKnob (pg, n, "threshold", 340.0f, 106.7f, 30.0f, steps);
-                k.sprite.stepped = true;
-                cs.push_back (k);
-            }
-            cs.push_back (blindKnob (pg, n, "ratio", 441.7f, 106.7f, 30.0f, { { -150.0f, 1.0f }, { 150.0f, 30.0f } }, true));
+            cs.push_back (blindKnob (pg, n, "threshold", 340.0f, 106.7f, 34.0f, { { -150.0f, 0.0f }, { 150.0f, -60.0f } }));
+            cs.push_back (blindKnob (pg, n, "ratio", 441.7f, 106.7f, 34.0f, { { -150.0f, 1.0f }, { 150.0f, 30.0f } }, true));
             cs.push_back (blindKnob (pg, n, "input", 676.7f, 106.7f, 38.0f, { { -135.0f, -30.0f }, { 135.0f, 30.0f } }));
             cs.push_back (blindKnob (pg, n, "output", 1193.7f, 103.0f, 37.0f, { { -135.0f, -30.0f }, { 135.0f, 30.0f } }));
             cs.push_back (blindKnob (pg, n, "makeup", 1290.6f, 95.6f, 24.0f, { { -135.0f, -30.0f }, { 135.0f, 30.0f } }));
@@ -2969,13 +2962,14 @@ namespace
                                                             { 3.0f, 0.0f }, { 42.0f, 6.0f }, { 77.0f, 12.0f }, { 114.0f, 18.0f }, { 150.0f, 24.0f } };
             cs.push_back (knob (pg, n, "input", "input", io));
             cs.push_back (knob (pg, n, "output", "output", io));
-            auto attack = knob (pg, n, "attack", "attack", { { -100.0f, 200.0f }, { -30.0f, 60.0f }, { 30.0f, 10.0f }, { 100.0f, 0.05f } });
-            attack.sprite.offBelow = -112.0f; attack.sprite.offParam = "compIn";   // (OFF, all the way left: the compressor out, the amplifier in)
+            // (SLOW at the lower left round to FAST at the lower right; past SLOW, at the bottom: OFF)
+            auto attack = knob (pg, n, "attack", "attack", { { -135.0f, 200.0f }, { -45.0f, 60.0f }, { 45.0f, 10.0f }, { 135.0f, 0.05f } });
+            attack.sprite.offBelow = -150.0f; attack.sprite.offParam = "compIn";   // (OFF: the compressor out, the amplifier in)
             cs.push_back (attack);
-            cs.push_back (knob (pg, n, "release", "release", { { -100.0f, 3000.0f }, { -30.0f, 900.0f }, { 30.0f, 200.0f }, { 100.0f, 5.0f } }));
-            cs.push_back (knob (pg, n, "mix", "mix", { { -100.0f, 100.0f }, { 100.0f, 0.0f } }));
-            auto hpf = knob (pg, n, "scHpf", "scHpf", { { -100.0f, 30.0f }, { 100.0f, 300.0f } }, false, true);
-            hpf.sprite.offBelow = -112.0f; hpf.sprite.offParam = "scFilter";
+            cs.push_back (knob (pg, n, "release", "release", { { -135.0f, 3000.0f }, { -45.0f, 900.0f }, { 45.0f, 200.0f }, { 135.0f, 5.0f } }));
+            cs.push_back (knob (pg, n, "mix", "mix", { { -135.0f, 100.0f }, { 135.0f, 0.0f } }));
+            auto hpf = knob (pg, n, "scHpf", "scHpf", { { -135.0f, 30.0f }, { 135.0f, 300.0f } }, false, true);
+            hpf.sprite.offBelow = -150.0f; hpf.sprite.offParam = "scFilter";
             cs.push_back (hpf);
             cs.push_back (toggle (pg, n, "impedance", "tg_zin", false));
             cs.push_back (toggle (pg, n, "power", "tg_bypass"));
@@ -3035,10 +3029,10 @@ namespace
                                                             { 5.0f, 0.0f }, { 43.0f, 6.0f }, { 76.0f, 12.0f }, { 115.0f, 18.0f }, { 153.0f, 24.0f } };
             cs.push_back (knob (pg, n, "input", "input", io));
             cs.push_back (knob (pg, n, "output", "output", io));
-            auto attack = knob (pg, n, "attack", "attack", { { -130.0f, 200.0f }, { -45.0f, 60.0f }, { 45.0f, 10.0f }, { 130.0f, 0.05f } });
-            attack.sprite.offBelow = -145.0f; attack.sprite.offParam = "compIn";
+            auto attack = knob (pg, n, "attack", "attack", { { -135.0f, 200.0f }, { -45.0f, 60.0f }, { 45.0f, 10.0f }, { 135.0f, 0.05f } });
+            attack.sprite.offBelow = -150.0f; attack.sprite.offParam = "compIn";
             cs.push_back (attack);
-            cs.push_back (knob (pg, n, "release", "release", { { -130.0f, 3000.0f }, { -45.0f, 900.0f }, { 45.0f, 200.0f }, { 130.0f, 5.0f } }));
+            cs.push_back (knob (pg, n, "release", "release", { { -135.0f, 3000.0f }, { -45.0f, 900.0f }, { 45.0f, 200.0f }, { 135.0f, 5.0f } }));
             const std::pair<const char*, float> ratios[] { { "r20", 20.0f }, { "r12", 12.0f }, { "r8", 8.0f }, { "r4", 4.0f } };
             for (const auto& [name, value] : ratios)
             {
@@ -3108,14 +3102,9 @@ namespace
                     arc (g, pg, "arcMonitor", -135.0f, -135.0f + 270.0f * frac ("output", -30.0f, 30.0f));
                     arc (g, pg, "arcHp1", -135.0f, -135.0f + 270.0f * frac ("makeup", -30.0f, 30.0f));
                     arc (g, pg, "arcHp2", -135.0f, -135.0f + 270.0f * frac ("mix", 0.0f, 100.0f));
-                    {
-                        const auto t = juce::roundToInt (valueOf (fx, v, "threshold") / -60.0f * 7.0f);
-                        const auto a = -150.0f + 300.0f * juce::jlimit (0, 7, t) / 7.0f;
-                        arc (g, pg, "ringThreshold", a - 14.0f, a + 14.0f);
-                        const auto r = std::log (juce::jlimit (1.0f, 30.0f, valueOf (fx, v, "ratio", 4.0f))) / std::log (30.0f);
-                        const auto b2 = -150.0f + 300.0f * r;
-                        arc (g, pg, "ringRatio", b2 - 14.0f, b2 + 14.0f);
-                    }
+                    // (the gold knobs' rings light from the lowest setting up to theirs, as Input and Output's)
+                    arc (g, pg, "arcThreshold", -150.0f, -150.0f + 300.0f * frac ("threshold", 0.0f, -60.0f));
+                    arc (g, pg, "arcRatio", -150.0f, -150.0f + 300.0f * std::log (juce::jlimit (1.0f, 30.0f, valueOf (fx, v, "ratio", 4.0f))) / std::log (30.0f));
                     // the meters: input, gain reduction (from the top), output
                     const auto barOf = [] (float db)
                     {
@@ -3152,8 +3141,9 @@ namespace
                     lamp (g, pg, "limit1", on ("limiter") && limiting > 0.3f);
                     lamp (g, pg, "limit2", on ("limiter") && limiting > 0.3f);
                     const auto vu = ballistics (key ("vu"), -gr, 0.35f, 0.18f);
-                    needle (g, pg, "needle1", vuAngle (vu, -28.2f, 15.4f, 26.6f));
-                    needle (g, pg, "needle2", vuAngle (vu, -30.5f, 15.0f, 31.9f));
+                    // (their own needles were too fine to cut cleanly: the silver limiter's, dark and sharp)
+                    needle (g, pg, "needle1", vuAngle (vu, -28.2f, 15.4f, 26.6f), "sfet.needle");
+                    needle (g, pg, "needle2", vuAngle (vu, -30.5f, 15.0f, 31.9f), "sfet.needle");
                     break;
                 }
                 case studioFet:
@@ -4673,11 +4663,13 @@ void DesignLook::drawSprite (juce::Graphics& g, juce::Component& c, const Sprite
 {
     if (sp.image == nullptr)
         return;
-    const auto image = skinImage (sp.image);
+    const auto image = skinImage (sp.offImage != nullptr && ! on ? sp.offImage : sp.image);
     if (! image.isValid())
         return;
     float degrees = 0.0f, dx = 0.0f;
-    if (c.getProperties().contains ("photoAngle"))
+    if (sp.offImage != nullptr)
+        degrees = 0.0f;
+    else if (c.getProperties().contains ("photoAngle"))
         degrees = (float) c.getProperties()["photoAngle"] - sp.angle;
     else if (sp.slides)
         dx = sp.from + juce::jlimit (0.0f, 1.0f, pos) * (sp.to - sp.from) - sp.pivot.x;

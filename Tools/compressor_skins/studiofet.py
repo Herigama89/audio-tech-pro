@@ -11,7 +11,7 @@ f.knob_pointer('release',747,220,6,24,'dark',hint=0,spread=30,threshold=45,fillm
 f.knob_pointer('mix',1425,88,6,24,'dark',hint=0,spread=30,threshold=45,fillmode='inpaint',grow=7)
 f.knob_pointer('scHpf',1425,222,6,24,'dark',hint=0,spread=30,threshold=45,fillmode='inpaint',grow=7)
 for k,(x,y) in {'zin':(177,88),'bypass':(177,228),'link':(1519,88),'extSc':(1519,222)}.items():
-    f.knob_whole('tg_'+k,x,y,19,panel_fill=False)
+    f.toggle('tg_'+k,x,y,19,9)
 f.lamp('led',441,234,5,lit_in_photo=False,glow=2.2)
 f.pressed('r20',(865,53,894,104),k=2.6)
 f.pressed('r12',(865,106,894,157),k=2.6)

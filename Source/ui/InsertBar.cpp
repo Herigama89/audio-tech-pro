@@ -174,6 +174,9 @@ void InsertBar::addSidechainItems (juce::PopupMenu& menu, juce::ValueTree insert
     {
         um.beginNewTransaction (id.isEmpty() ? juce::String ("No Side Chain") : "Side Chain from " + name);
         insert.setProperty (ids::sidechain, id, &um);
+        // (the compressor's key switch follows: in with a key, out without)
+        if (insert[ids::effect].toString() == "studioComp")
+            insert.setProperty ("extSc", id.isNotEmpty() ? 1.0f : 0.0f, &um);
     };
     menu.addSectionHeader ("Side Chain");
     menu.addItem ("None", true, current.isEmpty(), [set] () mutable { set ({}, {}); });

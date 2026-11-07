@@ -258,9 +258,21 @@ TEST_CASE ("Studio Compressor: input and gain turned right up colour the sound b
             const auto n = (double) (l.size() - from);
             const auto fundamental = 2.0 * (s * s + co * co) / (n * n);   // (its power)
             const auto rest = std::max (0.0, total / n - fundamental);
-            CHECK (std::sqrt (rest / std::max (fundamental, 1.0e-12)) < 0.12);   // under 12 % distortion
+            CHECK (std::sqrt (rest / std::max (fundamental, 1.0e-12)) < 0.2);   // (coloured, the FETs most, but under 20 %)
             CHECK (peakOf (l, from) < 32.0f);
         }
+}
+
+TEST_CASE ("Studio Compressor: the FETs dig in as the input goes up, as the 1176", "[stockfx]")
+{
+    for (const auto model : { 2.0f, 5.0f })
+    {
+        auto c = make ("studioComp");
+        set (*c, "model", model);
+        set (*c, "input", 24.0f);
+        run (*c, sine (300.0, 1.0, 0.25f), sine (300.0, 1.0, 0.25f));
+        CHECK (c->takeGainReductionDb() > 15.0f);
+    }
 }
 
 TEST_CASE ("Studio Compressor: the hardware faces' keys - power, compressor in, link, opto switch, S/C HPF, readings", "[stockfx]")
