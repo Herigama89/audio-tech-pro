@@ -3,7 +3,9 @@
 #include "Theme.h"
 #include "EffectDesigns.h"
 #include "../model/Identifiers.h"
-#include "../model/Project.h"
+#if ! RIFF_PLUGIN
+ #include "../model/Project.h"
+#endif
 
 namespace riff
 {
@@ -247,12 +249,20 @@ ConsoleStripWindow::ConsoleStripWindow (juce::ValueTree t, juce::UndoManager& um
     // ROUTE
     addKey (ids::consoleDynPostEq, "Dynamics after the EQ (off: before it)", "dynPost", true);
     addKey (ids::consoleDeEssPostEq, "De-esser after the EQ (off: before it)", "deEssPost", true);
+#if RIFF_PLUGIN
+    // (as a plug-in: the host's side-chain input is the key - route a track to it in the host)
+    addKey (ids::consoleExternalKey, "External key: the plug-in's side-chain input keys the dynamics (send a track to it in your DAW)", "ext", false);
+#else
     addKey (ids::consoleExternalKey, "External key: another track's sound keys the dynamics (choose it under the panel)", "ext", false);
+#endif
     addKey (ids::consoleLink, "Stereo link (off: each side compressed by its own level)", "link", true);
     // OUT, INSERT, meter
     addKnob (ids::consoleOutput, "Output", "strip_ptr_out", 2707, 84, 36, lin (-20.0f, 20.0f), 0.0f, db);
+#if ! RIFF_PLUGIN
+    // (as a plug-in, the DAW has the inserts)
     addKey (ids::consoleInsertIn, "Inserts in (the track's plug-ins)", "insIn", true);
     addKey (ids::consoleInsertsPost, "Inserts after the strip (off: before it)", "insOp", true);
+#endif
     addKey (ids::consoleMeterInput, "Meter the input (off: the output)", "mtrInp", false);
 
     // The power: the whole strip in or out
@@ -272,7 +282,9 @@ ConsoleStripWindow::ConsoleStripWindow (juce::ValueTree t, juce::UndoManager& um
     // External key: which track keys it (EXT turns it on)
     keyButton.setTooltip ("The track whose sound keys the strip's dynamics when EXT is on");
     keyButton.onClick = [this] { showKeyMenu(); };
+#if ! RIFF_PLUGIN
     addAndMakeVisible (keyButton);
+#endif
 
     // The analyzer behind the curve, and its settings
     addAndMakeVisible (analyzer);
@@ -343,8 +355,10 @@ void ConsoleStripWindow::addKey (const juce::Identifier& property, const juce::S
         undoManager.beginNewTransaction ("Channel strip " + raw->name.upToFirstOccurrenceOf (":", false, false));
         const auto turningOn = ! on (raw->property, raw->defaultOn);
         track.setProperty (raw->property, turningOn, &undoManager);
+#if ! RIFF_PLUGIN
         if (raw->property == ids::consoleExternalKey && turningOn && ! model::findById (track.getParent(), track[ids::consoleKey].toString()).isValid())
             showKeyMenu();   // (EXT with no key yet: choose one)
+#endif
     };
     addAndMakeVisible (*k);
     keys.push_back (std::move (k));
@@ -352,6 +366,7 @@ void ConsoleStripWindow::addKey (const juce::Identifier& property, const juce::S
 
 void ConsoleStripWindow::showKeyMenu()
 {
+#if ! RIFF_PLUGIN
     juce::PopupMenu menu;
     const auto project = track.getParent();
     const auto current = track[ids::consoleKey].toString();
@@ -372,14 +387,17 @@ void ConsoleStripWindow::showKeyMenu()
         menu.addItem ((model::isBusTrack (other) ? "Bus: " : "") + other[ids::name].toString(), true, id == current, [set, id] { set (id); });
     }
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&keyButton));
+#endif
 }
 
 void ConsoleStripWindow::refresh()
 {
     for (auto& k : knobs)
         k->showValue (track.hasProperty (k->property) ? (float) (double) track[k->property] : k->fallback);
+#if ! RIFF_PLUGIN
     const auto key = model::findById (track.getParent(), track[ids::consoleKey].toString());
     keyButton.setButtonText ("Key: " + (key.isValid() ? key[ids::name].toString() : juce::String ("none")));
+#endif
 }
 
 void ConsoleStripWindow::timerCallback()

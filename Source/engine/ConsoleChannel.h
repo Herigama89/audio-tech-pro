@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #include "BuiltInEffects.h"
 
 namespace riff
@@ -76,6 +78,8 @@ public:
 
     /** Reads a TRACK's console settings. */
     static Settings fromTrack (const juce::ValueTree& track);
+    /** The same from any source of the track's properties (by identifier; e.g. a plug-in's parameters). */
+    static Settings fromValues (const std::function<double (const juce::Identifier&, double fallback)>& get);
 
     void prepare (double sampleRate);
     void reset() noexcept;

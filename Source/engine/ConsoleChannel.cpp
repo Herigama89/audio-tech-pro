@@ -6,24 +6,30 @@ namespace riff
 
 ConsoleChannel::Settings ConsoleChannel::fromTrack (const juce::ValueTree& track)
 {
-    auto gain = [&track] (const juce::Identifier& id)
+    return fromValues ([&track] (const juce::Identifier& id, double fallback) { return (double) track.getProperty (id, fallback); });
+}
+
+ConsoleChannel::Settings ConsoleChannel::fromValues (const std::function<double (const juce::Identifier&, double fallback)>& get)
+{
+    auto gain = [&get] (const juce::Identifier& id)
     {
-        return juce::jlimit (-maxGainDb, maxGainDb, (float) track.getProperty (id, 0.0));
+        return juce::jlimit (-maxGainDb, maxGainDb, (float) get (id, 0.0));
     };
+    const auto on = [&get] (const juce::Identifier& id, bool fallback) { return get (id, fallback ? 1.0 : 0.0) > 0.5; };
 
     Settings s;
-    s.enabled  = track.getProperty (ids::stripIn, true);   // (the strip's power)
-    s.eqIn     = track.getProperty (ids::consoleIn, true);
-    s.dynEnabled = track.getProperty (ids::consoleDynIn, true);
+    s.enabled  = on (ids::stripIn, true);   // (the strip's power)
+    s.eqIn     = on (ids::consoleIn, true);
+    s.dynEnabled = on (ids::consoleDynIn, true);
     s.hf       = gain (ids::consoleHF);
     s.hmf      = gain (ids::consoleHMF);
     s.lmf      = gain (ids::consoleLMF);
     s.lf       = gain (ids::consoleLF);
-    s.dynamics = juce::jlimit (0.0f, maxDynamics, (float) track.getProperty (ids::consoleDynamics, 0.0));
+    s.dynamics = juce::jlimit (0.0f, maxDynamics, (float) get (ids::consoleDynamics, 0.0));
 
-    auto value = [&track] (const juce::Identifier& id, float fallback, float lo, float hi)
+    auto value = [&get] (const juce::Identifier& id, float fallback, float lo, float hi)
     {
-        return juce::jlimit (lo, hi, (float) (double) track.getProperty (id, fallback));
+        return juce::jlimit (lo, hi, (float) get (id, fallback));
     };
     s.inputDb  = value (ids::consoleInput, 0.0f, -20.0f, 20.0f);
     s.outputDb = value (ids::consoleOutput, 0.0f, -20.0f, 20.0f);
@@ -35,18 +41,17 @@ ConsoleChannel::Settings ConsoleChannel::fromTrack (const juce::ValueTree& track
     s.lfFreq   = value (ids::consoleLFFreq, 100.0f, 30.0f, 450.0f);
     s.hmfQ     = value (ids::consoleHMFQ, 1.0f, 0.1f, 4.0f);
     s.lmfQ     = value (ids::consoleLMFQ, 1.0f, 0.1f, 4.0f);
-    s.hfBell   = track.getProperty (ids::consoleHFBell, false);
-    s.lfBell   = track.getProperty (ids::consoleLFBell, false);
+    s.hfBell   = on (ids::consoleHFBell, false);
+    s.lfBell   = on (ids::consoleLFBell, false);
     s.compRatio   = value (ids::consoleCompRatio, 0.0f, 0.0f, 20.0f);
     s.compRelease = value (ids::consoleCompRelease, 0.15f, 0.05f, 4.0f);
-    s.compFast    = track.getProperty (ids::consoleCompFast, false);
+    s.compFast    = on (ids::consoleCompFast, false);
     s.gateThreshold = value (ids::consoleGateThreshold, -80.0f, -80.0f, 0.0f);
     s.gateRange     = value (ids::consoleGateRange, 20.0f, 0.0f, 40.0f);
     s.gateRelease   = value (ids::consoleGateRelease, 0.25f, 0.05f, 4.0f);
-    s.gateExpander  = track.getProperty (ids::consoleGateExpander, false);
+    s.gateExpander  = on (ids::consoleGateExpander, false);
     s.hpf = value (ids::consoleHPF, 0.0f, 0.0f, 500.0f);
 
-    const auto on = [&track] (const juce::Identifier& id, bool fallback) { return (bool) track.getProperty (id, fallback); };
     s.pad = on (ids::consolePad, false);
     s.phase = on (ids::consolePhase, false);
     s.line = on (ids::consoleLine, true);

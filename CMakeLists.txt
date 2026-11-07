@@ -338,6 +338,81 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# The plug-ins (VST3, and AU on a Mac): the Tube EQ, the Graphic EQ and the Channel Strip, with their
+# photographed faces, to use in other DAWs (FL Studio, Ableton Live, Cubase, Logic...).
+#   cmake --build build --target ATP_TubeEQ_VST3 ATP_GraphicEQ_VST3 ATP_ChannelStrip_VST3
+# ---------------------------------------------------------------------------
+option(RIFF_PLUGINS "Build the EQs and the channel strip as plug-ins" ON)
+if(RIFF_PLUGINS)
+    set(RIFF_PLUGIN_FORMATS VST3)
+    if(APPLE)
+        list(APPEND RIFF_PLUGIN_FORMATS AU)
+    endif()
+    # (only what the effects and their windows need: the stock effects, the faces, the strip)
+    set(RIFF_PLUGIN_SOURCES
+        Source/engine/BuiltInEffects.cpp
+        Source/engine/StockEq.cpp
+        Source/engine/StockDynamics.cpp
+        Source/engine/StockDelay.cpp
+        Source/engine/StockReverb.cpp
+        Source/engine/StockModulation.cpp
+        Source/engine/StockDistortion.cpp
+        Source/engine/StockFilter.cpp
+        Source/engine/StockAmps.cpp
+        Source/engine/StockPitch.cpp
+        Source/engine/StockUtility.cpp
+        Source/engine/StockExtras.cpp
+        Source/engine/StockPedalboard.cpp
+        Source/engine/StockMetering.cpp
+        Source/engine/StockMulti.cpp
+        Source/engine/StockRoomSim.cpp
+        Source/engine/StockLegacy.cpp
+        Source/engine/ConsoleChannel.cpp
+        Source/ui/EffectDesigns.cpp
+        Source/ui/EffectFace.cpp
+        Source/ui/Theme.cpp
+        Source/ui/ThemePack.cpp
+        Source/ui/Eco.cpp
+        Source/ui/SpectrumAnalyzer.cpp
+        Source/ui/ConsoleStripWindow.cpp)
+
+    function(riff_add_plugin target name code source categories)
+        juce_add_plugin(${target}
+            PRODUCT_NAME "${name}"
+            COMPANY_NAME "Audio Tech Pro"
+            BUNDLE_ID "com.audiotechpro.${target}"
+            PLUGIN_MANUFACTURER_CODE AtPr
+            PLUGIN_CODE ${code}
+            FORMATS ${RIFF_PLUGIN_FORMATS}
+            IS_SYNTH FALSE
+            NEEDS_MIDI_INPUT FALSE
+            NEEDS_MIDI_OUTPUT FALSE
+            EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+            COPY_PLUGIN_AFTER_BUILD FALSE
+            VST3_CATEGORIES ${categories}
+            AU_MAIN_TYPE kAudioUnitType_Effect)
+        juce_generate_juce_header(${target})
+        target_sources(${target} PRIVATE ${source} ${RIFF_PLUGIN_SOURCES})
+        target_include_directories(${target} PRIVATE Source)
+        target_compile_definitions(${target} PRIVATE
+            JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_DISPLAY_SPLASH_SCREEN=0 JUCE_VST3_CAN_REPLACE_VST2=0 RIFF_PLUGIN=1 ${ARGN})
+        target_link_libraries(${target}
+            PRIVATE
+                AudioTechProData
+                juce::juce_audio_utils
+                juce::juce_dsp
+            PUBLIC
+                juce::juce_recommended_config_flags
+                juce::juce_recommended_lto_flags
+                juce::juce_recommended_warning_flags)
+    endfunction()
+
+    riff_add_plugin(ATP_TubeEQ "ATP Tube EQ" AtTe Source/plugins/PluginEffect.cpp "Fx;EQ" RIFF_PLUGIN_EFFECT="tubeEq")
+    riff_add_plugin(ATP_GraphicEQ "ATP Graphic EQ" AtGe Source/plugins/PluginEffect.cpp "Fx;EQ" RIFF_PLUGIN_EFFECT="graphicEq")
+    riff_add_plugin(ATP_ChannelStrip "ATP Channel Strip" AtCs Source/plugins/PluginStrip.cpp "Fx;Dynamics;EQ")
+endif()
+
+# ---------------------------------------------------------------------------
 # Tests:  cmake --build build --target AudioTechProTests && ./build/AudioTechProTests_artefacts/Debug/AudioTechProTests
 # ---------------------------------------------------------------------------
 if(RIFF_BUILD_TESTS)
