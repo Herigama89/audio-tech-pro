@@ -175,15 +175,10 @@ class Face:
         matte = np.clip(matte, 0, 1) * band
         m = (matte > 0.25).astype(np.uint8)
         needleColour = np.median(self.src[matte > 0.8], axis=0) if (matte > 0.8).any() else self.src[m > 0].mean(0)
-        # (taken off: what's darker - or lighter - than the face round it, near the line)
-        lumb = np.clip(self.bg.mean(2), 0, 255).astype(np.uint8)
-        local = cv2.medianBlur(lumb, 31).astype(np.float32)
-        dd = (lumb.astype(np.float32) - local) if light else (local - lumb.astype(np.float32))
-        wide = (t > -3) & (t < L + 3) & (dist < width * 2.6)
-        em = ((np.abs(dd) > 7) & wide).astype(np.uint8)
-        em = cv2.dilate(em, np.ones((3, 3), np.uint8)) & wide.astype(np.uint8)
-        # (filled with the face's own colour from round it: no smear of the scale's print along it)
-        self.smooth_fill(cv2.dilate(em, np.ones((3, 3), np.uint8)), sigma=(9, 4))
+        # (taken off: just the needle's own pixels, each filled across the needle from the face either side of it,
+        #  so the scale's print it crossed - the 0, the arc - carries on through)
+        nm = cv2.dilate(((matte > 0.12) & (t > -3) & (t < L + 3)).astype(np.uint8), np.ones((3, 3), np.uint8))
+        self.across_fill(nm, (uy, -ux))
         # straighten: turn the photo round the needle's base so the needle stands upright, take its strip
         ang = math.degrees(math.atan2(ux, -uy))   # (its angle from straight up)
         M = cv2.getRotationMatrix2D((float(bx), float(by)), ang, 1.0)
@@ -538,3 +533,254 @@ def _arc_over(self, key, cx, cy, r0, r1, lit_from, lit_angle, info=None):
     self.save_part(key, lit, a, dict(info or {}, cx=icx, cy=icy, R=R, kind='arc'))
 
 Face.arc_over = _arc_over
+
+def _cap_mask(self, cx, cy, r, test):
+    """The knob's own pixels round (cx, cy) within r (test: which pixels are the knob), holes filled, its largest piece."""
+    cx, cy, r = self.S(cx), self.S(cy), self.S(r)
+    d = np.hypot(self.xx - cx, self.yy - cy)
+    A = self.src
+    l = A.mean(2); sat = A.max(2) - A.min(2)
+    m = (test(A, l, sat) & (d < r)).astype(np.uint8)
+    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    n, lab, st, cen = cv2.connectedComponentsWithStats(m)
+    if n <= 1: raise RuntimeError('no cap')
+    i = 1 + np.argmax(st[1:, 4]); m = (lab == i).astype(np.uint8)
+    ff = m.copy(); fm = np.zeros((self.H + 2, self.W + 2), np.uint8); cv2.floodFill(ff, fm, (0, 0), 1); m = m | (1 - ff)
+    return m
+
+def _knob_cap(self, key, cx, cy, r, test, info=None, centre=True, grow=1):
+    """A knob that turns whole, cut to its own outline (the panel round it stays): its centre found from that outline."""
+    m = self._cap_mask(cx, cy, r, test)
+    if grow: m = cv2.dilate(m, np.ones((grow * 2 + 1, grow * 2 + 1), np.uint8))
+    ys, xs = np.nonzero(m)
+    if centre:
+        # (the outline's middle: from its widest extents, steadier than the centroid when a pointer pokes out)
+        ccx, ccy = (xs.min() + xs.max()) / 2.0, (ys.min() + ys.max()) / 2.0
+    else:
+        ccx, ccy = self.S(cx), self.S(cy)
+    R = int(math.ceil(max(np.hypot(xs - ccx, ys - ccy)))) + 2
+    icx, icy = int(round(ccx)), int(round(ccy))
+    a = cv2.GaussianBlur(m.astype(np.float32), (3, 3), 0.8)
+    crop = self.src[icy - R:icy + R, icx - R:icx + R]
+    self.save_part(key, crop, a[icy - R:icy + R, icx - R:icx + R], dict(info or {}, cx=icx, cy=icy, R=R, kind='turn'))
+    # under it: the knob filled in from round it (covered, except where a turned pointer leaves its place)
+    self.fill(cv2.dilate(m, np.ones((3, 3), np.uint8)), radius=5)
+    return ccx / self.scale, ccy / self.scale
+
+Face._cap_mask = _cap_mask
+Face.knob_cap = _knob_cap
+
+def _toggle2(self, key, cx, cy, R, rn, threshold=40, info=None, search=6):
+    """A bat toggle, as photographed (bat up) and thrown (down): the switch mirrored top to bottom about its nut's
+    middle, found from the nut's outline (the hex's widest rows)."""
+    cx, cy, R = self.S(cx), self.S(cy), self.S(R)
+    Ri = int(math.ceil(R)) + search + 2
+    icx, icy = int(round(cx)), int(round(cy))
+    crop = self.src[icy - Ri:icy + Ri, icx - Ri:icx + Ri]
+    ring = np.concatenate([crop[0], crop[-1], crop[:, 0], crop[:, -1]])
+    panel = np.median(ring, axis=0)
+    diff = (np.abs(crop - panel).sum(2) > threshold).astype(np.uint8)
+    diff = cv2.morphologyEx(diff, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    widths = diff.sum(1)
+    wide = np.nonzero(widths > widths.max() * 0.8)[0]
+    my = (wide.min() + wide.max()) / 2.0
+    cols = np.nonzero(diff[wide].sum(0) > 0)[0]
+    mx = (cols.min() + cols.max()) / 2.0
+    ncx, ncy = icx - Ri + mx, icy - Ri + my
+    Rt = int(math.ceil(R)) + 2
+    jx, jy = int(round(ncx)), int(round(ncy))
+    up = self.src[jy - Rt:jy + Rt, jx - Rt:jx + Rt].copy()
+    gy, gx = np.mgrid[-Rt:Rt, -Rt:Rt].astype(np.float32)
+    d = np.hypot(gx, gy)
+    down = up[::-1].copy()
+    # (the bat now hangs below: a little darker, it faces away from the light)
+    down = down * (1 - (gy > rn).astype(np.float32)[..., None] * 0.12)
+    alpha = np.clip((R - d) / 1.2 + 0.5, 0, 1)
+    # the panel under it, clean (the switch drawn up or down over it): its own colour from round it
+    m = np.zeros((self.H, self.W), np.uint8)
+    cv2.circle(m, (jx, jy), int(math.ceil(R)) + 2, 1, -1)
+    m[max(0, jy - int(R * 1.4)):jy, jx - int(R * 0.6):jx + int(R * 0.6)] = 1   # (the bat's tip, above)
+    self.smooth_fill(m, sigma=(40, 14, 6), feather=2.0)
+    clean = self.bg[jy - Rt:jy + Rt, jx - Rt:jx + Rt]
+    # (each picture: the switch's own pixels over the clean panel, so nothing of the other way shows)
+    def own(img):
+        sw = (np.abs(img - clean).sum(2) > threshold).astype(np.uint8)
+        sw = cv2.morphologyEx(sw, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+        return np.minimum(alpha, cv2.GaussianBlur(cv2.dilate(sw, np.ones((3, 3), np.uint8)).astype(np.float32), (3, 3), 0.8))
+    au = own(up)
+    self.save_part(key + '_up', up, au, dict(info or {}, cx=jx, cy=jy, R=Rt, kind='turn'))
+    self.save_part(key + '_down', down, au[::-1], dict(info or {}, cx=jx, cy=jy, R=Rt, kind='turn'))
+
+Face.toggle = _toggle2
+
+def _needle_fill(self, mask, pivot, delta, light=False, line=None):
+    """The face where a needle was: the face turned a little round the needle's pivot. Each side of where the needle was
+    takes the copy brought from its own side, so a scale changing colour under it (black up to 0, red after) carries
+    on as printed, nothing mixed."""
+    px, py = self.S(pivot[0]), self.S(pivot[1])
+    M1 = cv2.getRotationMatrix2D((float(px), float(py)), delta, 1.0)
+    M2 = cv2.getRotationMatrix2D((float(px), float(py)), -delta, 1.0)
+    t1 = cv2.warpAffine(self.bg, M1, (self.W, self.H), flags=cv2.INTER_CUBIC)
+    t2 = cv2.warpAffine(self.bg, M2, (self.W, self.H), flags=cv2.INTER_CUBIC)
+    if line is None:
+        fill = 0.5 * (t1 + t2)
+    else:
+        bx, by, ux, uy = line
+        side = (self.xx - bx) * uy - (self.yy - by) * ux          # (which side of the needle's line each pixel is)
+        # which copy brings pixels from the positive side: where a point on the line is fetched from
+        inv = cv2.invertAffineTransform(M1)
+        qx, qy = bx + ux * 20, by + uy * 20
+        sx = inv[0, 0] * qx + inv[0, 1] * qy + inv[0, 2]; sy = inv[1, 0] * qx + inv[1, 1] * qy + inv[1, 2]
+        positiveFromT1 = ((sx - bx) * uy - (sy - by) * ux) > 0
+        pos = (side > 0)[..., None]
+        fill = np.where(pos, t1 if positiveFromT1 else t2, t2 if positiveFromT1 else t1)
+        # (a soft seam along the middle)
+        w = np.clip(side / 1.5 * 0.5 + 0.5, 0, 1)[..., None]
+        a, b2 = (t1, t2) if positiveFromT1 else (t2, t1)
+        fill = a * w + b2 * (1 - w)
+    m = cv2.GaussianBlur(mask.astype(np.float32), (0, 0), 1.0)
+    m = np.maximum(m, mask.astype(np.float32))[..., None]
+    self.bg = self.bg * (1 - m) + fill * m
+
+Face.needle_fill = _needle_fill
+
+def pointer_angle(path, cx, cy, r0, r1, kind, hint, spread=30, threshold=70):
+    """Where a knob points in the photo (degrees clockwise from 12), without cutting anything."""
+    f = Face('scratch', path, out='/tmp/claude-0/scratchface')
+    return f.knob_pointer('p', cx, cy, r0, r1, kind, hint, spread=spread, threshold=threshold, fillmode='inpaint')
+
+
+def _across_fill(self, mask, perp, reach=10):
+    """Fills mask by interpolating, for each pixel, between the nearest unmasked pixels either side along perp."""
+    px, py = perp
+    ys, xs = np.nonzero(mask)
+    src = self.bg.copy()
+    H, W = mask.shape
+    for y, x in zip(ys, xs):
+        found = []
+        for sgn in (1, -1):
+            for k in range(1, reach + 1):
+                qx, qy = int(round(x + sgn * px * k)), int(round(y + sgn * py * k))
+                if not (0 <= qx < W and 0 <= qy < H): break
+                if not mask[qy, qx]:
+                    found.append((k, src[qy, qx])); break
+        if len(found) == 2:
+            (k1, c1), (k2, c2) = found
+            if np.abs(c1 - c2).sum() > 90:
+                # (an edge under the needle - the red arc starting: kept sharp, the nearer side's)
+                self.bg[y, x] = c1 if k1 <= k2 else c2
+            else:
+                self.bg[y, x] = (c1 * k2 + c2 * k1) / (k1 + k2)
+        elif found:
+            self.bg[y, x] = found[0][1]
+
+Face.across_fill = _across_fill
+
+def _column_fill(self, rect, margin=3):
+    """Fills a rectangle of a plain lit surface from the rows just above and below it, column by column (its
+    light falling off top to bottom carries on), with a little grain."""
+    x0, y0, x1, y1 = [int(round(self.S(v))) for v in rect]
+    top = np.median(self.bg[y0 - margin:y0, x0:x1], axis=0)
+    bot = np.median(self.bg[y1:y1 + margin, x0:x1], axis=0)
+    top = cv2.GaussianBlur(top[None], (0, 0), 6)[0]; bot = cv2.GaussianBlur(bot[None], (0, 0), 6)[0]
+    t = np.linspace(0, 1, y1 - y0)[:, None, None]
+    fill = top[None] * (1 - t) + bot[None] * t + self.rng.normal(0, 0.8, (y1 - y0, x1 - x0, 3))
+    m = np.ones((y1 - y0, x1 - x0), np.float32)
+    m = cv2.GaussianBlur(np.pad(m, 2)[2:-2, 2:-2] * 0 + m, (0, 0), 0.01)
+    self.bg[y0:y1, x0:x1] = fill
+
+Face.column_fill = _column_fill
+
+def _shaded_fill(self, rect, ref_cols, feather=2.0):
+    """Fills a rectangle of a lit face: each column's colour from the row just above it, darkening down the rect as the
+    clean columns ref_cols (x0, x1) of the photo darken (the lamp's light falling off)."""
+    x0, y0, x1, y1 = [int(round(self.S(v))) for v in rect]
+    rx0, rx1 = [int(round(self.S(v))) for v in ref_cols]
+    prof = np.median(self.bg[y0 - 1:y1, rx0:rx1], axis=1)          # (rows y0-1 .. y1-1)
+    gain = prof[1:] / np.maximum(prof[0], 1)
+    top = cv2.GaussianBlur(np.median(self.bg[y0 - 3:y0, x0:x1], axis=0)[None], (0, 0), 3)[0]
+    fill = top[None] * gain[:, None, :] + self.rng.normal(0, 0.8, (y1 - y0, x1 - x0, 3))
+    m = np.zeros((self.H, self.W), np.float32); m[y0:y1, x0:x1] = 1
+    m = cv2.GaussianBlur(m, (0, 0), feather); m = np.clip(m * 1.6, 0, 1)
+    full = self.bg.copy(); full[y0:y1, x0:x1] = fill
+    self.bg = self.bg * (1 - m[..., None]) + full * m[..., None]
+
+Face.shaded_fill = _shaded_fill
+
+def _lr_fill(self, rect, k=3, feather=1.2):
+    """Fills a rectangle from the columns just left and right of it, row by row (a plain face: its shading goes on
+    as it is either side), with a little grain."""
+    x0, y0, x1, y1 = [int(round(self.S(v))) for v in rect]
+    L = np.median(self.bg[y0:y1, x0 - k:x0], axis=1)
+    R = np.median(self.bg[y0:y1, x1:x1 + k], axis=1)
+    # (where one side has print on it - darker - the other side's colour)
+    dl = L.mean(1) - R.mean(1)
+    L = np.where((dl < -18)[:, None], R, L); R = np.where((dl > 18)[:, None], L, R)
+    L = cv2.GaussianBlur(L[:, None], (0, 0), 1.5)[:, 0]; R = cv2.GaussianBlur(R[:, None], (0, 0), 1.5)[:, 0]
+    t = np.linspace(0, 1, x1 - x0)[None, :, None]
+    fill = L[:, None] * (1 - t) + R[:, None] * t + self.rng.normal(0, 0.8, (y1 - y0, x1 - x0, 3))
+    m = np.zeros((self.H, self.W), np.float32); m[y0:y1, x0:x1] = 1
+    m = np.clip(cv2.GaussianBlur(m, (0, 0), feather) * 1.5, 0, 1)
+    full = self.bg.copy(); full[y0:y1, x0:x1] = fill
+    self.bg = self.bg * (1 - m[..., None]) + full * m[..., None]
+
+Face.lr_fill = _lr_fill
+
+def _push_button(self, key, cx, cy, R, lamp=(255, 70, 40), clear=34, info=None):
+    """Replaces a toggle with a push button (drawn): the switch taken off the panel, a chrome bezel with a dark cap,
+    its lamp lit (on) or dark (off) - two pictures."""
+    cx, cy, R = self.S(cx), self.S(cy), self.S(R)
+    icx, icy = int(round(cx)), int(round(cy))
+    m = np.zeros((self.H, self.W), np.uint8)
+    cv2.circle(m, (icx, icy), int(self.S(clear)) + 2, 1, -1)
+    m[max(0, icy - int(self.S(clear) * 1.45)):icy, icx - int(self.S(clear) * 0.7):icx + int(self.S(clear) * 1.35)] = 1
+    self.smooth_fill(m, sigma=(40, 14, 6), feather=2.0)
+    S = 4
+    Ri = int(math.ceil(R * 1.35)) + 2
+    size = Ri * 2 * S
+    yy, xx = np.mgrid[0:size, 0:size].astype(np.float32)
+    c = size / 2.0
+    d = np.hypot(xx - c, yy - c) / S
+    ang = np.arctan2(yy - c, xx - c)
+    def pic(on):
+        rgb = np.zeros((size, size, 3), np.float32); a = np.zeros((size, size), np.float32)
+        # soft shadow
+        sh = np.clip(1 - (np.hypot(xx - c - 1.5 * S, yy - c - 2.5 * S) / S - R) / (R * 0.3), 0, 1) * 0.45
+        # chrome bezel: light from the top left
+        bez = (d <= R)
+        shade = 0.5 + 0.5 * np.cos(ang + 2.3)
+        chrome = 150 + 90 * shade
+        rgb[bez] = np.stack([chrome, chrome, chrome * 1.02], -1)[bez]
+        # cap: dark, slightly domed
+        capR = R * 0.74
+        cap = d <= capR
+        dome = np.clip(1 - (np.hypot(xx - c + capR * 0.3 * S, yy - c + capR * 0.35 * S) / S) / capR, 0, 1)
+        capc = 22 + 40 * dome ** 2
+        rgb[cap] = np.stack([capc, capc, capc * 1.05], -1)[cap]
+        # lamp jewel in the cap
+        lr = R * 0.42
+        lamp_m = d <= lr
+        lamp_c = np.array(lamp, np.float32)
+        if on:
+            core = np.clip(1 - d / lr, 0, 1)
+            col = lamp_c[None, None, :] * (0.75 + 0.25 * core[..., None]) + 255 * (core[..., None] ** 3) * 0.6
+        else:
+            col = lamp_c[None, None, :] * 0.22 + 10
+            col = np.broadcast_to(col, rgb.shape)
+        rgb[lamp_m] = np.clip(col, 0, 255)[lamp_m]
+        # the jewel's glint
+        gl = np.hypot(xx - c + lr * 0.35 * S, yy - c + lr * 0.4 * S) / S < lr * 0.22
+        rgb[gl] = rgb[gl] * 0.4 + 255 * 0.6
+        a = np.clip((R - d) * S / 2 + 0.5, 0, 1)
+        a = np.maximum(a, sh)
+        rgb = np.where((d > R)[..., None], 0, rgb)
+        if on:
+            glow = np.clip(1 - d / (R * 1.3), 0, 1) ** 2 * 0.0
+        img = np.dstack([rgb, a * 255]).clip(0, 255).astype(np.uint8)
+        im = Image.fromarray(img, 'RGBA').resize((Ri * 2, Ri * 2), Image.LANCZOS)
+        return np.array(im).astype(np.float32)
+    for name, on in (('on', True), ('off', False)):
+        p = pic(on)
+        self.save_part(f'{key}_{name}', p[..., :3], p[..., 3] / 255.0, dict(info or {}, cx=icx, cy=icy, R=Ri, kind='turn'))
+
+Face.push_button = _push_button

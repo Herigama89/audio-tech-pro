@@ -1,5 +1,6 @@
 import sys; sys.path.insert(0,'tools')
 from face import Face
+import vu
 f=Face('sfet','photos/studiofet.png',crop=(0,0,1695,318))
 f.erase([(972,24,1185,52)],threshold=60)                 # model name above the meter (on the blue)
 f.erase([(1010,226,1150,280)],threshold=60,dilate=5)      # maker's name under it
@@ -21,5 +22,15 @@ f.pressed('mGR',(1262,53,1291,104),k=2.6)
 f.pressed('m8',(1262,106,1291,157),k=2.6)
 f.pressed('m4',(1262,159,1291,210),k=2.6)
 f.pressed('mOff',(1262,212,1291,264),k=2.6)
+# (the 0 the needle crossed: the face cleaned there, the 0 printed again)
+f.erase([(1102,93,1119,112)],smooth=True,sigma=((10,4),(5,2)),dilate=0,feather=1.5)
+f.relabel((1102,93,1119,112),'0',14,colour=(85,48,18),erase=False,centre=(1110,101.5))
+f.erase([(1093,122,1113,141)],smooth=True,sigma=((10,4),(5,2)),dilate=0,feather=1.5)
+f.relabel((1093,122,1113,141),'100',10,colour=(85,48,18),erase=False,centre=(1102.5,134.2))
+f.relabel((1093,122,1113,141),'•',13,colour=(70,38,14),erase=False,centre=(1103.5,127))
+f.lr_fill((1094,118,1101,130))
+# the meter's scale drawn clean (the photo's was crossed by its needle)
+f.draw_vu((953,84,1198,190),(1078,232),118,(-50.1,13.9,46.0),ink=(70,38,12),red=(226,36,18),labels='plain',size=1.15,
+          face_mask='rect',vu_right=(1170,174,14,False),extra=(('−',968,98,15,False),('+',1184,98,16,True)))
 f.write()
 f.preview('prev_sfet.png',{'input':-60,'output':90,'attack':100,'release':-100,'mix':-90,'scHpf':60,'needle':-20})

@@ -3056,8 +3056,17 @@ namespace
             cs.push_back (knob (pg, n, "threshold", "peak", { { -142.0f, 0.0f }, { 135.0f, -50.0f } }));
             cs.push_back (knob (pg, n, "meterMode", "meterSel", { { -45.0f, 2.0f }, { 0.0f, 0.0f }, { 45.0f, 1.0f } }, true, false, 0.0f));
             cs.push_back (knob (pg, n, "emphasis", "r37", { { -135.0f, 0.0f }, { 135.0f, 1.0f } }, false, false, 0.0f));
-            cs.push_back (toggle (pg, n, "power", "tgPower"));
-            cs.push_back (toggle (pg, n, "optoLimit", "tgLimit"));
+            // (push buttons, lit when in)
+            for (const auto& [id, name] : { std::pair { "power", "btPower" }, std::pair { "optoLimit", "btLimit" } })
+            {
+                const auto& lit = part (pg.key ((juce::String (name) + "_on").toRawUTF8()).c_str());
+                const auto& dark = part (pg.key ((juce::String (name) + "_off").toRawUTF8()).c_str());
+                auto b = key (pg, n, id, lit.cx - lit.R, lit.cy - lit.R, lit.R * 2.0f, lit.R * 2.0f);
+                b.sprite.image = lit.image;
+                b.sprite.offImage = dark.image;
+                b.sprite.pivot = { lit.cx, lit.cy };
+                cs.push_back (b);
+            }
         }
 
         c.paint = [] (juce::Graphics& g, R b, const EffectInfo& fx, const float* v, float live)
@@ -3208,11 +3217,6 @@ namespace
                     const auto reading = m == 0 ? -gr : outDb + (m == 1 ? 18.0f : 12.0f);
                     const auto vu = ballistics (key ("vu"), powered ? reading : -24.0f, 0.25f, 0.12f);
                     needle (g, pg, "needle", vuAngle (vu, -44.3f, 14.0f, 45.3f));
-                    if (! powered)
-                    {
-                        g.setColour (juce::Colours::black.withAlpha (0.4f));
-                        g.fillRect (pg.photo (720.0f, 132.0f, 276.0f, 130.0f));
-                    }
                     break;
                 }
                 default: break;
