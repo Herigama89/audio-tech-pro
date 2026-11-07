@@ -3,6 +3,9 @@
 #include <numeric>
 #include "../engine/StockDsp.h"
 #include "EffectFace.h"
+#include "CompressorFaceData.h"
+#include <cstring>
+#include <map>
 
 namespace riff::effectdesign
 {
@@ -2581,6 +2584,653 @@ namespace
         }
     }
 
+    //==============================================================================
+    // The Compressor's circuits, each on the photographed front panel of the hardware it's modelled on (cut from the
+    // photos by Tools/compressor_skins, the makers' names taken off): its knobs, keys, switches, lamps and meters.
+    //==============================================================================
+    namespace comp
+    {
+        constexpr int width = 1300, tabs = 46;
+        enum Circuit { platinum, studioVca, studioFet, classicVca, vintageVca, vintageFet, vintageOpto };
+
+        const photo::Part& part (const char* name)
+        {
+            static const photo::Part none {};
+            for (const auto& p : photo::parts)
+                if (std::strcmp (p.name, name) == 0)
+                    return p;
+            jassertfalse;
+            return none;
+        }
+        const photo::Face& faceOf (const char* name)
+        {
+            for (const auto& f : photo::faces)
+                if (std::strcmp (f.name, name) == 0)
+                    return f;
+            return photo::faces[0];
+        }
+
+        /** Where a face's photo sits in the window: its scale and top left. */
+        struct Page
+        {
+            const char* face;
+            float scale;
+            juce::Point<float> origin;
+            int height;
+            juce::Point<float> at (float x, float y) const { return origin + juce::Point<float> (x, y) * scale; }
+            RF rect (float x, float y, float w, float h) const { return RF (origin.x + x * scale, origin.y + y * scale, w * scale, h * scale); }
+            std::string key (const char* p) const { return std::string (face) + "." + p; }
+        };
+
+        Page pageFor (int circuit)
+        {
+            static const char* names[] { "plat", "svca", "sfet", "cvca", "vvca", "vfet", "vopto" };
+            const auto& f = faceOf (names[juce::jlimit (0, 6, circuit)]);
+            Page p { f.name, 1.0f, {}, 0 };
+            if (f.height > f.width)
+            {
+                // (the 500-series module: upright, in a rack as wide as the window)
+                p.scale = 560.0f / (float) f.height;
+                p.origin = { ((float) width - (float) f.width * p.scale) * 0.5f, (float) tabs };
+                p.height = tabs + 560;
+            }
+            else
+            {
+                p.scale = (float) width / (float) f.width;
+                p.origin = { 0.0f, (float) tabs };
+                p.height = tabs + juce::roundToInt ((float) f.height * p.scale);
+            }
+            return p;
+        }
+
+        void image (juce::Graphics& g, const char* name, RF where, float alpha = 1.0f)
+        {
+            g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+            g.setOpacity (alpha);
+            g.drawImage (skinImage (name), where);
+            g.setOpacity (1.0f);
+        }
+
+        /** A lamp (or a lit key, a pushed key): drawn when on. */
+        void lamp (juce::Graphics& g, const Page& pg, const char* name, bool on = true)
+        {
+            if (! on)
+                return;
+            const auto& p = part (pg.key (name).c_str());
+            if (p.kind == photo::region)
+                image (g, p.image, pg.rect ((float) p.x, (float) p.y, (float) p.w, (float) p.h));
+            else
+                image (g, p.image, pg.rect (p.cx - p.R, p.cy - p.R, p.R * 2.0f, p.R * 2.0f));
+        }
+
+        /** A bar meter lit from its foot up to the fraction (or from the top down, gain reduction). */
+        void bar (juce::Graphics& g, const Page& pg, const char* name, float fraction, bool fromTop = false)
+        {
+            const auto& p = part (pg.key (name).c_str());
+            const auto r = pg.rect ((float) p.x, (float) p.y, (float) p.w, (float) p.h);
+            const auto f = juce::jlimit (0.0f, 1.0f, fraction);
+            if (f <= 0.0f)
+                return;
+            juce::Graphics::ScopedSaveState keep (g);
+            g.reduceClipRegion ((fromTop ? r.withHeight (r.getHeight() * f) : r.withTrimmedTop (r.getHeight() * (1.0f - f))).getSmallestIntegerContainer());
+            image (g, p.image, r);
+        }
+
+        /** A lit arc round a knob, from its lowest setting's angle to the setting's. */
+        void arc (juce::Graphics& g, const Page& pg, const char* name, float from, float to)
+        {
+            const auto& p = part (pg.key (name).c_str());
+            const auto c = pg.at (p.cx, p.cy);
+            const auto r = (p.R + 2.0f) * pg.scale;
+            juce::Path wedge;
+            wedge.addPieSegment (RF (c.x - r, c.y - r, r * 2.0f, r * 2.0f), juce::degreesToRadians (from), juce::degreesToRadians (to), 0.0f);
+            juce::Graphics::ScopedSaveState keep (g);
+            g.reduceClipRegion (wedge);
+            image (g, p.image, pg.rect (p.cx - p.R, p.cy - p.R, p.R * 2.0f, p.R * 2.0f));
+        }
+
+        /** A meter's needle at an angle (degrees clockwise from straight up), behind the meter's window. */
+        void needle (juce::Graphics& g, const Page& pg, const char* name, float degrees, const char* imageFrom = nullptr)
+        {
+            const auto& p = part (pg.key (name).c_str());
+            const auto img = skinImage (imageFrom != nullptr ? part (imageFrom).image : p.image);
+            if (! img.isValid())
+                return;
+            juce::Graphics::ScopedSaveState keep (g);
+            if (p.wx1 > p.wx0)
+                g.reduceClipRegion (pg.rect ((float) p.wx0, (float) p.wy0, (float) (p.wx1 - p.wx0), (float) (p.wy1 - p.wy0)).getSmallestIntegerContainer());
+            const auto c = pg.at (p.cx, p.cy);
+            const auto s = p.R * 2.0f * pg.scale / (float) img.getWidth();
+            g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+            g.drawImageTransformed (img, juce::AffineTransform::scale (s).translated (c.x - p.R * pg.scale, c.y - p.R * pg.scale)
+                                                .rotated (juce::degreesToRadians (degrees), c.x, c.y));
+        }
+
+        /** A VU meter's angle for a reading: the scale's -20, 0 and +3 marks' angles, the usual VU spacing between. */
+        float vuAngle (float vu, float at20, float at0, float at3)
+        {
+            static const std::pair<float, float> marks[] { { -20.0f, 0.0f }, { -10.0f, 0.25f }, { -7.0f, 0.39f }, { -5.0f, 0.52f },
+                                                           { -3.0f, 0.69f }, { -2.0f, 0.78f }, { -1.0f, 0.88f }, { 0.0f, 1.0f } };
+            if (vu >= 0.0f)
+                return at0 + juce::jmin (vu, 3.6f) / 3.0f * (at3 - at0);
+            vu = juce::jmax (vu, -22.0f);
+            float f = 0.0f;
+            for (size_t i = 1; i < std::size (marks); ++i)
+                if (vu <= marks[i].first)
+                {
+                    const auto t = (vu - marks[i - 1].first) / (marks[i].first - marks[i - 1].first);
+                    f = marks[i - 1].second + t * (marks[i].second - marks[i - 1].second);
+                    break;
+                }
+            if (vu < -20.0f)
+                f = (vu + 20.0f) * 0.02f;
+            return at20 + f * (at0 - at20);
+        }
+
+        /** A needle's reading eased as a meter's needle swings (each needle its own), in its units. */
+        float ballistics (const std::string& which, float target, float rise = 0.45f, float fall = 0.2f)
+        {
+            static std::map<std::string, float> shown;
+            auto& v = shown.emplace (which, target).first->second;
+            v += (target - v) * (target > v ? rise : fall);
+            return v;
+        }
+
+        /** What the VU shows: gain reduction (0 dB at 0 VU, down from there), or the output against +4/+8, or rest. */
+        float vuReading (int meterMode, float grDb, float outDb)
+        {
+            switch (meterMode)
+            {
+                case 0:  return -grDb;
+                case 1:  return outDb + 18.0f;
+                case 2:  return outDb + 14.0f;
+                default: return -24.0f;
+            }
+        }
+
+        /** The FET limiters' ratio keys: which one a ratio is (as the engine steps it). */
+        float fetRatio (float r) { return r < 6.0f ? 4.0f : r < 10.0f ? 8.0f : r < 16.0f ? 12.0f : r < 25.0f ? 20.0f : 30.0f; }
+
+        float meter (int index, float fallback = -100.0f)
+        {
+            int count = 0;
+            const auto* m = paintingMeters (count);
+            return m != nullptr && index < count ? m[index] : fallback;
+        }
+
+        // The controls: a knob, its pointer (or the whole knob) turned to the setting on its printed scale
+        Control knob (const Page& pg, int pageNumber, const char* id, const char* partName, std::vector<std::pair<float, float>> map,
+                      bool stepped = false, bool logMap = false, float photographed = std::numeric_limits<float>::quiet_NaN())
+        {
+            const auto& p = part (pg.key (partName).c_str());
+            Sprite s;
+            s.image = p.image;
+            s.rect = RF (p.cx - p.R, p.cy - p.R, p.R * 2.0f, p.R * 2.0f);
+            s.pivot = { p.cx, p.cy };
+            s.angle = std::isnan (photographed) ? p.angle : photographed;
+            s.map = std::move (map);
+            s.stepped = stepped;
+            s.logMap = logMap;
+            s.scale = pg.scale;
+            s.offset = pg.origin;
+            Control c;
+            c.id = id;
+            c.kind = Kind::knob;
+            c.label = "-";
+            c.page = pageNumber;
+            c.bounds = pg.rect (p.cx - p.R, p.cy - p.R, p.R * 2.0f, p.R * 2.0f).getSmallestIntegerContainer();
+            c.sprite = s;
+            return c;
+        }
+        /** ... with no picture of its own (its arc, or the face, shows it): just where it's dragged. */
+        Control blindKnob (const Page& pg, int pageNumber, const char* id, float cx, float cy, float r, std::vector<std::pair<float, float>> map, bool logMap = false)
+        {
+            Sprite s;
+            s.rect = RF (cx - r, cy - r, r * 2.0f, r * 2.0f);
+            s.pivot = { cx, cy };
+            s.map = std::move (map);
+            s.logMap = logMap;
+            s.scale = pg.scale;
+            s.offset = pg.origin;
+            Control c;
+            c.id = id;
+            c.kind = Kind::knob;
+            c.label = "-";
+            c.page = pageNumber;
+            c.bounds = pg.rect (cx - r, cy - r, r * 2.0f, r * 2.0f).getSmallestIntegerContainer();
+            c.sprite = s;
+            return c;
+        }
+        /** An invisible key over the photo's (the face lights its lamp). */
+        Control key (const Page& pg, int pageNumber, const char* id, float x, float y, float w, float h)
+        {
+            Sprite s;
+            s.rect = RF (x, y, w, h);
+            s.pivot = s.rect.getCentre();
+            s.scale = pg.scale;
+            s.offset = pg.origin;
+            Control c;
+            c.id = id;
+            c.kind = Kind::hotspot;
+            c.label = "-";
+            c.page = pageNumber;
+            c.bounds = pg.rect (x, y, w, h).getSmallestIntegerContainer();
+            c.sprite = s;
+            return c;
+        }
+        Control keyAt (const Page& pg, int pageNumber, const char* id, const char* partName, float grow = 1.0f)
+        {
+            const auto& p = part (pg.key (partName).c_str());
+            if (p.kind == photo::region)
+                return key (pg, pageNumber, id, (float) p.x, (float) p.y, (float) p.w, (float) p.h);
+            const auto r = p.R * grow;
+            return key (pg, pageNumber, id, p.cx - r, p.cy - r, r * 2.0f, r * 2.0f);
+        }
+        /** A toggle switch: its bat turned over (down: off, unless upIsOff). */
+        Control toggle (const Page& pg, int pageNumber, const char* id, const char* partName, bool upIsOn = true)
+        {
+            const auto& p = part (pg.key (partName).c_str());
+            auto c = key (pg, pageNumber, id, p.cx - p.R, p.cy - p.R, p.R * 2.0f, p.R * 2.0f);
+            c.sprite.image = p.image;
+            c.sprite.pivot = { p.cx, p.cy };
+            c.sprite.onAngle = upIsOn ? 0.0f : 180.0f;
+            c.sprite.offAngle = upIsOn ? 180.0f : 0.0f;
+            return c;
+        }
+
+        void panel (juce::Graphics& g, R b, const Page& pg)
+        {
+            // (the rack round the photo)
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1b1c1f), 0.0f, (float) tabs, juce::Colour (0xff0d0e10), 0.0f, (float) b.getBottom(), false));
+            g.fillRect (b.withTrimmedTop (tabs));
+            const auto& f = faceOf (pg.face);
+            image (g, f.panel, pg.rect (0.0f, 0.0f, (float) f.width, (float) f.height));
+        }
+    }
+
+    void addCompressorFaces (std::map<juce::String, Design>& d)
+    {
+        using namespace comp;
+        Design c;
+        c.width = width;
+        c.knobs = KnobStyle::black;
+        c.label = juce::Colours::white; c.value = juce::Colours::white; c.accent = juce::Colour (0xffffb020); c.track = juce::Colours::black;
+        c.valueAbove = false;
+        c.meters = true;
+        c.live = true;
+        c.pageParam = "model";
+        c.photoScale = 1.0f;
+        for (int k = 0; k < 7; ++k)
+            c.pageSizes.push_back ({ width, pageFor (k).height });
+        c.height = c.pageSizes[0].y;
+        // The circuits, along the top: a tap shows that one's face
+        c.controls.push_back ({ "model", Kind::segmented, R (8, 7, width - 16, 32), "-" });
+
+        const auto nan = std::numeric_limits<float>::quiet_NaN();
+        auto& cs = c.controls;
+        //------------------------------------------------------------------ Platinum Digital: the blue interface
+        {
+            const auto pg = pageFor (platinum);
+            constexpr int n = platinum + 1;
+            // gold knobs: threshold in steps (the ring's lit number), ratio
+            {
+                std::vector<std::pair<float, float>> steps;
+                for (int i = 0; i < 8; ++i)
+                    steps.push_back ({ -150.0f + 300.0f * (float) i / 7.0f, -60.0f * (float) i / 7.0f });
+                auto k = blindKnob (pg, n, "threshold", 340.0f, 106.7f, 30.0f, steps);
+                k.sprite.stepped = true;
+                cs.push_back (k);
+            }
+            cs.push_back (blindKnob (pg, n, "ratio", 441.7f, 106.7f, 30.0f, { { -150.0f, 1.0f }, { 150.0f, 30.0f } }, true));
+            cs.push_back (blindKnob (pg, n, "input", 676.7f, 106.7f, 38.0f, { { -135.0f, -30.0f }, { 135.0f, 30.0f } }));
+            cs.push_back (blindKnob (pg, n, "output", 1193.7f, 103.0f, 37.0f, { { -135.0f, -30.0f }, { 135.0f, 30.0f } }));
+            cs.push_back (blindKnob (pg, n, "makeup", 1290.6f, 95.6f, 24.0f, { { -135.0f, -30.0f }, { 135.0f, 30.0f } }));
+            cs.push_back (blindKnob (pg, n, "mix", 1375.0f, 95.6f, 24.0f, { { -135.0f, 0.0f }, { 135.0f, 100.0f } }));
+            cs.push_back (blindKnob (pg, n, "attack", 469.3f, 220.0f, 12.0f, { { -135.0f, 0.05f }, { 135.0f, 200.0f } }, true));
+            cs.push_back (blindKnob (pg, n, "release", 469.3f, 267.3f, 12.0f, { { -135.0f, 5.0f }, { 135.0f, 3000.0f } }, true));
+            cs.push_back (blindKnob (pg, n, "knee", 766.0f, 267.0f, 13.0f, { { -135.0f, 0.0f }, { 135.0f, 1.0f } }));
+            cs.push_back (blindKnob (pg, n, "scHpf", 808.0f, 267.0f, 13.0f, { { -135.0f, 20.0f }, { 135.0f, 20000.0f } }, true));
+            cs.push_back (blindKnob (pg, n, "scQ", 850.0f, 267.0f, 13.0f, { { -135.0f, 0.1f }, { 135.0f, 10.0f } }, true));
+            cs.push_back (blindKnob (pg, n, "scGain", 892.0f, 267.0f, 13.0f, { { -135.0f, -24.0f }, { 135.0f, 24.0f } }));
+            cs.push_back (blindKnob (pg, n, "limThr", 934.0f, 267.0f, 13.0f, { { -135.0f, -20.0f }, { 135.0f, 0.0f } }));
+            const std::pair<const char*, const char*> toggles[] { { "peakRms", "kRms" }, { "detect", "kSum" }, { "scFilter", "kScFilter" },
+                                                                  { "autoRelease", "kAutoRel" }, { "listen", "kListen" }, { "limiter", "kLimit" },
+                                                                  { "meterHold", "kOhm" }, { "console", "kConsole" }, { "air", "kAir" } };
+            for (const auto& [id, lampName] : toggles)
+            {
+                const auto& p = part (pg.key (lampName).c_str());
+                cs.push_back (key (pg, n, id, (float) p.x, (float) p.y - 16.0f, (float) p.w, 26.0f));
+            }
+            {
+                const auto& p = part (pg.key ("kDrive").c_str());
+                auto k = key (pg, n, "distortion", (float) p.x, (float) p.y - 16.0f, (float) p.w, 26.0f);
+                k.sprite.cycle = true;
+                cs.push_back (k);
+            }
+            const char* modes[] { "kLP", "kBP", "kHP", "kEQ", "kHS" };
+            for (int m = 0; m < 5; ++m)
+            {
+                const auto& p = part (pg.key (modes[m]).c_str());
+                auto k = key (pg, n, "scMode", (float) p.x, (float) p.y - 16.0f, (float) p.w, 26.0f);
+                k.sprite.choice = m; k.sprite.radio = true;
+                cs.push_back (k);
+            }
+            const char* gains[] { "kOff", "k0dB", "k12dB" };
+            for (int m = 0; m < 3; ++m)
+            {
+                const auto& p = part (pg.key (gains[m]).c_str());
+                auto k = key (pg, n, "autoGain", (float) p.x, (float) p.y - 16.0f, (float) p.w, 26.0f);
+                k.sprite.choice = m; k.sprite.radio = true;
+                cs.push_back (k);
+            }
+            cs.push_back (keyAt (pg, n, "power", "power"));
+        }
+        //------------------------------------------------------------------ Studio VCA: the red dual compressor
+        {
+            const auto pg = pageFor (studioVca);
+            constexpr int n = studioVca + 1;
+            // (both channels' knobs set the stereo compressor: as the hardware's lower controls with Stereo on)
+            const std::vector<std::pair<float, float>> ratio { { 40.0f, 1.5f }, { 80.0f, 2.0f }, { 115.0f, 3.0f }, { 160.0f, 5.0f }, { 205.0f, 7.0f }, { 250.0f, 10.0f } };
+            const std::vector<std::pair<float, float>> thresh { { -150.0f, -48.0f }, { 150.0f, -12.0f } };
+            const std::vector<std::pair<float, float>> gain { { -150.0f, 0.0f }, { 150.0f, 20.0f } };
+            const std::vector<std::pair<float, float>> attack { { -135.0f, 0.3f }, { 135.0f, 100.0f } };
+            const std::vector<std::pair<float, float>> release { { -135.0f, 100.0f }, { 135.0f, 3000.0f } };
+            const std::vector<std::pair<float, float>> limit { { -150.0f, -18.0f }, { 150.0f, 0.0f } };
+            const std::pair<const char*, float> bars[] { { "ratio1", 161.2f }, { "ratio2", 208.8f }, { "thresh1", -44.0f }, { "thresh2", -147.6f },
+                                                         { "gain1", -107.2f }, { "gain2", -125.5f }, { "attack1", 14.3f }, { "attack2", -42.5f },
+                                                         { "release1", -26.4f }, { "release2", 129.7f }, { "limThr1", 142.6f }, { "limThr2", 116.6f } };
+            for (const auto& [name, photographed] : bars)
+            {
+                const juce::String nm (name);
+                const auto id = nm.startsWith ("ratio") ? "ratio" : nm.startsWith ("thresh") ? "threshold" : nm.startsWith ("gain") ? "makeup"
+                              : nm.startsWith ("attack") ? "attack" : nm.startsWith ("release") ? "release" : "limThr";
+                const auto& map = nm.startsWith ("ratio") ? ratio : nm.startsWith ("thresh") ? thresh : nm.startsWith ("gain") ? gain
+                                : nm.startsWith ("attack") ? attack : nm.startsWith ("release") ? release : limit;
+                cs.push_back (knob (pg, n, id, name, map, false, nm.startsWith ("ratio") || nm.startsWith ("attack") || nm.startsWith ("release"), photographed));
+            }
+            for (const auto* k : { "in1", "in2" })   cs.push_back (keyAt (pg, n, "compIn", k, 1.3f));
+            for (const auto* k : { "key1", "key2" }) cs.push_back (keyAt (pg, n, "extSc", k, 1.3f));
+            for (const auto* k : { "auto1", "auto2" }) cs.push_back (keyAt (pg, n, "autoRelease", k, 1.3f));
+            for (const auto* k : { "limIn1", "limIn2" }) cs.push_back (keyAt (pg, n, "limiter", k, 1.3f));
+            cs.push_back (keyAt (pg, n, "link", "stereo", 1.3f));
+            cs.push_back (keyAt (pg, n, "power", "power", 1.1f));
+        }
+        //------------------------------------------------------------------ Studio FET: the silver FET limiter
+        {
+            const auto pg = pageFor (studioFet);
+            constexpr int n = studioFet + 1;
+            const std::vector<std::pair<float, float>> io { { -150.0f, -30.0f }, { -115.0f, -24.0f }, { -73.0f, -12.0f }, { -36.0f, -6.0f },
+                                                            { 3.0f, 0.0f }, { 42.0f, 6.0f }, { 77.0f, 12.0f }, { 114.0f, 18.0f }, { 150.0f, 24.0f } };
+            cs.push_back (knob (pg, n, "input", "input", io));
+            cs.push_back (knob (pg, n, "output", "output", io));
+            auto attack = knob (pg, n, "attack", "attack", { { -100.0f, 200.0f }, { -30.0f, 60.0f }, { 30.0f, 10.0f }, { 100.0f, 0.05f } });
+            attack.sprite.offBelow = -112.0f; attack.sprite.offParam = "compIn";   // (OFF, all the way left: the compressor out, the amplifier in)
+            cs.push_back (attack);
+            cs.push_back (knob (pg, n, "release", "release", { { -100.0f, 3000.0f }, { -30.0f, 900.0f }, { 30.0f, 200.0f }, { 100.0f, 5.0f } }));
+            cs.push_back (knob (pg, n, "mix", "mix", { { -100.0f, 100.0f }, { 100.0f, 0.0f } }));
+            auto hpf = knob (pg, n, "scHpf", "scHpf", { { -100.0f, 30.0f }, { 100.0f, 300.0f } }, false, true);
+            hpf.sprite.offBelow = -112.0f; hpf.sprite.offParam = "scFilter";
+            cs.push_back (hpf);
+            cs.push_back (toggle (pg, n, "impedance", "tg_zin", false));
+            cs.push_back (toggle (pg, n, "power", "tg_bypass"));
+            cs.push_back (toggle (pg, n, "link", "tg_link"));
+            cs.push_back (toggle (pg, n, "extSc", "tg_extSc"));
+            const std::pair<const char*, float> ratios[] { { "r20", 20.0f }, { "r12", 12.0f }, { "r8", 8.0f }, { "r4", 4.0f } };
+            for (const auto& [name, value] : ratios)
+            {
+                auto k = keyAt (pg, n, "ratio", name);
+                k.sprite.setValue = value; k.sprite.altValue = 30.0f;   // (shift-click: all the buttons in)
+                cs.push_back (k);
+            }
+            const std::pair<const char*, int> meters[] { { "mGR", 0 }, { "m8", 2 }, { "m4", 1 }, { "mOff", 3 } };
+            for (const auto& [name, mode] : meters)
+            {
+                auto k = keyAt (pg, n, "meterMode", name);
+                k.sprite.choice = mode; k.sprite.radio = true;
+                cs.push_back (k);
+            }
+        }
+        //------------------------------------------------------------------ Classic VCA: the 1U bus compressor
+        {
+            const auto pg = pageFor (classicVca);
+            constexpr int n = classicVca + 1;
+            cs.push_back (knob (pg, n, "threshold", "threshold", { { -135.0f, -40.0f }, { 135.0f, 0.0f } }));
+            cs.push_back (knob (pg, n, "attack", "attack", { { -84.0f, 0.1f }, { -47.0f, 0.3f }, { -18.0f, 1.0f }, { 15.0f, 3.0f }, { 44.0f, 10.0f }, { 82.0f, 30.0f } }, true));
+            cs.push_back (knob (pg, n, "ratio", "ratio", { { -79.0f, 1.5f }, { -47.0f, 2.0f }, { -17.0f, 3.0f }, { 14.0f, 4.0f }, { 43.0f, 5.0f }, { 79.0f, 10.0f } }, true));
+            auto rel = knob (pg, n, "release", "release", { { -84.0f, 100.0f }, { -46.0f, 200.0f }, { -15.0f, 400.0f }, { 15.0f, 800.0f }, { 45.0f, 1600.0f }, { 83.0f, 1600.0f } }, true);
+            rel.sprite.autoParam = "autoRelease";
+            cs.push_back (rel);
+            cs.push_back (knob (pg, n, "makeup", "makeup", { { -135.0f, 0.0f }, { 135.0f, 20.0f } }));
+            cs.push_back (knob (pg, n, "scHpfStep", "scHpf", { { -84.0f, 0.0f }, { -47.0f, 1.0f }, { -15.0f, 2.0f }, { 15.0f, 3.0f }, { 45.0f, 4.0f }, { 83.0f, 5.0f } }, true));
+            cs.push_back (knob (pg, n, "vcaDrive", "vcaDrive", { { -135.0f, 0.0f }, { 135.0f, 1.0f } }));
+            cs.push_back (keyAt (pg, n, "compIn", "kComp"));
+            cs.push_back (keyAt (pg, n, "extSc", "kExt"));
+            cs.push_back (keyAt (pg, n, "power", "power"));
+        }
+        //------------------------------------------------------------------ Vintage VCA: the 500-series bus compressor
+        {
+            const auto pg = pageFor (vintageVca);
+            constexpr int n = vintageVca + 1;
+            cs.push_back (knob (pg, n, "threshold", "threshold", { { -135.0f, -40.0f }, { 135.0f, 0.0f } }));
+            cs.push_back (knob (pg, n, "makeup", "makeup", { { -135.0f, -5.0f }, { 135.0f, 15.0f } }));
+            cs.push_back (knob (pg, n, "attack", "attack", { { -87.0f, 0.1f }, { -50.0f, 0.3f }, { -15.0f, 1.0f }, { 19.0f, 3.0f }, { 53.0f, 10.0f }, { 87.0f, 30.0f } }, true));
+            auto rel = knob (pg, n, "release", "release", { { -88.0f, 100.0f }, { -53.0f, 200.0f }, { -22.0f, 400.0f }, { 18.0f, 800.0f }, { 53.0f, 1600.0f }, { 88.0f, 1600.0f } }, true);
+            rel.sprite.autoParam = "autoRelease";
+            cs.push_back (rel);
+            cs.push_back (knob (pg, n, "ratio", "ratio", { { -86.0f, 1.5f }, { -52.0f, 2.0f }, { -27.0f, 3.0f }, { 15.0f, 4.0f }, { 48.0f, 5.0f }, { 85.0f, 10.0f } }, true));
+            cs.push_back (knob (pg, n, "scHpfStep", "scHpf", { { -84.0f, 0.0f }, { -52.0f, 1.0f }, { -23.0f, 2.0f }, { 24.0f, 3.0f }, { 51.0f, 4.0f }, { 84.0f, 5.0f } }, true));
+            cs.push_back (keyAt (pg, n, "compIn", "kIn"));
+        }
+        //------------------------------------------------------------------ Vintage FET: the black FET limiter
+        {
+            const auto pg = pageFor (vintageFet);
+            constexpr int n = vintageFet + 1;
+            const std::vector<std::pair<float, float>> io { { -155.0f, -30.0f }, { -118.0f, -24.0f }, { -73.0f, -12.0f }, { -34.0f, -6.0f },
+                                                            { 5.0f, 0.0f }, { 43.0f, 6.0f }, { 76.0f, 12.0f }, { 115.0f, 18.0f }, { 153.0f, 24.0f } };
+            cs.push_back (knob (pg, n, "input", "input", io));
+            cs.push_back (knob (pg, n, "output", "output", io));
+            auto attack = knob (pg, n, "attack", "attack", { { -130.0f, 200.0f }, { -45.0f, 60.0f }, { 45.0f, 10.0f }, { 130.0f, 0.05f } });
+            attack.sprite.offBelow = -145.0f; attack.sprite.offParam = "compIn";
+            cs.push_back (attack);
+            cs.push_back (knob (pg, n, "release", "release", { { -130.0f, 3000.0f }, { -45.0f, 900.0f }, { 45.0f, 200.0f }, { 130.0f, 5.0f } }));
+            const std::pair<const char*, float> ratios[] { { "r20", 20.0f }, { "r12", 12.0f }, { "r8", 8.0f }, { "r4", 4.0f } };
+            for (const auto& [name, value] : ratios)
+            {
+                auto k = keyAt (pg, n, "ratio", name);
+                k.sprite.setValue = value; k.sprite.altValue = 30.0f;
+                cs.push_back (k);
+            }
+            const std::pair<const char*, int> meters[] { { "mGR", 0 }, { "m8", 2 }, { "m4", 1 }, { "mOff", 3 } };
+            for (const auto& [name, mode] : meters)
+            {
+                auto k = keyAt (pg, n, "meterMode", name);
+                k.sprite.choice = mode; k.sprite.radio = true;
+                cs.push_back (k);
+            }
+        }
+        //------------------------------------------------------------------ Vintage Opto: the grey levelling amplifier
+        {
+            const auto pg = pageFor (vintageOpto);
+            constexpr int n = vintageOpto + 1;
+            cs.push_back (knob (pg, n, "makeup", "gain", { { -142.0f, -30.0f }, { 3.0f, 0.0f }, { 135.0f, 30.0f } }));
+            cs.push_back (knob (pg, n, "threshold", "peak", { { -142.0f, 0.0f }, { 135.0f, -50.0f } }));
+            cs.push_back (knob (pg, n, "meterMode", "meterSel", { { -45.0f, 2.0f }, { 0.0f, 0.0f }, { 45.0f, 1.0f } }, true, false, 0.0f));
+            cs.push_back (knob (pg, n, "emphasis", "r37", { { -135.0f, 0.0f }, { 135.0f, 1.0f } }, false, false, 0.0f));
+            cs.push_back (toggle (pg, n, "power", "tgPower"));
+            cs.push_back (toggle (pg, n, "optoLimit", "tgLimit"));
+        }
+
+        c.paint = [] (juce::Graphics& g, R b, const EffectInfo& fx, const float* v, float live)
+        {
+            const auto circuit = juce::jlimit (0, 6, juce::roundToInt (valueOf (fx, v, "model", 1.0f)));
+            const auto pg = pageFor (circuit);
+            // the tabs' strip
+            g.setColour (juce::Colour (0xff141518));
+            g.fillRect (b.withHeight (tabs));
+            panel (g, b, pg);
+
+            const auto on = [&] (const char* id, float fallback = 0.0f) { return valueOf (fx, v, id, fallback) > 0.5f; };
+            const auto choice = [&] (const char* id) { return juce::roundToInt (valueOf (fx, v, id)); };
+            const auto powered = on ("power", 1.0f);
+            const auto gr = std::abs (meter (0, live));
+            const auto outDb = std::max (meter (3), meter (4));
+            const auto inL = meter (1), inR = meter (2), outL = meter (3), outR = meter (4);
+            const auto limiting = meter (5, 0.0f);
+            const auto mode = choice ("meterMode");
+            const auto key = [&] (const char* n) { return std::string (pg.face) + n; };
+
+            switch (circuit)
+            {
+                case platinum:
+                {
+                    if (! powered)
+                        break;
+                    lamp (g, pg, "power");
+                    const std::pair<const char*, const char*> lit[] { { "peakRms", "kRms" }, { "detect", "kSum" }, { "scFilter", "kScFilter" },
+                                                                      { "autoRelease", "kAutoRel" }, { "listen", "kListen" }, { "limiter", "kLimit" },
+                                                                      { "meterHold", "kOhm" }, { "console", "kConsole" }, { "air", "kAir" } };
+                    for (const auto& [id, l] : lit)
+                        lamp (g, pg, l, on (id));
+                    lamp (g, pg, "kDrive", choice ("distortion") > 0);
+                    const char* modes[] { "kLP", "kBP", "kHP", "kEQ", "kHS" };
+                    lamp (g, pg, modes[juce::jlimit (0, 4, choice ("scMode"))]);
+                    const char* gains[] { "kOff", "k0dB", "k12dB" };
+                    lamp (g, pg, gains[juce::jlimit (0, 2, choice ("autoGain"))]);
+                    // the arcs and the stepped ring show the knobs' settings
+                    const auto frac = [&] (const char* id, float lo, float hi) { return juce::jlimit (0.0f, 1.0f, (valueOf (fx, v, id) - lo) / (hi - lo)); };
+                    arc (g, pg, "arcInput", -135.0f, -135.0f + 270.0f * frac ("input", -30.0f, 30.0f));
+                    arc (g, pg, "arcMonitor", -135.0f, -135.0f + 270.0f * frac ("output", -30.0f, 30.0f));
+                    arc (g, pg, "arcHp1", -135.0f, -135.0f + 270.0f * frac ("makeup", -30.0f, 30.0f));
+                    arc (g, pg, "arcHp2", -135.0f, -135.0f + 270.0f * frac ("mix", 0.0f, 100.0f));
+                    {
+                        const auto t = juce::roundToInt (valueOf (fx, v, "threshold") / -60.0f * 7.0f);
+                        const auto a = -150.0f + 300.0f * juce::jlimit (0, 7, t) / 7.0f;
+                        arc (g, pg, "ringThreshold", a - 14.0f, a + 14.0f);
+                        const auto r = std::log (juce::jlimit (1.0f, 30.0f, valueOf (fx, v, "ratio", 4.0f))) / std::log (30.0f);
+                        const auto b2 = -150.0f + 300.0f * r;
+                        arc (g, pg, "ringRatio", b2 - 14.0f, b2 + 14.0f);
+                    }
+                    // the meters: input, gain reduction (from the top), output
+                    const auto barOf = [] (float db)
+                    {
+                        static const std::pair<float, float> marks[] { { -48.0f, 0.03f }, { -36.0f, 0.19f }, { -24.0f, 0.35f }, { -18.0f, 0.51f },
+                                                                       { -12.0f, 0.67f }, { -6.0f, 0.83f }, { 0.0f, 0.99f } };
+                        if (db <= -48.0f) return juce::jmax (0.0f, 0.03f + (db + 48.0f) * 0.004f);
+                        for (size_t i = 1; i < std::size (marks); ++i)
+                            if (db <= marks[i].first)
+                                return marks[i - 1].second + (db - marks[i - 1].first) / (marks[i].first - marks[i - 1].first) * (marks[i].second - marks[i - 1].second);
+                        return 1.0f;
+                    };
+                    const auto hold = on ("meterHold");
+                    const auto held = [&] (const char* which, float db) { return hold ? ballistics (key (which), db, 1.0f, 0.004f) : ballistics (key (which), db, 1.0f, 0.12f); };
+                    bar (g, pg, "barInL", barOf (held ("inL", inL)));
+                    bar (g, pg, "barInR", barOf (held ("inR", inR)));
+                    bar (g, pg, "barOutL", barOf (held ("outL", outL)));
+                    bar (g, pg, "barOutR", barOf (held ("outR", outR)));
+                    const auto grShown = ballistics (key ("gr"), gr, 0.6f, 0.15f);
+                    bar (g, pg, "barGrL", grShown / 24.0f, true);
+                    bar (g, pg, "barGrR", grShown / 24.0f, true);
+                    break;
+                }
+                case studioVca:
+                {
+                    if (! powered)
+                        break;
+                    lamp (g, pg, "power");
+                    for (const auto* l : { "in1", "in2" }) lamp (g, pg, l, on ("compIn", 1.0f));
+                    for (const auto* l : { "key1", "key2" }) lamp (g, pg, l, on ("extSc", 1.0f));
+                    for (const auto* l : { "auto1", "auto2" }) lamp (g, pg, l, on ("autoRelease"));
+                    for (const auto* l : { "limIn1", "limIn2" }) lamp (g, pg, l, on ("limiter"));
+                    lamp (g, pg, "stereo", on ("link", 1.0f));
+                    lamp (g, pg, "gainChange", gr > 1.0f);
+                    lamp (g, pg, "limit1", on ("limiter") && limiting > 0.3f);
+                    lamp (g, pg, "limit2", on ("limiter") && limiting > 0.3f);
+                    const auto vu = ballistics (key ("vu"), -gr, 0.35f, 0.18f);
+                    needle (g, pg, "needle1", vuAngle (vu, -28.2f, 15.4f, 26.6f));
+                    needle (g, pg, "needle2", vuAngle (vu, -30.5f, 15.0f, 31.9f));
+                    break;
+                }
+                case studioFet:
+                {
+                    lamp (g, pg, "led", powered);
+                    const auto ratio = valueOf (fx, v, "ratio", 4.0f);
+                    const std::pair<const char*, float> ratios[] { { "r20", 20.0f }, { "r12", 12.0f }, { "r8", 8.0f }, { "r4", 4.0f } };
+                    for (const auto& [l, value] : ratios)
+                        lamp (g, pg, l, ratio >= 25.0f || std::abs (fetRatio (ratio) - value) < 0.5f);
+                    const char* meters[] { "mGR", "m4", "m8", "mOff" };
+                    lamp (g, pg, meters[juce::jlimit (0, 3, mode)]);
+                    const auto vu = ballistics (key ("vu"), powered ? vuReading (mode, gr, outDb) : -24.0f, 0.35f, 0.18f);
+                    needle (g, pg, "needle", vuAngle (vu, -50.1f, 13.9f, 46.0f));
+                    if (! powered || mode == 3)
+                    {
+                        // (the meter's lamp out)
+                        g.setColour (juce::Colours::black.withAlpha (0.45f));
+                        g.fillRect (pg.rect (949.0f, 81.0f, 253.0f, 111.0f));
+                    }
+                    break;
+                }
+                case classicVca:
+                {
+                    if (! powered)
+                        break;
+                    lamp (g, pg, "power");
+                    lamp (g, pg, "kComp", on ("compIn", 1.0f));
+                    lamp (g, pg, "kExt", on ("extSc", 1.0f));
+                    lamp (g, pg, "driveLed", valueOf (fx, v, "vcaDrive") > 0.02f);
+                    const auto shown = ballistics (key ("gr"), on ("compIn", 1.0f) ? gr : 0.0f, 0.5f, 0.2f);
+                    needle (g, pg, "needle", -36.6f + juce::jlimit (0.0f, 21.0f, shown) / 20.0f * (40.1f + 36.6f));
+                    break;
+                }
+                case vintageVca:
+                {
+                    lamp (g, pg, "kIn", on ("compIn", 1.0f));
+                    const auto shown = ballistics (key ("gr"), on ("compIn", 1.0f) ? gr : 0.0f, 0.5f, 0.2f);
+                    needle (g, pg, "needle", -38.1f + juce::jlimit (0.0f, 21.0f, shown) / 20.0f * (41.4f + 38.1f));
+                    break;
+                }
+                case vintageFet:
+                {
+                    const auto ratio = valueOf (fx, v, "ratio", 4.0f);
+                    const std::pair<const char*, float> ratios[] { { "r20", 20.0f }, { "r12", 12.0f }, { "r8", 8.0f }, { "r4", 4.0f } };
+                    for (const auto& [l, value] : ratios)
+                        lamp (g, pg, l, ratio >= 25.0f || std::abs (fetRatio (ratio) - value) < 0.5f);
+                    const char* meters[] { "mGR", "m4", "m8", "mOff" };
+                    lamp (g, pg, meters[juce::jlimit (0, 3, mode)]);
+                    const auto vu = ballistics (key ("vu"), powered ? vuReading (mode, gr, outDb) : -24.0f, 0.35f, 0.18f);
+                    // (the photo's own needle was too faint to cut cleanly: the silver limiter's, the same kind of meter)
+                    needle (g, pg, "needle", vuAngle (vu, -41.3f, 11.6f, 42.5f), "sfet.needle");
+                    if (! powered || mode == 3)
+                    {
+                        g.setColour (juce::Colours::black.withAlpha (0.45f));
+                        g.fillRect (pg.rect (1151.0f, 77.0f, 248.0f, 108.0f));
+                    }
+                    break;
+                }
+                case vintageOpto:
+                {
+                    const auto m = mode == 2 ? 2 : mode == 1 ? 1 : 0;
+                    const auto reading = m == 0 ? -gr : outDb + (m == 1 ? 18.0f : 12.0f);
+                    const auto vu = ballistics (key ("vu"), powered ? reading : -24.0f, 0.25f, 0.12f);
+                    needle (g, pg, "needle", vuAngle (vu, -44.3f, 14.0f, 45.3f));
+                    if (! powered)
+                    {
+                        g.setColour (juce::Colours::black.withAlpha (0.4f));
+                        g.fillRect (pg.rect (720.0f, 120.0f, 276.0f, 142.0f));
+                    }
+                    break;
+                }
+                default: break;
+            }
+            if (! powered && circuit != studioFet && circuit != vintageOpto)
+            {
+                // (switched off: the panel a touch darker, nothing lit)
+                g.setColour (juce::Colours::black.withAlpha (0.12f));
+                g.fillRect (b.withTrimmedTop (tabs));
+            }
+        };
+        d["studioComp"] = c;
+    }
+
     void addHardwareDesigns (std::map<juce::String, Design>& d)
     {
         const auto knob = Kind::knob;
@@ -3765,6 +4415,7 @@ namespace
         }
         addHardwareDesigns (d);
         addPhotoDesigns (d);
+        addCompressorFaces (d);
 
         // The vintage EQs: under their faces, a screen with the curve they make and the live spectrum behind it
         // (not under the narrow graphic EQ)
@@ -3959,6 +4610,59 @@ namespace
     }
 }
 
+float photoValueAt (const Sprite& sp, float angle)
+{
+    const auto& m = sp.map;
+    if (m.empty())
+        return 0.0f;
+    if (sp.stepped)
+    {
+        size_t best = 0;
+        for (size_t i = 1; i < m.size(); ++i)
+            if (std::abs (m[i].first - angle) < std::abs (m[best].first - angle))
+                best = i;
+        return m[best].second;
+    }
+    if (angle <= m.front().first) return m.front().second;
+    for (size_t i = 1; i < m.size(); ++i)
+        if (angle <= m[i].first)
+        {
+            const auto [a0, v0] = m[i - 1];
+            const auto [a1, v1] = m[i];
+            const auto t = (angle - a0) / std::max (1.0e-4f, a1 - a0);
+            return sp.logMap && v0 > 0.0f && v1 > 0.0f ? v0 * std::pow (v1 / v0, t) : v0 + t * (v1 - v0);
+        }
+    return m.back().second;
+}
+
+float photoAngleOf (const Sprite& sp, float value)
+{
+    const auto& m = sp.map;
+    if (m.empty())
+        return 0.0f;
+    if (sp.stepped)
+    {
+        size_t best = 0;
+        for (size_t i = 1; i < m.size(); ++i)
+            if (std::abs (m[i].second - value) < std::abs (m[best].second - value))
+                best = i;
+        return m[best].first;
+    }
+    for (size_t i = 1; i < m.size(); ++i)
+    {
+        const auto [a0, v0] = m[i - 1];
+        const auto [a1, v1] = m[i];
+        if ((v0 <= v1 && value >= v0 && value <= v1) || (v0 > v1 && value <= v0 && value >= v1))
+        {
+            const auto t = sp.logMap && v0 > 0.0f && v1 > 0.0f && value > 0.0f ? std::log (value / v0) / std::log (v1 / v0)
+                                                                               : (value - v0) / (std::abs (v1 - v0) < 1.0e-9f ? 1.0f : v1 - v0);
+            return a0 + (float) t * (a1 - a0);
+        }
+    }
+    const bool rising = m.back().second >= m.front().second;
+    return (rising ? value < m.front().second : value > m.front().second) ? m.front().first : m.back().first;
+}
+
 void DesignLook::drawSprite (juce::Graphics& g, juce::Component& c, const Sprite& sp, float pos, bool on, int settings)
 {
     if (sp.image == nullptr)
@@ -3967,18 +4671,22 @@ void DesignLook::drawSprite (juce::Graphics& g, juce::Component& c, const Sprite
     if (! image.isValid())
         return;
     float degrees = 0.0f, dx = 0.0f;
-    if (sp.slides)
+    if (c.getProperties().contains ("photoAngle"))
+        degrees = (float) c.getProperties()["photoAngle"] - sp.angle;
+    else if (sp.slides)
         dx = sp.from + juce::jlimit (0.0f, 1.0f, pos) * (sp.to - sp.from) - sp.pivot.x;
     else if (sp.angles.empty())
         degrees = (on ? sp.onAngle : sp.offAngle) - sp.angle;
     else
         degrees = angleAt (sp.angles, pos, settings) - sp.angle;
     const auto origin = c.getPosition().toFloat();
+    const auto scale = sp.scale > 0.0f ? sp.scale : design.photoScale;
+    const auto offset = sp.scale > 0.0f ? sp.offset : design.photoOffset.toFloat();
     const auto t = juce::AffineTransform::scale (sp.rect.getWidth() / (float) image.getWidth(), sp.rect.getHeight() / (float) image.getHeight())
                        .translated (sp.rect.getX() + dx, sp.rect.getY())
                        .rotated (juce::degreesToRadians (degrees), sp.pivot.x + dx, sp.pivot.y)
-                       .scaled (design.photoScale)
-                       .translated ((float) design.photoOffset.x - origin.x, (float) design.photoOffset.y - origin.y);
+                       .scaled (scale)
+                       .translated (offset.x - origin.x, offset.y - origin.y);
     g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
     g.drawImageTransformed (image, t);
 }

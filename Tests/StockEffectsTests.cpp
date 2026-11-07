@@ -235,6 +235,75 @@ TEST_CASE ("Studio Compressor: circuits differ, the limiter holds its threshold,
     CHECK (peakOf (nl, 12000) < 0.01f);
 }
 
+TEST_CASE ("Studio Compressor: the hardware faces' keys - power, compressor in, link, opto switch, S/C HPF, readings", "[stockfx]")
+{
+    // Power off: the sound straight through, whatever the settings
+    auto off = make ("studioComp");
+    set (*off, "threshold", -40.0f);
+    set (*off, "input", 12.0f);
+    set (*off, "power", 0.0f);
+    const auto [ol, orr] = run (*off, sine (200.0, 0.5, 0.5f), sine (200.0, 0.5, 0.5f));
+    CHECK_THAT (peakOf (ol, 12000), Catch::Matchers::WithinAbs (0.5, 0.002));
+
+    // Compressor out (the FET's attack OFF, the bus compressor's IN key): no gain reduction, the amplifier still there
+    auto out = make ("studioComp");
+    set (*out, "model", 5.0f);
+    set (*out, "threshold", -40.0f);
+    set (*out, "compIn", 0.0f);
+    const auto [cl, cr] = run (*out, sine (200.0, 0.5, 0.5f), sine (200.0, 0.5, 0.5f));
+    CHECK (out->takeGainReductionDb() < 0.01f);
+    CHECK (peakOf (cl, 12000) > 0.4f);
+
+    // Unlinked: a loud left doesn't turn the quiet right down
+    for (const auto linked : { 1.0f, 0.0f })
+    {
+        auto c = make ("studioComp");
+        set (*c, "model", 0.0f);
+        set (*c, "threshold", -30.0f);
+        set (*c, "ratio", 10.0f);
+        set (*c, "link", linked);
+        const auto [l, r] = run (*c, sine (200.0, 0.5, 0.8f), sine (200.0, 0.5, 0.02f));
+        if (linked > 0.5f) CHECK (peakOf (r, 12000) < 0.01f);
+        else               CHECK_THAT (peakOf (r, 12000), Catch::Matchers::WithinAbs (0.02, 0.003));
+    }
+
+    // The opto's LIMIT turns peaks down further than COMPRESS
+    float peaks[2];
+    for (int limit = 0; limit < 2; ++limit)
+    {
+        auto c = make ("studioComp");
+        set (*c, "model", 6.0f);
+        set (*c, "threshold", -30.0f);
+        set (*c, "optoLimit", (float) limit);
+        const auto [l, r] = run (*c, sine (300.0, 1.0, 0.7f), sine (300.0, 1.0, 0.7f));
+        peaks[limit] = peakOf (l, 36000);
+    }
+    CHECK (peaks[1] < peaks[0] * 0.8f);
+
+    // The bus compressor's S/C HPF: the bass pumps it less
+    float reductions[2];
+    for (int step = 0; step < 2; ++step)
+    {
+        auto c = make ("studioComp");
+        set (*c, "model", 3.0f);
+        set (*c, "threshold", -30.0f);
+        set (*c, "scHpfStep", step == 0 ? 0.0f : 5.0f);
+        run (*c, sine (40.0, 1.0, 0.7f), sine (40.0, 1.0, 0.7f));
+        reductions[step] = c->takeGainReductionDb();
+    }
+    CHECK (reductions[1] < reductions[0] - 3.0f);
+
+    // The readings: gain reduction, input and output peaks, the limiter's
+    auto m = make ("studioComp");
+    set (*m, "threshold", -30.0f);
+    run (*m, sine (200.0, 0.5, 0.5f), sine (200.0, 0.5, 0.5f));
+    std::array<float, BuiltInEffect::meterCapacity> readings {};
+    REQUIRE (m->readMeters (readings.data(), (int) readings.size()) == 6);
+    CHECK (readings[0] > 3.0f);
+    CHECK_THAT (readings[1], Catch::Matchers::WithinAbs (juce::Decibels::gainToDecibels (0.5f), 0.2));
+    CHECK (readings[3] < readings[1]);
+}
+
 TEST_CASE ("Studio Reverb: the damping ratios set how long each band rings; freeze holds", "[stockfx]")
 {
     const auto tailOf = [] (float highRatio)

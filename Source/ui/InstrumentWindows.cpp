@@ -177,6 +177,8 @@ EffectPanel::EffectPanel (juce::ValueTree i, juce::UndoManager& um)
     {
         bypassButton.setVisible (false);   // (the window's bar above has Bypass)
         setSize (design->width, design->height);
+        if (! design->pageSizes.empty())
+            refresh();   // (its page's own size)
     }
     else
         setSize (faceWidth, layoutFace (false));
@@ -334,6 +336,66 @@ void EffectPanel::buildDesign (const EffectInfo& info)
             case effectdesign::Kind::field:
             case effectdesign::Kind::fader:
             {
+                if (! c.sprite.map.empty())
+                {
+                    // A photographed knob with its printed scale: dragged through its angles, the value from the scale
+                    auto* k = new MenuSlider();
+                    extras.add (k);
+                    const auto& sp = c.sprite;
+                    const auto a0 = sp.map.front().first, a1 = sp.map.back().first;
+                    const auto lowest = sp.offParam.isNotEmpty() ? std::min (a0, sp.offBelow - 8.0f) : a0;
+                    k->setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+                    k->setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+                    k->setRange (lowest, a1, sp.stepped ? 0.0 : 0.0);
+                    k->setMouseDragSensitivity (200);
+                    k->setWantsKeyboardFocus (false);
+                    k->getProperties().set ("sprite", (int) (&c - design->controls.data()));
+                    if (sp.hitRadius > 0.0f)
+                        k->getProperties().set ("hitRadius", sp.hitRadius * (sp.scale > 0.0f ? sp.scale : design->photoScale));
+                    k->setPopupDisplayEnabled (true, true, this);
+                    const auto param = *p;
+                    const auto* autoP = sp.autoParam.isNotEmpty() ? paramOf (sp.autoParam) : nullptr;
+                    const auto* offP = sp.offParam.isNotEmpty() ? paramOf (sp.offParam) : nullptr;
+                    k->textFromValueFunction = [sp, param, autoP, offP] (double angle)
+                    {
+                        if (offP != nullptr && angle < sp.offBelow) return juce::String ("Off");
+                        if (autoP != nullptr && angle >= sp.map.back().first - 4.0) return juce::String ("Auto");
+                        const auto v = effectdesign::photoValueAt (sp, (float) angle);
+                        if (param.isChoice()) return param.text (v);
+                        const auto digits = std::abs (v) < 1.0f ? 2 : std::abs (v) < 10.0f ? 1 : 0;
+                        return juce::String (v, digits) + param.suffix;
+                    };
+                    k->onDragStart = [this, name = p->name] { undoManager.beginNewTransaction (name); };
+                    k->onValueChange = [this, k, sp, id = c.id, autoP, offP]
+                    {
+                        const auto angle = (float) k->getValue();
+                        const auto off = offP != nullptr && angle < sp.offBelow;
+                        if (offP != nullptr)
+                            insert.setProperty (juce::Identifier (offP->id), off ? 0.0f : 1.0f, &undoManager);
+                        if (autoP != nullptr)
+                            insert.setProperty (juce::Identifier (autoP->id), angle >= sp.map.back().first - 4.0f ? 1.0f : 0.0f, &undoManager);
+                        if (! off)
+                        {
+                            // (the AUTO stop: the release stays as it was)
+                            if (autoP == nullptr || angle < sp.map.back().first - 4.0f)
+                                insert.setProperty (juce::Identifier (id), effectdesign::photoValueAt (sp, std::min (angle, autoP != nullptr ? sp.map[sp.map.size() - 2].first : angle)), &undoManager);
+                        }
+                    };
+                    k->setDoubleClickReturnValue (true, effectdesign::photoAngleOf (sp, p->defaultValue));
+                    addAndMakeVisible (k);
+                    refreshers.push_back ([k, sp, current, id = c.id, autoP, offP]
+                    {
+                        float angle = effectdesign::photoAngleOf (sp, current (id));
+                        if (autoP != nullptr && current (autoP->id) > 0.5f) angle = sp.map.back().first;
+                        if (offP != nullptr && current (offP->id) < 0.5f) angle = sp.offBelow - 8.0f;
+                        k->getProperties().set ("photoAngle", angle);
+                        if (! k->isMouseButtonDown())
+                            k->setValue (angle, juce::dontSendNotification);
+                        k->repaint();
+                    });
+                    placed.component = k;
+                    break;
+                }
                 auto* k = addKnob (*p);
                 k->label.setVisible (false);
                 if (c.kind == effectdesign::Kind::field)
@@ -419,6 +481,38 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                     b->getProperties().set ("hotspot", true);
                 if (design->photoScale > 0.0f)
                     b->getProperties().set ("sprite", (int) (&c - design->controls.data()));
+                if (! std::isnan (c.sprite.setValue))
+                {
+                    // A key that sets a value (a ratio key); shift-click: its other value (all keys in)
+                    b->onClick = [b, setValue, id = c.id, name = p->name, v = c.sprite.setValue, alt = c.sprite.altValue]
+                    {
+                        const auto shift = juce::ModifierKeys::currentModifiers.isShiftDown();
+                        setValue (id, name, shift && ! std::isnan (alt) ? alt : v);
+                        juce::ignoreUnused (b);
+                    };
+                    addAndMakeVisible (b);
+                    placed.component = b;
+                    break;
+                }
+                if (c.sprite.cycle)
+                {
+                    // A key that steps through the settings (Off, Soft, Hard, Clip...)
+                    const auto count = std::max (2, (int) p->choices.size());
+                    b->onClick = [setValue, current, id = c.id, name = p->name, count]
+                    {
+                        setValue (id, name, (float) ((juce::roundToInt (current (id)) + 1) % count));
+                    };
+                    addAndMakeVisible (b);
+                    placed.component = b;
+                    break;
+                }
+                if (c.sprite.choice >= 0 && c.sprite.radio)
+                {
+                    b->onClick = [setValue, id = c.id, name = p->name, choice = c.sprite.choice] { setValue (id, name, (float) choice); };
+                    addAndMakeVisible (b);
+                    placed.component = b;
+                    break;
+                }
                 if (c.sprite.choice >= 0)
                 {
                     // One setting of a switch (e.g. Silk's Red): lit at it; a click picks it, or goes back to the first setting
@@ -742,6 +836,13 @@ void EffectPanel::refresh()
             if (p.id == design->pageParam)
                 page = (float) (double) insert.getProperty (juce::Identifier (p.id), p.defaultValue);
         const auto shown = juce::roundToInt (page) + 1;
+        // (pages of different sizes: the face, and so its window, takes the page's)
+        if (juce::isPositiveAndBelow (shown - 1, (int) design->pageSizes.size()))
+        {
+            const auto size = design->pageSizes[(size_t) shown - 1];
+            if (getWidth() != size.x || getHeight() != size.y)
+                setSize (size.x, size.y);
+        }
         for (auto& placed : placedControls)
         {
             const auto visible = placed.control.page == 0 || placed.control.page == shown;

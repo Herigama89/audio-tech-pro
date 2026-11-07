@@ -57,6 +57,21 @@ namespace riff::effectdesign
         float onAngle = 0.0f, offAngle = 0.0f;// a two-way switch: where it points when on and off
         int choice = -1;                      // a button for one setting of a switch: lit at it; a click picks it, or goes back to the first
         float hitRadius = 0.0f;               // takes clicks only this far from the pivot (a knob inside a ring)
+
+        // A knob's printed scale: (angle, value) pairs, from the lowest setting; the knob turns between them
+        // (logMap: in proportion on a log scale), or snaps to them (stepped)
+        std::vector<std::pair<float, float>> map;
+        bool stepped = false, logMap = false;
+        juce::String autoParam {};            // the map's last stop switches this parameter on instead (a release knob's AUTO)
+        float offBelow = -1000.0f;            // turned further left than this angle: offParam off (an attack knob's OFF)
+        juce::String offParam {};
+        // A key that sets its parameter to a value (a ratio key); shift-click: altValue (all the ratio keys in)
+        float setValue = std::numeric_limits<float>::quiet_NaN(), altValue = std::numeric_limits<float>::quiet_NaN();
+        bool radio = false;                   // (a choice key: a click always picks it)
+        bool cycle = false;                   // a key that steps through its parameter's settings
+        // (a face with pages of different photos: this one's photo scale and where it sits; 0: the design's)
+        float scale = 0.0f;
+        juce::Point<float> offset {};
     };
 
     struct Control
@@ -76,6 +91,7 @@ namespace riff::effectdesign
     {
         int width = 800, height = 500;
         float photoScale = 0.0f;                // a photographed face: its photo's pixels to the face's (0: a drawn face)
+        std::vector<juce::Point<int>> pageSizes;  // (pages of different sizes: each page's, the window follows)
         juce::Point<int> photoOffset;           //  where the photo's top left sits on the face (a narrow module, centred in a wider window)
         std::vector<Control> controls;
         KnobStyle knobs = KnobStyle::dark;
@@ -124,6 +140,10 @@ namespace riff::effectdesign
     /** Draws the spectrum into a screen (0 dB at the top, -84 dB at the bottom), x from a frequency. */
     void drawSpectrum (juce::Graphics&, juce::Rectangle<float> screen, const std::function<float (double)>& xOf, juce::Colour colour);
 
+    /** A photographed knob's angle for a value, and the value at an angle (its printed scale). */
+    float photoAngleOf (const Sprite&, float value);
+    float photoValueAt (const Sprite&, float angle);
+
     /** A picture compiled into the app, by its BinaryData resource name (cached). */
     juce::Image skinImage (const char* name);
 
@@ -147,7 +167,7 @@ namespace riff::effectdesign
         juce::Label* createSliderTextBox (juce::Slider&) override;
         juce::Slider::SliderLayout getSliderLayout (juce::Slider&) override;
         juce::Colour hardwareLamp() const;
-        /** Draws a control's photographed moving part at a position (0..1) or on/off. */
+        /** Draws a control's photographed moving part at a position (0..1) or on/off (or at the component's "photoAngle"). */
         void drawSprite (juce::Graphics&, juce::Component&, const Sprite&, float pos, bool on, int settings);
 
         const Design& design;

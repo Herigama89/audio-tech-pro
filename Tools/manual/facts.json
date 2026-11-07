@@ -2328,6 +2328,162 @@
             "Off",
             "On"
           ]
+        },
+        {
+          "id": "power",
+          "name": "Power",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "compIn",
+          "name": "Compressor In",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Out",
+            "In"
+          ]
+        },
+        {
+          "id": "meterMode",
+          "name": "Meter",
+          "unit": "",
+          "min": 0.0,
+          "max": 3.0,
+          "default": 0.0,
+          "choices": [
+            "GR",
+            "+4",
+            "+8",
+            "Off"
+          ]
+        },
+        {
+          "id": "link",
+          "name": "Stereo Link",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "extSc",
+          "name": "External Side Chain",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "air",
+          "name": "Air",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "console",
+          "name": "Console",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "vcaDrive",
+          "name": "VCA Drive",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "emphasis",
+          "name": "HF Emphasis",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "impedance",
+          "name": "Input Impedance",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "10k",
+            "600"
+          ]
+        },
+        {
+          "id": "meterHold",
+          "name": "Meter Hold",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "scHpfStep",
+          "name": "S/C HPF",
+          "unit": "",
+          "min": 0.0,
+          "max": 5.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "30 Hz",
+            "60 Hz",
+            "105 Hz",
+            "125 Hz",
+            "185 Hz"
+          ]
+        },
+        {
+          "id": "optoLimit",
+          "name": "Limit/Compress",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Compress",
+            "Limit"
+          ]
         }
       ]
     },
@@ -27228,42 +27384,7 @@
       "recorded": true
     }
   ],
-  "library": [
-    "Grand Piano|Piano",
-    "Upright Piano|Piano",
-    "Electric Piano (Rhodes)|Keys",
-    "Electric Grand|Keys",
-    "Finger Bass|Bass",
-    "Pick Bass|Bass",
-    "Jazz Bass|Bass",
-    "Mirror Bass|Bass",
-    "Studio Bass|Bass",
-    "Killer Finger Bass|Bass",
-    "Nylon Guitar|Guitar",
-    "Steel Acoustic Guitar|Guitar",
-    "Clean Electric Guitar|Guitar",
-    "Hollow Electric Guitar|Guitar",
-    "Rock Kit|Drums",
-    "Violin Section|Strings",
-    "Viola Section|Strings",
-    "Cello Section|Strings",
-    "Pizzicato Violins|Strings",
-    "Pizzicato Cellos|Strings",
-    "Upright Bass (Jazz)|Bass",
-    "Tremolo Violins|Strings",
-    "Trumpet|Brass",
-    "French Horn|Brass",
-    "Trombone|Brass",
-    "Tuba|Brass",
-    "Trumpet Staccato|Brass",
-    "Flute|Winds",
-    "Oboe|Winds",
-    "Clarinet|Winds",
-    "Bassoon|Winds",
-    "Glockenspiel|Mallets",
-    "Marimba|Mallets",
-    "Harp|Strings"
-  ],
+  "library": [],
   "wavetables": [
     "Basic Shapes",
     "Pulse Width",

@@ -3397,8 +3397,19 @@ void MainComponent::openInsertWindow (const juce::ValueTree& insert)
         void resized() override
         {
             bar.setBounds (6, 4, InsertBar::preferredWidth, 24);
-            panel.setBounds (0, 32, getWidth(), getHeight() - 32);
+            if (! fitting)
+                panel.setBounds (0, 32, getWidth(), getHeight() - 32);
         }
+        // (a face whose pages differ in size: the window follows it)
+        void childBoundsChanged (juce::Component* child) override
+        {
+            if (child != &panel || fitting)
+                return;
+            const juce::ScopedValueSetter<bool> guard (fitting, true);
+            setSize (juce::jmax (panel.getWidth(), InsertBar::preferredWidth + 12), panel.getHeight() + 32);
+            panel.setTopLeftPosition (0, 32);
+        }
+        bool fitting = false;
         InsertBar bar;
         EffectPanel panel;
     };
