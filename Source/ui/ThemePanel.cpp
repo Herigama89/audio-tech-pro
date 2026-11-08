@@ -30,10 +30,10 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
 
     skinBox.addItemList ({ "Studio Grey (from your picture)", "Flat Dark (FL Studio style)", "Studio White (your fader, knob and meter photos)",
                            "Xenon (your dark glass console picture)", "Pro Tools style", "Ableton style",
-                           "REAPER theme (choose or load one below)" }, 1);
+                           "REAPER theme (choose or load one below)", "Neon Night (high-contrast dark modern)" }, 1);
     skinBox.onChange = [this]
     {
-        settings.skin = (theme::Skin) juce::jlimit (0, (int) theme::Skin::reaper, skinBox.getSelectedItemIndex());
+        settings.skin = (theme::Skin) juce::jlimit (0, (int) theme::Skin::neon, skinBox.getSelectedItemIndex());
         if (settings.skin == theme::Skin::reaper && settings.themePack.isEmpty())
             if (const auto themes = themepack::installed(); ! themes.isEmpty())
                 settings.themePack = themes.getFirst().getFullPathName();
@@ -183,6 +183,13 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
         { "Xenon",         { theme::Skin::xenon, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f } },
         { "Pro Tools",     { theme::Skin::protools, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f } },
         { "Ableton",       { theme::Skin::ableton, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f } },
+        { "Neon Night",    [] {
+              // High-Contrast Dark Modern: obsidian surfaces, cyan levels, lime waveforms, magenta peaks, smooth bars
+              theme::Settings s;
+              s.skin = theme::Skin::neon;
+              s.levelMeters = 1;
+              s.gridStyle = 3;
+              return s; }() },
         { "Dark VU",       [] {
               // From your mixer picture: dark grey strips, its fader caps, knobs, square keys, green meters and amber VUs
               theme::Settings s;

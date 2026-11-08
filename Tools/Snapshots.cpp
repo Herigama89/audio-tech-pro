@@ -690,6 +690,22 @@ public:
             main.project.setProperty ("mixerBusZone", side, nullptr);
         main.player.rebuildNow();
         main.showMixer();
+        if (const auto only = juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_SKIN", {}); only == "neon")
+        {
+            // Just the Neon Night skin: its mixer, then its arrange window
+            theme::Settings t;
+            t.skin = theme::Skin::neon;
+            t.levelMeters = 1;
+            t.gridStyle = 3;
+            main.applyTheme (t);
+            main.mixer.relayoutStrips();
+            pump (main, 300);
+            save (main, "neon-mixer.png");
+            main.closeMixer();
+            pump (main, 200);
+            save (main, "neon-arrange.png");
+            return 0;
+        }
         // The interface's preamps, from a real captured state (Tests/data/ucnet), with 48 V on input 1 and 32 dB of gain
         if (juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_PREAMP", {}).isNotEmpty())
         {
@@ -1639,10 +1655,12 @@ public:
                     break;
                 }
             main.timeline.changed();
-            for (auto [skin, name] : { std::pair { theme::Skin::protools, "protools" }, std::pair { theme::Skin::ableton, "ableton" } })
+            for (auto [skin, name] : { std::pair { theme::Skin::protools, "protools" }, std::pair { theme::Skin::ableton, "ableton" },
+                                       std::pair { theme::Skin::neon, "neon" } })
             {
                 theme::Settings t;
                 t.skin = skin;
+                if (skin == theme::Skin::neon) { t.levelMeters = 1; t.gridStyle = 3; }
                 main.applyTheme (t);
                 pump (main, 150);
                 save (main, juce::String (name) + "-arrange.png");

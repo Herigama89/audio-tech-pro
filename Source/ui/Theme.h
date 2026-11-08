@@ -93,7 +93,7 @@ namespace riff::theme
     // settings: the colours above are worked out from a skin's own palette and
     // these adjustments, and change while the app runs.
     //==========================================================================
-    enum class Skin { studio, flat, white, xenon, protools, ableton, reaper };   // the picture's grey console, a flat dark look, or Studio White (your photos' faders, knobs and meters)
+    enum class Skin { studio, flat, white, xenon, protools, ableton, reaper, neon };   // neon: High-Contrast Dark Modern (night mode: obsidian, cyan / lime / magenta signal colours)   // the picture's grey console, a flat dark look, or Studio White (your photos' faders, knobs and meters)
 
     struct Settings
     {
