@@ -42,9 +42,12 @@ namespace
     float holdSecondsFor (int index) { static const float s[] { 2.0f, 4.0f, 6.0f, -1.0f }; return s[juce::jlimit (0, 3, index)]; }
 }
 
-MultiMeterPanel::MultiMeterPanel (AudioEngine& e) : engine (e)
+MultiMeterPanel::MultiMeterPanel (AudioEngine& e) : MultiMeterPanel (e, {}) {}
+
+MultiMeterPanel::MultiMeterPanel (AudioEngine& e, std::function<int (float*, float*, int)> src) : engine (e), source (std::move (src))
 {
-    engine.setMasterTap (true);
+    if (! source)
+        engine.setMasterTap (true);
 
     auto setUpTab = [this] (juce::TextButton& b, bool gonio)
     {
@@ -139,7 +142,8 @@ MultiMeterPanel::MultiMeterPanel (AudioEngine& e) : engine (e)
 
 MultiMeterPanel::~MultiMeterPanel()
 {
-    engine.setMasterTap (false);
+    if (! source)
+        engine.setMasterTap (false);
 }
 
 void MultiMeterPanel::showGoniometer (bool gonio)
@@ -158,7 +162,8 @@ void MultiMeterPanel::timerCallback()
         loudness.prepare (rate);
         preparedRate = rate;
     }
-    const auto n = engine.readMaster (readL.data(), readR.data(), (int) readL.size());
+    const auto n = source ? source (readL.data(), readR.data(), (int) readL.size())
+                          : engine.readMaster (readL.data(), readR.data(), (int) readL.size());
     take (readL.data(), readR.data(), n);
 }
 

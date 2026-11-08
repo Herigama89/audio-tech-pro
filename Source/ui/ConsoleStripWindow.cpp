@@ -371,6 +371,23 @@ ConsoleStripWindow::ConsoleStripWindow (juce::ValueTree t, juce::UndoManager& um
     keyButton.onClick = [this] { showKeyMenu(); };
     addAndMakeVisible (keyButton);
 
+    // The track's MultiMeter under the EQ (when it's been given one)
+    meterButton.setClickingTogglesState (true);
+    meterButton.setToggleState ((bool) track.getProperty ("stripMeterShown", true), juce::dontSendNotification);
+    meterButton.setTooltip ("The track's MultiMeter under the EQ: analyzer, goniometer, loudness (LUFS), peak and RMS levels, correlation. "
+                            "Make the window taller for a bigger meter");
+    meterButton.setWantsKeyboardFocus (false);
+    meterButton.onClick = [this]
+    {
+        track.setProperty ("stripMeterShown", meterButton.getToggleState(), nullptr);
+        if (meter != nullptr)
+            meter->setVisible (meterButton.getToggleState());
+        if (onPreferredHeightChanged)
+            onPreferredHeightChanged();
+        resized();
+    };
+    addChildComponent (meterButton);
+
     // The analyzer behind the curve, and its settings
     addAndMakeVisible (analyzer);
     auto setupBox = [this] (juce::ComboBox& box, const juce::StringArray& items, int selected, const juce::String& tip)
@@ -572,11 +589,39 @@ void ConsoleStripWindow::applyAnalyzerOptions()
     analyzer.setOptions (o);
 }
 
+void ConsoleStripWindow::setMeter (std::unique_ptr<juce::Component> multiMeter)
+{
+    meter = std::move (multiMeter);
+    if (meter != nullptr)
+    {
+        addChildComponent (*meter);
+        meter->setVisible (meterButton.getToggleState());
+    }
+    meterButton.setVisible (meter != nullptr);
+    resized();
+}
+
+int ConsoleStripWindow::preferredHeight() const
+{
+    const auto base = faceHeight + margin + optionsHeight + curveHeight + margin;
+    return meter != nullptr && meterButton.getToggleState() ? base + 560 : base;
+}
+
+juce::Rectangle<int> ConsoleStripWindow::meterArea() const
+{
+    const auto top = curveArea().getBottom() + margin;
+    return { margin, top, getWidth() - margin * 2, juce::jmax (0, getHeight() - top - margin) };
+}
+
 void ConsoleStripWindow::resized()
 {
     analyzer.setBounds (curveArea().reduced (2));
+    if (meter != nullptr)
+        meter->setBounds (meterArea());
     auto row = optionsArea();
     keyButton.setBounds (row.removeFromRight (220).reduced (2, 0));
+    if (meterButton.isVisible())
+        meterButton.setBounds (row.removeFromRight (120).reduced (2, 0));
     const auto w = juce::jmin (130, row.getWidth() / 5);
     for (auto* box : { &modeBox, &fftBox, &rangeBox, &releaseBox, &holdBox })
         box->setBounds (row.removeFromLeft (w).reduced (2, 0));

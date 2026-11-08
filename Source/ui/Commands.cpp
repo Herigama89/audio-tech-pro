@@ -46,7 +46,7 @@ const std::vector<Info>& all()
         { closeProject,           "Close Project",              "File",      "Closes the project (asking to save changes first)" },
         { findMissingFiles,       "Find Missing Audio Files...", "File",     "Looks for audio files the project can't find, in a folder you choose" },
         { detectKey,              "Detect Song Key...",         "Edit",      "Listens to the song (or the selected regions) and finds its key and scale, to set as the project's key" },
-        { splitStems,             "Split to Stems...",          "Edit",      "Splits the selected audio regions into vocals, drums, bass and the rest (or six stems, with guitar and piano), each on a new track, as Logic's Stem Splitter does" },
+        { splitStems,             "Split to Stems...",          "Edit",      "Splits the selected audio regions into vocals, drums, bass and the rest (or six stems, with guitar and piano) - and the drums into kick, snare, toms, hi-hat and cymbals - each on a new track, as Logic's Stem Splitter does" },
         { muteRegions,            "Mute Regions",               "Edit",      "Mute or unmute the selected regions" },
         { nudgeLeft,              "Nudge Left",                 "Edit",      "Move the selected regions a 16th note earlier" },
         { nudgeRight,             "Nudge Right",                "Edit",      "Move the selected regions a 16th note later" },

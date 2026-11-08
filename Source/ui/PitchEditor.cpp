@@ -134,7 +134,9 @@ void PitchEditor::setupInspector()
         { &gainSlider, -30.0, 12.0, 0.0, "Gain of the selected notes (or all), in dB" },
         { &driftSlider, 0.0, 100.0, 0.0, "Pitch Drift: how much of the notes' slow drift (scoops, sags) is flattened (100%: none left)" },
         { &vibratoSlider, 0.0, 200.0, 100.0, "Vibrato: 0% none, 100% as sung, 200% twice as wide" },
-        { &formantSlider, -12.0, 12.0, 0.0, "Formant Shift: the voice's character darker or brighter, its pitch kept (semitones)" } };
+        { &formantSlider, -12.0, 12.0, 0.0, "Formant Shift: the voice's character darker or brighter, its pitch kept (semitones)" },
+        { &transitionSlider, 0.0, 100.0, 10.0, "Pitch Transition: how the voice glides into the note from the one before - low, a quick step; "
+                                               "high, a slow sung slide (natural for big moves)" } };
     for (const auto& spec : specs)
     {
         auto& s = *spec.slider;
@@ -154,7 +156,8 @@ void PitchEditor::setupInspector()
     strengthSlider.setTextValueSuffix ("");
     gainSlider.setTextValueSuffix (" dB");
 
-    for (const auto* text : { "Time Quantize", "Strength", "Scale Quantize", "Pitch Correction", "Gain", "Pitch Drift", "Vibrato", "Formant Shift" })
+    transitionSlider.setTextValueSuffix (" %");
+    for (const auto* text : { "Time Quantize", "Strength", "Scale Quantize", "Pitch Correction", "Gain", "Pitch Drift", "Vibrato", "Formant Shift", "Pitch Transition" })
     {
         auto* l = captions.add (new juce::Label ({}, text));
         l->setFont (juce::FontOptions (12.5f));
@@ -179,6 +182,7 @@ void PitchEditor::refreshInspector()
     driftSlider.setValue (e.drift * 100.0, juce::dontSendNotification);
     vibratoSlider.setValue (e.vibrato * 100.0, juce::dontSendNotification);
     formantSlider.setValue (e.formant, juce::dontSendNotification);
+    transitionSlider.setValue (e.transition * 100.0, juce::dontSendNotification);
 }
 
 void PitchEditor::sliderChanged (juce::Slider& s, bool finished)
@@ -194,10 +198,11 @@ void PitchEditor::sliderChanged (juce::Slider& s, bool finished)
         else if (&s == &driftSlider)    e.drift = v / 100.0;
         else if (&s == &vibratoSlider)  e.vibrato = v / 100.0;
         else if (&s == &formantSlider)  e.formant = v;
+        else if (&s == &transitionSlider) e.transition = v / 100.0;
     }
     if (finished)
         commit (&s == &correctionSlider ? "Pitch Correction" : &s == &gainSlider ? "Note Gain" : &s == &driftSlider ? "Pitch Drift"
-                : &s == &vibratoSlider ? "Vibrato" : "Formant Shift");
+                : &s == &vibratoSlider ? "Vibrato" : &s == &transitionSlider ? "Pitch Transition" : "Formant Shift");
     else
     {
         liveDirty = true;   // (heard as the slider moves)
@@ -1011,14 +1016,15 @@ void PitchEditor::resized()
     scaleLockButton.setBounds (panel.removeFromTop (row));
     panel.removeFromTop (10);
     for (auto [name, slider] : { std::pair { "Pitch Correction", &correctionSlider }, std::pair { "Gain", &gainSlider },
-                                 std::pair { "Pitch Drift", &driftSlider }, std::pair { "Vibrato", &vibratoSlider }, std::pair { "Formant Shift", &formantSlider } })
+                                 std::pair { "Pitch Drift", &driftSlider }, std::pair { "Vibrato", &vibratoSlider }, std::pair { "Formant Shift", &formantSlider },
+                                 std::pair { "Pitch Transition", &transitionSlider } })
     {
         caption (name)->setBounds (panel.removeFromTop (17));
         slider->setBounds (panel.removeFromTop (row));
         panel.removeFromTop (juce::String (name) == "Gain" ? 10 : 4);
     }
     const bool fits = panel.getHeight() >= 0;
-    for (auto* c : std::initializer_list<juce::Component*> { &driftSlider, &vibratoSlider, &formantSlider, caption ("Pitch Drift"), caption ("Vibrato"), caption ("Formant Shift") })
+    for (auto* c : std::initializer_list<juce::Component*> { &driftSlider, &vibratoSlider, &formantSlider, &transitionSlider, caption ("Pitch Drift"), caption ("Vibrato"), caption ("Formant Shift"), caption ("Pitch Transition") })
         c->setVisible (fits);   // (a short pane: they're in the Functions menu and on the notes' hot spots)
 }
 
@@ -1102,6 +1108,7 @@ void PitchEditor::showFunctionsMenu()
     m.addItem ("Set Vibrato to 0%", [this] { setForTargets ([] (auto& e) { e.vibrato = 0.0; }, "Vibrato to 0%"); });
     m.addItem ("Set Vibrato to 100% (as sung)", [this] { setForTargets ([] (auto& e) { e.vibrato = 1.0; }, "Vibrato to 100%"); });
     m.addItem ("Set Formant Shift to 0", [this] { setForTargets ([] (auto& e) { e.formant = 0.0; }, "Formant Shift to 0"); });
+    m.addItem ("Natural Transitions (slow glides between notes)", [this] { setForTargets ([] (auto& e) { e.transition = 0.45; }, "Natural Transitions"); });
     m.addItem ("Set Gain to 0 dB", [this] { setForTargets ([] (auto& e) { e.gain = 0.0; }, "Gain to 0 dB"); });
     m.addItem ("Set Time Back (as sung)", [this] { liveWhole = true; setForTargets ([] (auto& e) { e.time = 0.0; }, "Time as Sung"); });
     m.addSeparator();

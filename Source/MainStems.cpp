@@ -4,6 +4,7 @@
 #include "MainComponent.h"
 #include "engine/AudioEdit.h"
 #include "engine/StemSeparator.h"
+#include "engine/DrumSplitter.h"
 #include "model/Project.h"
 
 namespace riff
@@ -24,6 +25,11 @@ namespace
         if (stem == "Bass")   return juce::Colour (0xff5c8ee6);
         if (stem == "Guitar") return juce::Colour (0xff6cc070);
         if (stem == "Piano")  return juce::Colour (0xffb07ce0);
+        if (stem == "Kick")   return juce::Colour (0xffe8743a);
+        if (stem == "Snare")  return juce::Colour (0xffe8c23a);
+        if (stem == "Toms")   return juce::Colour (0xffd0903a);
+        if (stem == "Hi-Hat") return juce::Colour (0xff3ac8e8);
+        if (stem == "Cymbals") return juce::Colour (0xff3a9ae8);
         return juce::Colour (0xff8a9aa8);   // Other
     }
 
@@ -35,9 +41,14 @@ namespace
         {
             model.addItem ("4 stems: Vocals, Drums, Bass, Other", 1);
             model.addItem ("6 stems: adds Guitar and Piano", 2);
+            model.addItem ("Drum parts (a drum recording): Kick, Snare, Toms, Hi-Hat, Cymbals", 3);
             model.setSelectedId (1, juce::dontSendNotification);
             model.onChange = [this] { update(); };
             addAndMakeVisible (model);
+            drumParts.setToggleState (true, juce::dontSendNotification);
+            drumParts.setTooltip ("The drum stem taken apart too: a track each for the kick, snare, toms, hi-hat and cymbals (as Logic's Stem Splitter)");
+            drumParts.onClick = [this] { update(); };
+            addAndMakeVisible (drumParts);
             for (const auto& name : stemNames6())
             {
                 auto* b = boxes.add (new juce::ToggleButton (name));
@@ -45,10 +56,14 @@ namespace
                 addAndMakeVisible (b);
             }
             update();
-            setSize (360, 84);
+            setSize (420, 112);
         }
 
         bool six() const { return model.getSelectedId() == 2; }
+        /** Only the drum parts: the region is drums already, no stem model needed. */
+        bool drumsOnly() const { return model.getSelectedId() == 3; }
+        /** The drum stem split into its parts as well. */
+        bool splitDrums() const { return drumsOnly() || (drumParts.getToggleState() && chosen().contains ("Drums")); }
 
         juce::StringArray chosen() const
         {
@@ -70,16 +85,20 @@ namespace
                 auto& row = i < 3 ? row1 : row2;
                 boxes[i]->setBounds (row.removeFromLeft (getWidth() / 3));
             }
+            area.removeFromTop (4);
+            drumParts.setBounds (area.removeFromTop (24));
         }
 
     private:
         void update()
         {
             for (auto* b : boxes)
-                b->setEnabled (six() || (b->getButtonText() != "Guitar" && b->getButtonText() != "Piano"));
+                b->setEnabled (! drumsOnly() && (six() || (b->getButtonText() != "Guitar" && b->getButtonText() != "Piano")));
+            drumParts.setEnabled (! drumsOnly());
         }
 
         juce::ComboBox model;
+        juce::ToggleButton drumParts { "Split the drums into Kick, Snare, Toms, Hi-Hat and Cymbals" };
         juce::OwnedArray<juce::ToggleButton> boxes;
     };
 
@@ -96,13 +115,62 @@ namespace
     {
     public:
         StemJob (juce::AudioFormatManager& f, std::vector<Piece> p, bool six, juce::StringArray keep, juce::File folder,
-                 std::function<void (const juce::String&, std::vector<Piece>&)> done)
+                 bool parts, bool onlyDrums, std::function<void (const juce::String&, std::vector<Piece>&)> done)
             : ThreadWithProgressWindow ("Split to Stems", true, true),
               formats (f), pieces (std::move (p)), sixStems (six), wanted (std::move (keep)), dest (std::move (folder)),
-              onDone (std::move (done)) {}
+              drumParts (parts), drumsOnly (onlyDrums), onDone (std::move (done)) {}
+
+        /** A drum recording (or stem) into its parts, each written and added to the piece's stems. */
+        bool splitDrums (Piece& piece, const juce::AudioBuffer<float>& drums, double rate, double base, double share)
+        {
+            setStatusMessage ("Splitting the drums of \"" + piece.name + "\" into kick, snare, toms, hi-hat and cymbals...");
+            const auto parts = drumsplit::split (drums, rate, [&] (float p)
+            {
+                setProgress (base + share * p);
+                return ! threadShouldExit();
+            });
+            if (parts.empty())
+            {
+                if (error.isEmpty())
+                    error = threadShouldExit() ? "cancelled" : "The drums were silent";
+                return false;
+            }
+            const auto names = drumsplit::partNames();
+            for (int i = 0; i < (int) parts.size(); ++i)
+            {
+                const auto file = dest.getNonexistentChildFile (juce::File::createLegalFileName (piece.name + " " + names[i]), ".wav", false);
+                if (const auto e = write (parts[(size_t) i], file, rate); e.isNotEmpty())
+                {
+                    error = e;
+                    return false;
+                }
+                piece.stems.emplace_back (names[i], file);
+            }
+            return true;
+        }
 
         void run() override
         {
+            if (drumsOnly)
+            {
+                // A drum recording: just its parts (no stem model to load)
+                for (size_t i = 0; i < pieces.size() && ! threadShouldExit(); ++i)
+                {
+                    auto& piece = pieces[i];
+                    double rate = 0.0;
+                    const auto audio = audioedit::readRegion (formats, piece.file, piece.offset, piece.length, rate);
+                    if (audio.getNumSamples() == 0 || rate <= 0.0)
+                    {
+                        error = "Couldn't read " + piece.file.getFileName();
+                        return;
+                    }
+                    if (! splitDrums (piece, audio, rate, (double) i / (double) pieces.size(), 1.0 / (double) pieces.size()))
+                        return;
+                }
+                if (threadShouldExit())
+                    error = "cancelled";
+                return;
+            }
             if (! stems::Files::present (sixStems))
             {
                 error = stems::download (sixStems, [this] (float p, const juce::String& what)
@@ -156,6 +224,13 @@ namespace
                 {
                     if (! wanted.contains (names[s]))
                         continue;
+                    if (drumParts && names[s] == "Drums")
+                    {
+                        // (the drum stem taken apart instead: a track per part)
+                        if (! splitDrums (piece, result[(size_t) s], stems::sampleRate, base + share * 0.9, share * 0.1))
+                            return;
+                        continue;
+                    }
                     const auto file = dest.getNonexistentChildFile (juce::File::createLegalFileName (piece.name + " " + names[s]), ".wav", false);
                     if (const auto e = write (result[(size_t) s], file); e.isNotEmpty())
                     {
@@ -176,13 +251,13 @@ namespace
         }
 
     private:
-        static juce::String write (const juce::AudioBuffer<float>& audio, const juce::File& file)
+        static juce::String write (const juce::AudioBuffer<float>& audio, const juce::File& file, double rate = stems::sampleRate)
         {
             if (! file.getParentDirectory().createDirectory())
                 return "Couldn't create " + file.getParentDirectory().getFullPathName();
             std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
             juce::WavAudioFormat wav;
-            auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (stems::sampleRate)
+            auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (rate)
                                                            .withNumChannels (2).withBitsPerSample (24));
             if (writer == nullptr)
                 return "Couldn't write " + file.getFullPathName();
@@ -194,6 +269,7 @@ namespace
         std::vector<Piece> pieces;
         bool sixStems;
         juce::StringArray wanted;
+        bool drumParts = false, drumsOnly = false;
         juce::File dest;
         std::function<void (const juce::String&, std::vector<Piece>&)> onDone;
         juce::String error;
@@ -250,9 +326,10 @@ void MainComponent::splitToStems()
         window->removeChildComponent (choices.get());   // ours, not the window's
         const auto six = choices->six();
         const auto keep = choices->chosen();
+        const auto drumsOnly = choices->drumsOnly(), drumParts = choices->splitDrums();
         if (result != 1 || safe == nullptr)
             return;
-        if (keep.isEmpty())
+        if (keep.isEmpty() && ! drumsOnly)
         {
             safe->showError ("Split to Stems", "Choose at least one stem to keep.");
             return;
@@ -260,7 +337,7 @@ void MainComponent::splitToStems()
         auto& self = *safe;
         const auto folder = self.recordingFolder().getChildFile ("Stems");
 
-        auto* job = new StemJob (self.engine.getFormatManager(), std::move (pieces), six, keep, folder,
+        auto* job = new StemJob (self.engine.getFormatManager(), std::move (pieces), six, keep, folder, drumParts, drumsOnly,
             [safe] (const juce::String& error, std::vector<Piece>& done)
         {
             if (safe == nullptr)

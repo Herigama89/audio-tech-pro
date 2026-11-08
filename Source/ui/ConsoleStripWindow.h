@@ -39,6 +39,13 @@ public:
     std::function<std::optional<bool>()> interfacePhantom;
     std::function<void (bool)> setInterfacePhantom;
 
+    /** The track's full MultiMeter (analyzer, goniometer, loudness, levels, correlation) under the EQ: shown with the
+        METER key, as tall as the window is made. The window owns it. */
+    void setMeter (std::unique_ptr<juce::Component> multiMeter);
+    /** How tall the window wants to be (the meter shown or not). */
+    int preferredHeight() const;
+    std::function<void()> onPreferredHeightChanged;
+
     void paint (juce::Graphics& g) override;
     void paintOverChildren (juce::Graphics& g) override;
     void resized() override;
@@ -87,6 +94,9 @@ private:
     SpectrumAnalyzer analyzer;
     juce::ComboBox modeBox, fftBox, rangeBox, releaseBox, holdBox;
     juce::TextButton keyButton;
+    juce::TextButton meterButton { "MultiMeter" };
+    std::unique_ptr<juce::Component> meter;
+    juce::Rectangle<int> meterArea() const;
     void applyAnalyzerOptions();
     juce::Rectangle<int> curveArea() const;
     juce::Rectangle<int> optionsArea() const;

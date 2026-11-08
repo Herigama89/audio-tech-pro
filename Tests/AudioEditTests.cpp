@@ -637,3 +637,119 @@ TEST_CASE ("Flex Pitch: straightening vibrato and drift sounds clean (no added n
     INFO ("noise between harmonics: " << juce::Decibels::gainToDecibels (std::sqrt (ratio)) << " dB");
     CHECK (juce::Decibels::gainToDecibels (std::sqrt (ratio)) < -30.0);
 }
+
+TEST_CASE ("Flex Pitch: Pitch Transition glides between moved notes, slow or quick", "[pitch]")
+{
+    // Two notes sung straight after each other; the second moved up 4 semitones
+    constexpr double rate = 48000.0;
+    juce::AudioBuffer<float> voice (1, (int) (1.4 * rate));
+    voice.clear();
+    double phase = 0.0;
+    for (int i = (int) (0.05 * rate); i < (int) (1.35 * rate); ++i)
+    {
+        const auto f = i < (int) (0.7 * rate) ? 220.0 : 246.94;
+        phase += juce::MathConstants<double>::twoPi * f / rate;
+        voice.setSample (0, i, (float) (0.3 * std::sin (phase) + 0.12 * std::sin (2.0 * phase) + 0.06 * std::sin (3.0 * phase)));
+    }
+    const auto analysis = pitchcorrect::analyse (voice, rate);
+    REQUIRE (analysis.notes.size() == 2);
+    const auto glideLength = [&] (double transition)
+    {
+        std::vector<pitchcorrect::NoteEdit> edits (2);
+        edits[1].shift = 4.0;
+        edits[1].transition = transition;
+        const auto again = pitchcorrect::analyse (pitchcorrect::render (voice, analysis, edits), rate);
+        // frames between the first note's pitch and the second's new one
+        const auto from = analysis.notes[0].centre + 0.5, to = analysis.notes[1].centre + 3.5;
+        int inBetween = 0;
+        for (const auto m : again.midi)
+            if (m > from && m < to)
+                ++inBetween;
+        return inBetween * again.hop / rate;
+    };
+    const auto quick = glideLength (0.0), slow = glideLength (1.0);
+    INFO ("quick " << quick << " s, slow " << slow << " s");
+    CHECK (quick < 0.06);
+    CHECK (slow > quick + 0.08);
+    // (kept with the edits)
+    std::vector<pitchcorrect::NoteEdit> edits (2);
+    edits[1].transition = 0.7;
+    CHECK_THAT (pitchcorrect::fromString (pitchcorrect::toString (edits), 2)[1].transition, WithinAbs (0.7, 1.0e-3));
+}
+
+#include "../Source/engine/DrumSplitter.h"
+
+TEST_CASE ("Drum parts: a kit split into kick, snare, toms, hi-hat and cymbals, adding back up", "[stems]")
+{
+    constexpr double rate = 44100.0;
+    const int n = (int) (8.0 * rate);
+    juce::Random random (11);
+    // Each instrument on its own, then all together
+    std::vector<juce::AudioBuffer<float>> alone;
+    for (int i = 0; i < 5; ++i) { alone.emplace_back (2, n); alone.back().clear(); }
+    const auto beat = rate * 0.5;   // 120 bpm
+    juce::IIRFilter hp1, hp2;
+    hp1.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, 7000.0));
+    hp2.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, 3500.0));
+    double kickPhase = 0.0;
+    for (int s = 0; s < n; ++s)
+    {
+        const auto inBeat = std::fmod ((double) s, beat), inBar = std::fmod ((double) s, beat * 4.0);
+        const auto noise = random.nextFloat() * 2.0f - 1.0f;
+        // kick on 1 and 3: a falling sine
+        const auto kt = std::fmod ((double) s, beat * 2.0) / rate;
+        kickPhase += juce::MathConstants<double>::twoPi * (50.0 + 90.0 * std::exp (-kt * 30.0)) / rate;
+        alone[0].setSample (0, s, (float) (0.8 * std::sin (kickPhase) * std::exp (-kt * 9.0)));
+        // snare on 2 and 4: a 190 Hz body and noise
+        const auto st = std::fmod ((double) s + beat, beat * 2.0) / rate;
+        alone[1].setSample (0, s, (float) ((0.4 * std::sin (juce::MathConstants<double>::twoPi * 190.0 * st) + 0.35 * noise) * std::exp (-st * 18.0)));
+        // a tom at the end of each bar
+        const auto tt = (inBar - beat * 3.5) / rate;
+        alone[2].setSample (0, s, tt > 0.0 ? (float) (0.6 * std::sin (juce::MathConstants<double>::twoPi * 110.0 * tt) * std::exp (-tt * 7.0)) : 0.0f);
+        // closed hats on every eighth
+        const auto ht = std::fmod ((double) s, beat * 0.5) / rate;
+        alone[3].setSample (0, s, hp1.processSingleSampleRaw (noise) * 0.5f * (float) std::exp (-ht * 60.0));
+        // a crash ringing from each bar's start
+        alone[4].setSample (0, s, hp2.processSingleSampleRaw (random.nextFloat() * 2.0f - 1.0f) * 0.25f * (float) std::exp (-(inBar / rate) * 1.2));
+        juce::ignoreUnused (inBeat);
+    }
+    juce::AudioBuffer<float> kit (2, n);
+    kit.clear();
+    for (auto& a : alone)
+    {
+        a.copyFrom (1, 0, a, 0, 0, n);
+        for (int c = 0; c < 2; ++c)
+            kit.addFrom (c, 0, a, c, 0, n);
+    }
+
+    const auto parts = drumsplit::split (kit, rate);
+    REQUIRE (parts.size() == 5);
+    // they add back up to the kit
+    double err = 0.0, energy = 0.0;
+    for (int s = 4096; s < n - 4096; ++s)
+    {
+        float sum = 0.0f;
+        for (const auto& p : parts) sum += p.getSample (0, s);
+        err += juce::square ((double) sum - kit.getSample (0, s));
+        energy += juce::square ((double) kit.getSample (0, s));
+    }
+    CHECK (10.0 * std::log10 (energy / juce::jmax (1.0e-12, err)) > 30.0);
+    // each part is mostly its own instrument: closer to it than to any other
+    const auto similarity = [&] (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b)
+    {
+        double ab = 0.0, aa = 0.0, bb = 0.0;
+        for (int s = 0; s < n; ++s)
+        {
+            ab += (double) a.getSample (0, s) * b.getSample (0, s);
+            aa += juce::square ((double) a.getSample (0, s));
+            bb += juce::square ((double) b.getSample (0, s));
+        }
+        return ab / std::sqrt (juce::jmax (1.0e-12, aa * bb));
+    };
+    for (int p = 0; p < 5; ++p)
+    {
+        double own = similarity (parts[(size_t) p], alone[(size_t) p]);
+        INFO (drumsplit::partNames()[p] << ": " << own);
+        CHECK (own > 0.5);
+    }
+}

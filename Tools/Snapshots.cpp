@@ -208,7 +208,22 @@ public:
                     }
                     return n;
                 }, [] { return 48000.0; }, [] { return std::array<float, 5> { 0.5f, 0.45f, 7.5f, 4.0f, 3.5f }; });
-                for (int i = 0; i < 12; ++i)
+                // (its MultiMeter, fed something music-like)
+                static AudioEngine meterEngine;
+                strip.setMeter (std::make_unique<MultiMeterPanel> (meterEngine, [phase = 0.0, random = juce::Random (5)] (float* l, float* r, int max) mutable
+                {
+                    const int n = juce::jmin (max, 1600);
+                    for (int i = 0; i < n; ++i)
+                    {
+                        phase += 0.0143;
+                        const auto noise = random.nextFloat() * 2.0f - 1.0f;
+                        l[i] = (float) (0.3 * std::sin (phase) + 0.1 * std::sin (phase * 3.01)) + 0.08f * noise;
+                        r[i] = (float) (0.28 * std::sin (phase + 0.3) + 0.1 * std::sin (phase * 2.0)) + 0.08f * noise;
+                    }
+                    return n;
+                }));
+                strip.setSize (strip.getWidth(), strip.preferredHeight());
+                for (int i = 0; i < 40; ++i)
                     juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
                 save (strip, "fx-" + spec.replaceCharacters (":=,", "_-_").substring (0, 120) + ".png");
                 continue;
@@ -661,7 +676,51 @@ public:
             main.mixer.narrowButton.setToggleState (true, juce::sendNotification);
             main.mixer.resized();
             { juce::Graphics g (canvasImage); main.paintEntireComponent (g, true); }
+            CALLGRIND_START_INSTRUMENTATION;
             auto frameNarrow = meterFrame();
+            CALLGRIND_STOP_INSTRUMENTATION;
+            if (std::getenv ("RIFF_PERF_DETAIL") != nullptr && ! main.mixer.strips.isEmpty())
+            {
+                // Where a meter's repaint goes: each ancestor's own paint and every component painted in that rect
+                auto* st = main.mixer.strips[3];
+                const auto r = main.getLocalArea (&st->meter, st->meter.getLocalBounds()).getSmallestIntegerContainer();
+                std::function<void (juce::Component&, juce::Graphics&, int)> walk = [&] (juce::Component& c, juce::Graphics& g, int depth)
+                {
+                    if (! c.isVisible()) return;
+                    const auto local = c.getLocalArea (&main, r);
+                    if (! c.getLocalBounds().intersects (local)) return;
+                    juce::Graphics::ScopedSaveState ss (g);
+                    g.reduceClipRegion (local);
+                    const auto t0 = juce::Time::getMillisecondCounterHiRes();
+                    for (int i = 0; i < 20; ++i) c.paint (g);
+                    const auto t = (juce::Time::getMillisecondCounterHiRes() - t0) / 20.0;
+                    std::cout << "   DETAIL " << juce::String::repeatedString (" ", depth) << typeid (c).name() << " " << c.getComponentID()
+                              << " opaque=" << c.isOpaque() << " own paint " << juce::String (t, 3) << " ms" << std::endl;
+                    for (auto* child : c.getChildren())
+                    {
+                        juce::Graphics::ScopedSaveState s2 (g);
+                        g.setOrigin (child->getPosition());
+                        walk (*child, g, depth + 1);
+                    }
+                };
+                juce::Graphics g (canvasImage);
+                walk (main, g, 0);
+                for (auto* comp : { (juce::Component*) &main, (juce::Component*) &main.mixer, (juce::Component*) st })
+                {
+                    const auto local = comp->getLocalArea (&main, r);
+                    const auto t0 = juce::Time::getMillisecondCounterHiRes();
+                    for (int i = 0; i < 20; ++i)
+                    {
+                        juce::Graphics g2 (canvasImage);
+                        g2.reduceClipRegion (local);
+                        comp->paintEntireComponent (g2, true);
+                    }
+                    std::cout << "   ENTIRE " << typeid (*comp).name() << " " << juce::String ((juce::Time::getMillisecondCounterHiRes() - t0) / 20.0, 3) << " ms" << std::endl;
+                    const auto t1 = juce::Time::getMillisecondCounterHiRes();
+                    for (int i = 0; i < 20; ++i) { juce::Graphics g2 (canvasImage); g2.reduceClipRegion (local); comp->paintOverChildren (g2); }
+                    std::cout << "   OVER " << typeid (*comp).name() << " " << juce::String ((juce::Time::getMillisecondCounterHiRes() - t1) / 20.0, 3) << " ms" << std::endl;
+                }
+            }
             for (int rep = juce::SystemStats::getEnvironmentVariable ("RIFF_PERF_NARROW_REPEAT", "0").getIntValue(); --rep >= 0;)
                 frameNarrow = meterFrame();
             main.mixer.narrowButton.setToggleState (false, juce::sendNotification);

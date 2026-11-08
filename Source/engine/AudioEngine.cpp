@@ -2121,6 +2121,16 @@ bool AudioEngine::processTrack (const PlaybackGraph::Track& track, Pass& pass, c
 
     storeMax (stripOutPeaks[(size_t) track.slot], peakOf (tL, tR));
 
+    // A strip window's MultiMeter: the track's sound after its strip, in stereo
+    if (track.slot == stripTapSlot.load (std::memory_order_relaxed))
+    {
+        const auto scope = stripTapFifo.write (juce::jmin (n, stripTapFifo.getFreeSpace()));
+        std::copy_n (tL, scope.blockSize1, stripTapL.data() + scope.startIndex1);
+        std::copy_n (tR, scope.blockSize1, stripTapR.data() + scope.startIndex1);
+        std::copy_n (tL + scope.blockSize1, scope.blockSize2, stripTapL.data() + scope.startIndex2);
+        std::copy_n (tR + scope.blockSize1, scope.blockSize2, stripTapR.data() + scope.startIndex2);
+    }
+
     // The spectrum analyzer's track: its sound after the EQ, in mono.
     if (track.slot == analyzerSlot.load (std::memory_order_relaxed))
     {

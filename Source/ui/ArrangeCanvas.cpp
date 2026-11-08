@@ -830,9 +830,10 @@ void ArrangeCanvas::setWaveformFill (juce::Graphics& g, juce::Colour trackColour
         default:
             if (theme::glassSkin() && ! live)
             {
-                // Liquid Glass: the waveform in the track's own colour, bright on the glass
+                // Liquid Glass: the waveform in the track's own colour, bright on the glass (a solid colour: a gradient
+                // re-worked for every one of a waveform's thousands of little bars is what made the tracks area crawl)
                 const auto c = theme::glassLight() ? trackColour.darker (0.1f) : trackColour.brighter (0.35f);
-                g.setGradientFill (juce::ColourGradient (c.brighter (0.25f), 0.0f, area.getY(), c, 0.0f, area.getBottom(), false));
+                g.setColour (c.brighter (0.1f));
                 break;
             }
             g.setColour (live ? theme::waveform.withAlpha (0.95f) : trackColour.brighter (0.75f).withAlpha (0.95f)); break;
@@ -1159,9 +1160,26 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
             const auto tStart = offset + (x0 - body.getX()) / timeline.pixelsPerSecond;
             const auto tEnd   = offset + (x1 - body.getX()) / timeline.pixelsPerSecond;
 
-            setWaveformFill (g, colour, bounds);
-            thumb.drawChannels (g, juce::Rectangle<float> (x0, body.getY(), x1 - x0, body.getHeight()).toNearestInt(),
-                                tStart, tEnd, (float) (double) region.getProperty (ids::gain, 1.0) * timeline.waveformZoom);
+            const auto level = (float) (double) region.getProperty (ids::gain, 1.0) * timeline.waveformZoom;
+            if (theme::waveformMode() == 2)
+            {
+                // The gradient theme: drawn in strips of solid colour across the region (looks the same; a real gradient
+                // under every bar is many times slower)
+                constexpr float strip = 24.0f;
+                for (auto sx = x0; sx < x1; sx += strip)
+                {
+                    const auto ex = juce::jmin (x1, sx + strip);
+                    const auto t = juce::jlimit (0.0f, 1.0f, ((sx + ex) * 0.5f - bounds.getX()) / juce::jmax (1.0f, bounds.getWidth()));
+                    g.setColour (theme::waveformA().interpolatedWith (theme::waveformB(), t));
+                    const auto a = offset + (sx - body.getX()) / timeline.pixelsPerSecond, b = offset + (ex - body.getX()) / timeline.pixelsPerSecond;
+                    thumb.drawChannels (g, juce::Rectangle<float> (sx, body.getY(), ex - sx, body.getHeight()).toNearestInt(), a, b, level);
+                }
+            }
+            else
+            {
+                setWaveformFill (g, colour, bounds);
+                thumb.drawChannels (g, juce::Rectangle<float> (x0, body.getY(), x1 - x0, body.getHeight()).toNearestInt(), tStart, tEnd, level);
+            }
         }
     }
 

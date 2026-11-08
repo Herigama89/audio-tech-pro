@@ -2,6 +2,7 @@
 #include "ui/NemixPanel.h"
 #include "ui/InsertBar.h"
 #include "MainComponent.h"
+#include "ui/MultiMeter.h"
 #include "ui/PluginWindowKeys.h"
 #include "ui/PluginHostPanel.h"
 #include "ui/Skin.h"
@@ -786,7 +787,26 @@ MainComponent::MainComponent (bool openAudioDevice)
             for (const auto c : preampsOf())
                 interfaceControl.setPhantom (c, on);
         };
-        editorWindows[id] = makePinnedWindow (track[ids::name].toString() + ": Channel Strip", stripWindow, false, closer, "pinStripWindow");
+        // The track's own MultiMeter under the EQ (the engine taps this track's sound for it)
+        {
+            const auto slot = player.slotOf (track[ids::id].toString());
+            engine.setStripTapSlot (slot);
+            stripWindow->setMeter (std::make_unique<MultiMeterPanel> (engine, [this, slot] (float* l, float* r, int max)
+            {
+                // (the last strip window brought up meters its track; another one's meter waits)
+                return engine.getStripTapSlot() == slot ? engine.readStripTap (l, r, max) : 0;
+            }));
+            stripWindow->setSize (stripWindow->getWidth(), stripWindow->preferredHeight());
+        }
+        editorWindows[id] = makePinnedWindow (track[ids::name].toString() + ": Channel Strip", stripWindow, true, closer, "pinStripWindow");
+        if (auto* window = editorWindows[id].get())
+        {
+            window->setResizeLimits (800, 300, 4000, 3000);
+            stripWindow->onPreferredHeightChanged = [stripWindow, window]
+            {
+                window->setSize (window->getWidth(), window->getHeight() - stripWindow->getHeight() + stripWindow->preferredHeight());
+            };
+        }
     };
     routing::createStack = [this] (bool summing) { createStackFromSelection (summing); };
     TrackHeader::pluginParameterNames = [this] (const juce::String& insertId)
@@ -3291,21 +3311,33 @@ void MainComponent::removeExtension (juce::Array<juce::ValueTree> regions)
 {
     undoManager.beginNewTransaction ("Remove Extension");
     std::set<juce::String> tracks;
-    for (auto region : regions)
+    std::set<juce::String> leaving;
+    for (const auto& region : regions)
     {
-        region.setProperty (ids::araEdit, false, &undoManager);
         tracks.insert (region.getParent()[ids::id].toString());
+        leaving.insert (region[ids::id].toString());
     }
-    // A track with no Extension regions left loses the plugin it was given as one.
+    // A track with no Extension regions left loses the plugin it was given as one - taken out first (its window closed,
+    // then the plugin), so it never has to take on the whole track's audio on its way out
     for (const auto& id : tracks)
     {
         auto track = model::findById (project, id);
-        if (! track.isValid() || model::hasAraRegions (track))
+        if (! track.isValid())
+            continue;
+        bool othersStay = false;
+        for (const auto& r : track)
+            othersStay = othersStay || (r.hasType (ids::REGION) && (bool) r[ids::araEdit] && leaving.count (r[ids::id].toString()) == 0);
+        if (othersStay)
             continue;
         for (const auto& insert : model::insertsOf (model::findChain (project, id)))
             if ((bool) insert.getProperty ("araExtension", false))
+            {
+                editorWindows.erase (insert[ids::id].toString());
                 model::removeInsert (insert, &undoManager);
+            }
     }
+    for (auto region : regions)
+        region.setProperty (ids::araEdit, false, &undoManager);
 }
 
 void MainComponent::copyInsertToSelected (juce::ValueTree insert)

@@ -51,6 +51,9 @@ public:
 
     juce::AudioPluginInstance& getPlugin() noexcept { return *plugin; }
 
+    /** Keeps a detached ARA document until this plugin instance has gone. */
+    void retireAra (std::unique_ptr<AraDocument> doc) { retiredAra = std::move (doc); }
+
     /** Hears knob moves made in the plugin's own window: (parameter index, value 0..1, phase: 0 grab, 1 move, 2 let go).
         Called on the message thread. */
     void watchParameters (std::function<void (int, float, int)> callback);
@@ -83,6 +86,8 @@ private:
     std::atomic<bool> rendersRegions { false }, extensionMode { false };
     int preparedBlock = 0;
 
+    // (declared before the plugin, so destroyed after it: an ARA document outlives the instance bound to it)
+    std::unique_ptr<AraDocument> retiredAra;
     std::unique_ptr<juce::AudioPluginInstance> plugin;
     juce::AudioBuffer<float> buffer;
     juce::MidiBuffer noMidi;
@@ -189,7 +194,12 @@ private:
     std::map<juce::String, Entry> entries;
     juce::AudioFormatManager* audioFormats = nullptr;
     std::map<juce::String, std::unique_ptr<AraDocument>> araDocs;   // (declared after entries: they go first)
-    void dropAra (const juce::String& insertId) { araDocs.erase (insertId); }
+    /** An insert's ARA document out of use: its regions leave the plugin now, and the document itself goes only after
+        the plugin instance (ARA: a document controller must outlive the plugins bound to it - else Melodyne & co. crash). */
+    void dropAra (const juce::String& insertId);
+public:
+    ~EffectRack();
+private:
     std::shared_ptr<bool> alive = std::make_shared<bool> (true);
 };
 

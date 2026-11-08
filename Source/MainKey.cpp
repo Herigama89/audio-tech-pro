@@ -123,6 +123,10 @@ void MainComponent::setGpuDrawing (bool on)
         openGL->setComponentPaintingEnabled (true);
         openGL->setContinuousRepainting (false);   // (only what changed is drawn, as before - by the graphics card)
         openGL->setMultisamplingEnabled (false);
+        // (room on the graphics card for every picture the window draws - strip faces, meters, plugin faces, VUs.
+        // JUCE keeps 8 MB by default: a mixer's strip faces alone are more, so they were sent to the card again
+        // every frame - the lag that grew with the number of channels)
+        openGL->setImageCacheSize ((size_t) 512 * 1024 * 1024);
         openGL->attachTo (*this);
     }
     else if (! on && openGL != nullptr)

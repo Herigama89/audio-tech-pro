@@ -249,7 +249,33 @@ juce::AudioBuffer<float> synthesise (const juce::AudioBuffer<float>& audio, cons
         }
         return out;
     };
-    shift = smooth (shift, 3);   // (~20 ms: a note glides into its new pitch rather than jumping)
+    // Each note glides into its new pitch over its Pitch Transition (an S-curve, centred on where it starts), and out
+    // of it into a gap the same way - a voice slides between notes, it doesn't jump
+    {
+        const auto plain = shift;
+        const auto glideFrames = [&] (const NoteEdit& e) { return juce::jmax (2, (int) std::lround ((0.02 + juce::jlimit (0.0, 1.0, e.transition) * 0.25) * rate / a.hop)); };
+        const auto ramp = [&] (int at, int length, int lo, int hi)
+        {
+            const auto from = plain[(size_t) juce::jlimit (0, frames - 1, at - 1)], to = plain[(size_t) juce::jlimit (0, frames - 1, at)];
+            if (std::abs (to - from) < 1.0e-6)
+                return;
+            const int first = juce::jmax (lo, at - length / 2), last = juce::jmin (hi, at + length - length / 2);
+            for (int f = juce::jmax (0, first); f < juce::jmin (frames, last); ++f)
+            {
+                const auto t = (double) (f - first) / (double) juce::jmax (1, last - first);
+                shift[(size_t) f] = from + (to - from) * t * t * (3.0 - 2.0 * t);
+            }
+        };
+        for (size_t i = 0; i < a.notes.size() && i < edits.size(); ++i)
+        {
+            const auto& note = a.notes[i];
+            const int previousStart = i > 0 ? a.notes[i - 1].startFrame + 1 : 0;
+            const int nextEnd = i + 1 < a.notes.size() ? a.notes[i + 1].endFrame - 1 : frames;
+            ramp (note.startFrame, glideFrames (edits[i]), previousStart, note.endFrame - 1);
+            if (i + 1 >= a.notes.size() || a.notes[i + 1].startFrame > note.endFrame)
+                ramp (note.endFrame, glideFrames (edits[i]), note.startFrame + 1, nextEnd);
+        }
+    }
     for (int f = 0; f < frames; ++f)
         shift[(size_t) f] += detail[(size_t) f];
     gain = smooth (gain, 4);
@@ -460,7 +486,7 @@ std::pair<int, int> noteSpan (const Analysis& a, int index)
     if (! juce::isPositiveAndBelow (index, (int) a.notes.size()))
         return { 0, 0 };
     const auto& note = a.notes[(size_t) index];
-    const auto margin = (int) (a.sampleRate * 0.03);   // (the shift eases in and out over a few frames)
+    const auto margin = (int) (a.sampleRate * 0.16);   // (the shift glides in and out: up to half the longest Pitch Transition)
     return { juce::jmax (0, note.startFrame * a.hop - margin), juce::jmin (a.numSamples, note.endFrame * a.hop + margin) };
 }
 
@@ -522,7 +548,8 @@ juce::String toString (const std::vector<NoteEdit>& edits)
         if (! edits[i].isNeutral())
             parts.add (juce::String ((int) i) + ":" + juce::String (edits[i].shift, 4) + ":" + juce::String (edits[i].drift, 3)
                        + ":" + juce::String (edits[i].gain, 2) + ":" + juce::String (edits[i].vibrato, 3) + ":" + juce::String (edits[i].formant, 3)
-                       + ":" + juce::String (edits[i].snap, 3) + ":" + juce::String (edits[i].time, 5));
+                       + ":" + juce::String (edits[i].snap, 3) + ":" + juce::String (edits[i].time, 5)
+                       + ":" + juce::String (edits[i].transition, 3));
     return parts.joinIntoString (";");
 }
 
@@ -548,6 +575,8 @@ std::vector<NoteEdit> fromString (const juce::String& text, size_t numNotes)
             edits[(size_t) i].snap = juce::jlimit (0.0, 1.0, v[6].getDoubleValue());
             edits[(size_t) i].time = v[7].getDoubleValue();
         }
+        if (v.size() >= 9)
+            edits[(size_t) i].transition = juce::jlimit (0.0, 1.0, v[8].getDoubleValue());
     }
     return edits;
 }

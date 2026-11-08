@@ -149,7 +149,7 @@ private:
     juce::TextButton timeQButton { "Q" }, scaleQButton { "Q" }, scaleLockButton { "Keep in Scale" };
     inline static bool keepScale = false;   // (remembered from one editor to the next)
     bool scaleLocked() const { return keepScale && ! scaleNotes().empty(); }
-    juce::Slider strengthSlider, correctionSlider, gainSlider, driftSlider, vibratoSlider, formantSlider;
+    juce::Slider strengthSlider, correctionSlider, gainSlider, driftSlider, vibratoSlider, formantSlider, transitionSlider;
     juce::OwnedArray<juce::Label> captions;
     void setupInspector();
     void refreshInspector();

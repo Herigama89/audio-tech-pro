@@ -33,6 +33,10 @@ public:
 
     ~AraDocument();
 
+    /** Takes its regions out of the plugin (stopped for a moment) and lets go of the plugin: after this the plugin
+        instance can be destroyed first, then this document. */
+    void detach();
+
     /** Brings the plugin's regions in line with the track's: added, moved, trimmed, removed. Message thread. */
     void sync (const juce::ValueTree& project, const juce::ValueTree& track);
 

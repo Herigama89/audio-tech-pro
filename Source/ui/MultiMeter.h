@@ -23,6 +23,9 @@ class MultiMeterPanel final : public juce::Component,
 {
 public:
     explicit MultiMeterPanel (AudioEngine& engine);
+    /** Metering something other than the master (a channel strip's track): where its sound comes from
+        (left, right, room; returns how many samples), instead of the master tap. */
+    MultiMeterPanel (AudioEngine& engine, std::function<int (float*, float*, int)> source);
     ~MultiMeterPanel() override;
 
     void paint (juce::Graphics& g) override;
@@ -49,6 +52,7 @@ private:
     void paintCorrelation (juce::Graphics& g, juce::Rectangle<int> area);
 
     AudioEngine& engine;
+    std::function<int (float*, float*, int)> source;
     LoudnessMeter loudness;
     double preparedRate = 0.0;
     std::vector<float> readL = std::vector<float> (65536), readR = std::vector<float> (65536);

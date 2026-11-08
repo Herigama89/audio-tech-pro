@@ -216,6 +216,22 @@ public:
         return scope.blockSize1 + scope.blockSize2;
     }
 
+    /** A channel strip window's MultiMeter: that track's sound (stereo, after its strip), read with readStripTap. -1: none. */
+    void setStripTapSlot (int slot) noexcept { stripTapSlot.store (slot); }
+    int getStripTapSlot() const noexcept { return stripTapSlot.load(); }
+    int readStripTap (float* left, float* right, int maxSamples) noexcept
+    {
+        const auto scope = stripTapFifo.read (juce::jmin (maxSamples, stripTapFifo.getNumReady()));
+        int written = 0;
+        for (auto [start, size] : { std::pair { scope.startIndex1, scope.blockSize1 }, std::pair { scope.startIndex2, scope.blockSize2 } })
+        {
+            std::copy_n (stripTapL.data() + start, size, left + written);
+            std::copy_n (stripTapR.data() + start, size, right + written);
+            written += size;
+        }
+        return written;
+    }
+
     /** The MultiMeter listens to the master output (after the master fader) while this is on. */
     void setMasterTap (bool on) noexcept { masterTapOn.store (on); }
 
@@ -627,6 +643,9 @@ private:
     std::atomic<bool> masterTapOn { false };
     juce::AbstractFifo masterFifo { 65536 };
     std::vector<float> masterTapL = std::vector<float> (65536, 0.0f), masterTapR = std::vector<float> (65536, 0.0f);
+    std::atomic<int> stripTapSlot { -1 };
+    juce::AbstractFifo stripTapFifo { 65536 };
+    std::vector<float> stripTapL = std::vector<float> (65536, 0.0f), stripTapR = std::vector<float> (65536, 0.0f);
     juce::AbstractFifo analyzerFifo { 32768 };
     std::vector<float> analyzerBuffer = std::vector<float> (32768, 0.0f);
 

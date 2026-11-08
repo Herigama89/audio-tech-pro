@@ -60,6 +60,11 @@ public:
 
     void paint (juce::Graphics& g) override;
     void resized() override;
+    void moved() override;
+    void visibilityChanged() override;
+    /** Narrow: the meters drawn by the strip's parent, unscaled, over the strip (a scaled strip's meters were slow:
+        everything drawn through a transform, 30 times a second). nullptr: the strip's own children again. */
+    void setMeterHost (juce::Component* host);
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
     void mouseDrag (const juce::MouseEvent& e) override;
@@ -261,6 +266,9 @@ private:
                           std::function<void()> reset, const juce::String& learn = {});
     strip::Fader fader;
     LevelMeter meter { "" };
+    juce::Component* meterHost = nullptr;
+    juce::Rectangle<int> meterRect, grRect;   // (in the strip's own coordinates)
+    void placeMeters();
     juce::Label dbLabel;
     juce::TextButton automationButton;   // Off / Read / Touch / Latch / Write
     void showAutomationModeMenu();

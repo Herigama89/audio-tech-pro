@@ -215,6 +215,7 @@ struct AraDocument::Impl
     std::unique_ptr<juce::ARAHostModel::RegionSequence> regionSequence;
     std::map<juce::String, std::unique_ptr<Source>> sources;    // by file path
     std::map<juce::String, std::unique_ptr<Region>> regions;    // by region id
+    bool detached = false;                                      // (its regions out of the plugin; the plugin may be gone)
     juce::String pendingArchive;
     juce::String trackName { "Track" };
 
@@ -276,13 +277,13 @@ struct AraDocument::Impl
 
 AraDocument::AraDocument (std::unique_ptr<Impl> i) : impl (std::move (i)) {}
 
-AraDocument::~AraDocument()
+void AraDocument::detach()
 {
-    if (impl == nullptr || impl->doc == nullptr)
+    if (impl == nullptr || impl->doc == nullptr || impl->detached)
         return;
     if (impl->playback != nullptr)
         impl->playback->alive.reset();
-    // Regions leave the plugin while it's stopped, then the model goes (regions, sources, sequence, context).
+    // Regions leave the plugin while it's stopped
     impl->effect.setRendersRegions (false);
     impl->effect.withPluginStopped ([this]
     {
@@ -290,6 +291,15 @@ AraDocument::~AraDocument()
         impl->editorRenderer = {};
         impl->regions.clear();
     });
+    impl->detached = true;
+}
+
+AraDocument::~AraDocument()
+{
+    if (impl == nullptr || impl->doc == nullptr)
+        return;
+    detach();   // (a no-op when the rack already did it, with the plugin since gone)
+    // then the model goes (sources, sequence, context, the document controller)
     impl->sources.clear();
     impl->regionSequence.reset();
     impl->musicalContext.reset();
@@ -468,6 +478,7 @@ namespace riff
 struct AraDocument::Impl {};
 AraDocument::AraDocument (std::unique_ptr<Impl> i) : impl (std::move (i)) {}
 AraDocument::~AraDocument() = default;
+void AraDocument::detach() {}
 void AraDocument::create (PluginEffect&, juce::AudioFormatManager&, const juce::String&, const juce::String&,
                           std::function<void (std::unique_ptr<AraDocument>)> done) { done (nullptr); }
 void AraDocument::sync (const juce::ValueTree&, const juce::ValueTree&) {}

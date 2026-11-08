@@ -354,6 +354,34 @@ void EffectRack::loadPlugin (const juce::ValueTree& insert, const juce::String& 
     });
 }
 
+void EffectRack::dropAra (const juce::String& insertId)
+{
+    auto doc = araDocs.find (insertId);
+    if (doc == araDocs.end())
+        return;
+    auto document = std::move (doc->second);
+    araDocs.erase (doc);
+    if (document == nullptr)
+        return;
+    document->detach();   // (its regions out of the plugin, while the plugin's still there)
+    if (auto e = entries.find (insertId); e != entries.end())
+        if (auto* plugin = dynamic_cast<PluginEffect*> (e->second.effect.get()))
+        {
+            plugin->retireAra (std::move (document));   // (goes with the plugin, after it)
+            return;
+        }
+}
+
+EffectRack::~EffectRack()
+{
+    // Every ARA document handed to its plugin first: then the plugins (and after each, its document) go
+    std::vector<juce::String> ids;
+    for (const auto& [id, doc] : araDocs)
+        ids.push_back (id);
+    for (const auto& id : ids)
+        dropAra (id);
+}
+
 void EffectRack::removeAllExcept (const juce::StringArray& insertIds)
 {
     for (auto it = entries.begin(); it != entries.end();)

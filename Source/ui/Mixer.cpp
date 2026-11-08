@@ -1554,9 +1554,9 @@ void ChannelStrip::paint (juce::Graphics& g)
         const auto clip = g.getClipBounds();
         // (a pixel of slack: in Narrow the strip is drawn scaled, and the area to redraw is rounded outwards)
         // (two pixels: in Narrow one pixel of the screen is more than one of the strip's)
-        if (meter.isVisible() && meter.isOpaque() && meter.getBounds().expanded (2).contains (clip))
+        if (meter.isVisible() && meter.isOpaque() && meterRect.expanded (2).contains (clip))
             return;
-        if (grColumn.isVisible() && grColumn.getBounds().expanded (2).contains (clip))
+        if (grColumn.isVisible() && grRect.expanded (2).contains (clip))
             return;
     }
     const auto scale = juce::jlimit (0.5f, 4.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
@@ -1822,7 +1822,42 @@ void ChannelStrip::paintFace (juce::Graphics& g)
 
 juce::Rectangle<int> ChannelStrip::grArea() const
 {
-    return { meter.getX() - 6, meter.getY(), 4, meter.getHeight() };
+    return { meterRect.getX() - 6, meterRect.getY(), 4, meterRect.getHeight() };
+}
+
+void ChannelStrip::setMeterHost (juce::Component* host)
+{
+    if (host == meterHost)
+        return;
+    meterHost = host;
+    placeMeters();
+}
+
+void ChannelStrip::placeMeters()
+{
+    for (auto [c, r] : { std::pair<juce::Component*, juce::Rectangle<int>> { &meter, meterRect }, { &grColumn, grRect } })
+    {
+        if (meterHost == nullptr || getParentComponent() != meterHost)
+        {
+            if (c->getParentComponent() != this)
+                addAndMakeVisible (c);
+            c->setBounds (r);
+            continue;
+        }
+        if (c->getParentComponent() != meterHost)
+            meterHost->addAndMakeVisible (c);
+        c->setBounds (meterHost->getLocalArea (this, r.toFloat()).getSmallestIntegerContainer());
+        c->setVisible (isVisible());
+        c->toFront (false);
+    }
+}
+
+void ChannelStrip::moved() { placeMeters(); }
+
+void ChannelStrip::visibilityChanged()
+{
+    if (meterHost != nullptr)
+        placeMeters();
 }
 
 void ChannelStrip::pushGainReduction (float db)
@@ -2128,8 +2163,9 @@ void ChannelStrip::resized()
     // Fader on the left, the scale, then the meter; the level box under the meter (as in the picture)
     const auto fa = faderArea();
     fader.setBounds (juce::Rectangle<int> (2, fa.getY(), (int) (getWidth() * 0.46f), fa.getHeight()));
-    meter.setBounds (juce::Rectangle<int> (getWidth() - 16, fa.getY() + 6, 12, fa.getHeight() - 12));
-    grColumn.setBounds (grArea().expanded (1));
+    meterRect = juce::Rectangle<int> (getWidth() - 16, fa.getY() + 6, 12, fa.getHeight() - 12);
+    grRect = grArea().expanded (1);
+    placeMeters();
     dbLabel.setBounds (juce::Rectangle<int> (getWidth() - 46, fa.getBottom() + 2, 42, 19));
     if (! isMaster())
     {
@@ -3285,6 +3321,8 @@ void MixerPanel::resized()
     auto place = [scale] (juce::Component& c, juce::Rectangle<int> r)
     {
         c.setTransform (juce::AffineTransform::scale (scale));
+        if (auto* strip = dynamic_cast<ChannelStrip*> (&c))
+            strip->setMeterHost (juce::exactlyEqual (scale, 1.0f) ? nullptr : c.getParentComponent());
         c.setBounds (juce::Rectangle<float> ((float) r.getX() / scale, (float) r.getY() / scale,
                                              (float) ChannelStrip::stripWidth, (float) r.getHeight() / scale).toNearestInt());
     };

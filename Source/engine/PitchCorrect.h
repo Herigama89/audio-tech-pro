@@ -44,11 +44,13 @@ namespace riff::pitchcorrect
         double formant = 0.0;   // semitones: the voice's character brighter (up) or darker (down), the pitch kept
         double snap = 0.0;      // 0..1: Pitch Correction, how far its centre goes onto the nearest semitone
         double time = 0.0;      // seconds: moved later (or earlier), the audio either side stretching
+        double transition = 0.1; // 0..1: how slowly the voice glides into this note from the one before (Pitch Transition):
+                                 // 0 a quick step (~20 ms), 1 a long, sung slide (~270 ms)
         bool operator== (const NoteEdit&) const = default;
         bool isNeutral() const
         {
             return std::abs (shift) < 1.0e-4 && drift < 1.0e-4 && std::abs (gain) < 1.0e-4 && std::abs (vibrato - 1.0) < 1.0e-4
-                && std::abs (formant) < 1.0e-4 && snap < 1.0e-4 && std::abs (time) < 1.0e-5;
+                && std::abs (formant) < 1.0e-4 && snap < 1.0e-4 && std::abs (time) < 1.0e-5 && std::abs (transition - 0.1) < 1.0e-4;
         }
     };
 
