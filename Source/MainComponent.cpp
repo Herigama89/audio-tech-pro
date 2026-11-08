@@ -3955,11 +3955,75 @@ void MainComponent::showLatencyCalibration()
     options.launchAsync();
 }
 
+namespace
+{
+    /** Audio settings: JUCE's device selector in the theme's colours, and a newly chosen interface comes up with
+        all its inputs and outputs on. */
+    class AudioSettingsPanel final : public juce::Component,
+                                     private juce::ChangeListener
+    {
+    public:
+        AudioSettingsPanel (juce::AudioDeviceManager& m, std::function<void()> onDeviceChanged)
+            : dm (m), changed (std::move (onDeviceChanged)), selector (m, 0, 256, 2, 256, true, false, true, false)
+        {
+            // (the channel lists, labels and boxes read these: no black writing on the dark ground)
+            for (const int id : { (int) juce::ListBox::textColourId, (int) juce::Label::textColourId, (int) juce::ToggleButton::textColourId,
+                                  (int) juce::ComboBox::textColourId, (int) juce::TextButton::textColourOffId })
+                setColour (id, theme::text);
+            setColour (juce::ListBox::backgroundColourId, theme::panel);
+            setColour (juce::ListBox::outlineColourId, theme::text.withAlpha (0.15f));
+            setColour (juce::ToggleButton::tickColourId, theme::accent);
+            setColour (juce::ToggleButton::tickDisabledColourId, theme::text.withAlpha (0.4f));
+            addAndMakeVisible (selector);
+            lastDevice = currentName();
+            dm.addChangeListener (this);
+            setSize (520, 460);
+        }
+        ~AudioSettingsPanel() override { dm.removeChangeListener (this); }
+
+        void resized() override { selector.setBounds (getLocalBounds()); }
+        void paint (juce::Graphics& g) override { g.fillAll (theme::background); }
+
+    private:
+        juce::AudioDeviceManager& dm;
+        std::function<void()> changed;
+        juce::AudioDeviceSelectorComponent selector;
+        juce::String lastDevice;
+
+        juce::String currentName() const
+        {
+            auto* device = dm.getCurrentAudioDevice();
+            return device != nullptr ? device->getTypeName() + "/" + device->getName() : juce::String();
+        }
+
+        void changeListenerCallback (juce::ChangeBroadcaster*) override
+        {
+            const auto now = currentName();
+            if (now == lastDevice || now.isEmpty())
+                return;
+            lastDevice = now;
+            // A different interface: every input and output on (its own channel lists can still turn some off)
+            auto* device = dm.getCurrentAudioDevice();
+            auto setup = dm.getAudioDeviceSetup();
+            setup.useDefaultInputChannels = setup.useDefaultOutputChannels = false;
+            setup.inputChannels.clear();
+            setup.inputChannels.setRange (0, juce::jmin (256, device->getInputChannelNames().size()), true);
+            setup.outputChannels.clear();
+            setup.outputChannels.setRange (0, juce::jmin (256, device->getOutputChannelNames().size()), true);
+            juce::MessageManager::callAsync ([this, setup, safe = juce::Component::SafePointer<AudioSettingsPanel> (this)]
+            {
+                if (safe == nullptr)
+                    return;
+                if (dm.setAudioDeviceSetup (setup, true).isEmpty() && changed)
+                    changed();
+            });
+        }
+    };
+}
+
 void MainComponent::showAudioSettings()
 {
-    auto selector = std::make_unique<juce::AudioDeviceSelectorComponent> (
-        engine.getDeviceManager(), 0, 256, 2, 256, true, false, true, false);
-    selector->setSize (520, 460);
+    auto selector = std::make_unique<AudioSettingsPanel> (engine.getDeviceManager(), [this] { saveDeviceState(); });
 
     juce::DialogWindow::LaunchOptions options;
     options.content.setOwned (selector.release());

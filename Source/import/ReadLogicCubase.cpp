@@ -378,7 +378,12 @@ namespace
                         const auto* p = lf.body();
                         const auto count = (size_t) lgx::u16 (p + 0x08);
                         if (0x0a + count * 2 <= lf.bodySize())
-                            fileName = juce::String (juce::CharPointer_UTF16 (reinterpret_cast<const juce::CharPointer_UTF16::CharType*> (p + 0x0a)), count);
+                        {
+                            // (copied out first: the name needn't sit on a 2-byte boundary, and reading it in place is undefined)
+                            std::vector<juce::CharPointer_UTF16::CharType> name (count + 1, 0);
+                            std::memcpy (name.data(), p + 0x0a, count * 2);
+                            fileName = juce::String (juce::CharPointer_UTF16 (name.data()), count);
+                        }
                         // the 'EVAW' format block: frames, rate; the folder path before it
                         for (size_t k = 0x0a + count * 2; k + 0x20 <= lf.bodySize(); ++k)
                             if (std::memcmp (p + k, "EVAW", 4) == 0)

@@ -323,7 +323,7 @@ void EffectPanel::buildDesign (const EffectInfo& info)
             l->setFont (juce::FontOptions (15.0f));
             // (a control's own colour, for one that sits on a different background, e.g. on a screen)
             const bool ownColour = c.kind != effectdesign::Kind::field && ! c.colour.isTransparent()
-                                && ! (theme::glassSkin() && design->photoScale <= 0.0f
+                                && ! (effectdesign::writesInTheme (*design)
                                       && std::abs (c.colour.getPerceivedBrightness() - theme::console.getPerceivedBrightness()) < 0.35f);
             l->setColour (juce::Label::textColourId, ownColour ? c.colour : effectdesign::labelColourOf (*design));
             l->setJustificationType (juce::Justification::centred);
@@ -405,7 +405,7 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                     k->slider.getProperties().set ("field", true);
                     // (Liquid Glass: a value colour that would vanish on the glass is darkened, or gives way to the theme's text)
                     auto ink = c.colour;
-                    if (theme::glassSkin() && design->photoScale <= 0.0f && ! ink.isTransparent())
+                    if (effectdesign::writesInTheme (*design) && ! ink.isTransparent())
                     {
                         if (ink.getSaturation() < 0.2f)
                             ink = theme::text;
@@ -560,7 +560,7 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                     box->addItem (p->choices[n], (int) n + 1);
                 box->getProperties().set ("centred", c.bounds.getHeight() >= 38);
                 // (Liquid Glass: a writing colour that would vanish on the glass gives way to the theme's text)
-                const bool glassFace = theme::glassSkin() && design->photoScale <= 0.0f;
+                const bool glassFace = effectdesign::writesInTheme (*design);
                 if (! c.colour.isTransparent() && ! (glassFace && std::abs (c.colour.getPerceivedBrightness() - theme::console.getPerceivedBrightness()) < 0.35f))
                     box->getProperties().set ("ink", c.colour.toString());
                 box->setWantsKeyboardFocus (false);
@@ -817,6 +817,17 @@ void EffectPanel::timerCallback()
     // The meter: quick to rise, easing back
     const auto now = liveValue != nullptr ? liveValue() : 0.0f;
     liveShown = std::abs (now) > std::abs (liveShown) ? now : liveShown + (now - liveShown) * 0.25f;
+    // Only when something shown has moved: a still face isn't redrawn (with all its knobs) 30 times a second
+    double signature = liveShown;
+    for (int i = 0; i < meterCount; ++i)
+        signature += meterValues[(size_t) i] * (double) (i + 1);
+    if (spectrum.valid)
+        for (const auto db : spectrum.db)
+            signature += db * 0.001;
+    const bool animated = theme::glassSkin() && insert[ids::effect].toString() == "studioReverb" && std::abs (liveShown) > 0.002f;
+    if (! animated && std::abs (signature - lastSignature) < 1.0e-4)
+        return;
+    lastSignature = signature;
     repaint();
 }
 

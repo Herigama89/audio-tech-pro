@@ -46,7 +46,11 @@ namespace riff::automix
     };
 
     /** What Automix does: set the faders, pan, add the usual plugins. */
-    struct Options { bool faders = true, pan = true, plugins = true; };
+    struct Options
+    {
+        bool faders = true, pan = true, plugins = true;
+        juce::String reference;   // a mastered song to sound like (its file; empty: none) - the master bus is set to match it
+    };
 
     /** A plugin to add (a built-in effect's type) with its settings, and why. */
     struct Insert

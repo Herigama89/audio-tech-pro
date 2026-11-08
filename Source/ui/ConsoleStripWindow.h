@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <array>
 #include <optional>
 #include "../engine/ConsoleChannel.h"
 #include "SpectrumAnalyzer.h"
@@ -92,6 +93,8 @@ private:
 
     Levels levels;
     float inDb = -100.0f, outDb = -100.0f, grDb = 0.0f, deEssDb = 0.0f, gateDb = 0.0f;
+    std::array<float, 5> lastShown {};
+    int ecoFrame = 0;
 };
 
 } // namespace riff

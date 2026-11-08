@@ -120,7 +120,7 @@ std::vector<float> SpectrumAnalyzer::analyse (const float* samples, int numSampl
 
 void SpectrumAnalyzer::timerCallback()
 {
-    static int ecoFrame = 0;
+    // (each analyser its own count: shared, two would starve each other in Eco mode)
     if (eco::skipFrame (ecoFrame))
         return;   // (Eco mode: 15 a second; nothing while the app isn't in front)
     const auto now = juce::Time::getMillisecondCounter();
@@ -165,6 +165,14 @@ void SpectrumAnalyzer::timerCallback()
                 peakDb[i] = juce::jmax (bandShown[i], peakDb[i] - options.releaseDbPerSecond * dt);
         }
     }
+    // (nothing coming in and everything fallen to the floor: no need to redraw the same picture)
+    bool floor = got == 0;
+    for (size_t i = 0; floor && i < bandShown.size(); ++i)
+        floor = bandShown[i] <= -119.0f && (options.peakHoldSeconds < 0.0f || peakDb[i] <= -119.0f);
+    if (floor && ++floorFrames > 30)
+        return;
+    if (! floor)
+        floorFrames = 0;
     repaint();
 }
 

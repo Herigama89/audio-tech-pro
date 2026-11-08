@@ -2,6 +2,7 @@
 // it may do in the app. (Split from MainComponent.cpp to keep that file readable.)
 
 #include "MainComponent.h"
+#include "engine/ReferenceMatch.h"
 #include "model/Project.h"
 #include "ui/Commands.h"
 #include "engine/ConsolePlugins.h"
@@ -35,6 +36,42 @@ namespace
         AudioEngine& engine;
         double start, end;
         std::function<void (AudioEngine::MixMeasurement)> done;
+    };
+
+    /** Automix's reference matching: the reference song read, and the mix (as it is now) played through offline. */
+    class ReferenceMatchJob final : public juce::Thread
+    {
+    public:
+        using Done = std::function<void (reference::Profile mix, reference::Profile ref, juce::String error)>;
+        ReferenceMatchJob (AudioEngine& e, juce::File f, double s, double en, Done callback)
+            : Thread ("Match reference"), engine (e), file (std::move (f)), start (s), end (en), done (std::move (callback)) {}
+
+        void run() override
+        {
+            juce::String error;
+            const auto ref = reference::analyseFile (file, error, [this] { return ! threadShouldExit(); });
+            reference::Profile mix;
+            if (error.isEmpty() && ! threadShouldExit())
+            {
+                auto analyser = std::make_shared<reference::Analyser>();
+                analyser->prepare (engine.getSampleRate() > 0.0 ? engine.getSampleRate() : 48000.0);
+                engine.measureTap = [analyser] (const float* l, const float* r, int n) { analyser->add (l, r, n); };
+                engine.measureMix (start, end, [this] (double) { return ! threadShouldExit(); });
+                engine.measureTap = nullptr;
+                mix = analyser->result();
+                if (! mix.valid())
+                    error = "The mix was too quiet to match.";
+            }
+            if (threadShouldExit())
+                return;
+            juce::MessageManager::callAsync ([cb = done, mix, ref, error] { cb (mix, ref, error); });
+        }
+
+    private:
+        AudioEngine& engine;
+        juce::File file;
+        double start, end;
+        Done done;
     };
 
     /** Commands Claude shouldn't run on its own: they open file dialogs or windows, or it has a better tool. */
@@ -361,6 +398,19 @@ void MainComponent::runAutomix (const juce::String& genre, bool cycleOnly, autom
         return;
     }
 
+    // A reference to match: the master plugins a previous match added are left out while listening (they're replaced)
+    const juce::File referenceFile (options.reference);
+    const bool matching = options.reference.isNotEmpty() && referenceFile.existsAsFile();
+    if (options.reference.isNotEmpty() && ! matching)
+    {
+        statusLabel.setText ("Automix: the reference song isn't there any more - choose it again", juce::dontSendNotification);
+        return;
+    }
+    if (matching)
+        for (auto insert : model::insertsOf (model::chainFor (project, model::masterOwner)))
+            if ((bool) insert.getProperty (reference::marker, false))
+                insert.setProperty (ids::bypass, true, nullptr);
+
     if (auto* panel = panelNow())
         panel->setBusy (true);
     if (engine.isPlaying())
@@ -371,7 +421,7 @@ void MainComponent::runAutomix (const juce::String& genre, bool cycleOnly, autom
     statusLabel.setText ("Automix: listening to every track...", juce::dontSendNotification);
 
     mixMeasureJob = std::make_unique<MixMeasureJob> (engine, start, end,
-        [safe = juce::Component::SafePointer<MainComponent> (this), genre, panelNow, options] (AudioEngine::MixMeasurement result)
+        [safe = juce::Component::SafePointer<MainComponent> (this), genre, panelNow, options, matching, referenceFile, start, end] (AudioEngine::MixMeasurement result)
     {
         if (safe == nullptr)
             return;
@@ -449,6 +499,68 @@ void MainComponent::runAutomix (const juce::String& genre, bool cycleOnly, autom
                                    juce::dontSendNotification);
         if (auto* panel = panelNow())
             panel->showResults (results, genre);
+        if (matching && ! results.empty())
+            safe->matchReference (referenceFile, start, end);
+        else if (matching)
+            for (auto insert : model::insertsOf (model::chainFor (safe->project, model::masterOwner)))
+                if ((bool) insert.getProperty (reference::marker, false))
+                    insert.setProperty (ids::bypass, false, nullptr);
+    });
+    mixMeasureJob->startThread();
+}
+
+void MainComponent::matchReference (const juce::File& file, double start, double end)
+{
+    // The mix as it is now (balanced), against the reference: then the master bus set to take it there
+    auto panelNow = [this]() -> AutomixPanel*
+    {
+        if (auto it = editorWindows.find ("automix"); it != editorWindows.end())
+            return dynamic_cast<AutomixPanel*> (it->second->getContentComponent());
+        return nullptr;
+    };
+    if (auto* panel = panelNow())
+        panel->setBusy (true);
+    statusLabel.setText ("Automix: listening to the reference and the mix...", juce::dontSendNotification);
+    player.setIgnoreSolo (true);
+    player.rebuildNow();
+    engine.beginOfflineRender();
+    mixMeasureJob = std::make_unique<ReferenceMatchJob> (engine, file, start, end,
+        [safe = juce::Component::SafePointer<MainComponent> (this), panelNow, file] (reference::Profile mix, reference::Profile ref, juce::String error)
+    {
+        if (safe == nullptr)
+            return;
+        safe->engine.endOfflineRender();
+        safe->player.setIgnoreSolo (false);
+        auto& um = safe->undoManager;
+        auto chain = model::chainFor (safe->project, model::masterOwner);
+        juce::StringArray lines;
+        if (error.isEmpty())
+        {
+            // (one more step of the same undo: a previous match's plugins replaced by this one's)
+            for (int i = chain.getNumChildren(); --i >= 0;)
+                if ((bool) chain.getChild (i).getProperty (reference::marker, false))
+                    chain.removeChild (i, &um);
+            for (const auto& step : reference::plan (mix, ref))
+            {
+                if (findBuiltInEffect (step.type) == nullptr)
+                    continue;
+                auto insert = model::addBuiltinInsert (chain, step.type, -1, &um);
+                for (const auto& [param, value] : step.params)
+                    insert.setProperty (juce::Identifier (param), value, &um);
+                insert.setProperty (reference::marker, true, &um);
+                lines.add (step.why);
+            }
+        }
+        else
+            for (auto insert : model::insertsOf (chain))
+                if ((bool) insert.getProperty (reference::marker, false))
+                    insert.setProperty (ids::bypass, false, nullptr);   // (the earlier match back as it was)
+        safe->player.rebuildNow();
+        safe->statusLabel.setText (error.isNotEmpty() ? "Automix: " + error
+                                                      : "Automix: the master bus set to sound like " + file.getFileNameWithoutExtension(),
+                                   juce::dontSendNotification);
+        if (auto* panel = panelNow())
+            panel->showReference (lines, error);
     });
     mixMeasureJob->startThread();
 }

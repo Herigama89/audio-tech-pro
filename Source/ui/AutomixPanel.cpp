@@ -23,7 +23,9 @@ AutomixPanel::AutomixPanel (juce::ValueTree p) : project (std::move (p))
     {
         const auto genre = genreBox.getText();
         project.setProperty ("automixGenre", genre, nullptr);
-        automix::Options options { fadersBox.getToggleState(), panBox.getToggleState(), pluginsBox.getToggleState() };
+        automix::Options options { fadersBox.getToggleState(), panBox.getToggleState(), pluginsBox.getToggleState(),
+                                   referenceBox.getToggleState() ? referencePath() : juce::String() };
+        project.setProperty ("automixMatch", referenceBox.getToggleState(), nullptr);
         project.setProperty ("automixDo", juce::String (options.faders ? "f" : "") + (options.pan ? "p" : "") + (options.plugins ? "i" : ""), nullptr);
         if (onRun)
             onRun (genre, rangeBox.getSelectedItemIndex() == 1, options);
@@ -42,6 +44,30 @@ AutomixPanel::AutomixPanel (juce::ValueTree p) : project (std::move (p))
     for (auto* b : { &fadersBox, &panBox, &pluginsBox })
         addAndMakeVisible (b);
 
+    // A reference: a finished, mastered song the master bus is set to sound like (tone, density, width, loudness)
+    referenceBox.setToggleState ((bool) project.getProperty ("automixMatch", false), juce::dontSendNotification);
+    referenceBox.setTooltip ("After balancing, listen to the mix and to a mastered song you like, and set up the master bus to sound like it: "
+                             "Match EQ for its tone, bus compression for its density, its stereo width, and a limiter to its loudness");
+    addAndMakeVisible (referenceBox);
+    chooseButton.setTooltip ("The song to sound like: a finished, mastered track (WAV, AIFF, FLAC, MP3...)");
+    chooseButton.onClick = [this]
+    {
+        chooser = std::make_unique<juce::FileChooser> ("Choose a mastered song to sound like", juce::File (referencePath()).getParentDirectory(),
+                                                       "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.m4a;*.caf;*.ogg");
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                              [this] (const juce::FileChooser& fc)
+        {
+            const auto file = fc.getResult();
+            if (file == juce::File())
+                return;
+            project.setProperty ("automixReference", file.getFullPathName(), nullptr);
+            referenceBox.setToggleState (true, juce::dontSendNotification);
+            updateReferenceButton();
+        });
+    };
+    addAndMakeVisible (chooseButton);
+    updateReferenceButton();
+
     report.setMultiLine (true);
     report.setReadOnly (true);
     report.setCaretVisible (false);
@@ -53,7 +79,30 @@ AutomixPanel::AutomixPanel (juce::ValueTree p) : project (std::move (p))
                     "or its sound, and its fader set to where that role sits in the genre. "
                     "Name your tracks well for the best result. It's a starting point: Undo puts the faders back.");
     addAndMakeVisible (report);
-    setSize (520, 480);
+    setSize (560, 520);
+}
+
+juce::String AutomixPanel::referencePath() const { return project.getProperty ("automixReference", "").toString(); }
+
+void AutomixPanel::updateReferenceButton()
+{
+    const auto path = referencePath();
+    chooseButton.setButtonText (path.isEmpty() ? juce::String ("Choose a mastered song...") : juce::File (path).getFileName());
+}
+
+void AutomixPanel::showReference (const juce::StringArray& steps, const juce::String& error)
+{
+    setBusy (false);
+    auto text = report.getText().upToLastOccurrenceOf ("\nUndo (Cmd+Z)", false, false);
+    if (text.isEmpty() || text.startsWith ("Each track"))
+        text = {};
+    text << (text.isEmpty() ? "" : "\n\n") << "Master bus, to sound like " << juce::File (referencePath()).getFileNameWithoutExtension() << ":\n";
+    if (error.isNotEmpty())
+        text << "   " << error << "\n";
+    for (const auto& line : steps)
+        text << "   + " << line << "\n";
+    text << "\nUndo (Cmd+Z) puts it all back.";
+    report.setText (text);
 }
 
 void AutomixPanel::setBusy (bool busy)
@@ -107,7 +156,10 @@ void AutomixPanel::resized()
     fadersBox.setBounds (row.removeFromLeft (80));
     panBox.setBounds (row.removeFromLeft (90));
     pluginsBox.setBounds (row);
-    report.setBounds (getLocalBounds().withTrimmedTop (116).reduced (16, 12));
+    auto refRow = juce::Rectangle<int> (16, 116, getWidth() - 32, 26);
+    referenceBox.setBounds (refRow.removeFromLeft (180));
+    chooseButton.setBounds (refRow);
+    report.setBounds (getLocalBounds().withTrimmedTop (150).reduced (16, 12));
 }
 
 } // namespace riff

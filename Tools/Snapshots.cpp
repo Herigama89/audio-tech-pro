@@ -579,6 +579,34 @@ public:
         return 0;
     }
 
+    int automixOnly()
+    {
+        out.createDirectory();
+        MainComponent main (false);
+        main.setSize (1440, 920);
+        {
+            theme::Settings t;
+            if (juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_SKIN", {}) == "glasslight")
+                t.skin = theme::Skin::glassLight;
+            main.applyTheme (t);
+        }
+        main.project.setProperty ("automixReference", "/Users/me/Music/Reference Master.wav", nullptr);
+        main.project.setProperty ("automixMatch", true, nullptr);
+        AutomixPanel panel (main.project);
+        std::vector<automix::Result> results;
+        results.push_back ({ "a", "Kick", automix::Role::kick, -4.0, -6.0 });
+        results.push_back ({ "b", "Lead Vox", automix::Role::leadVocal, -8.0, -7.5 });
+        results.push_back ({ "c", "808", automix::Role::bass, -2.0, -8.0 });
+        panel.showResults (results, "Hip-Hop");
+        panel.showReference ({ "Match EQ: the reference's tone (lows +1.8 dB, mids -0.9 dB, highs +2.6 dB)",
+                               "Bus compression (Classic VCA, 2:1): about 2.8 dB on the loud parts, for the reference's density",
+                               "Wider stereo (Direction Mixer spread 1.21), as wide as the reference",
+                               "Adaptive Limiter: +9.4 dB to the reference's loudness (-8.1 LUFS), peaks held at -0.8 dB" }, {});
+        pump (main, 50);
+        save (panel, "automix-reference.png");
+        return 0;
+    }
+
     /** Where the time goes as a song grows (for the lag with many channels and plug-ins). */
     int perfOnly()
     {
@@ -1869,8 +1897,7 @@ public:
         pump (main, 200);
         struct Case { const char* name; theme::Settings s; };
         std::vector<Case> cases;
-        for (auto [name, skin] : { std::pair { "studio", theme::Skin::studio }, std::pair { "flat", theme::Skin::flat },
-                                   std::pair { "white", theme::Skin::white }, std::pair { "xenon", theme::Skin::xenon } })
+        for (auto [name, skin] : { std::pair { "glassDark", theme::Skin::glassDark }, std::pair { "glassLight", theme::Skin::glassLight } })
         {
             theme::Settings s;
             s.skin = skin;
@@ -2590,6 +2617,12 @@ int main (int argc, char* argv[])
     if (argc > 2 && juce::String (argv[1]) == "stretch")
     {
         const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).stretchOnly();
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        return r;
+    }
+    if (argc > 2 && juce::String (argv[1]) == "automix")
+    {
+        const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).automixOnly();
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         return r;
     }

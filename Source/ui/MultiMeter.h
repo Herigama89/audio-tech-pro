@@ -72,6 +72,7 @@ private:
     float levelReturn = 11.8f, levelPeakSeconds = 2.0f;
     bool levelHold = false;
     float peakDb[2] { -100.0f, -100.0f }, rmsDb[2] { -100.0f, -100.0f };
+    int quietFrames = 0;
     float heldPeak[2] { -100.0f, -100.0f }, heldFor[2] {};
     double rmsSquares[2] {};
     float correlation = 0.0f, correlationLow = 1.0f, correlationHigh = -1.0f;

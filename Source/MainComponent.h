@@ -271,6 +271,7 @@ private:
     ai::AppHooks makeAssistantHooks();
     juce::String assistantManual() const;
     void measureMixForAssistant (double start, double end, std::function<void (ai::AppHooks::Measurement)> done);
+    void matchReference (const juce::File& reference, double start, double end);
     void generateMidi (const GeneratorPanel::Request& request);
     void applyKeyPreset (const juce::String& preset);
     void saveKeyMappings();

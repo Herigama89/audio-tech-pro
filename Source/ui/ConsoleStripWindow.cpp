@@ -504,7 +504,7 @@ void ConsoleStripWindow::refresh()
 
 void ConsoleStripWindow::timerCallback()
 {
-    static int ecoFrame = 0;
+    // (each window its own count: shared, two windows would starve each other in Eco mode)
     if (eco::skipFrame (ecoFrame))
         return;   // (Eco mode)
     const auto now = levels();
@@ -515,7 +515,30 @@ void ConsoleStripWindow::timerCallback()
     ease (grDb, std::abs (now[2]));
     ease (deEssDb, std::abs (now[3]));
     ease (gateDb, std::abs (now[4]));
-    repaint (0, 0, faceWidth, faceHeight);
+    // (48V shows only when the interface's phantom power can be switched from here)
+    for (auto& k : keys)
+        if (k->property == ids::consolePhantom)
+        {
+            const bool reachable = interfacePhantom && interfacePhantom().has_value();
+            if (k->isVisible() != reachable)
+            {
+                k->setVisible (reachable);
+                repaint();
+            }
+        }
+    // Only the meters move: repaint them alone (and only when they changed), not the whole face and its knobs
+    const std::array<float, 5> shown { inDb, outDb, grDb, deEssDb, gateDb };
+    if (shown == lastShown)
+        return;
+    lastShown = shown;
+    if (theme::glassSkin())
+    {
+        repaint (368, 22, 70, 60);      // compressor and gate
+        repaint (196, 22, 14, 56);      // de-esser
+        repaint (1384, 18, 18, 76);     // level
+    }
+    else
+        repaint (0, 0, faceWidth, faceHeight);
 }
 
 void ConsoleStripWindow::lamp (juce::Graphics& g, const juce::String& name) const

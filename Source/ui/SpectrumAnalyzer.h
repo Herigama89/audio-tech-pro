@@ -55,6 +55,8 @@ private:
     std::vector<float> spectrumDb;              // per FFT bin, after windowing
     std::vector<float> bandDb, bandShown, peakDb, peakAge;   // per band (31) or per column (line mode)
     juce::uint32 lastTick = 0;
+    int floorFrames = 0;
+    int ecoFrame = 0;
 };
 
 } // namespace riff

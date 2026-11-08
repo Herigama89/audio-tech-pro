@@ -410,7 +410,9 @@ namespace
             // (Liquid Glass: the particles drift up and fade like a reverb's tail, and glitter as they go)
             const auto now = glass ? (float) (juce::Time::getMillisecondCounterHiRes() * 0.001) : 0.0f;
             const auto speed = 0.35f / std::max (0.3f, std::sqrt (decay));
-            for (int i = 0; i < 6000; ++i)
+            // (Liquid Glass: fewer, livelier particles, and none at all in silence)
+            const int count = glass ? (heard > 0.002f ? 2800 : 0) : 6000;
+            for (int i = 0; i < count; ++i)
             {
                 const auto t = random.nextFloat();
                 const auto f = 20.0 * std::pow (1000.0, (double) t);
@@ -669,6 +671,7 @@ namespace
     Design makeModern (const EffectInfo& info)
     {
         Design d;
+        d.glassFace = true;
         d.knobs = KnobStyle::dark;
         d.label = juce::Colour (0xffb9c8d6);
         d.value = modernGreen;
@@ -3713,7 +3716,8 @@ namespace
                     p.knobs = { { "threshold", 157, 116, 126, lin (0.0f, -50.0f), "PEAK REDUCTION", cream },
                                 { "makeup", 960, 116, 126, lin (0.0f, 30.0f), "GAIN", cream }, { "emphasis", 1198, 198, 40, lin (0.0f, 1.0f), "HF EMPHASIS", cream } };
                     p.pills = { { "optoLimit", 1160, 58, 70, "COMP", -1.0f, -1, false, true }, { "optoLimit", 1236, 58, 70, "LIMIT" },
-                                { "meterMode", 1150, 126, 48, "GR", -1.0f, 0 }, { "meterMode", 1200, 126, 44, "+4", -1.0f, 1 }, { "meterMode", 1248, 126, 44, "+10", -1.0f, 2 } };
+                                { "meterMode", 1150, 126, 48, "GR", -1.0f, 0 }, { "meterMode", 1200, 126, 44, "+4", -1.0f, 1 }, { "meterMode", 1248, 126, 44, "+10", -1.0f, 2 },
+                                { "tubes", 834, 140, 70, "TUBES", -1.0f, -1, true } };
                     p.meters = { { Meter::optoVu, { 360, 26, 380, 193 } } };
                     p.captions = { { 1198, 26, "MODE", false }, { 1198, 96, "METER", false }, { 834, 56, "ON", true }, { 550, 238, "VU", false } };
                     p.power = { 834, 210 };
@@ -4076,6 +4080,7 @@ namespace
             }
         }
         c.paint = glasscomp::paint;
+        c.glassFace = true;
         d["studioCompGlass"] = c;
     }
 
@@ -4147,6 +4152,7 @@ namespace
             c.label = juce::Colour (0xffc99a4a); c.value = juce::Colour (0xffe9c27a); c.accent = juce::Colour (0xffc99a4a); c.track = juce::Colours::black;
             c.valueAbove = false;
             c.paint = paintDistortion;
+            c.glassFace = true;
             c.controls = {
                 { "drive", knob, R (90, 110, 160, 200), "DRIVE" },
                 { "tone", knob, R (270, 110, 160, 200), "TONE" },
@@ -4169,6 +4175,7 @@ namespace
             c.label = juce::Colour (0xff3a1e08); c.value = juce::Colour (0xff3a1e08); c.accent = juce::Colour (0xff3a1e08); c.track = juce::Colours::black;
             c.valueAbove = false;
             c.paint = paintAutoWah;
+            c.glassFace = true;
             c.controls = {
                 { "mode", Kind::segmented, R (420, 34, 230, 34), "-" },
                 { "sensitivity", knob, R (60, 110, 150, 160), "SENSITIVITY" },
@@ -4189,6 +4196,7 @@ namespace
             c.label = juce::Colour (0xff2a2a2a); c.value = juce::Colour (0xffd8dadc); c.accent = juce::Colour (0xffd8dadc); c.track = juce::Colours::black;
             c.valueAbove = false;
             c.paint = paintGuitarAmp;
+            c.glassFace = true;
             const auto grey = juce::Colour (0xffaab0b6);
             c.controls = {
                 { "gain", knob, R (60, 74, 95, 120), "GAIN" },
@@ -4466,6 +4474,7 @@ namespace
             c.width = 1100; c.height = 490;
             c.knobs = KnobStyle::dark;
             c.label = juce::Colours::white.withAlpha (0.55f); c.value = juce::Colours::white; c.accent = juce::Colour (0xff4fa3ff); c.track = juce::Colour (0xff0d131c);
+            c.glassFace = true;
             c.paint = [] (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float live)
             {
                 paintChannelEq (g, b, info, v, live);
@@ -4560,6 +4569,7 @@ namespace
             c.knobs = KnobStyle::light;
             c.label = juce::Colour (0xff3b3b3b); c.value = juce::Colour (0xffff6a3d); c.accent = juce::Colour (0xffff6a3d); c.track = juce::Colour (0xffa9a9a9);
             c.paint = paintStudioReverb;
+            c.glassFace = true;
             c.live = true;   // (the Liquid Glass particles move)
             c.pageParam = "view";
             const auto white = juce::Colours::white.withAlpha (0.6f), orange = juce::Colour (0xffff6a3d);
@@ -4624,6 +4634,7 @@ namespace
             c.label = juce::Colours::white.withAlpha (0.6f); c.value = juce::Colour (0xff4fb3e0); c.accent = juce::Colour (0xff4fb3e0); c.track = juce::Colour (0xff141a22);
             c.live = true;
             c.paint = paintPitchCorrection;
+            c.glassFace = true;
             c.pageParam = "kbMode";
             c.controls = {
                 { "key", Kind::dropdown, R (40, 52, 160, 30), "Root Note" },
@@ -4668,6 +4679,7 @@ namespace
             c.meters = true;     // (each band's gain change, the levels in and out)
             c.analyzer = true;   // (the spectrum behind the bands)
             c.paint = paintMultipressor;
+            c.glassFace = true;
             const char* fields[] { "Thr", "Ratio", "ExpThr", "ExpRatio", "ExpRed", "Rms", "Attack", "Release", "Gain" };
             for (int b = 0; b < 4; ++b)
             {
@@ -5398,8 +5410,14 @@ juce::Image skinImage (const char* name)
     return {};
 }
 
-juce::Colour labelColourOf (const Design& d) { return theme::glassSkin() && d.photoScale <= 0.0f ? theme::text : d.label; }
-juce::Colour valueColourOf (const Design& d) { return theme::glassSkin() && d.photoScale <= 0.0f ? theme::accent : d.value; }
+bool writesInTheme (const Design& d)
+{
+    // (in light mode a face still in its own dark colours keeps its light writing: dark writing would vanish on it)
+    return theme::glassSkin() && d.photoScale <= 0.0f
+        && (d.glassFace || ! theme::glassLight() || d.label.getPerceivedBrightness() < 0.55f);
+}
+juce::Colour labelColourOf (const Design& d) { return writesInTheme (d) ? theme::text : d.label; }
+juce::Colour valueColourOf (const Design& d) { return writesInTheme (d) ? theme::accent : d.value; }
 
 const Design* designFor (const juce::String& type)
 {

@@ -24,6 +24,8 @@ public:
 
     void setBusy (bool busy);
     void showResults (const std::vector<automix::Result>& results, const juce::String& genre);
+    /** What matching the reference did on the master bus (or why it couldn't). */
+    void showReference (const juce::StringArray& steps, const juce::String& error);
 
 private:
     juce::ValueTree project;
@@ -31,6 +33,11 @@ private:
     juce::TextButton runButton { "Automix" };
     juce::ToggleButton fadersBox { "Faders" }, panBox { "Panning" }, pluginsBox { "Plugins (EQ, compression...)" };
     juce::TextEditor report;
+    juce::ToggleButton referenceBox { "Sound like a reference:" };
+    juce::TextButton chooseButton { "Choose a mastered song..." };
+    std::unique_ptr<juce::FileChooser> chooser;
+    juce::String referencePath() const;
+    void updateReferenceButton();
     juce::String note;
 };
 

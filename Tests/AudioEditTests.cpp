@@ -554,3 +554,86 @@ TEST_CASE ("Stretch keeps a chord's notes and level steady", "[audioedit][stretc
     }
 }
 
+
+TEST_CASE ("Flex Pitch: straightening vibrato and drift sounds clean (no added noise, a steady pitch)", "[pitch]")
+{
+    // A voice-like tone: many harmonics shaped by two formants, with a scoop into the note and a wide vibrato
+    constexpr double rate = 48000.0;
+    juce::AudioBuffer<float> voice (1, (int) (1.2 * rate));
+    voice.clear();
+    double phase = 0.0;
+    juce::Random noise (7);
+    for (int i = 0; i < voice.getNumSamples(); ++i)
+    {
+        const auto t = i / rate;
+        if (t < 0.05 || t > 1.15)
+            continue;
+        const auto scoop = t < 0.25 ? -1.0 * (0.25 - t) / 0.2 : 0.0;
+        const auto f = 196.0 * std::pow (2.0, (scoop + 0.5 * std::sin (juce::MathConstants<double>::twoPi * 5.8 * t)) / 12.0);
+        phase += juce::MathConstants<double>::twoPi * f / rate;
+        double v = 0.0;
+        for (int h = 1; h <= 20; ++h)
+        {
+            const auto hz = h * f;
+            const auto formants = std::exp (-std::pow ((hz - 700.0) / 300.0, 2.0)) + 0.6 * std::exp (-std::pow ((hz - 1200.0) / 350.0, 2.0)) + 0.05;
+            v += formants * std::sin (h * phase) / h;
+        }
+        voice.setSample (0, i, (float) (0.25 * v + 0.0005 * (noise.nextFloat() - 0.5f)));
+    }
+    const auto analysis = pitchcorrect::analyse (voice, rate);
+    REQUIRE (! analysis.notes.empty());
+    size_t longest = 0;
+    for (size_t i = 0; i < analysis.notes.size(); ++i)
+        if (analysis.notes[i].endFrame - analysis.notes[i].startFrame > analysis.notes[longest].endFrame - analysis.notes[longest].startFrame)
+            longest = i;
+    std::vector<pitchcorrect::NoteEdit> edits (analysis.notes.size());
+    for (auto& e : edits) { e.vibrato = 0.0; e.drift = 1.0; e.shift = 1.0; }
+    const auto result = pitchcorrect::render (voice, analysis, edits);
+
+    // The pitch is steady now: re-tracked, it barely moves through the middle of the note
+    const auto again = pitchcorrect::analyse (result, rate);
+    std::vector<double> mids;
+    for (size_t f = (size_t) (0.4 * rate / again.hop); f < (size_t) (1.0 * rate / again.hop) && f < again.midi.size(); ++f)
+        if (again.midi[f] > 0.0f)
+            mids.push_back (again.midi[f]);
+    REQUIRE (mids.size() > 50);
+    double mean = 0.0, jitter = 0.0;
+    for (auto m : mids) mean += m;
+    mean /= (double) mids.size();
+    double spread = 0.0;
+    for (size_t i = 0; i < mids.size(); ++i)
+    {
+        spread = std::max (spread, std::abs (mids[i] - mean));
+        if (i > 0) jitter += std::abs (mids[i] - mids[i - 1]);
+    }
+    jitter /= (double) (mids.size() - 1);
+    INFO ("mean " << mean << " spread " << spread << " jitter " << jitter);
+    CHECK_THAT (mean, WithinAbs (56.0, 0.2));   // G3 up a semitone
+    CHECK (spread < 0.15);
+    CHECK (jitter < 0.02);
+
+    // No noise added: the energy between the harmonics stays as low as it was
+    const auto inharmonic = [&] (const juce::AudioBuffer<float>& b, double f0)
+    {
+        constexpr int order = 15, size = 1 << order;
+        juce::dsp::FFT fft (order);
+        std::vector<float> data ((size_t) size * 2, 0.0f);
+        const int from = (int) (0.45 * rate);
+        for (int i = 0; i < size && from + i < b.getNumSamples(); ++i)
+            data[(size_t) i] = b.getSample (0, from + i) * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) (size - 1)));
+        fft.performFrequencyOnlyForwardTransform (data.data(), true);
+        double near = 0.0, far = 0.0;
+        for (int k = 1; k < size / 2; ++k)
+        {
+            const auto hz = k * rate / size;
+            if (hz > 6000.0) break;
+            const auto distance = std::abs (hz / f0 - std::round (hz / f0)) * f0;
+            const auto e = (double) data[(size_t) k] * data[(size_t) k];
+            (distance < 12.0 ? near : far) += e;
+        }
+        return far / juce::jmax (1.0e-12, near);
+    };
+    const auto ratio = inharmonic (result, 196.0 * std::pow (2.0, 1.0 / 12.0));
+    INFO ("noise between harmonics: " << juce::Decibels::gainToDecibels (std::sqrt (ratio)) << " dB");
+    CHECK (juce::Decibels::gainToDecibels (std::sqrt (ratio)) < -30.0);
+}

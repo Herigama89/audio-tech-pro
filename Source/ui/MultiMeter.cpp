@@ -259,6 +259,12 @@ void MultiMeterPanel::take (const float* l, const float* r, int n)
         }
 
     analyse (dt);
+    // (silence that has settled: nothing moves, so the meter isn't redrawn)
+    const bool settled = n <= 0 && peakDb[0] <= -99.0f && peakDb[1] <= -99.0f;
+    if (settled && ++quietFrames > 90)
+        return;
+    if (! settled)
+        quietFrames = 0;
     repaint();
 }
 

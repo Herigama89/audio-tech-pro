@@ -195,6 +195,8 @@ Analysis analyse (const juce::AudioBuffer<float>& audio, double sampleRate)
 //==============================================================================
 namespace
 {
+std::vector<double> shiftCurve (const Analysis& a, int index, const NoteEdit& e, std::vector<double>* cleanOut);
+
 /** The result for samples [spanFrom, spanTo) (the grains round them from a little before and after). */
 juce::AudioBuffer<float> synthesise (const juce::AudioBuffer<float>& audio, const Analysis& a, const std::vector<NoteEdit>& edits,
                                      int spanFrom, int spanTo)
@@ -204,18 +206,32 @@ juce::AudioBuffer<float> synthesise (const juce::AudioBuffer<float>& audio, cons
     const auto rate = a.sampleRate;
 
     // What each frame gets: its note's shift (and straightening), its note's gain; smoothed over ~25 ms
-    std::vector<double> shift ((size_t) frames, 0.0), gain ((size_t) frames, 0.0), formant ((size_t) frames, 0.0);
+    // (each note's shift in two parts: its overall move, which glides in and out over ~20 ms, and the shape within
+    // it - the drift and vibrato taken out or widened - which is followed exactly, fading only at the note's ends)
+    std::vector<double> shift ((size_t) frames, 0.0), detail ((size_t) frames, 0.0), gain ((size_t) frames, 0.0), formant ((size_t) frames, 0.0);
+    // (a note whose drift or vibrato is reshaped is placed at the pitch it should have outright - not as a shift from
+    // what the tracker heard, which lags a fast vibrato - so a straightened note comes out truly steady)
+    std::vector<double> absolute ((size_t) frames, 0.0), absoluteWeight ((size_t) frames, 0.0);
     for (size_t i = 0; i < a.notes.size() && i < edits.size(); ++i)
     {
         const auto& note = a.notes[i];
         const auto& e = edits[i];
-        const auto curve = curveAfter (a, (int) i, e);
+        std::vector<double> clean;
+        const auto noteShift = shiftCurve (a, (int) i, e, &clean);
         const auto plain = centreAfter (note, e) - note.centre;
+        const bool reshaped = e.drift > 1.0e-3 || std::abs (e.vibrato - 1.0) > 1.0e-3;
+        const int length = note.endFrame - note.startFrame;
         for (int f = juce::jmax (0, note.startFrame); f < juce::jmin (frames, note.endFrame); ++f)
         {
-            const auto m = (double) a.midi[(size_t) f];
-            const auto shaped = (double) curve[(size_t) (f - note.startFrame)];
-            shift[(size_t) f] = m > 0.0 && shaped > 0.0 ? shaped - m : plain;
+            const int k = f - note.startFrame;
+            const auto edge = juce::jlimit (0.0, 1.0, (double) juce::jmin (k + 1, length - k) / 4.0);
+            shift[(size_t) f] = plain;
+            detail[(size_t) f] = (noteShift[(size_t) k] - plain) * edge;
+            if (reshaped)
+            {
+                absolute[(size_t) f] = clean[(size_t) k] + noteShift[(size_t) k];
+                absoluteWeight[(size_t) f] = edge;
+            }
             gain[(size_t) f] = e.gain;
             formant[(size_t) f] = e.formant;
         }
@@ -233,9 +249,11 @@ juce::AudioBuffer<float> synthesise (const juce::AudioBuffer<float>& audio, cons
         }
         return out;
     };
-    shift = smooth (shift, 2);
-    gain = smooth (gain, 3);
-    formant = smooth (formant, 3);
+    shift = smooth (shift, 3);   // (~20 ms: a note glides into its new pitch rather than jumping)
+    for (int f = 0; f < frames; ++f)
+        shift[(size_t) f] += detail[(size_t) f];
+    gain = smooth (gain, 4);
+    formant = smooth (formant, 4);
     const auto atSample = [&] (const std::vector<double>& v, double s)
     {
         const auto pos = juce::jlimit (0.0, (double) (frames - 1), s / a.hop);
@@ -256,6 +274,17 @@ juce::AudioBuffer<float> synthesise (const juce::AudioBuffer<float>& audio, cons
     std::vector<float> mono ((size_t) juce::jmax (1, end - base), 0.0f);
     for (int c = 0; c < audio.getNumChannels(); ++c)
         juce::FloatVectorOperations::addWithMultiply (mono.data(), audio.getReadPointer (c, base), 1.0f / (float) audio.getNumChannels(), end - base);
+    // (the marks are found on a low-passed copy - zero-phase, so they line up: the strongest peak of each period
+    // without jumping between the formants' peaks, which is what makes PSOLA sound rough)
+    {
+        juce::IIRFilter lp;
+        lp.setCoefficients (juce::IIRCoefficients::makeLowPass (rate, 900.0, 0.6));
+        lp.processSamples (mono.data(), (int) mono.size());
+        std::reverse (mono.begin(), mono.end());
+        lp.reset();
+        lp.processSamples (mono.data(), (int) mono.size());
+        std::reverse (mono.begin(), mono.end());
+    }
     const auto x = [&mono, base] (int i) { return mono[(size_t) (i - base)]; };
 
     // Pitch marks: one per period on the waveform's peaks where it's pitched, every 5 ms where it isn't
@@ -276,9 +305,18 @@ juce::AudioBuffer<float> synthesise (const juce::AudioBuffer<float>& audio, cons
             if (from > to)
                 break;
             next = from;
+            // the strongest peak, favouring one a period on from the last (steady marks: a smooth result)
+            const auto expected = previousPitched ? last + period : (double) from;
+            auto best = -1.0e9f;
             for (int s2 = from; s2 <= to; ++s2)
-                if (x (s2) > x (next))
+            {
+                const auto score = x (s2) * (previousPitched ? 1.0f - 0.35f * (float) std::abs (s2 - expected) / (float) (0.2 * period) : 1.0f);
+                if (score > best)
+                {
+                    best = score;
                     next = s2;
+                }
+            }
             previousPitched = true;
         }
         else
@@ -298,56 +336,77 @@ juce::AudioBuffer<float> synthesise (const juce::AudioBuffer<float>& audio, cons
         return span;
     }
 
+    // Each mark to a fraction of a sample (a parabola through the peak): grains taken and placed between samples,
+    // or the upper harmonics' phases jitter from grain to grain - heard as a hiss round the voice
+    std::vector<double> at (marks.size());
+    for (size_t m = 0; m < marks.size(); ++m)
+    {
+        const auto i0 = marks[m];
+        at[m] = (double) i0;
+        if (i0 - 1 >= base && i0 + 1 < end && pitchedAt (i0))
+        {
+            const auto l = x (i0 - 1), c = x (i0), r = x (i0 + 1);
+            const auto denom = l - 2.0f * c + r;
+            if (std::abs (denom) > 1.0e-9f)
+                at[m] += juce::jlimit (-0.5, 0.5, (double) (0.5f * (l - r) / denom));
+        }
+    }
+    // (cubic interpolation: a grain read between samples without dulling it)
+    const auto read = [n] (const float* in, double pos)
+    {
+        const auto i1 = (int) std::floor (pos);
+        const auto t = (float) (pos - i1);
+        const auto sample = [in, n] (int i) { return in[juce::jlimit (0, n - 1, i)]; };
+        const auto y0 = sample (i1 - 1), y1 = sample (i1), y2 = sample (i1 + 1), y3 = sample (i1 + 2);
+        const auto c1 = 0.5f * (y2 - y0), c2 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3, c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
+        return ((c3 * t + c2) * t + c1) * t + y1;
+    };
+
     // Synthesis: a grain (two periods, Hann) from the nearest analysis mark, placed every period / ratio
     juce::AudioBuffer<float> out (channels, end - base);
     out.clear();
     std::vector<float> weight ((size_t) (end - base), 0.0f);
-    double ts = marks.front();
+    double ts = at.front();
     size_t k = 0;
     while (ts < end)
     {
-        while (k + 1 < marks.size() && std::abs (marks[k + 1] - ts) < std::abs (marks[k] - ts))
+        while (k + 1 < at.size() && std::abs (at[k + 1] - ts) < std::abs (at[k] - ts))
             ++k;
-        const auto a0 = marks[k];
-        const auto period = k + 1 < marks.size() ? marks[k + 1] - marks[k] : (k > 0 ? marks[k] - marks[k - 1] : (int) periodAt (a0));
-        const auto half = juce::jmax (8, period);
-        const auto pitched = pitchedAt (a0);
+        const auto a0 = at[k];
+        // the period round the mark (two neighbours averaged: steadier than one gap)
+        const auto before = k > 0 ? at[k] - at[k - 1] : 0.0, after = k + 1 < at.size() ? at[k + 1] - at[k] : 0.0;
+        auto period = before > 0.0 && after > 0.0 ? 0.5 * (before + after) : juce::jmax (before, after);
+        if (period <= 0.0)
+            period = periodAt (marks[k]);
+        if (before > 0.0 && after > 0.0 && std::abs (before - after) > 0.25 * period)
+            period = juce::jmin (before, after);   // (at a jump between notes or into a breath: the shorter)
+        const auto half = juce::jmax (8.0, period);
+        const auto pitched = pitchedAt (marks[k]);
         const auto ratio = pitched ? std::pow (2.0, atSample (shift, ts) / 12.0) : 1.0;
         const auto g = (float) juce::Decibels::decibelsToGain (atSample (gain, ts));
-        const auto centre = (int) std::lround (ts);
         // Formant shift: the grain read faster (brighter) or slower (darker), its period's spacing kept
         const auto fs = pitched ? std::pow (2.0, atSample (formant, ts) / 12.0) : 1.0;
-        const bool resampled = std::abs (fs - 1.0) > 1.0e-3;
-        for (int j = -half; j <= half; ++j)
+        const int first = juce::jmax (base, (int) std::ceil (ts - half)), last = juce::jmin (end - 1, (int) std::floor (ts + half));
+        for (int dst = first; dst <= last; ++dst)
         {
-            const auto dst = centre + j;
-            if (dst < base || dst >= end)
+            const auto offset = (double) dst - ts;
+            const auto w = (float) (0.5 + 0.5 * std::cos (juce::MathConstants<double>::pi * offset / half));
+            const auto pos = a0 + offset * fs;
+            if (pos < 1.0 || pos >= n - 2)
                 continue;
-            const auto w = 0.5f + 0.5f * std::cos (juce::MathConstants<float>::pi * (float) j / (float) half);
-            if (resampled)
-            {
-                const auto pos = a0 + j * fs;
-                const auto i0 = (int) std::floor (pos);
-                if (i0 < 0 || i0 + 1 >= n)
-                    continue;
-                const auto t = (float) (pos - i0);
-                for (int c = 0; c < channels; ++c)
-                {
-                    const auto* in = audio.getReadPointer (c);
-                    out.getWritePointer (c)[dst - base] += (in[i0] + (in[i0 + 1] - in[i0]) * t) * w * g;
-                }
-            }
-            else
-            {
-                const auto src = a0 + j;
-                if (src < 0 || src >= n)
-                    continue;
-                for (int c = 0; c < channels; ++c)
-                    out.getWritePointer (c)[dst - base] += audio.getReadPointer (c)[src] * w * g;
-            }
+            for (int c = 0; c < channels; ++c)
+                out.getWritePointer (c)[dst - base] += read (audio.getReadPointer (c), pos) * w * g;
             weight[(size_t) (dst - base)] += w;
         }
-        ts += juce::jmax (4.0, period / ratio);
+        auto spacing = period / ratio;
+        if (pitched)
+            if (const auto w = atSample (absoluteWeight, ts); w > 0.0)
+            {
+                const auto f = juce::jlimit (0, frames - 1, (int) std::lround (ts / a.hop));
+                if (absolute[(size_t) f] > 0.0)
+                    spacing += (rate / hzOf (atSample (absolute, ts)) - spacing) * w;
+            }
+        ts += juce::jmax (4.0, spacing);
     }
     for (int c = 0; c < channels; ++c)
     {
@@ -581,40 +640,105 @@ double centreAfter (const Note& note, const NoteEdit& edit)
     return moved + edit.snap * (std::round (moved) - moved);
 }
 
+namespace
+{
+    /** A note's pitch curve made fit to edit with: frames where the tracking slipped (an octave off, a jump that
+        isn't sung) and unpitched frames inside the note are bridged from their neighbours, then it's lightly
+        smoothed. The voice's own movement (scoops, vibrato) stays; the tracker's jitter doesn't get into the edit. */
+    std::vector<double> cleanCurve (const Analysis& a, const Note& note)
+    {
+        const int count = juce::jmax (0, note.endFrame - note.startFrame);
+        std::vector<double> raw ((size_t) count, 0.0), out ((size_t) count, 0.0);
+        std::vector<bool> good ((size_t) count, false);
+        for (int k = 0; k < count; ++k)
+            raw[(size_t) k] = (double) a.midi[(size_t) (note.startFrame + k)];
+        for (int k = 0; k < count; ++k)
+        {
+            if (raw[(size_t) k] <= 0.0)
+                continue;
+            std::vector<float> near;
+            for (int j = juce::jmax (0, k - 3); j <= juce::jmin (count - 1, k + 3); ++j)
+                if (raw[(size_t) j] > 0.0)
+                    near.push_back ((float) raw[(size_t) j]);
+            good[(size_t) k] = std::abs (raw[(size_t) k] - (double) median (near)) < 0.6
+                               && std::abs (raw[(size_t) k] - note.centre) < 7.0;
+        }
+        int previous = -1;
+        for (int k = 0; k < count; ++k)
+        {
+            if (good[(size_t) k])
+            {
+                out[(size_t) k] = raw[(size_t) k];
+                previous = k;
+                continue;
+            }
+            int next = k + 1;
+            while (next < count && ! good[(size_t) next])
+                ++next;
+            const auto from = previous >= 0 ? raw[(size_t) previous] : (next < count ? raw[(size_t) next] : note.centre);
+            const auto to = next < count ? raw[(size_t) next] : from;
+            const auto t = previous >= 0 && next < count ? (double) (k - previous) / (double) (next - previous) : 0.0;
+            out[(size_t) k] = from + (to - from) * t;
+        }
+        // (about 15 ms of smoothing: the tracker's frame-to-frame wobble, not the singer's)
+        std::vector<double> smoothed ((size_t) count);
+        for (int k = 0; k < count; ++k)
+        {
+            double sum = 0.0, weights = 0.0;
+            for (int j = -2; j <= 2; ++j)
+                if (const auto at = k + j; at >= 0 && at < count)
+                {
+                    const auto w = 3.0 - std::abs (j);
+                    sum += out[(size_t) at] * w;
+                    weights += w;
+                }
+            smoothed[(size_t) k] = sum / weights;
+        }
+        return smoothed;
+    }
+
+    /** The shift (semitones) each frame of a note gets: from its clean curve to where the edit puts it. */
+    std::vector<double> shiftCurve (const Analysis& a, int index, const NoteEdit& e, std::vector<double>* cleanOut)
+    {
+        const auto& note = a.notes[(size_t) index];
+        const auto clean = cleanCurve (a, note);
+        const int count = (int) clean.size();
+        // Its slow part (a moving average over ~80 ms) is the drift; what's left round it is the vibrato
+        const int radius = juce::jmax (2, (int) std::lround (0.04 * a.sampleRate / a.hop));
+        std::vector<double> slow ((size_t) count, 0.0), shift ((size_t) count, 0.0);
+        for (int k = 0; k < count; ++k)
+        {
+            double sum = 0.0;
+            int n = 0;
+            for (int j = juce::jmax (0, k - radius); j <= juce::jmin (count - 1, k + radius); ++j, ++n)
+                sum += clean[(size_t) j];
+            slow[(size_t) k] = n > 0 ? sum / n : note.centre;
+        }
+        const auto target = centreAfter (note, e);
+        for (int k = 0; k < count; ++k)
+        {
+            const auto driftPart = slow[(size_t) k] - note.centre;
+            const auto vibratoPart = clean[(size_t) k] - slow[(size_t) k];
+            shift[(size_t) k] = target + driftPart * (1.0 - e.drift) + vibratoPart * e.vibrato - clean[(size_t) k];
+        }
+        if (cleanOut != nullptr)
+            *cleanOut = clean;
+        return shift;
+    }
+}
+
 std::vector<float> curveAfter (const Analysis& a, int index, const NoteEdit& e)
 {
     std::vector<float> out;
     if (! juce::isPositiveAndBelow (index, (int) a.notes.size()))
         return out;
     const auto& note = a.notes[(size_t) index];
-    const int count = juce::jmax (0, note.endFrame - note.startFrame);
-    out.assign ((size_t) count, 0.0f);
-
-    // Its slow part (a moving average over ~80 ms) is the drift; what's left round it is the vibrato
-    const int radius = juce::jmax (2, (int) std::lround (0.04 * a.sampleRate / a.hop));
-    std::vector<double> slow ((size_t) count, 0.0);
-    for (int k = 0; k < count; ++k)
-    {
-        double sum = 0.0;
-        int n = 0;
-        for (int j = juce::jmax (0, k - radius); j <= juce::jmin (count - 1, k + radius); ++j)
-            if (const auto m = a.midi[(size_t) (note.startFrame + j)]; m > 0.0f)
-            {
-                sum += m;
-                ++n;
-            }
-        slow[(size_t) k] = n > 0 ? sum / n : note.centre;
-    }
-    const auto target = centreAfter (note, e);
-    for (int k = 0; k < count; ++k)
-    {
-        const auto m = (double) a.midi[(size_t) (note.startFrame + k)];
-        if (m <= 0.0)
-            continue;
-        const auto driftPart = slow[(size_t) k] - note.centre;
-        const auto vibratoPart = m - slow[(size_t) k];
-        out[(size_t) k] = (float) (target + driftPart * (1.0 - e.drift) + vibratoPart * e.vibrato);
-    }
+    std::vector<double> clean;
+    const auto shift = shiftCurve (a, index, e, &clean);
+    out.assign (clean.size(), 0.0f);
+    for (size_t k = 0; k < clean.size(); ++k)
+        if (a.midi[(size_t) note.startFrame + k] > 0.0f)
+            out[k] = (float) (clean[k] + shift[k]);
     return out;
 }
 

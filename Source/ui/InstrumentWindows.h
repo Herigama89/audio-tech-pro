@@ -233,6 +233,7 @@ private:
     std::vector<std::function<void()>> refreshers;
     std::function<float()> liveValue;
     float liveShown = 0.0f;
+    double lastSignature = -1.0e9;
     std::function<double (float*, int)> analyzerSource;
     std::function<int (float*, int)> meterSource;
     std::vector<float> meterValues;

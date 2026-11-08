@@ -370,6 +370,8 @@ public:
         double seconds = 0.0;
     };
     MixMeasurement measureMix (double startSeconds, double endSeconds, std::function<bool (double)> progress);
+    /** While measureMix runs: also given each block of the master (Automix's reference matching listens to it). */
+    std::function<void (const float*, const float*, int)> measureTap;
 
     // --- Rendering, public so tests can drive the engine without a device --
     void prepare (double newSampleRate, int maxBlockSize);

@@ -665,6 +665,8 @@ AudioEngine::MixMeasurement AudioEngine::measureMix (double startSeconds, double
         const auto n = (int) juce::jmin ((juce::int64) block.getNumSamples(), total - done);
         render (nullptr, 0, block.getArrayOfWritePointers(), 2, n);
         measuredMaster.add (block.getReadPointer (0), block.getReadPointer (1), n);
+        if (measureTap)
+            measureTap (block.getReadPointer (0), block.getReadPointer (1), n);
         done += n;
 
         if (progress && ! progress ((double) done / (double) total))

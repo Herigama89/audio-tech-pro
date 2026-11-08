@@ -4,6 +4,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "../Source/engine/BuiltInEffects.h"
 #include <set>
+#include <map>
 
 using namespace riff;
 
@@ -1544,4 +1545,109 @@ TEST_CASE ("Channel EQ's dynamic EQ cuts a band only when it is loud", "[effects
     CHECK (loudCut < -5.0);
     const auto quietCut = juce::Decibels::gainToDecibels (rms (0.005f, true) / rms (0.005f, false));
     CHECK (std::abs (quietCut) < 0.5);
+}
+
+TEST_CASE ("Vintage Opto: compresses deep and stays clean; its tubes colour it, and switch off", "[stockfx]")
+{
+    // Harmonic distortion of a 1 kHz tone (2nd to 7th harmonics against the fundamental), from the last half second
+    const auto thdOf = [] (const std::vector<float>& s)
+    {
+        double fund = 0.0, harm = 0.0;
+        const size_t from = s.size() / 2;
+        for (int h = 1; h <= 7; ++h)
+        {
+            std::complex<double> acc;
+            for (size_t i = from; i < s.size(); ++i)
+                acc += (double) s[i] * std::polar (1.0, -juce::MathConstants<double>::twoPi * 1000.0 * h * (double) i / rate);
+            (h == 1 ? fund : harm) += std::norm (acc);
+        }
+        return std::sqrt (harm / fund);
+    };
+    struct Result { float gr; double thd; float peak = 0.0f; };
+    const auto opto = [&] (float threshold, float tubes, float limit)
+    {
+        auto c = make ("studioComp");
+        set (*c, "model", 6.0f);
+        set (*c, "threshold", threshold);
+        set (*c, "tubes", tubes);
+        set (*c, "optoLimit", limit);
+        const auto [l, r] = run (*c, sine (1000.0, 2.0, 0.5f), sine (1000.0, 2.0, 0.5f));
+        return Result { c->takeGainReductionDb(), thdOf (l), peakOf (l, l.size() / 2) };
+    };
+    // Peak Reduction all the way: a lot of gain reduction, with no break-up (tubes off: clean)
+    const auto deep = opto (-50.0f, 0.0f, 0.0f);
+    INFO ("deep: " << deep.gr << " dB, THD " << deep.thd * 100.0 << " %, out peak " << deep.peak << " limit peak " << opto (-50.0f, 0.0f, 1.0f).peak << " light " << opto (-15.0f, 0.0f, 0.0f).peak);
+    CHECK (deep.gr > 25.0f);
+    CHECK (deep.thd < 0.01);
+    const auto limited = opto (-50.0f, 0.0f, 1.0f);
+    CHECK (limited.gr > deep.gr + 5.0f);
+    CHECK (limited.thd < 0.01);
+    // The tubes: audible colour (mostly second harmonic) that doesn't grow into distortion as it digs in
+    const auto light = opto (-15.0f, 1.0f, 0.0f), heavy = opto (-50.0f, 1.0f, 0.0f);
+    INFO ("tubes: light THD " << light.thd * 100.0 << " %, heavy " << heavy.thd * 100.0 << " %");
+    CHECK (light.thd > 0.01);
+    CHECK (heavy.thd < 0.06);
+}
+
+#include "../Source/engine/ReferenceMatch.h"
+
+TEST_CASE ("Automix reference: a dull, quiet, dynamic mix is planned towards a bright, loud, dense master", "[automix]")
+{
+    // The "master": pink-ish noise, bright, loud and dense; the "mix": the same darker, 12 dB quieter, with peaks
+    juce::Random random (3);
+    const auto make = [&] (float gain, float brightness, bool spiky)
+    {
+        std::vector<float> l ((size_t) (8.0 * rate)), r (l.size());
+        float lowL = 0.0f, lowR = 0.0f;
+        for (size_t i = 0; i < l.size(); ++i)
+        {
+            const auto a = random.nextFloat() * 2.0f - 1.0f, b = random.nextFloat() * 2.0f - 1.0f;
+            lowL += 0.05f * (a - lowL);
+            lowR += 0.05f * (b - lowR);
+            const auto spike = spiky && i % 24000 < 200 ? 4.0f : 1.0f;
+            l[i] = gain * spike * (lowL * 3.0f + brightness * (a - lowL));
+            r[i] = gain * spike * (lowR * 3.0f + brightness * (b - lowR));
+        }
+        reference::Analyser an;
+        an.prepare (rate);
+        an.add (l.data(), r.data(), (int) l.size());
+        return an.result();
+    };
+    const auto master = make (0.25f, 0.6f, false);
+    const auto mix = make (0.06f, 0.15f, true);
+    REQUIRE (master.valid());
+    REQUIRE (mix.valid());
+    CHECK (master.lufs > mix.lufs + 8.0);
+    CHECK (mix.density() > master.density() + 3.0);
+
+    const auto steps = reference::plan (mix, master);
+    std::map<juce::String, const reference::Step*> byType;
+    for (const auto& s : steps)
+        byType[s.type] = &s;
+    REQUIRE (byType.count ("matchEq") == 1);
+    REQUIRE (byType.count ("studioComp") == 1);
+    REQUIRE (byType.count ("adaptiveLimiter") == 1);
+    // the EQ learned both spectra, so it lifts the highs; the limiter brings the level up
+    const auto param = [] (const reference::Step& s, const juce::String& id)
+    {
+        for (const auto& [p, v] : s.params)
+            if (p == id) return v;
+        return -999.0f;
+    };
+    CHECK (param (*byType["matchEq"], "t28") - param (*byType["matchEq"], "t5") > param (*byType["matchEq"], "c28") - param (*byType["matchEq"], "c5") + 6.0f);
+    CHECK (param (*byType["adaptiveLimiter"], "gain") > 6.0f);
+    // each step is a real plugin with real parameters
+    for (const auto& s : steps)
+    {
+        auto e = BuiltInEffect::create (s.type);
+        REQUIRE (e != nullptr);
+        for (const auto& [p, v] : s.params)
+        {
+            bool found = false;
+            for (const auto& info : e->getInfo().params)
+                found = found || info.id == p;
+            INFO (s.type << " " << p);
+            CHECK (found);
+        }
+    }
 }

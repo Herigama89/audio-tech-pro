@@ -30,6 +30,8 @@ namespace ucnet
             if (start + 4 > n)
             {
                 // (keep a tail that might be the start of a frame)
+                if (n == 0)
+                    return out;   // (nothing to keep: copying an empty block reads through a null pointer)
                 juce::MemoryBlock tail (bytes + (n >= 3 ? n - 3 : 0), std::min<size_t> (n, 3));
                 buffer = tail;
                 return out;

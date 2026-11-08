@@ -55,7 +55,7 @@ namespace
         enum Model { platinum, studioVca, studioFet, classicVca, vintageVca, vintageFet, vintageOpto };
         enum Index { iModel, iThreshold, iRatio, iAttack, iRelease, iKnee, iMakeup, iAutoGain, iScFreq, iMix, iDistortion, iOutput,
                      iLimiter, iLimThr, iInput, iAutoRelease, iDetect, iPeakRms, iScFilter, iScMode, iScQ, iScGain, iListen,
-                     iPower, iCompIn, iMeterMode, iLink, iExtSc, iAir, iConsole, iVcaDrive, iEmphasis, iImpedance, iMeterHold, iScHpfStep, iOptoLimit };
+                     iPower, iCompIn, iMeterMode, iLink, iExtSc, iAir, iConsole, iVcaDrive, iEmphasis, iImpedance, iMeterHold, iScHpfStep, iOptoLimit, iTubes };
 
         /** What a circuit makes of the Ratio, Attack and Release knobs (the vintage ones step). */
         static float circuitRatio (int model, float ratio) noexcept
@@ -138,7 +138,7 @@ namespace
             const auto model = (Model) juce::jlimit (0, 6, choice (iModel));
             const auto threshold = value (iThreshold);
             // (the opto's LIMIT/COMPRESS switch sets its ratio: about 3:1, or a limiter's)
-            const auto ratio = model == vintageOpto ? (choice (iOptoLimit) == 1 ? 10.0f : 3.0f)
+            const auto ratio = model == vintageOpto ? (choice (iOptoLimit) == 1 ? 8.0f : 3.0f)
                                                     : circuitRatio (model, std::max (1.0f, value (iRatio)));
             const auto attackMs = circuitAttack (model, value (iAttack));
             const auto releaseMs = circuitRelease (model, value (iRelease));
@@ -159,6 +159,7 @@ namespace
             const auto vcaDrive = value (iVcaDrive);
             const auto transformer = choice (iImpedance) == 1;   // 600 ohm: the input transformer loaded, more colour
             const auto console = choice (iConsole) == 1;
+            const auto tubes = choice (iTubes) == 1;   // (the opto's valve stages: their colour, or clean)
 
             // Each circuit's detector, knee, topology and colour
             bool rmsDetect = false, feedback = false;
@@ -171,7 +172,9 @@ namespace
                 case classicVca:  rmsDetect = true; knee = 4.0f; break;
                 case vintageVca:  rmsDetect = true; feedback = true; knee = 3.0f; break;
                 case vintageFet:  knee = ratio >= 30.0f ? 0.0f : 2.0f; break;
-                case vintageOpto: rmsDetect = true; feedback = true; knee = 14.0f; break;
+                // (the opto: its feedback's settled law worked out ahead - about 3:1, or 8:1 in Limit - so it can be driven
+                // as deep as you like without the loop overshooting; its slow cell and two-stage release keep the feel)
+                case vintageOpto: rmsDetect = true; knee = 10.0f; break;
             }
             const auto attack = coeffMs (attackMs, sampleRate);
             const auto rmsCoeff = coeffMs (model == vintageOpto ? 20.0 : model == classicVca ? 12.0 : 8.0, sampleRate);
@@ -308,8 +311,11 @@ namespace
                     a = a + vcaDrive * (std::tanh (a * d) / d - a) * 1.4f;
                     b = b + vcaDrive * (std::tanh (b * d) / d - b) * 1.4f;
                 }
-                a = colour (model, a, envDb, dcL);
-                b = colour (model, b, envDb, dcR);
+                if (model != vintageOpto || tubes)
+                {
+                    a = colour (model, a, envDb, dcL);
+                    b = colour (model, b, envDb, dcR);
+                }
                 if (console)
                 {
                     // (the console's output transformer: gentle second harmonic, the peaks rounded)
@@ -492,9 +498,11 @@ namespace
                 }
                 case vintageOpto:
                 {
-                    const auto t = std::tanh (x);
-                    // (the valve make-up stage: warm second harmonic, a soft top)
-                    y = x + 0.11f * work * t * t + 0.035f * work * (std::tanh (x * 1.3f) / 1.3f - x);
+                    // (the valve stages: a rich, warm second harmonic, a little third and a rounded top - always there,
+                    // as tubes are, and only a touch more as it works: deep compression stays clean)
+                    const auto tube = 1.0f + (work - 1.0f) * 0.25f;
+                    const auto t = std::tanh (x * 1.2f);
+                    y = x + 0.24f * tube * t * t + 0.06f * tube * (std::tanh (x * 1.6f) / 1.6f - x);
                     break;
                 }
                 default: return x;
@@ -1271,7 +1279,8 @@ const std::vector<StockEffect>& stockDynamicsEffects()
               { "impedance", "Input Impedance", "", 0.0f, 1.0f, 0.0f, 0.5f, { "10k", "600" } },
               { "meterHold", "Meter Hold", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
               { "scHpfStep", "S/C HPF", "", 0.0f, 5.0f, 0.0f, 2.5f, { "Off", "30 Hz", "60 Hz", "105 Hz", "125 Hz", "185 Hz" } },
-              { "optoLimit", "Limit/Compress", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Compress", "Limit" } } }, "Dynamics" },
+              { "optoLimit", "Limit/Compress", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Compress", "Limit" } },
+              { "tubes", "Tubes", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } } }, "Dynamics" },
           make<StudioCompressor> },
 
         { { "multiband", "Multipressor", multipressorParams(), "Dynamics" },

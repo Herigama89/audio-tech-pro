@@ -110,6 +110,7 @@ namespace riff::effectdesign
         bool showScale = false;                 // the knob's lowest and highest values under it (as Logic's newer plug-ins)
         bool lcdValues = false;                 // values in small dark windows under the knobs (older hardware-style faces)
         bool live = false;                      // a meter that follows the sound (gain reduction, correction)
+        bool glassFace = false;                 // its face paints itself in Liquid Glass (else it keeps its own colours)
         bool analyzer = false;                  // a live spectrum of the output behind the curve (as Logic's EQs)
         bool meters = false;                    // the effect's own readings (meters, loudness), refreshed while open
         /** Curve displays with points to drag: 20 Hz to 20 kHz across, each point's value over its parameter's range up the side. */
@@ -155,6 +156,8 @@ namespace riff::effectdesign
     float photoValueAt (const Sprite&, float angle);
 
     /** The face's label and value colours (Liquid Glass: the theme's text and accent on the drawn faces). */
+    /** Liquid Glass: the face is glass (or dark enough for the theme's writing), so its labels and values take the theme's colours. */
+    bool writesInTheme (const Design&);
     juce::Colour labelColourOf (const Design&);
     juce::Colour valueColourOf (const Design&);
 
