@@ -8,7 +8,7 @@ title: Looks and Themes
 ![The Theme panel](img/theme.jpg)
 
 - **Theme for** - edit the mixer's theme (and the rest of the app), or give the editor, the toolbar or the MultiMeter a theme of its own.
-- **Skin** - Studio Grey, Flat Dark (FL Studio style), Studio White, Xenon (dark glass console), Pro Tools style, Ableton style, **Neon Night** (high-contrast dark modern: near-black, cyan levels, lime waveforms, magenta peaks), or a **REAPER theme** (load a `.ReaperThemeZip`: its pictures and colours skin the app).
+- **Skin** - **Liquid Glass Dark** (the default: smoked glass, amber highlights) or **Liquid Glass Light** (frosted white glass, blue highlights). Both use the dark fader caps, LED-ring knobs, the black compression meter on every strip and smooth meters. Settings from older versions switch to Liquid Glass.
 - **Presets** - Default, Warm, Cool Blue, High Contrast, Soft Light, Studio White, Xenon, Pro Tools, Ableton and Dark VU: click one to try it.
 - **Colours** - hue, lightness, contrast, text, accent, meters, grid; the locator and marker colours; how waveforms are coloured (the track's colour, your own colour, or a gradient).
 - **Parts** - the **fader caps**, **knobs**, channel **keys** and **meters** whatever the skin (Xenon with black long-throw caps, say), an amber **VU meter** at the top of each mixer strip, and LED or smooth level meters.

@@ -93,11 +93,11 @@ namespace riff::theme
     // settings: the colours above are worked out from a skin's own palette and
     // these adjustments, and change while the app runs.
     //==========================================================================
-    enum class Skin { studio, flat, white, xenon, protools, ableton, reaper, neon };   // neon: High-Contrast Dark Modern (night mode: obsidian, cyan / lime / magenta signal colours)   // the picture's grey console, a flat dark look, or Studio White (your photos' faders, knobs and meters)
+    enum class Skin { studio, flat, white, xenon, protools, ableton, reaper, neon, glassDark, glassLight };   // neon: High-Contrast Dark Modern (night mode: obsidian, cyan / lime / magenta signal colours)   // the picture's grey console, a flat dark look, or Studio White (your photos' faders, knobs and meters)
 
     struct Settings
     {
-        Skin skin = Skin::studio;
+        Skin skin = Skin::glassDark;   // (the main theme: Liquid Glass, dark; Light is its light mode)
         float hue = 0.0f;          // degrees, -180..180: tints every surface
         float saturation = 1.0f;   // 0..2
         float lightness = 0.0f;    // -1..1: darker or lighter surfaces
@@ -122,8 +122,8 @@ namespace riff::theme
 
         // The faders' caps, whatever the skin: -1 the skin's own, 0 classic, 1 Studio White, 2 Xenon, 3 the REAPER theme's,
         // 4..7 photo caps (see Looks.h). Knobs, channel keys and the bus compressor's meter likewise (-1: the skin's own).
-        int faderStyle = -1;
-        int knobStyle = -1, buttonStyle = -1, meterStyle = -1;
+        int faderStyle = 8;   // (the Liquid Glass theme: the Dark VU caps and knobs, the black compression meter)
+        int knobStyle = -1, buttonStyle = -1, meterStyle = 1;   // (knobs: the glass skins' own LED-ring knobs)
 
         // The editor (tracks area, ruler, editors) with a theme of its own: another Settings, as text;
         // empty: the same as the mixer and the rest of the app.
@@ -139,11 +139,11 @@ namespace riff::theme
         // The grid: 0 lines, 1 shaded bars, 2 bars only, 3 dotted, 4 shaded beats (FL Studio), 5 none.
         int gridStyle = 0;
         // A VU meter at the top of each mixer strip (the Dark VU theme's amber meter)
-        bool stripVu = false;
+        bool stripVu = true;
         // The level meters: 0 LED segments, 1 smooth bars (as FL Studio's mixer)
-        int levelMeters = 0;
+        int levelMeters = 1;
         // The meter at the top of each strip (when stripVu): 0 the amber VU (level), 1 the black compression meter (gain reduction)
-        int stripMeterKind = 0;
+        int stripMeterKind = 1;
 
         // The edit windows (tracks area and editors): your own colours (ARGB), 0: the skin's.
         juce::uint32 editBack = 0, gridBarColour = 0, gridBeatColour = 0, rollBack = 0;
@@ -168,6 +168,12 @@ namespace riff::theme
 
     /** Studio White: a light console with the fader caps, knobs and LED meters cut from your photos. */
     bool whiteSkin();
+
+    /** Liquid Glass (dark or light): rounded glass keys, slots and strips, lit along their top edges. */
+    bool glassSkin();
+    bool glassLight();
+    /** Settings from an older version (the skins since retired): the Liquid Glass theme instead. */
+    Settings upgraded (const Settings&);
 
     /** Xenon: the dark glass console of your picture (its knobs, caps, slots, meters and textures). */
     bool xenonSkin();

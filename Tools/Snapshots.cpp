@@ -690,20 +690,19 @@ public:
             main.project.setProperty ("mixerBusZone", side, nullptr);
         main.player.rebuildNow();
         main.showMixer();
-        if (const auto only = juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_SKIN", {}); only == "neon")
+        if (const auto only = juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_SKIN", {}); only.isNotEmpty())
         {
-            // Just the Neon Night skin: its mixer, then its arrange window
+            // Just one skin: its mixer, then its arrange window (neon, glass, glasslight)
             theme::Settings t;
-            t.skin = theme::Skin::neon;
-            t.levelMeters = 1;
-            t.gridStyle = 3;
+            if (only == "neon") { t.skin = theme::Skin::neon; t.levelMeters = 1; t.gridStyle = 3; }
+            if (only == "glasslight") t.skin = theme::Skin::glassLight;
             main.applyTheme (t);
             main.mixer.relayoutStrips();
             pump (main, 300);
-            save (main, "neon-mixer.png");
+            save (main, only + "-mixer.png");
             main.closeMixer();
             pump (main, 200);
-            save (main, "neon-arrange.png");
+            save (main, only + "-arrange.png");
             return 0;
         }
         // The interface's preamps, from a real captured state (Tests/data/ucnet), with 48 V on input 1 and 32 dB of gain

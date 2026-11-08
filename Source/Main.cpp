@@ -34,7 +34,10 @@ public:
             options.filenameSuffix = "settings";
             options.osxLibrarySubFolder = "Application Support";
             juce::PropertiesFile settings (options);
-            riff::theme::set (riff::theme::Settings::fromString (settings.getValue ("theme")));
+            // (older versions' skins are retired: the Liquid Glass theme in their place, saved as the new one)
+            const auto theme = riff::theme::upgraded (riff::theme::Settings::fromString (settings.getValue ("theme")));
+            settings.setValue ("theme", theme.toString());
+            riff::theme::set (theme);
             riff::theme::apply (look);
         }
         juce::LookAndFeel::setDefaultLookAndFeel (&look);

@@ -139,9 +139,9 @@ TEST_CASE ("The fader choice and the REAPER theme are kept with the theme settin
     CHECK (back.themePack == s.themePack);
     CHECK (back.faderStyle == 2);
 
-    // Older settings (without them): the skin's own faders
+    // The default settings: the Liquid Glass theme's Dark VU caps
     const auto plain = theme::Settings::fromString (theme::Settings().toString());
-    CHECK (plain.faderStyle == -1);
+    CHECK (plain.faderStyle == 8);
     CHECK (plain.themePack.isEmpty());
 }
 
@@ -184,11 +184,11 @@ TEST_CASE ("Faders, knobs, keys and the meter are chosen apart from the skin and
     CHECK (theme::knobStyle() == 2);
     CHECK (theme::meterStyle() == 1);
 
-    // Older settings: the skin's own
+    // The defaults: the glass skin's own knobs and keys, the black compression meter
     const auto plain = theme::Settings::fromString (theme::Settings().toString());
     CHECK (plain.knobStyle == -1);
     CHECK (plain.buttonStyle == -1);
-    CHECK (plain.meterStyle == -1);
+    CHECK (plain.meterStyle == 1);
     theme::set ({});
 }
 
@@ -231,7 +231,7 @@ TEST_CASE ("The toolbar and the MultiMeter can have themes of their own", "[them
     const auto back = theme::Settings::fromString (mixed.toString());
     CHECK (back.toolbarTheme == mixed.toolbarTheme);
     CHECK (back.meterTheme == mixed.meterTheme);
-    CHECK (back.skin == theme::Skin::studio);
+    CHECK (back.skin == theme::Skin::glassDark);
 
     theme::set (mixed);
     const auto mainPanel = theme::panel;
@@ -263,4 +263,25 @@ TEST_CASE ("Your own text colours, track colouring and grid style", "[theme]")
     CHECK (theme::gridStyle() == 3);
     theme::set ({});
     CHECK (theme::text != juce::Colour (0xffffd27a));
+}
+
+TEST_CASE ("Older skins become the Liquid Glass theme", "[theme]")
+{
+    theme::Settings old;
+    old.skin = theme::Skin::xenon;
+    old.faderStyle = 2;
+    CHECK (theme::upgraded (old).skin == theme::Skin::glassDark);
+    CHECK (theme::upgraded (old).faderStyle == 8);
+    old.skin = theme::Skin::white;
+    CHECK (theme::upgraded (old).skin == theme::Skin::glassLight);
+    theme::Settings light;
+    light.skin = theme::Skin::glassLight;
+    light.hue = 20.0f;
+    CHECK (theme::upgraded (light) == light);
+    theme::set (light);
+    CHECK (theme::glassSkin());
+    CHECK (theme::glassLight());
+    theme::set ({});
+    CHECK (theme::glassSkin());
+    CHECK (! theme::glassLight());
 }

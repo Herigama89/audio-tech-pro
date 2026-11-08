@@ -220,6 +220,60 @@ namespace
         return fromTable (values, c, fallback);
     }
 
+    /** Liquid Glass, dark: smoked near-black glass, white text, amber highlights; regions see-through in the track's colour. */
+    juce::Colour glassDarkValue (const juce::Colour* c, juce::Colour fallback)
+    {
+        using namespace juce;
+        static const SkinTable values {
+            { &background, Colour (0xff111215) }, { &toolbar, Colour (0xff1d1e22) }, { &toolbarDark, Colour (0xff141518) },
+            { &panel, Colour (0xff1a1b1f) }, { &laneA, Colour (0xff131417) }, { &laneB, Colour (0xff16171b) },
+            { &outline, Colour (0xff2c2e33) }, { &gridBar, Colour (0xff2e3036) }, { &gridBeat, Colour (0xff1d1f23) },
+            { &text, Colour (0xfff2f4f8) }, { &dimText, Colour (0xff8b9099) }, { &accent, Colour (0xffff9f0a) },
+            { &selection, Colour (0xff3a2e1a) }, { &meterGreen, Colour (0xff30d158) }, { &meterAmber, Colour (0xffffd60a) },
+            { &meterRed, Colour (0xffff453a) },
+            { &cream, Colour (0xff2a2b30) }, { &creamShade, Colour (0xff222327) }, { &creamDeep, Colour (0xff141518) },
+            { &ink, Colour (0xfff2f4f8) }, { &inkDim, Colour (0xff8b9099) }, { &gold, Colour (0xffff9f0a) }, { &goldDark, Colour (0xffc07400) },
+            { &ruler, Colour (0xff191a1e) }, { &rulerDark, Colour (0xff131417) },
+            { &console, Colour (0xff0e0f11) }, { &consoleShade, Colour (0xff0b0c0e) }, { &consoleDark, Colour (0xff07080a) },
+            { &slotDark, Colour (0xff0d0e10) }, { &stripFace, Colour (0xff202125) }, { &stripFaceLow, Colour (0xff17181b) },
+            { &stripEdge, Colour (0xff0b0c0e) }, { &stripInk, Colour (0xfff2f4f8) }, { &stripInkDim, Colour (0xff8b9099) },
+            { &stripSlot, Colour (0xff0f1012) }, { &stripSlotOn, Colour (0xff4a3614) }, { &knobArc, Colour (0xffff9f0a) },
+            { &lcd, Colour (0xff0c0d0f) }, { &lcdText, Colour (0xfff2f4f8) }, { &lcdDim, Colour (0xff7d828b) },
+            { &knobCream, Colour (0xffe6e8ec) }, { &knobBlue, Colour (0xffff9f0a) }, { &knobRed, Colour (0xffff453a) },
+            { &knobBlack, Colour (0xffff9f0a) }, { &neon, Colour (0xffff9f0a) },
+            { &mute, Colour (0xff0a84ff) }, { &solo, Colour (0xffffd60a) }, { &danger, Colour (0xffff453a) },
+            { &waveform, Colour (0xfff2f4f8) }, { &locators, Colour (0xffff9f0a) }, { &markers, Colour (0xff3a3c42) },
+        };
+        return fromTable (values, c, fallback);
+    }
+
+    /** Liquid Glass, light: frosted white glass, dark text, blue highlights (the transport's display stays dark). */
+    juce::Colour glassLightValue (const juce::Colour* c, juce::Colour fallback)
+    {
+        using namespace juce;
+        static const SkinTable values {
+            { &background, Colour (0xffe6e9f0) }, { &toolbar, Colour (0xfff4f5f8) }, { &toolbarDark, Colour (0xffe9ebf0) },
+            { &panel, Colour (0xfff1f2f6) }, { &laneA, Colour (0xfff3f5f9) }, { &laneB, Colour (0xffeceff4) },
+            { &outline, Colour (0xffcfd3db) }, { &gridBar, Colour (0xffc4c9d2) }, { &gridBeat, Colour (0xffdde1e8) },
+            { &text, Colour (0xff1c1d22) }, { &dimText, Colour (0xff6b707a) }, { &accent, Colour (0xff0a84ff) },
+            { &selection, Colour (0xffcfe3fb) }, { &meterGreen, Colour (0xff30c75a) }, { &meterAmber, Colour (0xfff2c400) },
+            { &meterRed, Colour (0xffff3b30) },
+            { &cream, Colour (0xfffafbfd) }, { &creamShade, Colour (0xffeceef3) }, { &creamDeep, Colour (0xffd6dae2) },
+            { &ink, Colour (0xff1c1d22) }, { &inkDim, Colour (0xff6b707a) }, { &gold, Colour (0xff0a84ff) }, { &goldDark, Colour (0xff0060c8) },
+            { &ruler, Colour (0xfff0f2f6) }, { &rulerDark, Colour (0xffe4e7ed) },
+            { &console, Colour (0xffe3e6ed) }, { &consoleShade, Colour (0xffd9dde5) }, { &consoleDark, Colour (0xffc6cbd5) },
+            { &slotDark, Colour (0xffdfe2e9) }, { &stripFace, Colour (0xfff7f8fb) }, { &stripFaceLow, Colour (0xffeceef3) },
+            { &stripEdge, Colour (0xffc9ced8) }, { &stripInk, Colour (0xff1c1d22) }, { &stripInkDim, Colour (0xff6b707a) },
+            { &stripSlot, Colour (0xffe2e5ec) }, { &stripSlotOn, Colour (0xff2f8ef5) }, { &knobArc, Colour (0xff0a84ff) },
+            { &lcd, Colour (0xff15161a) }, { &lcdText, Colour (0xfff2f4f8) }, { &lcdDim, Colour (0xff8b9099) },
+            { &knobCream, Colour (0xff2b2c30) }, { &knobBlue, Colour (0xff0a84ff) }, { &knobRed, Colour (0xffff3b30) },
+            { &knobBlack, Colour (0xff0a84ff) }, { &neon, Colour (0xff0a84ff) },
+            { &mute, Colour (0xff0a84ff) }, { &solo, Colour (0xfff2c400) }, { &danger, Colour (0xffff3b30) },
+            { &waveform, Colour (0xff1c1d22) }, { &locators, Colour (0xffff9f0a) }, { &markers, Colour (0xffb7bcc6) },
+        };
+        return fromTable (values, c, fallback);
+    }
+
     /** A REAPER theme's colours (its .ReaperTheme file), by what each of ours is for. */
     juce::Colour reaperValue (const juce::Colour* c, juce::Colour fallback)
     {
@@ -498,6 +552,8 @@ void applyColours (const Settings& s)
             case Skin::ableton:  return abletonValue (e.colour, e.flat);
             case Skin::reaper:   return reaperValue (e.colour, e.flat);
             case Skin::neon:     return neonValue (e.colour, e.flat);
+            case Skin::glassDark:  return glassDarkValue (e.colour, e.flat);
+            case Skin::glassLight: return glassLightValue (e.colour, e.flat);
             case Skin::flat:     return e.flat;
             case Skin::studio:   break;
         }
@@ -609,6 +665,19 @@ void shadeGridSpan (juce::Graphics& g, float x0, float x1, float top, float heig
 bool imageSkin() { return settingsNow().skin == Skin::studio; }
 bool whiteSkin() { return settingsNow().skin == Skin::white; }
 bool xenonSkin() { return settingsNow().skin == Skin::xenon; }
+bool glassSkin() { const auto k = settingsNow().skin; return k == Skin::glassDark || k == Skin::glassLight; }
+bool glassLight() { return settingsNow().skin == Skin::glassLight; }
+
+Settings upgraded (const Settings& s)
+{
+    // (the skins before Liquid Glass are retired: their settings become the Liquid Glass theme, dark or light by the old one's lightness)
+    if (s.skin == Skin::glassDark || s.skin == Skin::glassLight)
+        return s;
+    Settings fresh;
+    if (s.skin == Skin::white)
+        fresh.skin = Skin::glassLight;
+    return fresh;
+}
 bool reaperSkin() { return settingsNow().skin == Skin::reaper && themepack::active(); }
 
 int knobStyle()   { return settingsNow().knobStyle; }
@@ -649,7 +718,7 @@ juce::Colour waveformB()
 bool glassRegions()
 {
     const auto& s = editorSettings();
-    return s.glassRegions >= 0 ? s.glassRegions == 1 : (s.skin == Skin::xenon || s.skin == Skin::neon);
+    return s.glassRegions >= 0 ? s.glassRegions == 1 : (s.skin == Skin::xenon || s.skin == Skin::neon || s.skin == Skin::glassDark || s.skin == Skin::glassLight);
 }
 
 std::vector<juce::Colour*> allColours()
@@ -691,7 +760,7 @@ Settings Settings::fromString (const juce::String& text)
     const auto v = juce::StringArray::fromTokens (text, ";", "");
     if (v.size() < 9)
         return s;
-    s.skin = (Skin) juce::jlimit (0, (int) Skin::neon, v[0].getIntValue());
+    s.skin = (Skin) juce::jlimit (0, (int) Skin::glassLight, v[0].getIntValue());
     s.hue = juce::jlimit (-180.0f, 180.0f, v[1].getFloatValue());
     s.saturation = juce::jlimit (0.0f, 2.0f, v[2].getFloatValue());
     s.lightness = juce::jlimit (-1.0f, 1.0f, v[3].getFloatValue());

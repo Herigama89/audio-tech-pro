@@ -28,17 +28,11 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
     };
     addChildComponent (sameButton);
 
-    skinBox.addItemList ({ "Studio Grey (from your picture)", "Flat Dark (FL Studio style)", "Studio White (your fader, knob and meter photos)",
-                           "Xenon (your dark glass console picture)", "Pro Tools style", "Ableton style",
-                           "REAPER theme (choose or load one below)", "Neon Night (high-contrast dark modern)" }, 1);
+    skinBox.addItemList ({ "Liquid Glass Dark", "Liquid Glass Light" }, 1);
     skinBox.onChange = [this]
     {
-        settings.skin = (theme::Skin) juce::jlimit (0, (int) theme::Skin::neon, skinBox.getSelectedItemIndex());
-        if (settings.skin == theme::Skin::reaper && settings.themePack.isEmpty())
-            if (const auto themes = themepack::installed(); ! themes.isEmpty())
-                settings.themePack = themes.getFirst().getFullPathName();
+        settings.skin = skinBox.getSelectedItemIndex() == 1 ? theme::Skin::glassLight : theme::Skin::glassDark;
         changed();
-        refreshReaperThemes();
     };
     addAndMakeVisible (skinBox);
 
@@ -66,7 +60,7 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
             safe->refreshReaperThemes();
         });
     };
-    addAndMakeVisible (loadReaperButton);
+    addChildComponent (loadReaperButton);   // (REAPER themes: retired with the old skins)
     reaperBox.setTextWhenNothingSelected ("REAPER themes loaded");
     reaperBox.setTooltip ("The REAPER themes you've loaded: choose one to use it");
     reaperBox.onChange = [this]
@@ -80,7 +74,7 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
         refreshControls();
         changed();
     };
-    addAndMakeVisible (reaperBox);
+    addChildComponent (reaperBox);
     refreshReaperThemes();
 
     faderBox.addItemList (looks::faderNames(), 1);
@@ -174,39 +168,8 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
     // Quick starting points
     struct Preset { const char* name; theme::Settings s; };
     const Preset list[] {
-        { "Default",       {} },
-        { "Warm",          { theme::Skin::flat, -175.0f, 1.2f, 0.0f, 0.1f, 0.0f, 30.0f, 1.0f, 1.0f } },
-        { "Cool Blue",     { theme::Skin::flat, 10.0f, 1.8f, -0.1f, 0.15f, 0.1f, 195.0f, 1.0f, 1.0f } },
-        { "High Contrast", { theme::Skin::flat, 0.0f, 0.6f, -0.2f, 0.8f, 0.6f, 50.0f, 1.3f, 1.4f } },
-        { "Soft Light",    { theme::Skin::flat, 0.0f, 0.8f, 0.5f, -0.3f, 0.2f, 160.0f, 0.9f, 0.8f } },
-        { "Studio White",  { theme::Skin::white, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f } },
-        { "Xenon",         { theme::Skin::xenon, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f } },
-        { "Pro Tools",     { theme::Skin::protools, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f } },
-        { "Ableton",       { theme::Skin::ableton, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f } },
-        { "Neon Night",    [] {
-              // High-Contrast Dark Modern: obsidian surfaces, cyan levels, lime waveforms, magenta peaks, smooth bars
-              theme::Settings s;
-              s.skin = theme::Skin::neon;
-              s.levelMeters = 1;
-              s.gridStyle = 3;
-              return s; }() },
-        { "Dark VU",       [] {
-              // From your mixer picture: dark grey strips, its fader caps, knobs, square keys, green meters and amber VUs
-              theme::Settings s;
-              s.skin = theme::Skin::flat;
-              s.saturation = 0.15f;
-              s.lightness = -0.12f;
-              s.accentHue = 157.0f;
-              s.meterLow = 0xff2bc98fu;
-              s.meterMid = 0xffd8c24au;
-              s.meterPeak = 0xffe0473au;
-              s.faderStyle = 8;
-              s.knobStyle = 7;
-              s.buttonStyle = 4;
-              s.meterStyle = 3;
-              s.stripVu = true;
-              return s;
-          }() },
+        { "Liquid Glass Dark",  {} },
+        { "Liquid Glass Light", [] { theme::Settings s; s.skin = theme::Skin::glassLight; return s; }() },
     };
     for (const auto& p : list)
     {
@@ -544,7 +507,7 @@ void ThemePanel::addRow (const juce::String& name, double min, double max, doubl
 
 void ThemePanel::refreshControls()
 {
-    skinBox.setSelectedItemIndex ((int) settings.skin, juce::dontSendNotification);
+    skinBox.setSelectedItemIndex (settings.skin == theme::Skin::glassLight ? 1 : 0, juce::dontSendNotification);
     faderBox.setSelectedItemIndex (settings.faderStyle + 1, juce::dontSendNotification);
     knobBox.setSelectedItemIndex (settings.knobStyle + 1, juce::dontSendNotification);
     buttonBox.setSelectedItemIndex (settings.buttonStyle + 1, juce::dontSendNotification);

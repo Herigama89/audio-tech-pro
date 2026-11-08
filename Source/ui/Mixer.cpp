@@ -1620,6 +1620,22 @@ void ChannelStrip::paintFace (juce::Graphics& g)
     // The strip, from the picture: its top (knob scales, keys, Dynamics), then its plain face below.
     if (theme::imageSkin())
         skin::tileDown (g, skin::stripFace(), bounds.toFloat());
+    else if (theme::glassSkin())
+    {
+        // Liquid Glass: a rounded glass card on the mixer's dark (or frosted) ground, lit along its top edge
+        g.fillAll (theme::console);
+        const auto card = bounds.toFloat().reduced (2.0f, 3.0f);
+        const auto light = theme::glassLight();
+        g.setColour (juce::Colours::black.withAlpha (light ? 0.08f : 0.35f));
+        g.fillRoundedRectangle (card.translated (0.0f, 2.0f), 12.0f);
+        g.setGradientFill (juce::ColourGradient (theme::stripFace.brighter (light ? 0.0f : 0.12f), 0.0f, card.getY(),
+                                                 theme::stripFaceLow, 0.0f, card.getBottom(), false));
+        g.fillRoundedRectangle (card, 12.0f);
+        g.setColour ((light ? juce::Colour (0xff8a93a3) : juce::Colours::white).withAlpha (light ? 0.3f : 0.12f));
+        g.drawRoundedRectangle (card.reduced (0.5f), 12.0f, 1.0f);
+        g.setColour (juce::Colours::white.withAlpha (light ? 0.9f : 0.28f));
+        g.drawLine (card.getX() + 12.0f, card.getY() + 1.0f, card.getRight() - 12.0f, card.getY() + 1.0f, 1.0f);
+    }
     else
     {
         // The flat skin: a plain panel, lit a touch at the top, with a dark gap between strips
@@ -3151,7 +3167,7 @@ void MixerPanel::setMasterLevels (float left, float right)
 
 void MixerPanel::paint (juce::Graphics& g)
 {
-    const auto frame = theme::whiteSkin() ? theme::consoleDark : juce::Colour (0xff2b2a2d);   // the console's frame, behind the strips
+    const auto frame = theme::glassSkin() ? theme::console : theme::whiteSkin() ? theme::consoleDark : juce::Colour (0xff2b2a2d);   // the console's frame, behind the strips
     if (theme::xenonSkin())
     {
         // The texture with the frame colour under it, as one opaque picture (a copy to draw, not a blend).
@@ -3169,7 +3185,7 @@ void MixerPanel::paint (juce::Graphics& g)
     for (const auto x : { zoneEdges.first, zoneEdges.second })
         if (x > 0)
         {
-            g.setColour (juce::Colours::black.withAlpha (0.55f));
+            g.setColour (juce::Colours::black.withAlpha (theme::glassLight() ? 0.07f : 0.55f));
             g.fillRect (x, headerHeight, zoneGap, getHeight() - headerHeight);
             g.setColour (juce::Colours::white.withAlpha (0.12f));
             g.fillRect (x + zoneGap / 2, headerHeight, 1, getHeight() - headerHeight);

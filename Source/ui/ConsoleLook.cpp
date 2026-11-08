@@ -242,6 +242,35 @@ void ConsoleLook::drawKeyBackground (juce::Graphics& g, juce::Button& button, co
         return;
     }
 
+    if (style == look::Key::slot && theme::glassSkin())
+    {
+        // Liquid Glass: an empty slot a soft recess; a used one tinted in the accent with a lit edge
+        const auto used = backgroundColour == theme::stripSlotOn;
+        const auto corner = juce::jmin (area.getHeight() * 0.5f, 7.0f);
+        if (used)
+        {
+            const auto light = theme::glassLight();
+            g.setGradientFill (juce::ColourGradient (theme::accent.withAlpha (light ? 0.95f : 0.48f), area.getX(), area.getY(),
+                                                     theme::accent.withAlpha (light ? 0.82f : 0.26f), area.getX(), area.getBottom(), false));
+            g.fillRoundedRectangle (area, corner);
+            g.setColour (theme::accent.brighter (0.4f).withAlpha (0.55f));
+            g.drawRoundedRectangle (area.reduced (0.5f), corner, 1.0f);
+        }
+        else
+        {
+            g.setColour ((theme::glassLight() ? juce::Colour (0xff1e2a40) : juce::Colours::black).withAlpha (theme::glassLight() ? 0.06f : 0.28f));
+            g.fillRoundedRectangle (area, corner);
+            g.setColour ((theme::glassLight() ? juce::Colours::black : juce::Colours::white).withAlpha (0.07f));
+            g.drawRoundedRectangle (area.reduced (0.5f), corner, 1.0f);
+        }
+        if (over)
+        {
+            g.setColour ((theme::glassLight() ? juce::Colours::black : juce::Colours::white).withAlpha (0.06f));
+            g.fillRoundedRectangle (area, corner);
+        }
+        return;
+    }
+
     if (style == look::Key::slot)
     {
         // Recessed: the slot's own colour says whether it holds something.
@@ -302,7 +331,14 @@ void ConsoleLook::drawKeyText (juce::Graphics& g, juce::TextButton& button, bool
     }
     const auto font = getTextButtonFont (button, button.getHeight());
     g.setFont (font);
-    g.setColour (button.findColour (juce::TextButton::textColourOffId).withMultipliedAlpha (button.isEnabled() ? 1.0f : 0.5f));
+    auto ink = button.findColour (juce::TextButton::textColourOffId);
+    if (theme::glassSkin())
+    {
+        // Liquid Glass slots: white on a used (accent) slot, the strip's ink on an empty one
+        const auto used = button.findColour (juce::TextButton::buttonColourId) == theme::stripSlotOn;
+        ink = used ? (theme::glassLight() ? juce::Colours::white : theme::stripInk) : theme::stripInkDim;
+    }
+    g.setColour (ink.withMultipliedAlpha (button.isEnabled() ? 1.0f : 0.5f));
     const auto area = button.getLocalBounds().reduced (3, 0);
     g.drawText (pluginnames::abbreviate (button.getButtonText(), font, (float) area.getWidth()), area, juce::Justification::centred, false);
 }
@@ -326,6 +362,17 @@ void ConsoleLook::drawScrollbar (juce::Graphics& g, juce::ScrollBar&, int x, int
 
 void ConsoleLook::drawPopupMenuBackground (juce::Graphics& g, int width, int height)
 {
+    if (theme::glassSkin())
+    {
+        // frosted glass: the panel colour, lit along the top, a soft rim
+        g.fillAll (theme::panel);
+        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (theme::glassLight() ? 0.5f : 0.07f), 0.0f, 0.0f,
+                                                 juce::Colours::transparentWhite, 0.0f, (float) juce::jmin (height, 60), false));
+        g.fillRect (0, 0, width, juce::jmin (height, 60));
+        g.setColour ((theme::glassLight() ? juce::Colours::black : juce::Colours::white).withAlpha (0.14f));
+        g.drawRect (0, 0, width, height);
+        return;
+    }
     g.fillAll (theme::panel);
     g.setColour (theme::outline);
     g.drawRect (0, 0, width, height);
@@ -411,6 +458,47 @@ namespace look
         s.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
     }
 
+    void drawGlassKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
+                        juce::Colour ring, bool fromCentre, bool enabled)
+    {
+        const auto size = juce::jmin (area.getWidth(), area.getHeight());
+        const auto c = area.getCentre();
+        const auto outer = size * 0.5f;
+        const auto alpha = enabled ? 1.0f : 0.4f;
+        proportion = juce::jlimit (0.0f, 1.0f, proportion);
+        const auto ringR = outer * 0.86f, ringW = juce::jmax (1.6f, outer * 0.13f);
+        const auto to = startAngle + proportion * (endAngle - startAngle);
+        const auto from = fromCentre ? (startAngle + endAngle) * 0.5f : startAngle;
+        // the ring's track, then the lit part (with a soft glow)
+        juce::Path track;
+        track.addCentredArc (c.x, c.y, ringR, ringR, 0.0f, startAngle, endAngle, true);
+        g.setColour ((theme::glassLight() ? juce::Colour (0xff1c2030) : juce::Colours::white).withAlpha (0.13f * alpha));
+        g.strokePath (track, juce::PathStrokeType (ringW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        if (std::abs (to - from) > 0.01f)
+        {
+            juce::Path lit;
+            lit.addCentredArc (c.x, c.y, ringR, ringR, 0.0f, juce::jmin (from, to), juce::jmax (from, to), true);
+            g.setColour (ring.withAlpha (0.28f * alpha));
+            g.strokePath (lit, juce::PathStrokeType (ringW * 2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setColour (ring.withAlpha (alpha));
+            g.strokePath (lit, juce::PathStrokeType (ringW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+        // the knob: matte black, lit from above (the light stays put as it turns)
+        const auto r = outer * 0.64f;
+        const auto body = juce::Rectangle<float> (r * 2.0f, r * 2.0f).withCentre (c);
+        g.setColour (juce::Colours::black.withAlpha (0.45f * alpha));
+        g.fillEllipse (body.translated (0.0f, r * 0.12f).expanded (r * 0.04f));
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3d3f45).withAlpha (alpha), c.x - r * 0.2f, c.y - r * 0.8f,
+                                                 juce::Colour (0xff17181b).withAlpha (alpha), c.x + r * 0.3f, c.y + r, true));
+        g.fillEllipse (body);
+        g.setColour (juce::Colours::white.withAlpha (0.16f * alpha));
+        g.drawEllipse (body.reduced (0.5f), 1.0f);
+        // the pointer line
+        const auto p0 = onCircle (c, r * 0.18f, to), p1 = onCircle (c, r * 0.82f, to);
+        g.setColour (juce::Colour (0xfff2f4f8).withAlpha (alpha));
+        g.drawLine (juce::Line<float> (p0, p1), juce::jmax (1.4f, r * 0.13f));
+    }
+
     void drawNeonKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
                        juce::Colour ringColour, bool fromCentre, bool enabled, bool light)
     {
@@ -429,6 +517,14 @@ namespace look
         // A REAPER theme's knob
         if (skinKnobs && theme::reaperSkin() && themepack::drawKnob (g, area, proportion, fromCentre, enabled))
             return;
+        // Liquid Glass: a soft-touch black knob with a glowing LED ring showing the setting (its light never turns).
+        if (skinKnobs && theme::glassSkin())
+        {
+            juce::ignoreUnused (light);
+            drawGlassKnob (g, area, proportion, startAngle, endAngle,
+                           ringColour.getSaturation() > 0.35f ? ringColour : theme::knobArc, fromCentre, enabled);
+            return;
+        }
         // Studio White: every knob is the photo's knob with its LED ring.
         if (skinKnobs && theme::whiteSkin())
         {
@@ -595,6 +691,40 @@ namespace look
 
     void drawKey (juce::Graphics& g, juce::Rectangle<float> area, Key style, bool on, juce::Colour onColour, bool over, bool down)
     {
+        if (theme::glassSkin())
+        {
+            // Liquid Glass: a rounded glass pill, lit along its top edge; on, it glows in its colour
+            const auto light = theme::glassLight();
+            const auto corner = juce::jmin (area.getHeight() * 0.5f, 9.0f);
+            if (on)
+            {
+                g.setColour (onColour.withAlpha (0.30f));
+                g.fillRoundedRectangle (area.expanded (1.5f), corner + 1.5f);
+                g.setGradientFill (juce::ColourGradient (onColour.brighter (0.25f), area.getX(), area.getY(),
+                                                         onColour.darker (0.12f), area.getX(), area.getBottom(), false));
+            }
+            else
+                g.setGradientFill (light ? juce::ColourGradient (juce::Colour (0xfffdfdfe), area.getX(), area.getY(), juce::Colour (0xffeef0f4), area.getX(), area.getBottom(), false)
+                                         : juce::ColourGradient (juce::Colours::white.withAlpha (0.14f), area.getX(), area.getY(),
+                                                                 juce::Colours::white.withAlpha (0.05f), area.getX(), area.getBottom(), false));
+            g.fillRoundedRectangle (area, corner);
+            if (over && ! on)
+            {
+                g.setColour ((light ? juce::Colours::black : juce::Colours::white).withAlpha (0.06f));
+                g.fillRoundedRectangle (area, corner);
+            }
+            if (down)
+            {
+                g.setColour (juce::Colours::black.withAlpha (0.12f));
+                g.fillRoundedRectangle (area, corner);
+            }
+            // the rim: bright along the top, faint round the rest
+            g.setColour ((light ? juce::Colour (0xff9aa3b2) : juce::Colours::white).withAlpha (light ? 0.35f : 0.16f));
+            g.drawRoundedRectangle (area.reduced (0.5f), corner, 1.0f);
+            g.setColour (juce::Colours::white.withAlpha (on ? 0.5f : (light ? 0.9f : 0.32f)));
+            g.drawLine (area.getX() + corner, area.getY() + 1.0f, area.getRight() - corner, area.getY() + 1.0f, 1.0f);
+            return;
+        }
         juce::Colour top, bottom, edge;
         auto corner = 3.5f;
 
