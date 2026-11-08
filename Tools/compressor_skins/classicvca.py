@@ -10,7 +10,7 @@ K={'threshold':(401,88),'attack':(542,89),'ratio':(679,89),'release':(818,89),'m
 for k,(x,y) in K.items():
     from face import pointer_angle
     a=pointer_angle('photos/classicvca.png',x,y,0.5,26.5,'dark',hint=-18,spread=40,threshold=70)
-    f.knob_cap(k,x,y,31,lambda A,l,s: l>150,info={'angle':round(a,1)})
+    f.still_knob(k,x,y,28,0.5,26.5,'dark',hint=-18,spread=40,threshold=70,fillturn=40)
 f.region('kComp',(1330,62,1386,118),darken_bg=0.42)
 f.region('kExt',(1454,63,1510,119),darken_bg=0.42)
 f.lamp('power',1599,85,30,glow=1.15,dark=0.45)

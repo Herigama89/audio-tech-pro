@@ -14,7 +14,7 @@ f.knob_pointer('output',578.5,160,40,72,'light',hint=5,spread=18,fillmode='inpai
 from face import pointer_angle
 for k,y in [('attack',91),('release',228)]:
     a=pointer_angle('photos/vintagefet.png',847,y,8,19,'dark',hint=0,spread=30,threshold=45)
-    f.knob_cap(k,847,y,24,lambda A,l,s: l>150,info={'angle':round(a,1)})
+    f.still_knob(k,847,y,22,8,19,'dark',hint=0,spread=30,threshold=45)
 f.pressed('r20',(1053,53,1079,104),k=2.6)
 f.pressed('r12',(1053,106,1079,157),k=2.6)
 f.pressed('r8',(1053,159,1079,210),k=2.6)

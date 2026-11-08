@@ -10,7 +10,7 @@ K={'gain1':(647,674,40),'gain2':(646,825,44),'ratio1':(740,605,31),'ratio2':(742
    'attack1':(953,615,31),'attack2':(955,769,30),'release1':(1051,675,31),'release2':(1052,825,34),'limThr1':(1749,685,30),'limThr2':(1744,836,36)}
 # (the knobs alone turn: their silver caps and bars, not the red round them)
 notRed=lambda A,l,s: ~((A[:,:,0]-np.maximum(A[:,:,1],A[:,:,2])>45)&(A[:,:,0]>90)) & (l>55)
-for k,(x,y,r) in K.items(): f.knob_cap(k,x,y,r+6,notRed)
+for k,(x,y,r) in K.items(): f.recess(k,x,y,r+6,notRed)
 # lamps (illuminated keys and indicators, lit in the photo)
 L={'in1':(479,667,13),'key1':(538,669,13),'in2':(483,820,14),'key2':(539,820,14),'auto1':(1051,612,14),'auto2':(1051,764,14),
    'gainChange':(1159,621,13),'stereo':(1523,820,14),'limIn2':(1619,821,14),'limIn1':(1623,669,13),'limit2':(1679,776,13),'limit1':(1683,623,14),
@@ -30,4 +30,4 @@ for (pv,circle,below,r,ang,sz,vu_at) in [((1430,722),(1429,671,59),688,80,(-28.2
               mask_below=below,numbers=[-20,-10,-7,-5,-3,0,3],red_width=5,percent=True,
               extra=(('VU',vu_at[0],vu_at[1],13,False),))
 f.write()
-f.preview('prev_svca.png',{k:40 for k in K}|{'needle1':40,'needle2':10})
+

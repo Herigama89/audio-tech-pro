@@ -10,7 +10,7 @@ for k,(x,y) in K.items():
     from face import pointer_angle
     a=pointer_angle('photos/vintagevca.png',x,y,1,20,'light',hint=0,spread=40,threshold=70)
     cx,cy=C[k]
-    f.knob_whole(k,cx,cy,24.5,info={'angle':round(a,1)})
+    f.still_knob(k,cx,cy,23,1,20,'light',hint=0,spread=40,threshold=70,fillturn=40)
 f.region('kIn',(268,247,330,272),darken_bg=0.6)
 f.relabel((92,70,112,90),'0',10,colour=(225,225,225),erase=False,centre=(101,80),font='sans')
 f.draw_gr((80,58,260,138),(166,163),74,-38.1,41.4,size=1.05)

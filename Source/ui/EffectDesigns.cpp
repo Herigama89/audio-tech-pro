@@ -2777,6 +2777,24 @@ namespace
             s.logMap = logMap;
             s.scale = pg.scale;
             s.offset = pg.origin;
+            // The knobs whose light would turn with them (their caps' shading, a bar's reflections) stay as photographed;
+            // only their pointer - or the bar - is drawn, at the setting
+            const juce::String face (pg.face), name (partName);
+            const auto drawn = [&s, &p] (Sprite::Drawn kind, juce::Colour ink, float inner, float outer, float thickness)
+            {
+                s.drawn = kind; s.ink = ink; s.inner = inner; s.outer = outer; s.thickness = thickness;
+                s.radius = p.R; s.image = nullptr;
+            };
+            if (face == "svca")
+                drawn (Sprite::Drawn::bar, {}, 0.0f, 1.0f, 0.46f);
+            else if (face == "cvca")
+                drawn (Sprite::Drawn::line, juce::Colour (0xff141414), 0.06f, 0.9f, 0.1f);
+            else if (face == "vvca")
+                drawn (Sprite::Drawn::line, juce::Colour (0xfff4f4f2), 0.18f, 0.92f, 0.15f);
+            else if (face == "sfet" && name != "input" && name != "output")
+                drawn (Sprite::Drawn::dot, juce::Colour (0xff2e2e2e), 0.0f, 0.58f, 0.26f);
+            else if (face == "vfet" && name != "input" && name != "output")
+                drawn (Sprite::Drawn::dot, juce::Colour (0xff2a2a2a), 0.0f, 0.6f, 0.28f);
             Control c;
             c.id = id;
             c.kind = Kind::knob;
@@ -4665,6 +4683,62 @@ float photoAngleOf (const Sprite& sp, float value)
 
 void DesignLook::drawSprite (juce::Graphics& g, juce::Component& c, const Sprite& sp, float pos, bool on, int settings)
 {
+    if (sp.drawn != Sprite::Drawn::none)
+    {
+        const auto absolute = c.getProperties().contains ("photoAngle") ? (float) c.getProperties()["photoAngle"]
+                            : sp.angles.empty() ? 0.0f : angleAt (sp.angles, pos, settings);
+        const auto scale = sp.scale > 0.0f ? sp.scale : design.photoScale;
+        const auto offset = sp.scale > 0.0f ? sp.offset : design.photoOffset.toFloat();
+        const auto centre = sp.pivot * scale + offset - c.getPosition().toFloat();
+        const auto r = sp.radius * scale;
+        const auto a = juce::degreesToRadians (absolute);
+        const juce::Point<float> dir (std::sin (a), -std::cos (a));
+        juce::Graphics::ScopedSaveState keep (g);
+        if (sp.drawn == Sprite::Drawn::line)
+        {
+            const auto p0 = centre + dir * (r * sp.inner), p1 = centre + dir * (r * sp.outer);
+            g.setColour (sp.ink);
+            g.drawLine ({ p0, p1 }, std::max (1.2f, r * sp.thickness));
+        }
+        else if (sp.drawn == Sprite::Drawn::dot)
+        {
+            const auto p = centre + dir * (r * sp.outer);
+            const auto d = std::max (2.5f, r * sp.thickness);
+            g.setColour (sp.ink);
+            g.drawEllipse (RF (d, d).withCentre (p), std::max (1.0f, d * 0.28f));
+        }
+        else
+        {
+            // A bar knob: a machined bar across the knob, the light always from above (it doesn't turn with it)
+            const auto len = r * 1.92f, wid = r * sp.thickness;
+            juce::Path bar;
+            bar.addRoundedRectangle (-len * 0.5f, -wid * 0.5f, len, wid, wid * 0.18f);
+            const auto t = juce::AffineTransform::rotation (a + juce::MathConstants<float>::halfPi).translated (centre);
+            // shadow
+            g.setColour (juce::Colours::black.withAlpha (0.45f));
+            g.fillPath (bar, t.translated (r * 0.05f, r * 0.12f));
+            // the bar: lighter on its upper long face, darker on the lower, as lit from above
+            const juce::Point<float> across (-dir.y, dir.x);   // (the bar's width direction... its long axis is `dir`)
+            const auto upFace = juce::Point<float> (dir.y, -dir.x).y < 0.0f ? juce::Point<float> (dir.y, -dir.x) : juce::Point<float> (-dir.y, dir.x);
+            juce::ignoreUnused (across);
+            const auto top = centre + upFace * (wid * 0.5f), bottom = centre - upFace * (wid * 0.5f);
+            juce::ColourGradient grad (juce::Colour (0xfff4f5f6), top.x, top.y, juce::Colour (0xff8e9196), bottom.x, bottom.y, false);
+            grad.addColour (0.45, juce::Colour (0xffd8dadd));
+            grad.addColour (0.55, juce::Colour (0xffb9bcc0));
+            g.setGradientFill (grad);
+            g.fillPath (bar, t);
+            g.setColour (juce::Colours::black.withAlpha (0.35f));
+            g.strokePath (bar, juce::PathStrokeType (std::max (0.8f, r * 0.03f)), t);
+            // the end faces: a little darker
+            for (const auto sgn : { -1.0f, 1.0f })
+            {
+                const auto e = centre + dir * (sgn * len * 0.5f);
+                g.setColour (juce::Colours::black.withAlpha (0.12f));
+                g.fillEllipse (RF (wid * 0.5f, wid * 0.5f).withCentre (e - dir * (sgn * wid * 0.25f)));
+            }
+        }
+        return;
+    }
     if (sp.image == nullptr)
         return;
     const auto image = skinImage (sp.offImage != nullptr && ! on ? sp.offImage : sp.image);

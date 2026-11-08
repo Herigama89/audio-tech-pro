@@ -73,6 +73,15 @@ namespace riff::effectdesign
         // (a face with pages of different photos: this one's photo scale and where it sits; 0: the design's)
         float scale = 0.0f;
         juce::Point<float> offset {};
+
+        // (drawn, not cut from the photo: the photo's knob stays still, lit as photographed, and only what turns is
+        //  drawn at the setting - a pointer line, a dot, or a whole bar knob - so nothing's light turns with it)
+        enum class Drawn { none, line, dot, bar };
+        Drawn drawn = Drawn::none;
+        juce::Colour ink {};
+        float radius = 0.0f;                 // the knob's radius (photo pixels)
+        float inner = 0.0f, outer = 1.0f;    // a line: from and to, as fractions of the radius; a dot: where (outer)
+        float thickness = 0.1f;              // a line's width, a dot's size or a bar's width, as a fraction of the radius
     };
 
     struct Control

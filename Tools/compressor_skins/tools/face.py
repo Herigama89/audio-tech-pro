@@ -784,3 +784,42 @@ def _push_button(self, key, cx, cy, R, lamp=(255, 70, 40), clear=34, info=None):
         self.save_part(f'{key}_{name}', p[..., :3], p[..., 3] / 255.0, dict(info or {}, cx=icx, cy=icy, R=Ri, kind='turn'))
 
 Face.push_button = _push_button
+
+def _still_knob(self, key, cx, cy, cap, r0, r1, kind, hint, spread=30, threshold=60, fillturn=35):
+    """A knob that stays as photographed (its light doesn't turn): its own pointer (line or dot) taken off the cap,
+    the cap filled from its own surface turned a little; the app draws the pointer at the setting."""
+    a = self.knob_pointer(key, cx, cy, r0, r1, kind, hint, spread=spread, threshold=threshold, fillmode='turn', fillturn=fillturn)
+    p = self.layout['parts'][key]
+    p['R'] = round(self.S(cap))
+    p['kind'] = 'pointer'
+    # (the middle, which no turn moves: the cap's own colour there, smoothly)
+    ccx, ccy = self.S(cx), self.S(cy)
+    lum = self.bg.mean(2)
+    mid = (np.hypot(self.xx - ccx, self.yy - ccy) < self.S(cap) * 0.42)
+    local = cv2.medianBlur(np.clip(lum, 0, 255).astype(np.uint8), 9).astype(np.float32)
+    odd = (mid & (np.abs(lum - local) > 12)).astype(np.uint8)
+    if odd.any():
+        self.fill(cv2.dilate(odd, np.ones((3, 3), np.uint8)), radius=3)
+    return a
+
+def _recess(self, key, cx, cy, r, test, darken=0.62):
+    """A knob that's drawn whole (a bar knob): the photo's knob taken out, its round recess in the panel shaded."""
+    m = self._cap_mask(cx, cy, r, test)
+    ys, xs = np.nonzero(m)
+    ccx, ccy = (xs.min() + xs.max()) / 2.0, (ys.min() + ys.max()) / 2.0
+    rad = max(xs.max() - xs.min(), ys.max() - ys.min()) / 2.0
+    hole = np.zeros((self.H, self.W), np.uint8)
+    cv2.circle(hole, (int(round(ccx)), int(round(ccy))), int(round(rad)) + 2, 1, -1)
+    # the recess, clean: the panel's red, in shade, its lower lip catching the light
+    ring = (np.hypot(self.xx - ccx, self.yy - ccy) > rad + 5) & (np.hypot(self.xx - ccx, self.yy - ccy) < rad + 10)
+    col = np.median(self.bg[ring], axis=0)
+    d = np.hypot(self.xx - ccx, self.yy - ccy) / max(rad + 2, 1)
+    down = np.clip((self.yy - ccy) / max(rad, 1), -1, 1)
+    shade = 0.42 + 0.18 * (1 - d) + 0.22 * np.clip(down, 0, 1) * np.clip((d - 0.75) / 0.25, 0, 1)
+    fill = col[None, None, :] * shade[..., None] + self.rng.normal(0, 1.0, self.bg.shape)
+    hm = cv2.GaussianBlur((d <= 1.0).astype(np.float32), (0, 0), 1.0)[..., None]
+    self.bg = self.bg * (1 - hm) + fill * hm
+    self.layout['parts'][key] = dict(image='none', cx=int(round(ccx)), cy=int(round(ccy)), R=int(round(rad)), kind='pointer', angle=0.0)
+
+Face.still_knob = _still_knob
+Face.recess = _recess
