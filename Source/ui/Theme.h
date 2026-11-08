@@ -137,7 +137,7 @@ namespace riff::theme
         // The tracks in their colours: 0 a tab on the left (the skin's way), 1 tinted, 2 filled (as Cubase, FL Studio, Logic).
         int trackColouring = 0;
         // The grid: 0 lines, 1 shaded bars, 2 bars only, 3 dotted, 4 shaded beats (FL Studio), 5 none.
-        int gridStyle = 0;
+        int gridStyle = 3;   // (Liquid Glass: dotted)
         // A VU meter at the top of each mixer strip (the Dark VU theme's amber meter)
         bool stripVu = true;
         // The level meters: 0 LED segments, 1 smooth bars (as FL Studio's mixer)

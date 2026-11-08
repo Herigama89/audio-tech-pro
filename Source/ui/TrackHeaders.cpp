@@ -260,6 +260,39 @@ void TrackHeader::paint (juce::Graphics& g)
     // (follows the theme when it changes)
     if (nameLabel.findColour (juce::Label::textColourId) != ink)
         nameLabel.setColour (juce::Label::textColourId, ink);
+    const bool glass = theme::glassSkin();
+    const auto number = juce::Rectangle<int> (0, 0, numberWidth, getHeight());
+    if (glass)
+    {
+        // Liquid Glass: a rounded glass card on the tracks' ground, its edge lit in the accent when selected,
+        // the track's colour as a rounded tab on its left
+        g.fillAll (theme::laneA);
+        const auto card = area.toFloat().reduced (3.0f, 2.5f);
+        look::drawGlassPanel (g, card, 12.0f);
+        if (selected)
+        {
+            g.setColour (theme::accent.withAlpha (0.18f));
+            g.fillRoundedRectangle (card, 12.0f);
+            g.setColour (theme::accent.withAlpha (0.8f));
+            g.drawRoundedRectangle (card.reduced (0.5f), 12.0f, 1.2f);
+        }
+        g.setColour (model::trackColour (track));
+        g.fillRoundedRectangle (juce::Rectangle<float> (card.getX() + 5.0f, card.getY() + 7.0f, 4.0f, card.getHeight() - 14.0f), 2.0f);
+        g.setColour (selected ? theme::accent : theme::stripInk);
+        g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+        area.removeFromLeft (numberWidth);
+        const int icon = track.getProperty (ids::icon, 0);
+        if (icon > 0 && getHeight() >= 56)
+        {
+            g.drawText (juce::String (track.getParent().indexOf (track) + 1), number.withTrimmedLeft (8).withHeight (getHeight() / 2 + 4), juce::Justification::centred, false);
+            icons::draw (g, icon, number.withTrimmedLeft (8).toFloat().withTrimmedTop ((float) getHeight() * 0.5f + 2.0f).withSizeKeepingCentre (16.0f, 16.0f),
+                         (selected ? theme::accent : theme::stripInk).withAlpha (0.85f));
+        }
+        else
+            g.drawText (juce::String (track.getParent().indexOf (track) + 1), number.withTrimmedLeft (8), juce::Justification::centred, false);
+    }
+    else
+    {
     g.setGradientFill (juce::ColourGradient (body.brighter (0.05f), 0.0f, 0.0f, body.darker (0.06f), 0.0f, (float) getHeight(), false));
     g.fillRect (area);
     {
@@ -272,7 +305,7 @@ void TrackHeader::paint (juce::Graphics& g)
     }
 
     // Number column: steel blue when selected
-    auto number = area.removeFromLeft (numberWidth);
+    area.removeFromLeft (numberWidth);
     g.setColour (selected ? theme::knobArc : theme::stripFaceLow);
     g.fillRect (number);
     g.setColour (theme::stripEdge);
@@ -294,6 +327,7 @@ void TrackHeader::paint (juce::Graphics& g)
     // The track's colour, as a tab on the left edge
     g.setColour (model::trackColour (track));
     g.fillRect (0, 0, 4, getHeight());
+    }
 
     // Kind, under the name
     g.setColour (theme::inkDim);

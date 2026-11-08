@@ -238,7 +238,7 @@ namespace
             { &slotDark, Colour (0xff0d0e10) }, { &stripFace, Colour (0xff202125) }, { &stripFaceLow, Colour (0xff17181b) },
             { &stripEdge, Colour (0xff0b0c0e) }, { &stripInk, Colour (0xfff2f4f8) }, { &stripInkDim, Colour (0xff8b9099) },
             { &stripSlot, Colour (0xff0f1012) }, { &stripSlotOn, Colour (0xff4a3614) }, { &knobArc, Colour (0xffff9f0a) },
-            { &lcd, Colour (0xff0c0d0f) }, { &lcdText, Colour (0xfff2f4f8) }, { &lcdDim, Colour (0xff7d828b) },
+            { &lcd, Colour (0xff0c0d0f) }, { &lcdText, Colour (0xfff5f7fb) }, { &lcdDim, Colour (0xff7d828b) },   // (lcdText: unlike the text, so a switch to light keeps it white)
             { &knobCream, Colour (0xffe6e8ec) }, { &knobBlue, Colour (0xffff9f0a) }, { &knobRed, Colour (0xffff453a) },
             { &knobBlack, Colour (0xffff9f0a) }, { &neon, Colour (0xffff9f0a) },
             { &mute, Colour (0xff0a84ff) }, { &solo, Colour (0xffffd60a) }, { &danger, Colour (0xffff453a) },
@@ -265,7 +265,7 @@ namespace
             { &slotDark, Colour (0xffdfe2e9) }, { &stripFace, Colour (0xfff7f8fb) }, { &stripFaceLow, Colour (0xffeceef3) },
             { &stripEdge, Colour (0xffc9ced8) }, { &stripInk, Colour (0xff1c1d22) }, { &stripInkDim, Colour (0xff6b707a) },
             { &stripSlot, Colour (0xffe2e5ec) }, { &stripSlotOn, Colour (0xff2f8ef5) }, { &knobArc, Colour (0xff0a84ff) },
-            { &lcd, Colour (0xff15161a) }, { &lcdText, Colour (0xfff2f4f8) }, { &lcdDim, Colour (0xff8b9099) },
+            { &lcd, Colour (0xff15161a) }, { &lcdText, Colour (0xfff4f6fa) }, { &lcdDim, Colour (0xff868b94) },
             { &knobCream, Colour (0xff2b2c30) }, { &knobBlue, Colour (0xff0a84ff) }, { &knobRed, Colour (0xffff3b30) },
             { &knobBlack, Colour (0xff0a84ff) }, { &neon, Colour (0xff0a84ff) },
             { &mute, Colour (0xff0a84ff) }, { &solo, Colour (0xfff2c400) }, { &danger, Colour (0xffff3b30) },
@@ -672,7 +672,23 @@ Settings upgraded (const Settings& s)
 {
     // (the skins before Liquid Glass are retired: their settings become the Liquid Glass theme, dark or light by the old one's lightness)
     if (s.skin == Skin::glassDark || s.skin == Skin::glassLight)
-        return s;
+    {
+        // (an area with an older skin's theme of its own: back to the main one, so the whole app is glass)
+        auto glass = s;
+        // (the pieces: the Dark VU caps, LED-ring or Dark VU knobs, glass keys, the black compression meter)
+        glass.faderStyle = 8;
+        if (glass.knobStyle != 7) glass.knobStyle = -1;
+        glass.buttonStyle = -1;
+        glass.meterStyle = 1;
+        for (auto* area : { &glass.editorTheme, &glass.toolbarTheme, &glass.meterTheme })
+            if (area->isNotEmpty())
+            {
+                const auto own = Settings::fromString (*area);
+                if (own.skin != Skin::glassDark && own.skin != Skin::glassLight)
+                    area->clear();
+            }
+        return glass;
+    }
     Settings fresh;
     if (s.skin == Skin::white)
         fresh.skin = Skin::glassLight;

@@ -827,7 +827,15 @@ void ArrangeCanvas::setWaveformFill (juce::Graphics& g, juce::Colour trackColour
     {
         case 1:  g.setColour (theme::waveformA().withAlpha (0.95f)); break;
         case 2:  g.setGradientFill (juce::ColourGradient (theme::waveformA(), area.getX(), 0.0f, theme::waveformB(), area.getRight(), 0.0f, false)); break;
-        default: g.setColour (live ? theme::waveform.withAlpha (0.95f) : trackColour.brighter (0.75f).withAlpha (0.95f)); break;
+        default:
+            if (theme::glassSkin() && ! live)
+            {
+                // Liquid Glass: the waveform in the track's own colour, bright on the glass
+                const auto c = theme::glassLight() ? trackColour.darker (0.1f) : trackColour.brighter (0.35f);
+                g.setGradientFill (juce::ColourGradient (c.brighter (0.25f), 0.0f, area.getY(), c, 0.0f, area.getBottom(), false));
+                break;
+            }
+            g.setColour (live ? theme::waveform.withAlpha (0.95f) : trackColour.brighter (0.75f).withAlpha (0.95f)); break;
     }
 }
 
@@ -1048,7 +1056,25 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
     const auto base = missing ? theme::danger : colour;
     const bool glass = theme::glassRegions() && ! missing;
     auto header = bounds.withHeight ((float) regionHeader);
-    if (glass)
+    if (glass && theme::glassSkin())
+    {
+        // Liquid Glass: a rounded pane of glass tinted in the track's colour, lit along its top, its edge in the colour
+        const auto light = theme::glassLight();
+        const auto corner = juce::jmin (9.0f, bounds.getHeight() * 0.25f);
+        const auto shown = bounds.getIntersection (g.getClipBounds().toFloat().expanded (12.0f, 0.0f));
+        const auto pane = bounds.withLeft (juce::jmax (bounds.getX(), shown.getX() - 12.0f)).withRight (juce::jmin (bounds.getRight(), shown.getRight() + 12.0f));
+        g.setGradientFill (juce::ColourGradient (base.withAlpha (light ? 0.42f : 0.36f), 0.0f, pane.getY(),
+                                                 base.withAlpha (light ? 0.2f : 0.14f), 0.0f, pane.getBottom(), false));
+        g.fillRoundedRectangle (pane, corner);
+        g.setColour (base.withAlpha (0.12f));
+        g.fillRoundedRectangle (pane.expanded (1.5f), corner + 1.5f);
+        g.setColour (base.withAlpha (light ? 0.85f : 0.8f));
+        g.drawRoundedRectangle (pane.reduced (0.5f), corner, 1.0f);
+        g.setColour (juce::Colours::white.withAlpha (light ? 0.7f : 0.3f));
+        g.drawLine (pane.getX() + corner, pane.getY() + 1.0f, pane.getRight() - corner, pane.getY() + 1.0f, 1.0f);
+        g.setColour (light ? base.darker (0.55f) : base.brighter (0.7f));
+    }
+    else if (glass)
     {
         g.setColour (juce::Colour (0xff0c0f1c).interpolatedWith (base, 0.14f).withAlpha (0.82f));
         g.fillRoundedRectangle (bounds, 4.0f);
@@ -1207,7 +1233,16 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
             g.drawHorizontalLine (juce::roundToInt (handle.getCentreY()), handle.getX() + 4.0f, handle.getRight() - 4.0f);
         }
 
-    if (glass)
+    if (glass && theme::glassSkin())
+    {
+        // (the glass pane's own edge is drawn with it; selected: a bright outline)
+        if (selected)
+        {
+            g.setColour (theme::glassLight() ? theme::accent : juce::Colours::white);
+            g.drawRoundedRectangle (bounds.reduced (0.5f), juce::jmin (9.0f, bounds.getHeight() * 0.25f), 2.0f);
+        }
+    }
+    else if (glass)
     {
         g.setColour (selected ? juce::Colours::white : base.brighter (0.4f).withAlpha (0.85f));
         g.drawRoundedRectangle (bounds.reduced (0.5f), 4.0f, selected ? 2.0f : 1.2f);

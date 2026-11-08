@@ -32,6 +32,11 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
     skinBox.onChange = [this]
     {
         settings.skin = skinBox.getSelectedItemIndex() == 1 ? theme::Skin::glassLight : theme::Skin::glassDark;
+        // (dark or light for the whole app: the toolbar, editors and MultiMeter follow, and text takes the mode's colours)
+        settings.editorTheme.clear();
+        settings.toolbarTheme.clear();
+        settings.meterTheme.clear();
+        settings.textColour = settings.stripTextColour = 0;
         changed();
     };
     addAndMakeVisible (skinBox);
@@ -77,38 +82,39 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
     addChildComponent (reaperBox);
     refreshReaperThemes();
 
-    faderBox.addItemList (looks::faderNames(), 1);
+    // (Liquid Glass: the Dark VU caps only; knobs LED-ringed or Dark VU; glass keys; the black compression meter)
+    faderBox.addItemList ({ "Dark VU" }, 1);
     faderBox.setTooltip ("The fader caps (mixer, track headers, editors), whatever the skin: Xenon with black long-throw caps, say");
     faderBox.onChange = [this]
     {
-        settings.faderStyle = faderBox.getSelectedItemIndex() - 1;
+        settings.faderStyle = 8;
         changed();
     };
     addAndMakeVisible (faderBox);
 
-    knobBox.addItemList (looks::knobNames(), 1);
+    knobBox.addItemList ({ "Liquid Glass (LED ring)", "Dark VU" }, 1);
     knobBox.setTooltip ("The knobs on the channel strips, track headers, plugins' strips and the bus compressor");
     knobBox.onChange = [this]
     {
-        settings.knobStyle = knobBox.getSelectedItemIndex() - 1;
+        settings.knobStyle = knobBox.getSelectedItemIndex() == 1 ? 7 : -1;
         changed();
     };
     addAndMakeVisible (knobBox);
 
-    buttonBox.addItemList (looks::buttonNames(), 1);
+    buttonBox.addItemList ({ "Liquid Glass" }, 1);
     buttonBox.setTooltip ("The channel keys (mute, solo, record, monitor, EQ and Dynamics in, the bus compressor's IN), lit in their colours");
     buttonBox.onChange = [this]
     {
-        settings.buttonStyle = buttonBox.getSelectedItemIndex() - 1;
+        settings.buttonStyle = -1;
         changed();
     };
     addAndMakeVisible (buttonBox);
 
-    meterBox.addItemList (looks::meterNames(), 1);
+    meterBox.addItemList ({ "Black compression meter" }, 1);
     meterBox.setTooltip ("The bus compressor's gain reduction meter");
     meterBox.onChange = [this]
     {
-        settings.meterStyle = meterBox.getSelectedItemIndex() - 1;
+        settings.meterStyle = 1;
         changed();
     };
     addAndMakeVisible (meterBox);
@@ -508,10 +514,10 @@ void ThemePanel::addRow (const juce::String& name, double min, double max, doubl
 void ThemePanel::refreshControls()
 {
     skinBox.setSelectedItemIndex (settings.skin == theme::Skin::glassLight ? 1 : 0, juce::dontSendNotification);
-    faderBox.setSelectedItemIndex (settings.faderStyle + 1, juce::dontSendNotification);
-    knobBox.setSelectedItemIndex (settings.knobStyle + 1, juce::dontSendNotification);
-    buttonBox.setSelectedItemIndex (settings.buttonStyle + 1, juce::dontSendNotification);
-    meterBox.setSelectedItemIndex (settings.meterStyle + 1, juce::dontSendNotification);
+    faderBox.setSelectedItemIndex (0, juce::dontSendNotification);
+    knobBox.setSelectedItemIndex (settings.knobStyle == 7 ? 1 : 0, juce::dontSendNotification);
+    buttonBox.setSelectedItemIndex (0, juce::dontSendNotification);
+    meterBox.setSelectedItemIndex (0, juce::dontSendNotification);
     stripVuButton.setToggleState (settings.stripVu, juce::dontSendNotification);
     stripMeterBox.setSelectedItemIndex (! settings.stripVu ? 0 : settings.stripMeterKind == 1 ? 2 : 1, juce::dontSendNotification);
     levelMeterBox.setSelectedItemIndex (juce::jlimit (0, 1, settings.levelMeters), juce::dontSendNotification);
