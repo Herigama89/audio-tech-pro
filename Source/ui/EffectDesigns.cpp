@@ -2790,7 +2790,7 @@ namespace
             else if (face == "cvca")
                 drawn (Sprite::Drawn::line, juce::Colour (0xff141414), 0.06f, 0.9f, 0.1f);
             else if (face == "vvca")
-                drawn (Sprite::Drawn::line, juce::Colour (0xfff4f4f2), 0.18f, 0.92f, 0.15f);
+                drawn (Sprite::Drawn::line, juce::Colour (0xfff4f4f2), 0.25f, 0.95f, 0.16f);
             else if (face == "sfet" && name != "input" && name != "output")
                 drawn (Sprite::Drawn::dot, juce::Colour (0xff2e2e2e), 0.0f, 0.58f, 0.26f);
             else if (face == "vfet" && name != "input" && name != "output")
