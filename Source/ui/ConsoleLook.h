@@ -83,6 +83,13 @@ namespace look
         from the start (or from the centre, for a knob that goes both ways) up to the value.
         `proportion` is 0..1; `fromCentre` lights from 0.5.
     */
+    /** The Liquid Glass knob: matte black with a glowing LED ring in `ring` showing the setting. */
+    void drawGlassKnob (juce::Graphics&, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
+                        juce::Colour ring, bool fromCentre, bool enabled);
+
+    /** A Liquid Glass panel: a rounded card lit along its top edge (`recessed`: a darker section inside a card). */
+    void drawGlassPanel (juce::Graphics&, juce::Rectangle<float> area, float corner, bool recessed = false);
+
     void drawNeonKnob (juce::Graphics&, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
                        juce::Colour ring, bool fromCentre, bool enabled = true, bool onLightPanel = false);
 

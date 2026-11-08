@@ -2,6 +2,7 @@
 #include "Eco.h"
 #include "Theme.h"
 #include "EffectDesigns.h"
+#include "ConsoleLook.h"
 #include "../model/Identifiers.h"
 #include "../model/Project.h"
 
@@ -38,6 +39,58 @@ namespace
     constexpr int lampRadius = 17;
     const juce::Point<int> powerPlace { 2916, 160 };
     constexpr int powerRadius = 62;
+
+    /** Liquid Glass: each knob's ring in its section's colour (the console's colour code). */
+    juce::Colour sectionColour (const juce::Identifier& p)
+    {
+        if (p == ids::consoleMicGain) return juce::Colour (0xffff453a);
+        if (p == ids::consoleDeEssThreshold) return juce::Colour (0xffffd60a);
+        if (p == ids::consoleGateThreshold || p == ids::consoleGateRange || p == ids::consoleGateRelease) return juce::Colour (0xff30d158);
+        if (p == ids::consoleLF || p == ids::consoleLFFreq) return juce::Colour (0xffc49a6c);
+        if (p == ids::consoleLMF || p == ids::consoleLMFFreq || p == ids::consoleLMFQ) return juce::Colour (0xff0a84ff);
+        if (p == ids::consoleHMF || p == ids::consoleHMFFreq || p == ids::consoleHMFQ) return juce::Colour (0xff30d158);
+        if (p == ids::consoleHF || p == ids::consoleHFFreq) return juce::Colour (0xffff453a);
+        return juce::Colour (0xffe6e8ec);
+    }
+    juce::String shortName (const juce::Identifier& p)
+    {
+        static const std::pair<juce::Identifier, const char*> names[] {
+            { ids::consoleMicGain, "MIC" }, { ids::consoleInput, "TRIM" }, { ids::consoleDeEssThreshold, "AMOUNT" },
+            { ids::consoleDynamics, "THRESH" }, { ids::consoleCompRatio, "RATIO" }, { ids::consoleCompRelease, "RELEASE" },
+            { ids::consoleGateThreshold, "THRESH" }, { ids::consoleGateRange, "RANGE" }, { ids::consoleGateRelease, "RELEASE" },
+            { ids::consoleHPF, "HPF" }, { ids::consoleLPF, "LPF" }, { ids::consoleLF, "GAIN" }, { ids::consoleLFFreq, "FREQ" },
+            { ids::consoleLMF, "GAIN" }, { ids::consoleLMFFreq, "FREQ" }, { ids::consoleLMFQ, "Q" }, { ids::consoleHMF, "GAIN" },
+            { ids::consoleHMFFreq, "FREQ" }, { ids::consoleHMFQ, "Q" }, { ids::consoleHF, "GAIN" }, { ids::consoleHFFreq, "FREQ" },
+            { ids::consoleOutput, "OUT" } };
+        for (const auto& [id, n] : names)
+            if (id == p)
+                return n;
+        return {};
+    }
+    juce::String keyCaption (const juce::String& led)
+    {
+        static const std::pair<const char*, const char*> captions[] {
+            { "phantom", "48V" }, { "pad", "PAD" }, { "phase", "\xc3\x98" }, { "line", "LINE" }, { "deEssIn", "IN" }, { "knee", "SOFT" },
+            { "compFast", "FAST" }, { "linRel", "LIN" }, { "dynIn", "IN" }, { "exp", "EXP" }, { "gateFast", "FAST" }, { "filtSc", "S/C" },
+            { "filtIn", "IN" }, { "lfBell", "BELL" }, { "black", "BLK" }, { "eqIn", "EQ" }, { "eqSc", "S/C" }, { "hfBell", "BELL" },
+            { "dynPost", "DYN" }, { "deEssPost", "DE-S" }, { "ext", "EXT" }, { "link", "LINK" }, { "insIn", "INS" }, { "insOp", "POST" },
+            { "mtrInp", "MTR" } };
+        for (const auto& [l, c] : captions)
+            if (led == l)
+                return juce::String::fromUTF8 (c);
+        return led.toUpperCase();
+    }
+
+    // The glass panel's sections (in the face's pixels: x from, x to, title)
+    struct Section { float x0, x1; const char* title; juce::Colour dot; };
+    const Section sections[] {
+        { 3.0f, 159.0f, "INPUT", juce::Colour (0xffff453a) }, { 162.0f, 216.0f, "DE-ESS", juce::Colour (0xffffd60a) },
+        { 219.0f, 364.0f, "COMP", juce::Colour (0xffe6e8ec) }, { 367.0f, 440.0f, "GR", juce::Colour (0xffff9f0a) },
+        { 443.0f, 575.0f, "GATE", juce::Colour (0xff30d158) }, { 578.0f, 692.0f, "FILTERS", juce::Colour (0xffe6e8ec) },
+        { 695.0f, 802.0f, "LF", juce::Colour (0xffc49a6c) }, { 805.0f, 948.0f, "LMF", juce::Colour (0xff0a84ff) },
+        { 951.0f, 1012.0f, "EQ", juce::Colour (0xffe6e8ec) }, { 1015.0f, 1140.0f, "HMF", juce::Colour (0xff30d158) },
+        { 1143.0f, 1250.0f, "HF", juce::Colour (0xffff453a) }, { 1253.0f, 1312.0f, "ROUTE", juce::Colour (0xffe6e8ec) },
+        { 1315.0f, 1410.0f, "OUT", juce::Colour (0xffe6e8ec) }, { 1413.0f, 1492.0f, "", juce::Colour() } };
 
     juce::Rectangle<int> onFace (int x, int y, int w, int h)
     {
@@ -102,6 +155,13 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        if (theme::glassSkin())
+        {
+            // Liquid Glass: the LED-ring knob in its section's colour
+            const auto area = getLocalBounds().toFloat().reduced (1.0f);
+            look::drawGlassKnob (g, area, (float) getValue(), juce::degreesToRadians (-135.0f), juce::degreesToRadians (135.0f), ring, fromCentre, isEnabled());
+            return;
+        }
         if (! sprite.isValid())
             return;
         const auto angle = -135.0f + 270.0f * (float) getValue();
@@ -115,9 +175,11 @@ public:
     void showValue (float v) { setValue ((scale.angleOf (v) + 135.0f) / 270.0f, juce::dontSendNotification); }
 
     juce::Identifier property;
-    juce::String name;
+    juce::String name, label;
     float fallback = 0.0f;
     std::function<juce::String (float)> text;
+    juce::Colour ring { 0xffd9d9d6 };
+    bool fromCentre = false;
 
 private:
     juce::Image sprite;
@@ -138,6 +200,38 @@ public:
     }
     void paint (juce::Graphics& g) override
     {
+        if (theme::glassSkin() && isOn)
+        {
+            // Liquid Glass: a pill with its caption, lit when in (the power: a round glass key)
+            const auto lit = isOn();
+            const auto area = getLocalBounds().toFloat().reduced (1.0f);
+            if (round)
+            {
+                const auto c = area.getCentre();
+                const auto r = juce::jmin (area.getWidth(), area.getHeight()) * 0.42f;
+                const auto ball = juce::Rectangle<float> (r * 2.0f, r * 2.0f).withCentre (c);
+                look::drawKey (g, ball, look::Key::dark, false, {}, false, pressed);
+                const auto green = juce::Colour (0xff30d158);
+                juce::Path icon;
+                icon.addCentredArc (c.x, c.y, r * 0.42f, r * 0.42f, 0.0f, juce::degreesToRadians (35.0f), juce::degreesToRadians (325.0f), true);
+                icon.startNewSubPath (c.x, c.y - r * 0.55f);
+                icon.lineTo (c.x, c.y - r * 0.12f);
+                if (lit)
+                {
+                    g.setColour (green.withAlpha (0.35f));
+                    g.strokePath (icon, juce::PathStrokeType (r * 0.22f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                }
+                g.setColour (lit ? green : juce::Colour (0xff6b707a));
+                g.strokePath (icon, juce::PathStrokeType (r * 0.1f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                return;
+            }
+            const auto pill = area.withSizeKeepingCentre (area.getWidth(), juce::jmin (area.getHeight(), 15.0f));
+            look::drawKey (g, pill, look::Key::dark, lit, colour, false, pressed);
+            g.setColour (lit ? (colour.getPerceivedBrightness() > 0.6f ? juce::Colour (0xff1a1205) : juce::Colours::white) : theme::stripInk);
+            g.setFont (juce::FontOptions (8.5f, juce::Font::bold));
+            g.drawFittedText (label, pill.toNearestInt(), juce::Justification::centred, 1, 0.7f);
+            return;
+        }
         // (pressed: the key goes down a little)
         if (pressed)
         {
@@ -153,9 +247,11 @@ public:
     }
 
     juce::Identifier property;
-    juce::String name, led;
+    juce::String name, led, label;
     bool defaultOn = false, pressed = false, round = false;
+    juce::Colour colour { 0xffff9f0a };
     std::function<void()> onClick;
+    std::function<bool()> isOn;
 };
 
 //==============================================================================
@@ -261,6 +357,7 @@ ConsoleStripWindow::ConsoleStripWindow (juce::ValueTree t, juce::UndoManager& um
     power->name = "Power: the channel strip in or out";
     power->defaultOn = true;
     power->round = true;
+    power->isOn = [this] { return on (ids::stripIn, true); };
     power->setTooltip (power->name);
     power->onClick = [this]
     {
@@ -316,6 +413,10 @@ void ConsoleStripWindow::addKnob (const juce::Identifier& property, const juce::
     k->fallback = fallback;
     k->text = std::move (text);
     k->setBounds (onFace (cx - r, cy - r, r * 2, r * 2));
+    k->label = shortName (property);
+    k->ring = sectionColour (property);
+    k->fromCentre = property == ids::consoleLF || property == ids::consoleLMF || property == ids::consoleHMF || property == ids::consoleHF
+                 || property == ids::consoleInput || property == ids::consoleOutput;
     auto* raw = k.get();
     k->textFromValueFunction = [raw] (double) { return raw->name + ": " + raw->text (raw->propertyValue()); };
     k->setPopupDisplayEnabled (true, true, this);
@@ -337,7 +438,11 @@ void ConsoleStripWindow::addKey (const juce::Identifier& property, const juce::S
     k->setTooltip (name);
     const auto at = leds[led];
     k->setBounds (onFace (at.x - 25, at.y - 46 - 22, 50, 44));   // (the key sits just above its lamp)
+    k->label = keyCaption (led);
+    k->colour = juce::String (led) == "line" || juce::String (led) == "dynIn" || juce::String (led) == "eqIn" || juce::String (led) == "filtIn"
+                || juce::String (led) == "insIn" || juce::String (led) == "deEssIn" ? juce::Colour (0xff30d158) : juce::Colour (0xffff9f0a);
     auto* raw = k.get();
+    k->isOn = [this, raw] { return on (raw->property, raw->defaultOn); };
     k->onClick = [this, raw]
     {
         undoManager.beginNewTransaction ("Channel strip " + raw->name.upToFirstOccurrenceOf (":", false, false));
@@ -440,8 +545,67 @@ void ConsoleStripWindow::resized()
     power->setBounds (onFace (powerPlace.x - 58, powerPlace.y - 58, 116, 116));
 }
 
+void ConsoleStripWindow::paintGlass (juce::Graphics& g)
+{
+    // Liquid Glass: the window's ground, one glass card for the panel, a recessed glass section per part
+    g.fillAll (theme::console);
+    const auto face = juce::Rectangle<float> (0.0f, 0.0f, (float) faceWidth, (float) faceHeight).reduced (1.5f);
+    look::drawGlassPanel (g, face, 14.0f);
+    for (const auto& sec : sections)
+    {
+        const auto r = juce::Rectangle<float> (sec.x0, 6.0f, sec.x1 - sec.x0, (float) faceHeight - 12.0f);
+        look::drawGlassPanel (g, r, 10.0f, true);
+        if (sec.title[0] != 0)
+        {
+            g.setColour (sec.dot);
+            g.fillEllipse (r.getX() + 7.0f, r.getY() + 7.0f, 5.0f, 5.0f);
+            g.setColour (theme::stripInk.withAlpha (0.85f));
+            g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
+            g.drawText (sec.title, juce::Rectangle<float> (r.getX() + 15.0f, r.getY() + 3.0f, 80.0f, 13.0f), juce::Justification::centredLeft, false);
+        }
+    }
+    // the knobs' captions
+    g.setFont (juce::FontOptions (7.5f, juce::Font::bold));
+    g.setColour (theme::stripInkDim);
+    for (const auto& k : knobs)
+        g.drawText (k->label, k->getBounds().translated (0, k->getHeight() + 1).withHeight (9).expanded (10, 0), juce::Justification::centred, false);
+
+    const bool powered = on (ids::stripIn, true);
+    // The meters, smooth: gain reduction from the left (compressor, gate), the de-esser's, the level
+    const auto bar = [&g] (juce::Rectangle<float> r, float fraction, bool vertical, bool reduction)
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.45f));
+        g.fillRoundedRectangle (r, juce::jmin (r.getWidth(), r.getHeight()) * 0.5f);
+        fraction = juce::jlimit (0.0f, 1.0f, fraction);
+        if (fraction <= 0.0f)
+            return;
+        const auto lit = vertical ? r.withTrimmedTop (r.getHeight() * (1.0f - fraction)) : r.withWidth (r.getWidth() * fraction);
+        juce::ColourGradient grad = reduction ? juce::ColourGradient (juce::Colour (0xffffd60a), r.getX(), r.getY(), juce::Colour (0xffff453a), vertical ? r.getX() : r.getRight(), vertical ? r.getBottom() : r.getY(), false)
+                                              : juce::ColourGradient (juce::Colour (0xff30d158), r.getX(), r.getBottom(), juce::Colour (0xffff453a), r.getX(), r.getY(), false);
+        if (! reduction)
+            grad.addColour (0.75, juce::Colour (0xffffd60a));
+        g.setGradientFill (grad);
+        g.fillRoundedRectangle (lit, juce::jmin (r.getWidth(), r.getHeight()) * 0.5f);
+    };
+    g.setFont (juce::FontOptions (7.5f, juce::Font::bold));
+    g.setColour (theme::stripInkDim);
+    g.drawText ("COMP", juce::Rectangle<float> (373.0f, 28.0f, 60.0f, 9.0f), juce::Justification::centredLeft, false);
+    g.drawText ("GATE", juce::Rectangle<float> (373.0f, 58.0f, 60.0f, 9.0f), juce::Justification::centredLeft, false);
+    bar ({ 373.0f, 40.0f, 60.0f, 7.0f }, powered ? grDb / 20.0f : 0.0f, false, true);
+    bar ({ 373.0f, 70.0f, 60.0f, 7.0f }, powered ? gateDb / 20.0f : 0.0f, false, true);
+    bar ({ 200.0f, 26.0f, 6.0f, 48.0f }, powered ? deEssDb / 12.0f : 0.0f, true, true);
+    const auto level = on (ids::consoleMeterInput, false) ? inDb : outDb;
+    bar ({ 1389.0f, 22.0f, 7.0f, 68.0f }, powered ? juce::jmap (juce::jlimit (-48.0f, 0.0f, level), -48.0f, 0.0f, 0.0f, 1.0f) : 0.0f, true, false);
+}
+
 void ConsoleStripWindow::paint (juce::Graphics& g)
 {
+    if (theme::glassSkin())
+    {
+        paintGlass (g);
+        paintCurveGround (g);
+        return;
+    }
     g.fillAll (juce::Colour (0xff141518));
     g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
     g.drawImage (effectdesign::skinImage ("strip_panel_jpg"), juce::Rectangle<float> (0.0f, 0.0f, (float) faceWidth, (float) faceHeight));
@@ -477,10 +641,15 @@ void ConsoleStripWindow::paint (juce::Graphics& g)
                 lamp (g, name);
     }
 
+    paintCurveGround (g);
+}
+
+void ConsoleStripWindow::paintCurveGround (juce::Graphics& g)
+{
     // The screen under the panel: the EQ curve over the spectrum, 20 Hz to 20 kHz, +-18 dB
     const auto area = curveArea().toFloat();
     g.setColour (theme::lcd);
-    g.fillRoundedRectangle (area, 4.0f);
+    g.fillRoundedRectangle (area, theme::glassSkin() ? 12.0f : 4.0f);
     g.setColour (theme::outline);
     g.drawRoundedRectangle (area, 4.0f, 1.0f);
     const auto xOf = [&area] (double f) { return area.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * area.getWidth(); };
@@ -512,7 +681,14 @@ void ConsoleStripWindow::paintOverChildren (juce::Graphics& g)
         if (i == 0) curve.startNewSubPath (xOf (f), y);
         else        curve.lineTo (xOf (f), y);
     }
-    g.setColour (settings.enabled ? theme::neon : theme::dimText);
+    if (theme::glassSkin() && settings.enabled)
+    {
+        g.setColour (juce::Colour (0xff64d2ff).withAlpha (0.3f));
+        g.strokePath (curve, juce::PathStrokeType (6.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.setColour (juce::Colour (0xff9fe6ff));
+    }
+    else
+        g.setColour (settings.enabled ? theme::neon : theme::dimText);
     g.strokePath (curve, juce::PathStrokeType (2.0f));
     g.setFont (juce::FontOptions (9.0f));
     for (int d : { 12, 6, -6, -12 })
@@ -522,7 +698,7 @@ void ConsoleStripWindow::paintOverChildren (juce::Graphics& g)
     }
 
     // Powered off: the panel goes dark
-    if (! settings.enabled)
+    if (! settings.enabled && ! theme::glassSkin())
     {
         g.setColour (juce::Colours::black.withAlpha (0.25f));
         g.fillRect (0, 0, powerPlace.x / 2 - 34, faceHeight);   // (all but the power button)

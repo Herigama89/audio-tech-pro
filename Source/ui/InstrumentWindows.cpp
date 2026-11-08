@@ -323,7 +323,7 @@ void EffectPanel::buildDesign (const EffectInfo& info)
             l->setFont (juce::FontOptions (15.0f));
             // (a control's own colour, for one that sits on a different background, e.g. on a screen)
             const bool ownColour = c.kind != effectdesign::Kind::field && ! c.colour.isTransparent();
-            l->setColour (juce::Label::textColourId, ownColour ? c.colour : design->label);
+            l->setColour (juce::Label::textColourId, ownColour ? c.colour : effectdesign::labelColourOf (*design));
             l->setJustificationType (juce::Justification::centred);
             l->setInterceptsMouseClicks (false, false);
             addAndMakeVisible (l);

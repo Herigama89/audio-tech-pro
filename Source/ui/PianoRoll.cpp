@@ -817,8 +817,24 @@ void PianoRoll::paint (juce::Graphics& g)
             const auto vel = (float) (int) note[ids::velocity] / 127.0f;
             const bool muted = notetools::isMuted (note);
             const auto fill = muted ? theme::dimText.withAlpha (0.35f) : colour.withMultipliedBrightness (0.55f + 0.6f * vel);
-            g.setColour (fill);
-            g.fillRoundedRectangle (r, 2.0f);
+            if (theme::glassSkin() && ! muted)
+            {
+                // Liquid Glass: a glowing glass note, lit along its top edge
+                const auto corner = juce::jmin (4.0f, r.getHeight() * 0.4f);
+                g.setColour (fill.withAlpha (0.28f));
+                g.fillRoundedRectangle (r.expanded (2.0f), corner + 2.0f);
+                g.setGradientFill (juce::ColourGradient (fill.brighter (0.35f), r.getX(), r.getY(), fill.darker (0.1f), r.getX(), r.getBottom(), false));
+                g.fillRoundedRectangle (r, corner);
+                g.setColour (juce::Colours::white.withAlpha (0.55f));
+                g.drawLine (r.getX() + corner, r.getY() + 1.0f, r.getRight() - corner, r.getY() + 1.0f, 1.0f);
+                g.setColour (fill.brighter (0.6f).withAlpha (0.8f));
+                g.drawRoundedRectangle (r.reduced (0.5f), corner, 1.0f);
+            }
+            else
+            {
+                g.setColour (fill);
+                g.fillRoundedRectangle (r, 2.0f);
+            }
             if (! muted && r.getWidth() > 10.0f)
             {
                 // the velocity as a bar along the note's bottom

@@ -73,6 +73,8 @@ private:
     static constexpr int faceWidth = 1495, faceHeight = 156;
     std::map<juce::String, juce::Point<int>> leds;
     void lamp (juce::Graphics& g, const juce::String& name) const;
+    void paintGlass (juce::Graphics& g);          // (the Liquid Glass panel)
+    void paintCurveGround (juce::Graphics& g);
 
     // The analyzer behind the EQ curve, and its settings (as in Logic's MultiMeter); the side-chain key
     SpectrumAnalyzer analyzer;

@@ -176,7 +176,9 @@ void SpectrumAnalyzer::paint (juce::Graphics& g)
     const auto yOf = [&] (float dbValue) { return area.getY() + juce::jlimit (0.0f, 1.0f, -dbValue / options.rangeDb) * area.getHeight(); };
     const auto xOf = [&] (double f) { return area.getX() + (float) (std::log (f / lowHz) / std::log (highHz / lowHz)) * area.getWidth(); };
 
-    const auto fill = juce::Colour (0xff3fa7d6), peak = juce::Colour (0xffffd166);
+    // (Liquid Glass: an amber spectrum under the blue curve, rounded glass bars; else the classic blue)
+    const bool glass = theme::glassSkin();
+    const auto fill = glass ? juce::Colour (0xffff9f0a) : juce::Colour (0xff3fa7d6), peak = glass ? juce::Colour (0xffffe0a0) : juce::Colour (0xffffd166);
 
     if (options.bars)
     {
@@ -186,8 +188,11 @@ void SpectrumAnalyzer::paint (juce::Graphics& g)
         {
             const auto x = area.getX() + (float) i * width;
             const auto top = yOf (bandShown[i]);
-            g.setGradientFill (juce::ColourGradient (fill.withAlpha (0.75f), 0.0f, area.getY(), fill.withAlpha (0.25f), 0.0f, area.getBottom(), false));
-            g.fillRect (x + 1.0f, top, width - 2.0f, area.getBottom() - top);
+            g.setGradientFill (juce::ColourGradient (fill.withAlpha (glass ? 0.6f : 0.75f), 0.0f, area.getY(), fill.withAlpha (glass ? 0.08f : 0.25f), 0.0f, area.getBottom(), false));
+            if (glass)
+                g.fillRoundedRectangle (x + 1.5f, top, width - 3.0f, area.getBottom() - top, juce::jmin (4.0f, width * 0.3f));
+            else
+                g.fillRect (x + 1.0f, top, width - 2.0f, area.getBottom() - top);
             if (options.peakHoldSeconds != 0.0f && peakDb[i] > -options.rangeDb)
             {
                 g.setColour (peak);

@@ -4,6 +4,9 @@
 #include "../engine/StockDsp.h"
 #include "EffectFace.h"
 #include "CompressorFaceData.h"
+#include "Theme.h"
+#include "ConsoleLook.h"
+#include "Looks.h"
 #include <cstring>
 #include <map>
 
@@ -432,11 +435,24 @@ namespace
     //==============================================================================
     void paintPitchCorrection (juce::Graphics& g, R bounds, const EffectInfo& info, const float* v, float cents)
     {
-        g.setColour (juce::Colour (0xff191d25));
-        g.fillRect (bounds.withHeight (360));
-        g.setColour (juce::Colour (0xff222b38));
-        g.fillRect (bounds.withTrimmedTop (360));
-        const auto blue = juce::Colour (0xff4fb3e0);
+        const bool glass = theme::glassSkin();
+        if (glass)
+        {
+            // Liquid Glass: glass sections (scale, keyboard, correction; settings, tuning)
+            g.fillAll (theme::console);
+            look::drawGlassPanel (g, bounds.toFloat().reduced (6.0f), 16.0f);
+            for (const auto r : { RF (20.0f, 18.0f, 210.0f, 342.0f), RF (238.0f, 18.0f, 504.0f, 342.0f), RF (752.0f, 18.0f, 170.0f, 342.0f),
+                                  RF (20.0f, 370.0f, 548.0f, 212.0f), RF (592.0f, 370.0f, 330.0f, 212.0f) })
+                look::drawGlassPanel (g, r, 12.0f, true);
+        }
+        else
+        {
+            g.setColour (juce::Colour (0xff191d25));
+            g.fillRect (bounds.withHeight (360));
+            g.setColour (juce::Colour (0xff222b38));
+            g.fillRect (bounds.withTrimmedTop (360));
+        }
+        const auto blue = glass ? theme::accent : juce::Colour (0xff4fb3e0);
 
         // The keyboard: the notes of the scale lit
         const auto key = juce::roundToInt (valueOf (info, v, "key"));
@@ -456,6 +472,30 @@ namespace
         for (int w = 0; w < 7; ++w)
         {
             auto r = RF (keys.getX() + whiteW * (float) w, keys.getY(), whiteW - 3.0f, keys.getHeight());
+            if (glass)
+            {
+                // a glass key: the scale's lighter, the others faint; lit in the accent along its top
+                const auto lit = inScale (whites[w]);
+                const auto light = theme::glassLight();
+                g.setGradientFill (juce::ColourGradient ((light ? juce::Colours::white : juce::Colours::white.withAlpha (lit ? 0.24f : 0.06f)), 0.0f, r.getY(),
+                                                         (light ? juce::Colour (0xffe9ecf2) : juce::Colours::white.withAlpha (lit ? 0.09f : 0.02f)), 0.0f, r.getBottom(), false));
+                g.fillRoundedRectangle (r, 10.0f);
+                if (lit)
+                {
+                    g.setColour (blue.withAlpha (0.9f));
+                    g.fillRoundedRectangle (r.withHeight (4.0f).reduced (8.0f, 0.0f).translated (0.0f, 3.0f), 2.0f);
+                }
+                g.setColour ((light ? juce::Colours::black : juce::Colours::white).withAlpha (0.16f));
+                g.drawRoundedRectangle (r.reduced (0.5f), 10.0f, 1.0f);
+                if (bypassed (whites[w]))
+                {
+                    g.setColour (juce::Colour (0xffff453a));
+                    g.drawRoundedRectangle (r.reduced (2.0f), 10.0f, 2.5f);
+                }
+                g.setColour (theme::text.withAlpha (lit ? 1.0f : 0.45f));
+                g.drawText (names[whites[w]], r.removeFromBottom (26.0f), juce::Justification::centred, false);
+                continue;
+            }
             g.setColour (inScale (whites[w]) ? blue : juce::Colour (0xff2c3644));
             g.fillRoundedRectangle (r, 5.0f);
             if (bypassed (whites[w]))
@@ -471,6 +511,26 @@ namespace
             auto r = RF (keys.getX() + whiteW * blackAt[b] - whiteW * 0.33f - 1.5f, keys.getY(), whiteW * 0.66f, keys.getHeight() * 0.58f);
             g.setColour (juce::Colour (0xff111419));
             g.fillRoundedRectangle (r.expanded (2.0f, 0.0f), 5.0f);
+            if (glass)
+            {
+                g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2a2c31), 0.0f, r.getY(), juce::Colour (0xff141518), 0.0f, r.getBottom(), false));
+                g.fillRoundedRectangle (r, 8.0f);
+                if (inScale (blacks[b]))
+                {
+                    g.setColour (blue.withAlpha (0.9f));
+                    g.fillRoundedRectangle (r.withHeight (4.0f).reduced (6.0f, 0.0f).translated (0.0f, 3.0f), 2.0f);
+                }
+                g.setColour (juce::Colours::white.withAlpha (0.12f));
+                g.drawRoundedRectangle (r.reduced (0.5f), 8.0f, 1.0f);
+                if (bypassed (blacks[b]))
+                {
+                    g.setColour (juce::Colour (0xffff453a));
+                    g.drawRoundedRectangle (r.reduced (2.0f), 8.0f, 2.5f);
+                }
+                g.setColour (juce::Colours::white.withAlpha (inScale (blacks[b]) ? 0.9f : 0.4f));
+                g.drawText (names[blacks[b]], r.removeFromBottom (26.0f), juce::Justification::centred, false);
+                continue;
+            }
             g.setColour (inScale (blacks[b]) ? blue : juce::Colour (0xff222a35));
             g.fillRoundedRectangle (r, 5.0f);
             if (bypassed (blacks[b]))
@@ -484,25 +544,29 @@ namespace
 
         // The correction meter: how far the voice is being moved now
         const RF meter (848.0f, 90.0f, 8.0f, 230.0f);
-        g.setColour (juce::Colour (0xff2c3644));
-        g.fillRoundedRectangle (meter, 3.0f);
+        g.setColour (glass ? juce::Colours::black.withAlpha (0.45f) : juce::Colour (0xff2c3644));
+        g.fillRoundedRectangle (meter, glass ? 4.0f : 3.0f);
         const auto yOf = [meter] (float c) { return meter.getCentreY() - juce::jlimit (-100.0f, 100.0f, c) / 100.0f * meter.getHeight() * 0.5f; };
         g.setColour (blue);
         const auto y0 = yOf (0.0f), y1 = yOf (cents);
         g.fillRect (meter.getX(), std::min (y0, y1), meter.getWidth(), std::max (2.0f, std::abs (y1 - y0)));
         g.setFont (juce::FontOptions (13.0f));
+        const auto ink = glass ? theme::text : juce::Colours::white;
         for (const auto c : { 100, 50, 0, -50, -100 })
         {
-            g.setColour (juce::Colours::white.withAlpha (c == 0 ? 0.9f : 0.55f));
+            g.setColour (ink.withAlpha (c == 0 ? 0.9f : 0.55f));
             g.drawText ((c > 0 ? "+ " : c < 0 ? "- " : "") + juce::String (std::abs (c)), RF (790.0f, yOf ((float) c) - 8.0f, 48.0f, 16.0f), juce::Justification::right, false);
         }
-        title (g, R (780, 30, 140, 20), "Correction", juce::Colours::white.withAlpha (0.6f), 15.0f);
+        title (g, R (780, 30, 140, 20), "Correction", ink.withAlpha (0.6f), 15.0f);
         title (g, R (780, 52, 140, 22), juce::String (juce::roundToInt (cents)) + " Cent", blue, 17.0f);
 
-        title (g, R (40, 380, 300, 30), "Settings", juce::Colours::white.withAlpha (0.9f), 21.0f, juce::Justification::centredLeft);
-        title (g, R (610, 380, 300, 30), "Tuning", juce::Colours::white.withAlpha (0.9f), 21.0f, juce::Justification::centredLeft);
-        g.setColour (juce::Colours::white.withAlpha (0.1f));
-        g.fillRect (580, 390, 1, 190);
+        title (g, R (40, 380, 300, 30), "Settings", ink.withAlpha (0.9f), 21.0f, juce::Justification::centredLeft);
+        title (g, R (610, 380, 300, 30), "Tuning", ink.withAlpha (0.9f), 21.0f, juce::Justification::centredLeft);
+        if (! glass)
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.1f));
+            g.fillRect (580, 390, 1, 190);
+        }
     }
 
 
@@ -621,11 +685,28 @@ namespace
 
         d.paint = [boxes, displayArea, meter, left] (juce::Graphics& g, R bounds, const EffectInfo& fx, const float* v, float live)
         {
-            g.setGradientFill (juce::ColourGradient (modernBlueTop, 0.0f, 0.0f, modernBlueBottom, 0.0f, (float) bounds.getBottom(), false));
-            g.fillRect (bounds);
+            const bool glass = theme::glassSkin();
+            if (glass)
+            {
+                // Liquid Glass: the window's ground, a glass card, a recessed glass section per group
+                g.fillAll (theme::console);
+                look::drawGlassPanel (g, bounds.toFloat().reduced (6.0f), 16.0f);
+            }
+            else
+            {
+                g.setGradientFill (juce::ColourGradient (modernBlueTop, 0.0f, 0.0f, modernBlueBottom, 0.0f, (float) bounds.getBottom(), false));
+                g.fillRect (bounds);
+            }
             for (size_t b = 0; b < boxes.size(); ++b)
             {
                 const auto& box = boxes[b];
+                if (glass)
+                {
+                    look::drawGlassPanel (g, box.area.toFloat().reduced (4.0f, 4.0f), 12.0f, true);
+                    if (box.title.isNotEmpty())
+                        title (g, box.area.withHeight (40), box.title.toUpperCase(), theme::text.withAlpha (0.8f), 15.0f);
+                    continue;
+                }
                 if (box.title.isNotEmpty())
                     title (g, box.area.withHeight (46), box.title.toUpperCase(), modernCyan, 24.0f);
                 // A faint line between neighbouring sections (as Logic's)
@@ -642,8 +723,13 @@ namespace
             {
                 // The gain reduction meter on the left, as Logic's dynamics show it
                 const auto panel = R (0, 0, left, bounds.getHeight());
-                g.setColour (juce::Colour (0xff141c27));
-                g.fillRect (panel);
+                if (glass)
+                    look::drawGlassPanel (g, panel.toFloat().reduced (10.0f, 10.0f), 12.0f, true);
+                else
+                {
+                    g.setColour (juce::Colour (0xff141c27));
+                    g.fillRect (panel);
+                }
                 title (g, R (0, 12, left, 24), "REDUCTION", juce::Colour (0xffb9c8d6), 15.0f);
                 const auto bar = RF ((float) left * 0.5f - 7.0f, 52.0f, 14.0f, (float) bounds.getHeight() - 80.0f);
                 g.setColour (juce::Colour (0xff222d3b));
@@ -663,9 +749,19 @@ namespace
             }
             if (! displayArea.isEmpty())
             {
-                g.setColour (juce::Colour (0xff0f1722));
-                g.fillRect (displayArea.expanded (10, 14).withRight (bounds.getRight()));
-                effectface::drawDisplay (g, displayArea.toFloat(), fx, v, modernGreen);
+                if (glass)
+                {
+                    g.setColour (theme::lcd);
+                    g.fillRoundedRectangle (displayArea.expanded (6, 8).toFloat(), 12.0f);
+                    g.setColour (juce::Colours::white.withAlpha (0.08f));
+                    g.drawRoundedRectangle (displayArea.expanded (6, 8).toFloat(), 12.0f, 1.0f);
+                }
+                else
+                {
+                    g.setColour (juce::Colour (0xff0f1722));
+                    g.fillRect (displayArea.expanded (10, 14).withRight (bounds.getRight()));
+                }
+                effectface::drawDisplay (g, displayArea.toFloat(), fx, v, glass ? juce::Colour (0xffff9f0a) : modernGreen);
                 // (the analyzer over the display's screen, faint enough to read the curve through)
                 const auto screen = displayArea.toFloat().reduced (10.0f);
                 drawSpectrum (g, screen, [screen] (double f) { return screen.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * screen.getWidth(); },
@@ -3249,6 +3345,548 @@ namespace
         d["studioComp"] = c;
     }
 
+    //==========================================================================
+    // The Studio Compressor in Liquid Glass: each circuit drawn in glass (its controls as on its hardware face), the
+    // knobs LED-ringed, the keys glass pills; the Studio FET and the Opto on dark brushed metal; the FET's amber VU
+    // (whiter on the Opto), the black compression meter on the bus compressors.
+    namespace glasscomp
+    {
+        constexpr int faceTop = 46 + 8, faceHeight = 282, faceLeft = 0;
+
+        struct Knob { const char* id; float cx, cy, d; std::vector<std::pair<float, float>> map; const char* label; juce::Colour ring;
+                      bool log = false, stepped = false, fromCentre = false; const char* offParam = nullptr; const char* autoParam = nullptr; };
+        struct Pill { const char* id; float cx, cy, w; const char* text; float setValue = -1.0f; int choice = -1; bool green = false;
+                      bool invert = false; float h = 24.0f; };
+        enum class Meter { none, fetVu, optoVu, blackGr, bars };
+        struct Box { float x, w; const char* title = nullptr; };
+        struct Face
+        {
+            std::vector<Box> boxes;
+            std::vector<Knob> knobs;
+            std::vector<Pill> pills;
+            std::vector<std::pair<Meter, juce::Rectangle<float>>> meters;
+            juce::Colour tint;
+            bool metal = false;
+            juce::Point<float> power { -1.0f, -1.0f };   // (a round power key, if the face has one)
+            std::vector<std::tuple<float, float, const char*, bool>> captions;   // (UTF-8)   // x, y, text, dim
+        };
+
+        const juce::Colour amber (0xffff9f0a), cyan (0xff64d2ff), silver (0xffe6e8ec), gold (0xffffcc4d), red (0xffff453a),
+                           yellow (0xffffd60a), teal (0xff5ac8fa), cream (0xfff5e6c8), green (0xff30d158), white (0xfff2f2ee);
+
+        std::vector<std::pair<float, float>> lin (float a, float b) { return { { -135.0f, a }, { 135.0f, b } }; }
+        std::vector<std::pair<float, float>> steps (std::initializer_list<float> values)
+        {
+            std::vector<std::pair<float, float>> m;
+            const auto n = (int) values.size();
+            int i = 0;
+            for (auto v : values)
+                m.push_back ({ -120.0f + 240.0f * (float) i++ / (float) std::max (1, n - 1), v });
+            return m;
+        }
+
+        const std::vector<Face>& faces()
+        {
+            static const std::vector<Face> all = []
+            {
+                std::vector<Face> f (7);
+                const std::vector<std::pair<float, float>> io { { -150.0f, -30.0f }, { -115.0f, -24.0f }, { -73.0f, -12.0f }, { -36.0f, -6.0f },
+                                                                { 3.0f, 0.0f }, { 42.0f, 6.0f }, { 77.0f, 12.0f }, { 114.0f, 18.0f }, { 150.0f, 24.0f } };
+                const std::vector<std::pair<float, float>> fetAttack { { -135.0f, 200.0f }, { -45.0f, 60.0f }, { 45.0f, 10.0f }, { 135.0f, 0.05f } };
+                const std::vector<std::pair<float, float>> fetRelease { { -135.0f, 3000.0f }, { -45.0f, 900.0f }, { 45.0f, 200.0f }, { 135.0f, 5.0f } };
+                const auto busAttack = steps ({ 0.1f, 0.3f, 1.0f, 3.0f, 10.0f, 30.0f });
+                const auto busRelease = steps ({ 100.0f, 200.0f, 400.0f, 800.0f, 1600.0f, 1600.0f });
+                const auto busRatio = steps ({ 1.5f, 2.0f, 3.0f, 4.0f, 5.0f, 10.0f });
+                const auto busHpf = steps ({ 0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f });
+
+                // Platinum Digital: the blue unit, every key and the side chain
+                {
+                    auto& p = f[0];
+                    p.tint = juce::Colour (0xff0a84ff);
+                    p.boxes = { { 14, 300 }, { 324, 72, "IN" }, { 406, 150 }, { 566, 320 }, { 896, 72, "OUT" }, { 978, 232 }, { 1218, 66 } };
+                    p.knobs = { { "threshold", 80, 82, 72, lin (0.0f, -60.0f), "THRESHOLD", gold }, { "ratio", 190, 82, 72, lin (1.0f, 30.0f), "RATIO", gold, true },
+                                { "attack", 270, 56, 32, lin (0.05f, 200.0f), "ATTACK", cyan, true }, { "release", 270, 132, 32, lin (5.0f, 3000.0f), "RELEASE", cyan, true },
+                                { "input", 481, 92, 84, lin (-30.0f, 30.0f), "INPUT GAIN", silver, false, false, true },
+                                { "knee", 680, 130, 30, lin (0.0f, 1.0f), "KNEE", cyan }, { "scHpf", 726, 130, 30, lin (20.0f, 20000.0f), "FREQ", cyan, true },
+                                { "scQ", 772, 130, 30, lin (0.1f, 10.0f), "Q", cyan, true }, { "scGain", 818, 130, 30, lin (-24.0f, 24.0f), "GAIN", cyan, false, false, true },
+                                { "limThr", 864, 130, 30, lin (-20.0f, 0.0f), "CEILING", cyan },
+                                { "output", 1030, 92, 76, lin (-30.0f, 30.0f), "OUTPUT", silver, false, false, true },
+                                { "makeup", 1112, 66, 46, lin (-30.0f, 30.0f), "MAKE UP", cyan, false, false, true }, { "mix", 1182, 66, 46, lin (0.0f, 100.0f), "MIX", cyan } };
+                    const char* ids[] { "peakRms", "detect", "scFilter", "autoRelease", "listen", "limiter", "meterHold", "console" };
+                    const char* texts[] { "RMS", "SUM", "FILTER", "AUTO", "LISTEN", "LIMIT", "HOLD", "CONSOLE" };
+                    for (int i = 0; i < 8; ++i)
+                        p.pills.push_back ({ ids[i], 48.0f + (float) (i % 4) * 66.0f, 214.0f + (float) (i / 4) * 30.0f, 58.0f, texts[i] });
+                    p.pills.push_back ({ "air", 446, 200, 54, "AIR" });
+                    p.pills.push_back ({ "distortion", 516, 200, 54, "DRIVE", -2.0f });
+                    const char* modes[] { "LP", "BP", "HP", "EQ", "HS" };
+                    for (int i = 0; i < 5; ++i)
+                        p.pills.push_back ({ "scMode", 680.0f + (float) i * 46.0f, 62.0f, 40.0f, modes[i], -1.0f, i });
+                    p.pills.push_back ({ "extSc", 770, 226, 86, "KEY 1 \xc2\xb7 2" });
+                    const char* gains[] { "OFF", "0 dB", "-12 dB" };
+                    for (int i = 0; i < 3; ++i)
+                        p.pills.push_back ({ "autoGain", 1100.0f + (float) i * 48.0f, 200.0f, 44.0f, gains[i], -1.0f, i });
+                    p.meters = { { Meter::bars, { 344, 44, 32, 170 } }, { Meter::bars, { 590, 44, 32, 110 } }, { Meter::bars, { 916, 44, 32, 170 } } };
+                    p.captions = { { 770, 26, "SIDE CHAIN", false }, { 1146, 168, "AUTO GAIN", false }, { 611, 162, "GR", false } };
+                    p.power = { 1251, 124 };
+                }
+                // Studio VCA: the red dual VCA, the FET's amber VUs
+                {
+                    auto& p = f[1];
+                    p.tint = juce::Colour (0xffff453a);
+                    p.boxes = { { 14, 660 }, { 690, 452 }, { 1156, 134, "LIMITER" } };
+                    p.knobs = { { "threshold", 178, 120, 96, lin (-50.0f, 0.0f), "THRESHOLD", red }, { "ratio", 318, 120, 80, lin (1.5f, 10.0f), "RATIO", red, true },
+                                { "attack", 440, 86, 54, lin (0.3f, 100.0f), "ATTACK", amber, true }, { "release", 440, 196, 54, lin (100.0f, 3000.0f), "RELEASE", amber, true },
+                                { "makeup", 620, 120, 80, lin (0.0f, 20.0f), "GAIN", yellow }, { "limThr", 1223, 112, 62, lin (-18.0f, 0.0f), "THRESHOLD", red } };
+                    p.pills = { { "compIn", 55, 83, 62, "IN", -1.0f, -1, true }, { "extSc", 55, 119, 62, "KEY" }, { "link", 55, 155, 62, "LINK" },
+                                { "autoRelease", 528, 205, 56, "AUTO" }, { "limiter", 1195, 209, 50, "IN" } };
+                    p.meters = { { Meter::fetVu, { 702, 46, 214, 108 } }, { Meter::fetVu, { 922, 46, 214, 108 } } };
+                    p.captions = { { 809, 168, "OUTPUT", false }, { 1029, 168, "GAIN REDUCTION", false }, { 800, 230, "GAIN CHANGE", true }, { 1262, 230, "LIMIT", true } };
+                }
+                // Studio FET: the silver limiter on dark brushed metal
+                {
+                    auto& p = f[2];
+                    p.metal = true;
+                    p.boxes = { { 14, 110 }, { 134, 380 }, { 524, 130 }, { 664, 90, "RATIO" }, { 764, 300 }, { 1074, 90, "METER" }, { 1174, 110 } };
+                    p.knobs = { { "input", 230, 110, 112, io, "INPUT", silver }, { "output", 410, 110, 112, io, "OUTPUT", silver },
+                                { "attack", 589, 70, 52, fetAttack, "ATTACK", cyan, false, false, false, "compIn" },
+                                { "release", 589, 172, 52, fetRelease, "RELEASE", cyan },
+                                { "mix", 1229, 58, 42, lin (100.0f, 0.0f), "MIX", cyan }, { "scHpf", 1229, 150, 42, lin (30.0f, 300.0f), "SC HPF", cyan, true, false, false, "scFilter" } };
+                    p.pills = { { "impedance", 69, 60, 60, "10k", -1.0f, -1, false, true }, { "impedance", 69, 90, 60, "600" },
+                                { "power", 69, 162, 60, "IN", -1.0f, -1, true }, { "link", 1201, 238, 50, "LINK" }, { "extSc", 1257, 238, 50, "EXT" } };
+                    const std::pair<const char*, float> ratios[] { { "20", 20.0f }, { "12", 12.0f }, { "8", 8.0f }, { "4", 4.0f }, { "ALL", 30.0f } };
+                    for (int i = 0; i < 5; ++i)
+                        p.pills.push_back ({ "ratio", 709.0f, 60.0f + (float) i * 36.0f, 58.0f, ratios[i].first, ratios[i].second });
+                    const std::pair<const char*, int> modes[] { { "GR", 0 }, { "+8", 2 }, { "+4", 1 }, { "OFF", 3 } };
+                    for (int i = 0; i < 4; ++i)
+                        p.pills.push_back ({ "meterMode", 1119.0f, 60.0f + (float) i * 36.0f, 58.0f, modes[i].first, -1.0f, modes[i].second });
+                    p.meters = { { Meter::fetVu, { 780, 40, 268, 136 } } };
+                    p.captions = { { 69, 28, "Z-IN", false }, { 69, 130, "BYPASS", false }, { 914, 196, "GAIN REDUCTION", false }, { 589, 238, "left past slow: OFF", true } };
+                }
+                // Classic VCA: the bus compressor, the black compression meter
+                {
+                    auto& p = f[3];
+                    p.tint = juce::Colours::white;
+                    p.boxes = { { 14, 250 }, { 274, 560 }, { 844, 320 }, { 1174, 110 } };
+                    p.knobs = { { "threshold", 80, 92, 78, lin (-40.0f, 0.0f), "THRESHOLD", white }, { "makeup", 190, 92, 78, lin (0.0f, 20.0f), "MAKE UP", white },
+                                { "attack", 330, 92, 60, busAttack, "ATTACK", amber, false, true }, { "release", 442, 92, 60, busRelease, "RELEASE", amber, false, true, false, nullptr, "autoRelease" },
+                                { "ratio", 554, 92, 60, busRatio, "RATIO", amber, false, true }, { "scHpfStep", 666, 92, 60, busHpf, "SC HPF", amber, false, true },
+                                { "vcaDrive", 796, 92, 46, lin (0.0f, 1.0f), "VCA DRIVE", red } };
+                    p.pills = { { "compIn", 100, 226, 60, "IN", -1.0f, -1, true }, { "extSc", 170, 226, 60, "EXT SC" } };
+                    p.meters = { { Meter::blackGr, { 860, 30, 288, 160 } } };
+                    p.captions = { { 135, 190, "COMP", false }, { 1004, 206, "GAIN REDUCTION", false }, { 330, 190, ".1 .3 1 3 10 30 ms", true },
+                                   { 442, 206, ".1 .2 .4 .8 1.6 s AUTO", true }, { 554, 190, "1.5 2 3 4 5 10", true }, { 666, 206, "OFF 30\xe2\x80\x93" "185 Hz", true } };
+                    p.power = { 1229, 104 };
+                }
+                // Vintage VCA: the 500-series bus compressor
+                {
+                    auto& p = f[4];
+                    p.tint = teal;
+                    p.boxes = { { 14, 170 }, { 194, 640 }, { 844, 440 } };
+                    const std::pair<const char*, const char*> ids[] { { "threshold", "THRESHOLD" }, { "makeup", "MAKE UP" }, { "attack", "ATTACK" },
+                                                                      { "release", "RELEASE" }, { "ratio", "RATIO" }, { "scHpfStep", "SC HPF" } };
+                    const std::vector<std::pair<float, float>> maps[] { lin (-40.0f, 0.0f), lin (-5.0f, 15.0f), busAttack, busRelease, busRatio, busHpf };
+                    for (int i = 0; i < 6; ++i)
+                        p.knobs.push_back ({ ids[i].first, 260.0f + (float) i * 102.0f, 104.0f, 66.0f, maps[i], ids[i].second, teal, false, i >= 2,
+                                             false, nullptr, i == 3 ? "autoRelease" : nullptr });
+                    p.pills = { { "compIn", 99, 110, 70, "IN", -1.0f, -1, true } };
+                    p.meters = { { Meter::blackGr, { 870, 30, 300, 166 } } };
+                    p.captions = { { 99, 28, "VINTAGE VCA", false }, { 99, 44, "500 SERIES BUS COMPRESSOR", true }, { 1020, 212, "GAIN REDUCTION", false },
+                                   { 512, 206, "stepped like the hardware: attack .1\xe2\x80\x93" "30 ms \xc2\xb7 release .1\xe2\x80\x93" "1.6 s + AUTO \xc2\xb7 ratio 1.5\xe2\x80\x93" "10 \xc2\xb7 SC HPF off\xe2\x80\x93" "185 Hz", true } };
+                }
+                // Vintage FET: the black FET limiter
+                {
+                    auto& p = f[5];
+                    p.tint = amber;
+                    p.boxes = { { 14, 380 }, { 404, 130 }, { 544, 90, "RATIO" }, { 644, 420 }, { 1074, 90, "METER" }, { 1174, 110 } };
+                    const std::vector<std::pair<float, float>> vio { { -155.0f, -30.0f }, { -118.0f, -24.0f }, { -73.0f, -12.0f }, { -34.0f, -6.0f },
+                                                                     { 5.0f, 0.0f }, { 43.0f, 6.0f }, { 76.0f, 12.0f }, { 115.0f, 18.0f }, { 153.0f, 24.0f } };
+                    p.knobs = { { "input", 110, 110, 112, vio, "INPUT", amber }, { "output", 290, 110, 112, vio, "OUTPUT", amber },
+                                { "attack", 469, 70, 52, fetAttack, "ATTACK", yellow, false, false, false, "compIn" },
+                                { "release", 469, 172, 52, fetRelease, "RELEASE", yellow } };
+                    const std::pair<const char*, float> ratios[] { { "20", 20.0f }, { "12", 12.0f }, { "8", 8.0f }, { "4", 4.0f }, { "ALL", 30.0f } };
+                    for (int i = 0; i < 5; ++i)
+                        p.pills.push_back ({ "ratio", 589.0f, 60.0f + (float) i * 36.0f, 58.0f, ratios[i].first, ratios[i].second });
+                    const std::pair<const char*, int> modes[] { { "GR", 0 }, { "+8", 2 }, { "+4", 1 }, { "OFF", 3 } };
+                    for (int i = 0; i < 4; ++i)
+                        p.pills.push_back ({ "meterMode", 1119.0f, 60.0f + (float) i * 36.0f, 58.0f, modes[i].first, -1.0f, modes[i].second });
+                    p.meters = { { Meter::fetVu, { 680, 34, 340, 170 } } };
+                    p.captions = { { 850, 222, "VU \xc2\xb7 GAIN REDUCTION", false }, { 469, 238, "left past 1: OFF", true } };
+                    p.power = { 1229, 104 };
+                }
+                // Vintage Opto: the grey levelling amplifier on dark brushed metal, its VU whiter
+                {
+                    auto& p = f[6];
+                    p.metal = true;
+                    p.boxes = { { 14, 286 }, { 310, 480 }, { 800, 300 }, { 1110, 176 } };
+                    p.knobs = { { "threshold", 157, 116, 126, lin (0.0f, -50.0f), "PEAK REDUCTION", cream },
+                                { "makeup", 960, 116, 126, lin (0.0f, 30.0f), "GAIN", cream }, { "emphasis", 1198, 198, 40, lin (0.0f, 1.0f), "HF EMPHASIS", cream } };
+                    p.pills = { { "optoLimit", 1160, 58, 70, "COMP", -1.0f, -1, false, true }, { "optoLimit", 1236, 58, 70, "LIMIT" },
+                                { "meterMode", 1150, 126, 48, "GR", -1.0f, 0 }, { "meterMode", 1200, 126, 44, "+4", -1.0f, 1 }, { "meterMode", 1248, 126, 44, "+10", -1.0f, 2 } };
+                    p.meters = { { Meter::optoVu, { 360, 26, 380, 193 } } };
+                    p.captions = { { 1198, 26, "MODE", false }, { 1198, 96, "METER", false }, { 834, 56, "ON", true }, { 550, 238, "VU", false } };
+                    p.power = { 834, 210 };
+                }
+                return f;
+            }();
+            return all;
+        }
+
+        juce::Point<float> at (float x, float y) { return { (float) faceLeft + 50.0f + x - 50.0f, (float) faceTop + y }; }
+        RF rect (float x, float y, float w, float h) { return RF (w, h).withPosition (at (x, y)); }
+
+        /** The FET's amber VU (cut from its face), or the Opto's whiter one. */
+        juce::Image vuImage (bool whiter)
+        {
+            static juce::Image amberVu, whiteVu;
+            if (amberVu.isNull())
+            {
+                const auto panel = skinImage ("sfet_panel_jpg");
+                if (panel.isValid())
+                    amberVu = panel.getClippedImage ({ 928, 60, 288, 146 }).createCopy();
+            }
+            if (whiter && whiteVu.isNull() && amberVu.isValid())
+            {
+                whiteVu = amberVu.createCopy();
+                juce::Image::BitmapData px (whiteVu, juce::Image::BitmapData::readWrite);
+                for (int y = 0; y < whiteVu.getHeight(); ++y)
+                    for (int x = 0; x < whiteVu.getWidth(); ++x)
+                    {
+                        const auto c = px.getPixelColour (x, y);
+                        px.setPixelColour (x, y, c.withSaturation (c.getSaturation() * 0.3f).withMultipliedBrightness (1.18f));
+                    }
+            }
+            return whiter ? whiteVu : amberVu;
+        }
+
+        const ParamInfo* paramOf (const EffectInfo& fx, const char* id)
+        {
+            for (const auto& p : fx.params)
+                if (p.id == id)
+                    return &p;
+            return nullptr;
+        }
+
+        juce::String valueText (const ParamInfo& p, float v)
+        {
+            if (p.isChoice())
+                return p.text (v);
+            auto suffix = p.suffix.trim();
+            if (suffix == "ms" && std::abs (v) >= 1000.0f) { v /= 1000.0f; suffix = "s"; }
+            if (suffix == "Hz" && std::abs (v) >= 1000.0f) { v /= 1000.0f; suffix = "kHz"; }
+            const auto digits = std::abs (v) >= 100.0f ? 0 : (std::abs (v) >= 10.0f ? 1 : (std::abs (v) < 1.0f && suffix.isEmpty() ? 2 : 1));
+            auto number = juce::String (v, digits);
+            if (suffix == ":1") return number + ":1";
+            if (suffix == "dB" && v > 0.05f) number = "+" + number;
+            return suffix.isEmpty() ? number : number + " " + suffix;
+        }
+
+        void pill (juce::Graphics& g, RF r, const juce::String& text, bool on, bool greenOn)
+        {
+            const auto lit = greenOn ? green : (theme::glassLight() ? juce::Colour (0xff0a84ff) : juce::Colour (0xff0a84ff));
+            look::drawKey (g, r, look::Key::dark, on, lit, false, false);
+            g.setColour (on ? (greenOn ? juce::Colour (0xff062010) : juce::Colours::white) : theme::text);
+            g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+            g.drawFittedText (text, r.toNearestInt(), juce::Justification::centred, 1, 0.7f);
+        }
+
+        void paint (juce::Graphics& g, R b, const EffectInfo& fx, const float* v, float live)
+        {
+            using namespace comp;
+            const auto circuit = juce::jlimit (0, 6, juce::roundToInt (valueOf (fx, v, "model", 1.0f)));
+            const auto& f = faces()[(size_t) circuit];
+            const auto light = theme::glassLight();
+            g.fillAll (theme::console);
+            g.setColour (theme::toolbarDark);
+            g.fillRect (b.withHeight (46));
+
+            // the face: glass tinted in the unit's colour, or dark brushed metal
+            const auto face = RF (8.0f, (float) faceTop, (float) b.getWidth() - 16.0f, (float) faceHeight);
+            look::drawGlassPanel (g, face, 16.0f);
+            if (f.metal)
+            {
+                juce::Graphics::ScopedSaveState keep (g);
+                juce::Path clip;
+                clip.addRoundedRectangle (face.reduced (1.0f), 15.0f);
+                g.reduceClipRegion (clip);
+                g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3a3c41), 0.0f, face.getY(), juce::Colour (0xff232528), 0.0f, face.getBottom(), false));
+                g.fillRect (face);
+                for (float x = face.getX(); x < face.getRight(); x += 3.0f)
+                {
+                    g.setColour (juce::Colours::white.withAlpha (0.025f));
+                    g.fillRect (x, face.getY(), 1.0f, face.getHeight());
+                }
+                g.setColour (juce::Colours::white.withAlpha (0.35f));
+                g.drawLine (face.getX() + 16.0f, face.getY() + 1.0f, face.getRight() - 16.0f, face.getY() + 1.0f, 1.0f);
+            }
+            else
+            {
+                g.setGradientFill (juce::ColourGradient (f.tint.withAlpha (light ? 0.10f : 0.14f), 0.0f, face.getY(),
+                                                         f.tint.withAlpha (0.0f), 0.0f, face.getY() + face.getHeight() * 0.75f, false));
+                g.fillRoundedRectangle (face.reduced (1.0f), 15.0f);
+            }
+            const auto ink = f.metal ? juce::Colour (0xfff2f4f8) : theme::text;
+            const auto dim = f.metal ? juce::Colour (0xff9aa0a8) : theme::dimText;
+            for (const auto& box : f.boxes)
+            {
+                const auto r = rect (box.x, 14.0f, box.w, (float) faceHeight - 28.0f);
+                look::drawGlassPanel (g, r, 12.0f, true);
+                if (box.title != nullptr)
+                {
+                    g.setColour (ink.withAlpha (0.75f));
+                    g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+                    g.drawText (box.title, r.withHeight (22.0f).translated (0.0f, 6.0f), juce::Justification::centred, false);
+                }
+            }
+            for (const auto& [x, y, text, isDim] : f.captions)
+            {
+                g.setColour (isDim ? dim.withAlpha (0.8f) : ink.withAlpha (0.75f));
+                g.setFont (juce::FontOptions (isDim ? 9.5f : 10.5f, isDim ? juce::Font::plain : juce::Font::bold));
+                g.drawText (juce::String::fromUTF8 (text), RF (360.0f, 14.0f).withCentre (at (x, y)), juce::Justification::centred, false);
+            }
+
+            // knobs: the LED ring and pointer at the setting, the name and value under them
+            for (const auto& k : f.knobs)
+            {
+                Sprite s;
+                s.map = k.map;
+                s.logMap = k.log;
+                s.stepped = k.stepped;
+                auto angle = photoAngleOf (s, valueOf (fx, v, k.id, k.map.front().second));
+                if (k.offParam != nullptr && valueOf (fx, v, k.offParam, 1.0f) < 0.5f)
+                    angle = k.map.front().first - 15.0f;
+                if (k.autoParam != nullptr && valueOf (fx, v, k.autoParam) > 0.5f)
+                    angle = k.map.back().first;
+                const auto a0 = k.map.front().first, a1 = k.map.back().first;
+                const auto proportion = juce::jlimit (0.0f, 1.0f, (angle - a0) / (a1 - a0));
+                const auto c = at (k.cx, k.cy);
+                const auto area = RF (k.d, k.d).withCentre (c);
+                look::drawGlassKnob (g, area.expanded (k.d * 0.18f), proportion, juce::degreesToRadians (-135.0f), juce::degreesToRadians (135.0f),
+                                     k.ring, k.fromCentre, true);
+                g.setColour (ink);
+                g.setFont (juce::FontOptions (k.d >= 60.0f ? 11.5f : 10.0f, juce::Font::bold));
+                g.drawText (k.label, RF (140.0f, 14.0f).withCentre ({ c.x, area.getBottom() + k.d * 0.18f + 9.0f }), juce::Justification::centred, false);
+                if (const auto* p = paramOf (fx, k.id))
+                {
+                    g.setColour (dim);
+                    g.setFont (juce::FontOptions (9.5f));
+                    auto text = valueText (*p, valueOf (fx, v, k.id));
+                    if (k.offParam != nullptr && valueOf (fx, v, k.offParam, 1.0f) < 0.5f) text = "OFF";
+                    if (k.autoParam != nullptr && valueOf (fx, v, k.autoParam) > 0.5f) text = "AUTO";
+                    g.drawText (text, RF (140.0f, 12.0f).withCentre ({ c.x, area.getBottom() + k.d * 0.18f + 22.0f }), juce::Justification::centred, false);
+                }
+            }
+            // keys: lit at their setting
+            for (const auto& p : f.pills)
+            {
+                const auto value = valueOf (fx, v, p.id);
+                bool on;
+                if (p.setValue == -2.0f)        on = value > 0.5f;                                        // (a key stepping through settings)
+                else if (p.setValue >= 0.0f)    on = p.setValue >= 25.0f ? value >= 25.0f : (value < 25.0f && std::abs (fetRatio (value) - p.setValue) < 0.5f);
+                else if (p.choice >= 0)         on = juce::roundToInt (value) == p.choice;
+                else                            on = p.invert ? value < 0.5f : value > 0.5f;
+                juce::String text (juce::CharPointer_UTF8 (p.text));
+                if (p.setValue == -2.0f)
+                    if (const auto* param = paramOf (fx, p.id)) text = param->text (value);
+                pill (g, RF (p.w, p.h).withCentre (at (p.cx, p.cy)), value > 0.5f && p.setValue == -2.0f ? text : juce::String (juce::CharPointer_UTF8 (p.text)), on, p.green);
+            }
+            // the round power key
+            const auto powered = valueOf (fx, v, "power", 1.0f) > 0.5f;
+            if (f.power.x > 0.0f)
+            {
+                const auto c = at (f.power.x, f.power.y);
+                const auto ball = RF (46.0f, 46.0f).withCentre (c);
+                look::drawKey (g, ball, look::Key::dark, false, {}, false, false);
+                const auto col = powered ? green : juce::Colour (0xff6b707a);
+                juce::Path icon;
+                icon.addCentredArc (c.x, c.y, 9.0f, 9.0f, 0.0f, juce::degreesToRadians (35.0f), juce::degreesToRadians (325.0f), true);
+                icon.startNewSubPath (c.x, c.y - 12.0f);
+                icon.lineTo (c.x, c.y - 3.0f);
+                if (powered)
+                {
+                    g.setColour (col.withAlpha (0.35f));
+                    g.strokePath (icon, juce::PathStrokeType (5.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                }
+                g.setColour (col);
+                g.strokePath (icon, juce::PathStrokeType (2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                g.setColour (dim);
+                g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+                g.drawText ("POWER", RF (80.0f, 12.0f).withCentre ({ c.x, ball.getBottom() + 12.0f }), juce::Justification::centred, false);
+            }
+
+            // the meters
+            const auto gr = std::abs (meter (0, live));
+            const auto outDb = std::max (meter (3), meter (4));
+            const auto mode = juce::roundToInt (valueOf (fx, v, "meterMode"));
+            const auto key = [circuit] (const char* n) { return "glass" + std::to_string (circuit) + n; };
+            int vuIndex = 0, barIndex = 0;
+            for (const auto& [kind, r0] : f.meters)
+            {
+                const auto r = rect (r0.getX(), r0.getY(), r0.getWidth(), r0.getHeight());
+                if (kind == Meter::fetVu || kind == Meter::optoVu)
+                {
+                    const auto img = vuImage (kind == Meter::optoVu);
+                    juce::Graphics::ScopedSaveState keep (g);
+                    juce::Path clip;
+                    clip.addRoundedRectangle (r, 10.0f);
+                    g.setColour (juce::Colours::black.withAlpha (0.5f));
+                    g.fillRoundedRectangle (r.translated (0.0f, 4.0f), 10.0f);
+                    g.reduceClipRegion (clip);
+                    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+                    g.setOpacity (1.0f);
+                    if (img.isValid())
+                        g.drawImage (img, r, juce::RectanglePlacement::stretchToFit);
+                    // its needle (the Studio VCA's two: the output, then the gain reduction)
+                    float reading;
+                    if (circuit == 1)                 reading = vuIndex == 0 ? outDb + 18.0f : -gr;
+                    else if (circuit == 6)            reading = mode == 0 ? -gr : outDb + (mode == 1 ? 18.0f : 12.0f);
+                    else                              reading = powered ? vuReading (mode, gr, outDb) : -24.0f;
+                    const auto shown = ballistics (key (vuIndex == 0 ? "vu0" : "vu1"), reading, 0.35f, 0.18f);
+                    const auto sx = r.getWidth() / 288.0f, sy = r.getHeight() / 146.0f;
+                    const juce::Point<float> pivot (r.getX() + 140.0f * sx, r.getY() + 164.0f * sy);
+                    const auto a = juce::degreesToRadians (vuAngle (shown, -50.1f, 13.9f, 46.0f));
+                    const auto tip = pivot + juce::Point<float> (std::sin (a), -std::cos (a)) * (136.0f * sy);
+                    g.setColour (juce::Colour (0xff1a1a1a));
+                    g.drawLine ({ pivot, tip }, juce::jmax (1.2f, 1.6f * sy));
+                    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.18f), r.getX(), r.getY(), juce::Colours::transparentWhite, r.getCentreX(), r.getCentreY(), false));
+                    g.fillRect (r);
+                    ++vuIndex;
+                }
+                else if (kind == Meter::blackGr)
+                {
+                    const auto shown = ballistics (key ("gr"), valueOf (fx, v, "compIn", 1.0f) > 0.5f ? gr : 0.0f, 0.5f, 0.2f);
+                    g.setColour (juce::Colours::black.withAlpha (0.5f));
+                    g.fillRoundedRectangle (r.translated (0.0f, 4.0f), 12.0f);
+                    if (! looks::drawMeter (g, r, shown))
+                    {
+                        g.setColour (juce::Colour (0xff111214));
+                        g.fillRoundedRectangle (r, 12.0f);
+                    }
+                }
+                else
+                {
+                    // smooth bars: input (L, R), gain reduction from the top, output (L, R)
+                    const auto inL = meter (1), inR = meter (2), outL = meter (3), outR = meter (4);
+                    const auto frac = [] (float db) { return juce::jlimit (0.0f, 1.0f, (db + 48.0f) / 48.0f); };
+                    const bool reduction = barIndex == 1;
+                    const float values[2] { reduction ? gr / 24.0f : frac (barIndex == 0 ? inL : outL), reduction ? gr / 24.0f : frac (barIndex == 0 ? inR : outR) };
+                    for (int i = 0; i < 2; ++i)
+                    {
+                        const auto bar = RF (r.getX() + (float) i * 20.0f, r.getY(), 12.0f, r.getHeight());
+                        g.setColour (juce::Colours::black.withAlpha (0.5f));
+                        g.fillRoundedRectangle (bar, 6.0f);
+                        const auto fr = juce::jlimit (0.0f, 1.0f, ballistics (key (("b" + std::to_string (barIndex) + std::to_string (i)).c_str()), values[i], 0.6f, 0.15f));
+                        if (fr <= 0.0f)
+                            continue;
+                        const auto lit = reduction ? bar.withHeight (bar.getHeight() * fr) : bar.withTrimmedTop (bar.getHeight() * (1.0f - fr));
+                        juce::ColourGradient grad = reduction ? juce::ColourGradient (yellow, 0.0f, bar.getY(), red, 0.0f, bar.getBottom(), false)
+                                                              : juce::ColourGradient (green, 0.0f, bar.getBottom(), red, 0.0f, bar.getY(), false);
+                        if (! reduction) grad.addColour (0.8, yellow);
+                        g.setGradientFill (grad);
+                        g.fillRoundedRectangle (lit, 6.0f);
+                    }
+                    ++barIndex;
+                }
+            }
+            // lamps: the Studio VCA's gain change and limit, the Studio FET's on, the Classic VCA's drive, the Opto's pilot, the Vintage VCA's in
+            const auto lampAt = [&g] (juce::Point<float> c, juce::Colour col, bool on)
+            {
+                if (on) { g.setColour (col.withAlpha (0.35f)); g.fillEllipse (RF (22.0f, 22.0f).withCentre (c)); }
+                g.setColour (on ? col : col.withMultipliedBrightness (0.3f).withMultipliedSaturation (0.6f));
+                g.fillEllipse (RF (13.0f, 13.0f).withCentre (c));
+            };
+            if (circuit == 1)
+            {
+                lampAt (at (740, 230), red, gr > 1.0f);
+                lampAt (at (1240, 209), red, valueOf (fx, v, "limiter") > 0.5f && meter (5, 0.0f) > 0.3f);
+            }
+            if (circuit == 2) lampAt (at (69, 210), amber, powered);
+            if (circuit == 3) lampAt (at (796, 156), red, valueOf (fx, v, "vcaDrive") > 0.02f);
+            if (circuit == 4) lampAt (at (99, 160), green, valueOf (fx, v, "compIn", 1.0f) > 0.5f);
+            if (circuit == 6) lampAt (at (834, 40), red, powered);
+        }
+    }
+
+    void addGlassCompressorFaces (std::map<juce::String, Design>& d)
+    {
+        using namespace glasscomp;
+        Design c;
+        c.width = comp::width;
+        c.height = faceTop + faceHeight + 8;
+        c.knobs = KnobStyle::dark;
+        c.label = theme::text; c.value = theme::text; c.accent = juce::Colour (0xffff9f0a); c.track = juce::Colours::black;
+        c.meters = true;
+        c.live = true;
+        c.pageParam = "model";
+        c.photoScale = 1.0f;
+        c.controls.push_back ({ "model", Kind::segmented, R (8, 7, comp::width - 16, 32), "-" });
+        const auto offset = juce::Point<float> (0.0f, 0.0f);
+        for (int circuit = 0; circuit < 7; ++circuit)
+        {
+            const auto& f = faces()[(size_t) circuit];
+            const auto n = circuit + 1;
+            for (const auto& k : f.knobs)
+            {
+                const auto ctr = at (k.cx, k.cy);
+                const auto r = k.d * 0.5f + 4.0f;
+                Sprite s;
+                s.rect = RF (ctr.x - r, ctr.y - r, r * 2.0f, r * 2.0f);
+                s.pivot = ctr;
+                s.map = k.map;
+                s.logMap = k.log;
+                s.stepped = k.stepped;
+                s.scale = 1.0f;
+                s.offset = offset;
+                if (k.offParam != nullptr) { s.offBelow = k.map.front().first - 8.0f; s.offParam = k.offParam; }
+                if (k.autoParam != nullptr) s.autoParam = k.autoParam;
+                Control ctl;
+                ctl.id = k.id;
+                ctl.kind = Kind::knob;
+                ctl.label = "-";
+                ctl.page = n;
+                ctl.bounds = s.rect.getSmallestIntegerContainer();
+                ctl.sprite = s;
+                c.controls.push_back (ctl);
+            }
+            for (const auto& p : f.pills)
+            {
+                const auto rr = RF (p.w, p.h).withCentre (at (p.cx, p.cy));
+                Sprite s;
+                s.rect = rr;
+                s.pivot = rr.getCentre();
+                s.scale = 1.0f;
+                s.offset = offset;
+                if (p.setValue >= 0.0f) { s.setValue = p.setValue; s.altValue = 30.0f; }
+                if (p.setValue == -2.0f) s.cycle = true;
+                if (p.choice >= 0) { s.choice = p.choice; s.radio = true; }
+                if (p.invert) { s.choice = 0; s.radio = true; }
+                if (! p.invert && p.choice < 0 && p.setValue == -1.0f
+                    && std::any_of (f.pills.begin(), f.pills.end(), [&p] (const Pill& o) { return o.invert && juce::String (o.id) == p.id; }))
+                    { s.choice = 1; s.radio = true; }
+                Control ctl;
+                ctl.id = p.id;
+                ctl.kind = Kind::hotspot;
+                ctl.label = "-";
+                ctl.page = n;
+                ctl.bounds = rr.getSmallestIntegerContainer();
+                ctl.sprite = s;
+                c.controls.push_back (ctl);
+            }
+            if (f.power.x > 0.0f)
+            {
+                const auto rr = RF (50.0f, 50.0f).withCentre (at (f.power.x, f.power.y));
+                Sprite s;
+                s.rect = rr; s.pivot = rr.getCentre(); s.scale = 1.0f; s.offset = offset;
+                Control ctl;
+                ctl.id = "power"; ctl.kind = Kind::hotspot; ctl.label = "-"; ctl.page = n;
+                ctl.bounds = rr.getSmallestIntegerContainer();
+                ctl.sprite = s;
+                c.controls.push_back (ctl);
+            }
+        }
+        c.paint = glasscomp::paint;
+        d["studioCompGlass"] = c;
+    }
+
     void addHardwareDesigns (std::map<juce::String, Design>& d)
     {
         const auto knob = Kind::knob;
@@ -4434,6 +5072,7 @@ namespace
         addHardwareDesigns (d);
         addPhotoDesigns (d);
         addCompressorFaces (d);
+        addGlassCompressorFaces (d);
 
         // The vintage EQs: under their faces, a screen with the curve they make and the live spectrum behind it
         // (not under the narrow graphic EQ)
@@ -4544,6 +5183,9 @@ juce::Image skinImage (const char* name)
     return {};
 }
 
+juce::Colour labelColourOf (const Design& d) { return theme::glassSkin() && d.photoScale <= 0.0f ? theme::text : d.label; }
+juce::Colour valueColourOf (const Design& d) { return theme::glassSkin() && d.photoScale <= 0.0f ? theme::accent : d.value; }
+
 const Design* designFor (const juce::String& type)
 {
     // Hand-made faces where they exist, the standard Logic look for every other stock effect
@@ -4555,14 +5197,15 @@ const Design* designFor (const juce::String& type)
                 all[info.type] = makeModern (info);
         return all;
     }();
-    const auto it = designs.find (type);
+    // (Liquid Glass: the Studio Compressor's glass faces)
+    const auto it = designs.find (type == "studioComp" && theme::glassSkin() ? juce::String ("studioCompGlass") : type);
     return it != designs.end() ? &it->second : nullptr;
 }
 
 //==============================================================================
 DesignLook::DesignLook (const Design& d) : design (d)
 {
-    setColour (juce::Label::textColourId, design.label);
+    setColour (juce::Label::textColourId, labelColourOf (design));
     setColour (juce::PopupMenu::backgroundColourId, juce::Colour (0xff20252c));
     setColour (juce::PopupMenu::textColourId, juce::Colours::white);
     setColour (juce::PopupMenu::highlightedBackgroundColourId, design.accent.withAlpha (0.6f));
@@ -4590,7 +5233,7 @@ juce::Label* DesignLook::createSliderTextBox (juce::Slider& s)
     l->setFont (juce::FontOptions (field ? 16.0f : 17.0f));
     l->setColour (juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     l->setColour (juce::Label::outlineColourId, juce::Colours::transparentBlack);
-    const auto colour = s.getProperties().contains ("colour") ? juce::Colour::fromString (s.getProperties()["colour"].toString()) : design.value;
+    const auto colour = s.getProperties().contains ("colour") ? juce::Colour::fromString (s.getProperties()["colour"].toString()) : valueColourOf (design);
     l->setColour (juce::Label::textColourId, colour);
     l->setColour (juce::TextEditor::textColourId, juce::Colours::white);
     l->setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff101418));
@@ -4602,7 +5245,7 @@ juce::Label* DesignLook::createSliderTextBox (juce::Slider& s)
         l->setFont (juce::FontOptions (15.0f, juce::Font::bold));
         l->setColour (juce::Label::backgroundColourId, juce::Colour (0xff0e1210));
         l->setColour (juce::Label::outlineColourId, juce::Colours::black);
-        l->setColour (juce::Label::textColourId, design.value);
+        l->setColour (juce::Label::textColourId, valueColourOf (design));
     }
     return l;
 }
@@ -4780,6 +5423,19 @@ void DesignLook::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h
     const auto bounds = RF (size, size).withCentre (R (x, y, w, h).toFloat().getCentre());
     const auto centre = bounds.getCentre();
     const auto angle = start + pos * (end - start);
+
+    if (theme::glassSkin() && design.photoScale <= 0.0f)
+    {
+        // Liquid Glass: the LED-ring knob, its ring in the control's own colour (a band's), else the accent
+        auto ring = s.getProperties().contains ("cap") ? juce::Colour::fromString (s.getProperties()["cap"].toString()) : juce::Colour();
+        if (ring.isTransparent() || ring.getSaturation() < 0.3f)
+            ring = s.findColour (juce::Slider::rotarySliderFillColourId);
+        if (ring.isTransparent() || ring.getSaturation() < 0.3f)
+            ring = theme::accent;
+        const bool fromCentre = s.getMinimum() < 0.0 && s.getMaximum() > 0.0;
+        look::drawGlassKnob (g, bounds.reduced (size * 0.06f), pos, start, end, ring, fromCentre, s.isEnabled());
+        return;
+    }
 
     const auto capColour = s.getProperties().contains ("cap") ? juce::Colour::fromString (s.getProperties()["cap"].toString()) : juce::Colour();
     if (design.knobs == KnobStyle::black || design.knobs == KnobStyle::white || design.knobs == KnobStyle::chrome)
@@ -5023,6 +5679,12 @@ void DesignLook::drawButtonBackground (juce::Graphics& g, juce::Button& b, const
     }
     auto r = b.getLocalBounds().toFloat().reduced (1.0f);
     const auto on = b.getToggleState();
+    if (theme::glassSkin() && design.photoScale <= 0.0f || theme::glassSkin() && design.pageParam == "model")
+    {
+        // Liquid Glass: a glass pill, lit in the accent when chosen
+        look::drawKey (g, r, look::Key::dark, on, theme::accent, over, down);
+        return;
+    }
     if (design.knobs == KnobStyle::silver)
     {
         // Light hardware keys, the chosen one sunk and lit
@@ -5075,7 +5737,9 @@ void DesignLook::drawButtonText (juce::Graphics& g, juce::TextButton& b, bool, b
         return;
     const auto on = b.getToggleState();
     juce::Colour colour;
-    if (design.knobs == KnobStyle::silver)
+    if (theme::glassSkin() && (design.photoScale <= 0.0f || design.pageParam == "model"))
+        colour = on ? (theme::accent.getPerceivedBrightness() > 0.6f ? juce::Colour (0xff1a1205) : juce::Colours::white) : theme::text;
+    else if (design.knobs == KnobStyle::silver)
         colour = on ? juce::Colour (0xff7fd0ff) : juce::Colour (0xff23262a);
     else if (design.knobs == KnobStyle::light)
         colour = on ? juce::Colours::white : juce::Colour (0xff8a8a8a);
@@ -5107,7 +5771,7 @@ void DesignLook::drawComboBox (juce::Graphics& g, int w, int h, bool, int, int, 
         g.fillRoundedRectangle (box.getLocalBounds().toFloat().reduced (1.0f), 3.0f);
         return;
     }
-    g.setColour (box.getProperties().contains ("ink") ? juce::Colour::fromString (box.getProperties()["ink"].toString()) : design.value);
+    g.setColour (box.getProperties().contains ("ink") ? juce::Colour::fromString (box.getProperties()["ink"].toString()) : valueColourOf (design));
     const auto cx = (float) w - 10.0f, cy = (float) box.getHeight() * 0.5f;
     juce::Path p;
     p.startNewSubPath (cx - 4.0f, cy - 2.0f); p.lineTo (cx, cy - 6.0f); p.lineTo (cx + 4.0f, cy - 2.0f);
@@ -5123,7 +5787,7 @@ void DesignLook::positionComboBoxText (juce::ComboBox& box, juce::Label& label)
     label.setFont (narrow ? juce::Font (juce::FontOptions (11.0f)) : getComboBoxFont (box));
     label.setBorderSize (narrow ? juce::BorderSize<int>() : label.getBorderSize());
     // (a menu with its own ink, for one sitting on a light panel)
-    label.setColour (juce::Label::textColourId, box.getProperties().contains ("ink") ? juce::Colour::fromString (box.getProperties()["ink"].toString()) : design.value);
+    label.setColour (juce::Label::textColourId, box.getProperties().contains ("ink") ? juce::Colour::fromString (box.getProperties()["ink"].toString()) : valueColourOf (design));
     label.setJustificationType (box.getProperties()["centred"] || narrow ? juce::Justification::centred : juce::Justification::centredLeft);
 }
 

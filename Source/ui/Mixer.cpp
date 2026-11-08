@@ -2530,11 +2530,30 @@ void MasterBusCompressorPanel::paint (juce::Graphics& g)
     }
     else if (theme::xenonSkin())
         skin::tileTexture (g, skin::xenonPanel(), bounds);
+    else if (theme::glassSkin())
+    {
+        // Liquid Glass: a glass card on the mixer's ground, lit along its top edge
+        const auto light = theme::glassLight();
+        g.fillAll (theme::console);
+        const auto card = bounds.toFloat().reduced (3.0f, 3.0f);
+        g.setColour (juce::Colours::black.withAlpha (light ? 0.08f : 0.4f));
+        g.fillRoundedRectangle (card.translated (0.0f, 3.0f), 18.0f);
+        g.setGradientFill (juce::ColourGradient (theme::stripFace.brighter (light ? 0.0f : 0.14f), 0.0f, card.getY(),
+                                                 theme::stripFaceLow, 0.0f, card.getBottom(), false));
+        g.fillRoundedRectangle (card, 18.0f);
+        g.setColour ((light ? juce::Colour (0xff8a93a3) : juce::Colours::white).withAlpha (light ? 0.3f : 0.13f));
+        g.drawRoundedRectangle (card.reduced (0.5f), 18.0f, 1.0f);
+        g.setColour (juce::Colours::white.withAlpha (light ? 0.9f : 0.3f));
+        g.drawLine (card.getX() + 18.0f, card.getY() + 1.0f, card.getRight() - 18.0f, card.getY() + 1.0f, 1.0f);
+    }
     else
         g.fillAll (theme::consoleShade);
-    g.setColour (theme::consoleDark);
-    g.fillRect (0, 0, 1, getHeight());
-    g.fillRect (getWidth() - 1, 0, 1, getHeight());
+    if (! theme::glassSkin())
+    {
+        g.setColour (theme::consoleDark);
+        g.fillRect (0, 0, 1, getHeight());
+        g.fillRect (getWidth() - 1, 0, 1, getHeight());
+    }
 
     // Title under the meter
     g.setColour (theme::ink);
@@ -2544,10 +2563,21 @@ void MasterBusCompressorPanel::paint (juce::Graphics& g)
 
     // The control box
     const auto box = juce::Rectangle<int> (10, threshold.getY() - 10, getWidth() - 20, grit.getBottom() + 34 - (threshold.getY() - 10)).toFloat();
-    g.setColour (theme::consoleShade.darker (0.06f));
-    g.fillRoundedRectangle (box, 8.0f);
-    g.setColour (theme::consoleDark);
-    g.drawRoundedRectangle (box, 8.0f, 1.2f);
+    if (theme::glassSkin())
+    {
+        // (a recessed glass section)
+        g.setColour ((theme::glassLight() ? juce::Colour (0xff1e2a40) : juce::Colours::black).withAlpha (theme::glassLight() ? 0.05f : 0.25f));
+        g.fillRoundedRectangle (box, 14.0f);
+        g.setColour ((theme::glassLight() ? juce::Colours::black : juce::Colours::white).withAlpha (0.07f));
+        g.drawRoundedRectangle (box.reduced (0.5f), 14.0f, 1.0f);
+    }
+    else
+    {
+        g.setColour (theme::consoleShade.darker (0.06f));
+        g.fillRoundedRectangle (box, 8.0f);
+        g.setColour (theme::consoleDark);
+        g.drawRoundedRectangle (box, 8.0f, 1.2f);
+    }
 
     for (const auto& c : captions)
     {
@@ -2564,6 +2594,22 @@ void MasterBusCompressorPanel::paint (juce::Graphics& g)
     // IN lamp
     const auto lamp = juce::Rectangle<float> (12.0f, 12.0f).withCentre ({ (float) inButton.getRight() + 22.0f, (float) inButton.getBounds().getCentreY() });
     const bool on = inButton.getToggleState();
+    if (theme::glassSkin())
+    {
+        // (a round glass lamp, glowing green when in)
+        const auto green = juce::Colour (0xff30d158);
+        if (on)
+        {
+            g.setColour (green.withAlpha (0.35f));
+            g.fillEllipse (lamp.expanded (4.0f));
+        }
+        g.setColour (on ? green : juce::Colour (0xff2a2d33));
+        g.fillEllipse (lamp);
+        g.setColour (juce::Colours::white.withAlpha (on ? 0.5f : 0.15f));
+        g.drawEllipse (lamp.reduced (0.5f), 1.0f);
+    }
+    else
+    {
     g.setColour (on ? theme::knobArc.brighter (0.4f) : juce::Colour (0xff1c2a3d));
     g.fillRoundedRectangle (lamp, 2.0f);
     if (on)
@@ -2573,6 +2619,7 @@ void MasterBusCompressorPanel::paint (juce::Graphics& g)
     }
     g.setColour (juce::Colours::black.withAlpha (0.6f));
     g.drawRoundedRectangle (lamp, 2.0f, 1.0f);
+    }
 
     g.setColour (theme::ink);
     g.setFont (juce::FontOptions (10.5f, juce::Font::bold));

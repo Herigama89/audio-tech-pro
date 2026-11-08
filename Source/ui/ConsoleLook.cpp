@@ -458,6 +458,28 @@ namespace look
         s.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
     }
 
+    void drawGlassPanel (juce::Graphics& g, juce::Rectangle<float> area, float corner, bool recessed)
+    {
+        const auto light = theme::glassLight();
+        if (recessed)
+        {
+            g.setColour ((light ? juce::Colour (0xff1e2a40) : juce::Colours::black).withAlpha (light ? 0.05f : 0.26f));
+            g.fillRoundedRectangle (area, corner);
+            g.setColour ((light ? juce::Colours::black : juce::Colours::white).withAlpha (0.07f));
+            g.drawRoundedRectangle (area.reduced (0.5f), corner, 1.0f);
+            return;
+        }
+        g.setColour (juce::Colours::black.withAlpha (light ? 0.08f : 0.4f));
+        g.fillRoundedRectangle (area.translated (0.0f, 2.0f), corner);
+        g.setGradientFill (juce::ColourGradient (theme::stripFace.brighter (light ? 0.0f : 0.14f), 0.0f, area.getY(),
+                                                 theme::stripFaceLow, 0.0f, area.getBottom(), false));
+        g.fillRoundedRectangle (area, corner);
+        g.setColour ((light ? juce::Colour (0xff8a93a3) : juce::Colours::white).withAlpha (light ? 0.3f : 0.13f));
+        g.drawRoundedRectangle (area.reduced (0.5f), corner, 1.0f);
+        g.setColour (juce::Colours::white.withAlpha (light ? 0.9f : 0.3f));
+        g.drawLine (area.getX() + corner, area.getY() + 1.0f, area.getRight() - corner, area.getY() + 1.0f, 1.0f);
+    }
+
     void drawGlassKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
                         juce::Colour ring, bool fromCentre, bool enabled)
     {

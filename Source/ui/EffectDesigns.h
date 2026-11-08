@@ -154,6 +154,10 @@ namespace riff::effectdesign
     float photoAngleOf (const Sprite&, float value);
     float photoValueAt (const Sprite&, float angle);
 
+    /** The face's label and value colours (Liquid Glass: the theme's text and accent on the drawn faces). */
+    juce::Colour labelColourOf (const Design&);
+    juce::Colour valueColourOf (const Design&);
+
     /** A picture compiled into the app, by its BinaryData resource name (cached). */
     juce::Image skinImage (const char* name);
 

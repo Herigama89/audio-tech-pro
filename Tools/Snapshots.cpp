@@ -173,6 +173,13 @@ public:
     int effectsOnly (const juce::StringArray& types)
     {
         out.createDirectory();
+        {
+            // (the app's theme, as it starts: RIFF_SNAP_SKIN=glasslight for the light one)
+            theme::Settings t;
+            if (juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_SKIN", {}) == "glasslight")
+                t.skin = theme::Skin::glassLight;
+            theme::set (t);
+        }
         juce::UndoManager um;
         auto project = model::createProject();
         auto track = model::addTrack (project, "FX", nullptr);
