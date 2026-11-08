@@ -294,7 +294,7 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::toggleStatusBar:        setPanelShown ("viewStatusBar", showStatusBar, ! showStatusBar); break;
         case commands::toggleMeters:           setPanelShown ("viewMeters", showMeters, ! showMeters); break;
         case commands::toggleGpuDrawing:
-            appProperties.getUserSettings()->setValue ("gpuDrawing", ! gpuDrawing);
+            appProperties.getUserSettings()->setValue ("gpuDrawing2", ! gpuDrawing);
             setGpuDrawing (! gpuDrawing);
             break;
         case commands::toggleTrackHeaders:     setPanelShown ("viewTrackHeaders", showTrackHeaders, ! showTrackHeaders); break;

@@ -1683,4 +1683,19 @@ void PianoRoll::paintGhosts (juce::Graphics& g, juce::Rectangle<int> area)
     }
 }
 
+void PianoRoll::playheadMoved()
+{
+    if (! region.isValid())
+        return;
+    const double regionStart = region[ids::start], offset = region[ids::offset];
+    const auto x = contentToX (engine.getPlayheadSeconds() - regionStart + offset);
+    if (std::abs (x - shownPlayheadX) < 0.25f)
+        return;
+    const auto area = gridArea();
+    for (const auto at : { shownPlayheadX, x })
+        if (at > (float) area.getX() - 4.0f && at < (float) area.getRight() + 4.0f)
+            repaint (juce::roundToInt (at) - 3, area.getY(), 7, area.getHeight());
+    shownPlayheadX = x;
+}
+
 } // namespace riff

@@ -543,7 +543,10 @@ MainComponent::MainComponent (bool openAudioDevice)
         appProperties.getUserSettings()->setValue ("meterRelease", (double) LevelMeter::ballistics().release);
     };
    #if RIFF_GPU_DRAWING
-    setGpuDrawing (appProperties.getUserSettings()->getBoolValue ("gpuDrawing", true));
+    // (drawn by macOS by default: JUCE's graphics-card renderer works out every rounded shape, gradient and letter
+    // on the processor first and then sends it over - slower for a window as full of them as the Liquid Glass one,
+    // and it holds the window up while it draws. View > Draw with the Graphics Card still turns it on.)
+    setGpuDrawing (appProperties.getUserSettings()->getBoolValue ("gpuDrawing2", false));
    #endif
     engine.setSuspendWhenSilent (appProperties.getUserSettings()->getBoolValue ("suspendPlugins", true));
     eco::mode = juce::jlimit (0, 2, appProperties.getUserSettings()->getIntValue ("ecoMode", 0));
@@ -2712,8 +2715,8 @@ void MainComponent::timerCallback()
             canvas.repaint (oldX - 8, 0, 16, canvas.getHeight());
             canvas.repaint (newX - 8, 0, 16, canvas.getHeight());
         }
-        if (pianoRoll.isVisible())
-            pianoRoll.repaint();   // (its playhead; the piano roll redraws when the song moves)
+        if (pianoRoll.isShowing())
+            pianoRoll.playheadMoved();   // (its playhead: just the strips it moves across)
     }
 }
 

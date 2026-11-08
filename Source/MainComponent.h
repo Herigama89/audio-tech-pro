@@ -558,6 +558,7 @@ private:
     PerformanceReading lastReading;
     std::map<juce::String, float> trackLoads;   // smoothed, by track id
     double lastPerformanceMs = 0.0;
+    float uiGapAverage = 33.0f, uiWorstGap = 0.0f;
     void updatePerformance();
     void showPerformanceWindow();
 

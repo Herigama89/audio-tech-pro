@@ -15,6 +15,9 @@ struct PerformanceReading
     int overloads = 0;       // buffers that took longer than they play (you'd hear a click)
     float disk = 0.0f;       // share of time spent reading audio from disk
     juce::String device;     // "Quantum HD 2, 48 kHz, 128 samples (2.7 ms)"
+    float uiFps = 0.0f;      // how often the window gets its turn (its updates, 30 a second when all's well)
+    float uiWorstMs = 0.0f;  // the longest the window was held up in the last couple of seconds (a stutter)
+    juce::String drawing;    // "graphics card" or "the system"
     struct TrackLoad { juce::String name; float load = 0.0f; };
     std::vector<TrackLoad> tracks;   // the heaviest first
 };
@@ -113,6 +116,11 @@ public:
         g.setColour (theme::dimText);
         g.setFont (juce::FontOptions (12.0f));
         g.drawText (reading.device, r.removeFromTop (18), juce::Justification::centredLeft, true);
+        // The screen: how smoothly the window runs (what "laggy" is, in numbers)
+        g.setColour (reading.uiWorstMs > 80.0f ? theme::danger : theme::dimText);
+        g.drawText ("Screen: " + juce::String (juce::roundToInt (reading.uiFps)) + " updates/s, longest hold-up "
+                        + juce::String (juce::roundToInt (reading.uiWorstMs)) + " ms (drawn by " + reading.drawing + ")",
+                    r.removeFromTop (18), juce::Justification::centredLeft, true);
         r.removeFromTop (8);
 
         auto bar = [&] (const juce::String& name, float value, float peakValue, juce::Rectangle<int> row)

@@ -1268,6 +1268,15 @@ void MainComponent::updatePerformance()
     const auto elapsed = lastPerformanceMs > 0.0 ? (now - lastPerformanceMs) / 1000.0 : 0.0;
     lastPerformanceMs = now;
 
+    // The window's own smoothness: the gaps between these updates (30 a second asked for)
+    {
+        const auto gapMs = (float) (elapsed * 1000.0);
+        if (gapMs > 0.0f)
+        {
+            uiGapAverage += (gapMs - uiGapAverage) * 0.05f;
+            uiWorstGap = juce::jmax (gapMs, uiWorstGap * 0.985f);
+        }
+    }
     const auto load = engine.takeLoad();
     const auto diskSeconds = juce::Time::highResolutionTicksToSeconds (player.getReadAhead().busyTicks.exchange (0));
     PerformanceReading r;
@@ -1302,6 +1311,9 @@ void MainComponent::updatePerformance()
     }
     else
         r.device = "No audio device open";
+    r.uiFps = uiGapAverage > 0.0f ? 1000.0f / uiGapAverage : 0.0f;
+    r.uiWorstMs = uiWorstGap;
+    r.drawing = gpuDrawing ? "the graphics card" : "the system";
 
     lastReading = std::move (r);
     performanceMeter.setReading (lastReading.cpu, lastReading.disk, lastReading.peakNow);

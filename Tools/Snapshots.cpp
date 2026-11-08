@@ -657,7 +657,11 @@ public:
             const auto rebuild = ms ([&] { main.player.rebuildNow(); });
             const auto mixerTick = ms ([&] { for (int i = 0; i < 10; ++i) main.mixer.timerCallback(); }) / 10.0;
             const auto mainTick = ms ([&] { for (int i = 0; i < 10; ++i) main.timerCallback(); }) / 10.0;
+            const bool cgFull = std::getenv ("RIFF_CG_FULL") != nullptr;
+            if (cgFull) { juce::Graphics g (canvasImage); main.paintEntireComponent (g, true); }   // (warm: pictures made)
+            if (cgFull) CALLGRIND_START_INSTRUMENTATION;
             const auto paint = ms ([&] { juce::Graphics g (canvasImage); main.paintEntireComponent (g, true); });
+            if (cgFull) CALLGRIND_STOP_INSTRUMENTATION;
             // One frame of moving meters: every strip's meter (and its gain reduction) redrawn, as the window would
             auto meterFrame = [&]
             {
@@ -687,9 +691,9 @@ public:
             main.mixer.narrowButton.setToggleState (true, juce::sendNotification);
             main.mixer.resized();
             { juce::Graphics g (canvasImage); main.paintEntireComponent (g, true); }
-            CALLGRIND_START_INSTRUMENTATION;
+            if (! cgFull) CALLGRIND_START_INSTRUMENTATION;
             auto frameNarrow = meterFrame();
-            CALLGRIND_STOP_INSTRUMENTATION;
+            if (! cgFull) CALLGRIND_STOP_INSTRUMENTATION;
             const auto batchedNarrow = batchedFrame();
             std::cout << "           batched meter frame: wide " << juce::String (batchedWide, 2) << " ms   narrow " << juce::String (batchedNarrow, 2) << " ms" << std::endl;
             if (std::getenv ("RIFF_PERF_DETAIL") != nullptr && ! main.mixer.strips.isEmpty())

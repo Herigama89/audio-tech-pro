@@ -130,6 +130,12 @@ private:
     juce::ValueTree dragEvent;
     juce::Rectangle<float> rubberBand;
     float contentToX (double c) const;
+public:
+    /** The song moved: only the strips where its playhead was and is now are drawn again (not the whole roll,
+        30 times a second while it plays). */
+    void playheadMoved();
+private:
+    float shownPlayheadX = -1.0e6f;
     double xToContent (float x) const;
     int yToPitch (int y) const;
     int pitchToY (int pitch) const;
