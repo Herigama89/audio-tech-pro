@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 450" width="100%" height="100%">
+  <!-- Gray Aluminum Faceplate Chassis -->
+  <rect width="1000" height="450" fill="#D3D3D3" stroke="#888888" stroke-width="4"/>
+  <rect x="10" y="10" width="980" height="430" fill="#EAEAEA" stroke="#A6A6A6" stroke-width="2"/>
+  
+  <!-- Rack Screws and Branding Lines -->
+  <circle cx="25" cy="25" r="8" fill="#555555" />
+  <circle cx="975" cy="25" r="8" fill="#555555" />
+  <circle cx="25" cy="425" r="8" fill="#555555" />
+  <circle cx="975" cy="425" r="8" fill="#555555" />
+  
+  <text x="500" y="60" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="bold" fill="#111111" text-anchor="middle" letter-spacing="4">VINTAGE OPTO</text>
+  <text x="500" y="90" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="bold" fill="#333333" text-anchor="middle" letter-spacing="2">OPTICAL LIMITER</text>
+  <text x="500" y="380" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#444444" text-anchor="middle">LEVELING AMPLIFIER</text>
+
+  <!-- Central Warm Backlit VU Meter Box -->
+  <rect x="360" y="140" width="280" height="180" rx="15" ry="15" fill="#1A1A1A" stroke="#333333" stroke-width="5"/>
+  <rect x="375" y="155" width="250" height="130" rx="5" ry="5" fill="#FFEAA7"/>
+  
+  <!-- VU Grids and Labels -->
+  <path d="M 400 240 Q 500 180 600 240" fill="none" stroke="#2D3436" stroke-width="2"/>
+  <text x="500" y="220" font-family="Courier New, monospace" font-size="20" font-weight="bold" fill="#2D3436" text-anchor="middle">VU</text>
+  <text x="500" y="250" font-family="Arial" font-size="10" fill="#2D3436" text-anchor="middle">GAIN REDUCTION</text>
+  
+  <!-- VU Needle Anchor (Rotates based on reduction parameter) -->
+  <!-- Parameter Attachment ID: "vu_needle" [Center: 500, 275] -->
+  <line x1="500" y1="275" x2="460" y2="185" stroke="#D63031" stroke-width="3" id="vu_needle"/>
+  <circle cx="500" cy="275" r="7" fill="#2D3436"/>
+
+  <!-- Left Control Knob: PEAK REDUCTION -->
+  <!-- Parameter Attachment ID: "peak_reduction" [Center: 230, 240] -->
+  <text x="230" y="145" font-family="Arial" font-size="16" font-weight="bold" fill="#2D3436" text-anchor="middle">PEAK REDUCTION</text>
+  <circle cx="230" cy="240" r="70" fill="#111111" stroke="#444444" stroke-width="3"/>
+  <circle cx="230" cy="240" r="60" fill="#222222"/>
+  <!-- Indicator dot showing current rotation -->
+  <circle cx="185" cy="210" r="4" fill="#FFFFFF" id="knob_peak_reduction_indicator"/>
+  
+  <!-- Right Control Knob: GAIN (Makeup) -->
+  <!-- Parameter Attachment ID: "makeup_gain" [Center: 770, 240] -->
+  <text x="770" y="145" font-family="Arial" font-size="16" font-weight="bold" fill="#2D3436" text-anchor="middle">GAIN</text>
+  <circle cx="770" cy="240" r="70" fill="#111111" stroke="#444444" stroke-width="3"/>
+  <circle cx="770" cy="240" r="60" fill="#222222"/>
+  <!-- Indicator dot showing current rotation -->
+  <circle cx="725" cy="210" r="4" fill="#FFFFFF" id="knob_gain_indicator"/>
+
+  <!-- Compress / Limit Toggle Switch -->
+  <!-- Parameter Attachment ID: "comp_limit_mode" [Center: 500, 345] -->
+  <text x="440" y="350" font-family="Arial" font-size="14" font-weight="bold" fill="#2D3436" text-anchor="end">COMP</text>
+  <rect x="485" y="330" width="30" height="35" rx="5" fill="#2D3436"/>
+  <circle cx="500" cy="340" r="8" fill="#DFE6E9" id="switch_toggle_handle"/>
+  <text x="560" y="350" font-family="Arial" font-size="14" font-weight="bold" fill="#2D3436" text-anchor="start">LIMIT</text>
+
+  <!-- Red Vintage Jewel Pilot Light -->
+  <circle cx="890" cy="240" r="14" fill="#D63031" stroke="#780808" stroke-width="2"/>
+  <circle cx="887" cy="237" r="5" fill="#FF7675" opacity="0.7"/>
+  <text x="890" y="270" font-family="Arial" font-size="12" font-weight="bold" fill="#2D3436" text-anchor="middle">ON</text>
+
+  <!-- Power Toggle Switch -->
+  <rect x="875" y="310" width="30" height="50" rx="3" fill="#111111"/>
+  <rect x="880" y="315" width="20" height="20" fill="#555555"/>
+  <text x="890" y="380" font-family="Arial" font-size="12" font-weight="bold" fill="#2D3436" text-anchor="middle">POWER</text>
+</svg>

@@ -2785,8 +2785,15 @@ namespace
                 s.drawn = kind; s.ink = ink; s.inner = inner; s.outer = outer; s.thickness = thickness;
                 s.radius = p.R; s.image = nullptr;
             };
-            if (face == "svca")
-                drawn (Sprite::Drawn::bar, {}, 0.0f, 1.0f, 0.46f);
+            if (face == "svca" && name == "blend")
+                drawn (Sprite::Drawn::line, juce::Colour (0xff4caf50), 0.0f, 0.75f, 0.094f);
+            else if (face == "svca")
+                drawn (Sprite::Drawn::line, juce::Colours::white, 0.0f, 0.8f, 0.08f);
+            else if (face == "vopto")
+            {
+                drawn (Sprite::Drawn::dot, juce::Colours::white, 0.0f, 0.77f, 0.115f);
+                s.fill = true;
+            }
             else if (face == "cvca")
                 drawn (Sprite::Drawn::line, juce::Colour (0xff141414), 0.06f, 0.9f, 0.1f);
             else if (face == "vvca")
@@ -2860,6 +2867,26 @@ namespace
             c.sprite.offImage = upIsOn ? down.image : up.image;
             c.sprite.pivot = { up.cx, up.cy };
             return c;
+        }
+
+        /** A drawn meter needle (the vector faces'): from its pivot, `length` long, then the pivot's cap over it. */
+        void designNeedle (juce::Graphics& g, const Page& pg, juce::Point<float> pivot, float length, float degrees, juce::Colour ink,
+                           float width, float capRadius, juce::Colour cap = juce::Colour (0xff111111))
+        {
+            const auto c = pg.at (pivot.x, pivot.y);
+            const auto a = juce::degreesToRadians (degrees);
+            const auto tip = c + juce::Point<float> (std::sin (a), -std::cos (a)) * (length * pg.scale);
+            juce::Path p;
+            p.startNewSubPath (c);
+            p.lineTo (tip);
+            g.setColour (juce::Colours::black.withAlpha (0.18f));
+            g.strokePath (p, juce::PathStrokeType (width * pg.scale, juce::PathStrokeType::curved, juce::PathStrokeType::rounded),
+                          juce::AffineTransform::translation (2.0f * pg.scale, 3.0f * pg.scale));
+            g.setColour (ink);
+            g.strokePath (p, juce::PathStrokeType (width * pg.scale, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            const auto r = capRadius * pg.scale;
+            g.setColour (cap);
+            g.fillEllipse (c.x - r, c.y - r, r * 2.0f, r * 2.0f);
         }
 
         void panel (juce::Graphics& g, R b, const Page& pg)
@@ -2942,35 +2969,19 @@ namespace
             }
             cs.push_back (keyAt (pg, n, "power", "power"));
         }
-        //------------------------------------------------------------------ Studio VCA: the red dual compressor
+        //------------------------------------------------------------------ Studio VCA: the red dual VCA compressor
         {
             const auto pg = pageFor (studioVca);
             constexpr int n = studioVca + 1;
-            // (both channels' knobs set the stereo compressor: as the hardware's lower controls with Stereo on)
-            const std::vector<std::pair<float, float>> ratio { { 40.0f, 1.5f }, { 80.0f, 2.0f }, { 115.0f, 3.0f }, { 160.0f, 5.0f }, { 205.0f, 7.0f }, { 250.0f, 10.0f } };
-            const std::vector<std::pair<float, float>> thresh { { -150.0f, -48.0f }, { 150.0f, -12.0f } };
-            const std::vector<std::pair<float, float>> gain { { -150.0f, 0.0f }, { 150.0f, 20.0f } };
-            const std::vector<std::pair<float, float>> attack { { -135.0f, 0.3f }, { 135.0f, 100.0f } };
-            const std::vector<std::pair<float, float>> release { { -135.0f, 100.0f }, { 135.0f, 3000.0f } };
-            const std::vector<std::pair<float, float>> limit { { -150.0f, -18.0f }, { 150.0f, 0.0f } };
-            const std::pair<const char*, float> bars[] { { "ratio1", 161.2f }, { "ratio2", 208.8f }, { "thresh1", -44.0f }, { "thresh2", -147.6f },
-                                                         { "gain1", -107.2f }, { "gain2", -125.5f }, { "attack1", 14.3f }, { "attack2", -42.5f },
-                                                         { "release1", -26.4f }, { "release2", 129.7f }, { "limThr1", 142.6f }, { "limThr2", 116.6f } };
-            for (const auto& [name, photographed] : bars)
-            {
-                const juce::String nm (name);
-                const auto id = nm.startsWith ("ratio") ? "ratio" : nm.startsWith ("thresh") ? "threshold" : nm.startsWith ("gain") ? "makeup"
-                              : nm.startsWith ("attack") ? "attack" : nm.startsWith ("release") ? "release" : "limThr";
-                const auto& map = nm.startsWith ("ratio") ? ratio : nm.startsWith ("thresh") ? thresh : nm.startsWith ("gain") ? gain
-                                : nm.startsWith ("attack") ? attack : nm.startsWith ("release") ? release : limit;
-                cs.push_back (knob (pg, n, id, name, map, false, nm.startsWith ("ratio") || nm.startsWith ("attack") || nm.startsWith ("release"), photographed));
-            }
-            for (const auto* k : { "in1", "in2" })   cs.push_back (keyAt (pg, n, "compIn", k, 1.3f));
-            for (const auto* k : { "key1", "key2" }) cs.push_back (keyAt (pg, n, "extSc", k, 1.3f));
-            for (const auto* k : { "auto1", "auto2" }) cs.push_back (keyAt (pg, n, "autoRelease", k, 1.3f));
-            for (const auto* k : { "limIn1", "limIn2" }) cs.push_back (keyAt (pg, n, "limiter", k, 1.3f));
-            cs.push_back (keyAt (pg, n, "link", "stereo", 1.3f));
-            cs.push_back (keyAt (pg, n, "power", "power", 1.1f));
+            cs.push_back (knob (pg, n, "input", "input", { { -135.0f, -24.0f }, { 135.0f, 24.0f } }));
+            cs.push_back (knob (pg, n, "threshold", "threshold", { { -135.0f, -50.0f }, { 135.0f, 0.0f } }));
+            cs.push_back (knob (pg, n, "ratio", "ratio", { { -135.0f, 1.5f }, { 135.0f, 10.0f } }, false, true));
+            cs.push_back (knob (pg, n, "attack", "attack", { { -135.0f, 0.1f }, { 135.0f, 40.0f } }, false, true));
+            cs.push_back (knob (pg, n, "release", "release", { { -135.0f, 50.0f }, { 135.0f, 3000.0f } }, false, true));
+            cs.push_back (knob (pg, n, "vcaBlend", "blend", { { -135.0f, 0.0f }, { 135.0f, 1.0f } }));
+            // the two latching keys (their labels too)
+            cs.push_back (key (pg, n, "autoRelease", 900.0f, 670.0f, 120.0f, 100.0f));
+            cs.push_back (key (pg, n, "link", 1060.0f, 670.0f, 120.0f, 100.0f));
         }
         //------------------------------------------------------------------ Studio FET: the silver FET limiter
         {
@@ -3070,21 +3081,10 @@ namespace
         {
             const auto pg = pageFor (vintageOpto);
             constexpr int n = vintageOpto + 1;
-            cs.push_back (knob (pg, n, "makeup", "gain", { { -142.0f, -30.0f }, { 3.0f, 0.0f }, { 135.0f, 30.0f } }));
-            cs.push_back (knob (pg, n, "threshold", "peak", { { -142.0f, 0.0f }, { 135.0f, -50.0f } }));
-            cs.push_back (knob (pg, n, "meterMode", "meterSel", { { -45.0f, 2.0f }, { 0.0f, 0.0f }, { 45.0f, 1.0f } }, true, false, 0.0f));
-            cs.push_back (knob (pg, n, "emphasis", "r37", { { -135.0f, 0.0f }, { 135.0f, 1.0f } }, false, false, 0.0f));
-            // (push buttons, lit when in)
-            for (const auto& [id, name] : { std::pair { "power", "btPower" }, std::pair { "optoLimit", "btLimit" } })
-            {
-                const auto& lit = part (pg.key ((juce::String (name) + "_on").toRawUTF8()).c_str());
-                const auto& dark = part (pg.key ((juce::String (name) + "_off").toRawUTF8()).c_str());
-                auto b = key (pg, n, id, lit.cx - lit.R, lit.cy - lit.R, lit.R * 2.0f, lit.R * 2.0f);
-                b.sprite.image = lit.image;
-                b.sprite.offImage = dark.image;
-                b.sprite.pivot = { lit.cx, lit.cy };
-                cs.push_back (b);
-            }
+            cs.push_back (knob (pg, n, "threshold", "peak", { { -135.0f, 0.0f }, { 135.0f, -50.0f } }));
+            cs.push_back (knob (pg, n, "makeup", "gain", { { -135.0f, 0.0f }, { 135.0f, 30.0f } }));
+            cs.push_back (key (pg, n, "optoLimit", 940.0f, 660.0f, 120.0f, 70.0f));   // (COMP up, LIMIT down)
+            cs.push_back (key (pg, n, "power", 1740.0f, 610.0f, 80.0f, 120.0f));
         }
 
         c.paint = [] (juce::Graphics& g, R b, const EffectInfo& fx, const float* v, float live)
@@ -3156,21 +3156,13 @@ namespace
                 }
                 case studioVca:
                 {
-                    if (! powered)
-                        break;
-                    lamp (g, pg, "power");
-                    for (const auto* l : { "in1", "in2" }) lamp (g, pg, l, on ("compIn", 1.0f));
-                    for (const auto* l : { "key1", "key2" }) lamp (g, pg, l, on ("extSc", 1.0f));
-                    for (const auto* l : { "auto1", "auto2" }) lamp (g, pg, l, on ("autoRelease"));
-                    for (const auto* l : { "limIn1", "limIn2" }) lamp (g, pg, l, on ("limiter"));
-                    lamp (g, pg, "stereo", on ("link", 1.0f));
-                    lamp (g, pg, "gainChange", gr > 1.0f);
-                    lamp (g, pg, "limit1", on ("limiter") && limiting > 0.3f);
-                    lamp (g, pg, "limit2", on ("limiter") && limiting > 0.3f);
-                    const auto vu = ballistics (key ("vu"), -gr, 0.35f, 0.18f);
-                    // (their own needles were too fine to cut cleanly: the silver limiter's, dark and sharp)
-                    needle (g, pg, "needle1", vuAngle (vu, -28.2f, 15.4f, 26.6f), "sfet.needle");
-                    needle (g, pg, "needle2", vuAngle (vu, -30.5f, 15.0f, 31.9f), "sfet.needle");
+                    // the latching keys' lamps; the level meter (the output, +4) and the gain reduction meter
+                    lamp (g, pg, "autoLamp", on ("autoRelease"));
+                    lamp (g, pg, "linkLamp", on ("link", 1.0f));
+                    const auto level = ballistics (key ("level"), outDb + 18.0f, 0.35f, 0.18f);
+                    const auto grVu = ballistics (key ("vu"), -gr, 0.35f, 0.18f);
+                    designNeedle (g, pg, { 1670.0f, 350.0f }, 176.0f, vuAngle (level, -52.0f, 32.0f, 52.0f), juce::Colour (0xffd32f2f), 5.0f, 16.0f);
+                    designNeedle (g, pg, { 1670.0f, 730.0f }, 176.0f, vuAngle (grVu, -52.0f, 39.0f, 52.0f), juce::Colour (0xff222222), 5.0f, 16.0f);
                     break;
                 }
                 case studioFet:
@@ -3231,10 +3223,18 @@ namespace
                 }
                 case vintageOpto:
                 {
-                    const auto m = mode == 2 ? 2 : mode == 1 ? 1 : 0;
-                    const auto reading = m == 0 ? -gr : outDb + (m == 1 ? 18.0f : 12.0f);
-                    const auto vu = ballistics (key ("vu"), powered ? reading : -24.0f, 0.25f, 0.12f);
-                    needle (g, pg, "needle", vuAngle (vu, -44.3f, 14.0f, 45.3f));
+                    lamp (g, pg, "pilot", powered);
+                    // the COMP / LIMIT bat (up: compress) and the power rocker (up: on)
+                    const auto bat = on ("optoLimit") ? 710.0f : 680.0f;
+                    g.setColour (juce::Colour (0xffdfe6e9));
+                    g.fillEllipse (pg.rect (984.0f, bat - 16.0f, 32.0f, 32.0f));
+                    g.setColour (juce::Colours::black.withAlpha (0.25f));
+                    g.drawEllipse (pg.rect (984.0f, bat - 16.0f, 32.0f, 32.0f), 1.0f);
+                    g.setColour (juce::Colour (0xff555555));
+                    g.fillRect (pg.rect (1760.0f, powered ? 630.0f : 670.0f, 40.0f, 40.0f));
+                    const auto vu = ballistics (key ("vu"), powered ? -gr : -24.0f, 0.25f, 0.12f);
+                    designNeedle (g, pg, { 1000.0f, 550.0f }, 196.0f, vuAngle (vu, -60.0f, 30.0f, 56.0f), juce::Colour (0xffd63031), 6.0f, 14.0f,
+                                  juce::Colour (0xff2d3436));
                     break;
                 }
                 default: break;
@@ -4705,7 +4705,10 @@ void DesignLook::drawSprite (juce::Graphics& g, juce::Component& c, const Sprite
             const auto p = centre + dir * (r * sp.outer);
             const auto d = std::max (2.5f, r * sp.thickness);
             g.setColour (sp.ink);
-            g.drawEllipse (RF (d, d).withCentre (p), std::max (1.0f, d * 0.28f));
+            if (sp.fill)
+                g.fillEllipse (RF (d, d).withCentre (p));
+            else
+                g.drawEllipse (RF (d, d).withCentre (p), std::max (1.0f, d * 0.28f));
         }
         else
         {

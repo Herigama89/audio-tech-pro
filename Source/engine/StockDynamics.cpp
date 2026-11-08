@@ -55,7 +55,7 @@ namespace
         enum Model { platinum, studioVca, studioFet, classicVca, vintageVca, vintageFet, vintageOpto };
         enum Index { iModel, iThreshold, iRatio, iAttack, iRelease, iKnee, iMakeup, iAutoGain, iScFreq, iMix, iDistortion, iOutput,
                      iLimiter, iLimThr, iInput, iAutoRelease, iDetect, iPeakRms, iScFilter, iScMode, iScQ, iScGain, iListen,
-                     iPower, iCompIn, iMeterMode, iLink, iExtSc, iAir, iConsole, iVcaDrive, iEmphasis, iImpedance, iMeterHold, iScHpfStep, iOptoLimit };
+                     iPower, iCompIn, iMeterMode, iLink, iExtSc, iAir, iConsole, iVcaDrive, iEmphasis, iImpedance, iMeterHold, iScHpfStep, iOptoLimit, iVcaBlend };
 
         /** What a circuit makes of the Ratio, Attack and Release knobs (the vintage ones step). */
         static float circuitRatio (int model, float ratio) noexcept
@@ -101,6 +101,7 @@ namespace
             if (id == "attack")     return model != vintageOpto;
             if (id == "peakRms")    return model == platinum;
             if (id == "autoRelease") return model != vintageOpto;
+            if (id == "vcaBlend")   return model == studioVca;
             return true;
         }
 
@@ -110,7 +111,7 @@ namespace
             envDb = rms = slowDb = 0.0f;
             heldDb = 0.0f;
             lastGain = 1.0f;
-            envCh = rmsCh = slowCh = {};
+            envCh = rmsCh = slowCh = env2Ch = {};
             lastGainCh = { 1.0f, 1.0f };
             for (auto* f : { &scFilter, &scHpf, &scEmphasis, &airFilter, &bottom })
                 f->reset();
@@ -174,6 +175,11 @@ namespace
                 case vintageOpto: rmsDetect = true; feedback = true; knee = 14.0f; break;
             }
             const auto attack = coeffMs (attackMs, sampleRate);
+            // The Studio VCA's two VCAs: a quick one (peaks) and a slower levelling one, in series (0) or side by side (1)
+            const auto dual = model == studioVca;
+            const auto blend = dual ? juce::jlimit (0.0f, 1.0f, value (iVcaBlend)) : 0.0f;
+            const auto attack2 = coeffMs (attackMs * 3.0, sampleRate), release2 = coeffMs (releaseMs * 2.5, sampleRate);
+            const auto ratio2 = std::max (1.0f, ratio * 0.75f);
             const auto rmsCoeff = coeffMs (model == vintageOpto ? 20.0 : model == classicVca ? 12.0 : 8.0, sampleRate);
 
             // Auto gain: 0 dB brings the compressed level back to where 0 dB in would sit; -12 dB to -12 dB
@@ -289,11 +295,22 @@ namespace
                         if (model == classicVca || model == vintageVca)
                             rel = (env - slow) > 3.0f ? 150.0f : 900.0f;   // (the bus compressors' AUTO: two time constants)
                     }
-                    const auto coeff = target > env ? attack : coeffMs (rel, sampleRate);
+                    const auto coeff = target > env ? attack : coeffMs (dual ? rel * 0.4f : rel, sampleRate);
                     env = target + coeff * (env - target);
                     gains[c] = dbToGain (-env);
+                    if (dual)
+                    {
+                        // the second, slower VCA (a gentler ratio), then series and parallel blended
+                        const auto t2 = ratio > 1.0f ? target * (1.0f - 1.0f / ratio2) / std::max (1.0e-3f, 1.0f - 1.0f / ratio) : 0.0f;
+                        auto& env2 = linked ? env2Ch[0] : env2Ch[(size_t) c];
+                        env2 = t2 + (t2 > env2 ? attack2 : release2) * (env2 - t2);
+                        const auto g1 = gains[c], g2 = dbToGain (-env2);
+                        gains[c] = (1.0f - blend) * g1 * g2 + blend * 0.5f * (g1 + g2);
+                        dualDb[(size_t) c] = -gainToDb (std::max (gains[c], 1.0e-6f));
+                    }
                 }
-                envDb = linked ? envCh[0] : std::max (envCh[0], envCh[1]);
+                envDb = dual ? (linked ? dualDb[0] : std::max (dualDb[0], dualDb[1]))
+                             : linked ? envCh[0] : std::max (envCh[0], envCh[1]);
                 report (envDb);
                 lastGainCh[0] = gains[0];
                 lastGainCh[1] = gains[1];
@@ -421,7 +438,7 @@ namespace
         }
 
         float envDb = 0.0f, rms = 0.0f, heldDb = 0.0f, slowDb = 0.0f, lastGain = 1.0f;
-        std::array<float, 2> envCh {}, rmsCh {}, slowCh {}, lastGainCh { 1.0f, 1.0f };
+        std::array<float, 2> dualDb {}, envCh {}, rmsCh {}, slowCh {}, env2Ch {}, lastGainCh { 1.0f, 1.0f };
         float dcL = 0.0f, dcR = 0.0f;
         float lastScKey = -1.0f, scLevel = 1.0f;
         Biquad scFilter, scHpf, scEmphasis, airFilter, bottom;
@@ -1271,7 +1288,8 @@ const std::vector<StockEffect>& stockDynamicsEffects()
               { "impedance", "Input Impedance", "", 0.0f, 1.0f, 0.0f, 0.5f, { "10k", "600" } },
               { "meterHold", "Meter Hold", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
               { "scHpfStep", "S/C HPF", "", 0.0f, 5.0f, 0.0f, 2.5f, { "Off", "30 Hz", "60 Hz", "105 Hz", "125 Hz", "185 Hz" } },
-              { "optoLimit", "Limit/Compress", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Compress", "Limit" } } }, "Dynamics" },
+              { "optoLimit", "Limit/Compress", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Compress", "Limit" } },
+              { "vcaBlend", "VCA Blend", "", 0.0f, 1.0f, 0.5f, 0.5f } }, "Dynamics" },
           make<StudioCompressor> },
 
         { { "multiband", "Multipressor", multipressorParams(), "Dynamics" },

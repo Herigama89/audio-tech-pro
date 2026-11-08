@@ -82,6 +82,7 @@ namespace riff::effectdesign
         float radius = 0.0f;                 // the knob's radius (photo pixels)
         float inner = 0.0f, outer = 1.0f;    // a line: from and to, as fractions of the radius; a dot: where (outer)
         float thickness = 0.1f;              // a line's width, a dot's size or a bar's width, as a fraction of the radius
+        bool fill = false;                   // a dot filled in (else a ring)
     };
 
     struct Control
