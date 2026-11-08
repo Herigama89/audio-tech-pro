@@ -454,7 +454,10 @@ void set (const Settings& s)
     // The parts with themes of their own first (their colours kept aside), then the main theme.
     while (areaDepth() > 0)
         leaveArea();
-    for (const auto& [area, text] : { std::pair { Area::toolbar, s.toolbarTheme }, std::pair { Area::meter, s.meterTheme } })
+    // (Liquid Glass Light's MultiMeter: its own look unless one is chosen - lighter, with a purple accent)
+    static const juce::String lightMeter ("9;0;1;0;0;1;262;1;1;ff000000;ff000000;0;-1;0;0;-1;0;0;;8;0;0;0;0;-1;-1;1;;;;0;0;0;0;1;1;1");
+    const auto meterText = s.meterTheme.isEmpty() && s.skin == Skin::glassLight ? lightMeter : s.meterTheme;
+    for (const auto& [area, text] : { std::pair { Area::toolbar, s.toolbarTheme }, std::pair { Area::meter, meterText } })
     {
         auto& a = areaData (area);
         a.own = text.isNotEmpty();

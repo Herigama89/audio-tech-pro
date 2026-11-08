@@ -74,7 +74,23 @@ namespace
             randomCounter = 0;
         }
 
+        // How loud the reverb sounds now (0..1, the face's particles follow it: none in silence)
+        float displayValue() const noexcept override { return heard.load (std::memory_order_relaxed); }
+
         void process (float* l, float* r, int n) noexcept override
+        {
+            render (l, r, n);
+            float peak = 0.0f;
+            for (int i = 0; i < n; ++i)
+                peak = std::max (peak, std::max (std::abs (l[i]), std::abs (r[i])));
+            const auto level = juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (peak, -100.0f) + 60.0f) / 60.0f);
+            // (rises at once, falls with the block's length so it fades as the tail does)
+            const auto was = heard.load (std::memory_order_relaxed);
+            const auto fall = std::exp (-(float) n / (float) (0.25 * std::max (1.0, sampleRate)));
+            heard.store (level > was ? level : was * fall + level * (1.0f - fall), std::memory_order_relaxed);
+        }
+
+        void render (float* l, float* r, int n) noexcept
         {
             using namespace chroma;
             static const float base[] { 1009, 1123, 1289, 1447, 1597, 1741, 1913, 2111 };
@@ -232,6 +248,7 @@ namespace
         }
 
     private:
+        std::atomic<float> heard { 0.0f };
         static void designOutputEq (const float* v, double rate, std::array<Biquad, 6>& f)
         {
             using namespace chroma;

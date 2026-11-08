@@ -751,8 +751,7 @@ MainComponent::MainComponent (bool openAudioDevice)
         engine.setAnalyzerSlot (player.slotOf (track[ids::id].toString()));
         float discard[4096];
         while (engine.readAnalyzer (discard, 4096) > 0) {}
-        editorWindows[id] = makePinnedWindow (track[ids::name].toString() + ": Channel Strip",
-                                                            new ConsoleStripWindow (track, undoManager,
+        auto* stripWindow = new ConsoleStripWindow (track, undoManager,
                                                                                     [this] (float* dest, int max) { return engine.readAnalyzer (dest, max); },
                                                                                     [this] { return engine.getSampleRate(); },
                                                                                     [this, slot = player.slotOf (track[ids::id].toString())]
@@ -761,8 +760,33 @@ MainComponent::MainComponent (bool openAudioDevice)
                                                                                         return std::array<float, 5> { in, out, engine.getConsoleGainReduction (slot),
                                                                                                                       engine.getConsoleDeEssReduction (slot),
                                                                                                                       engine.getConsoleGateReduction (slot) };
-                                                                                    }),
-                                                            false, closer, "pinStripWindow");
+                                                                                    });
+        // The 48V key: the interface's phantom power for the track's input (its preamp, through the maker's control app)
+        const auto preampsOf = [track]
+        {
+            juce::Array<int> channels;
+            if (! track.isValid() || model::isBusTrack (track) || model::isInstrumentTrack (track) || track[ids::inputTrack].toString().isNotEmpty())
+                return channels;
+            const int first = (int) track.getProperty (ids::input, 0) + 1;
+            channels.add (first);
+            if ((bool) track.getProperty (ids::inputStereo, false))
+                channels.add (first + 1);
+            return channels;
+        };
+        stripWindow->interfacePhantom = [this, preampsOf]() -> std::optional<bool>
+        {
+            const auto channels = preampsOf();
+            if (! interfaceControl.isConnected() || channels.isEmpty())
+                return std::nullopt;
+            const auto p = interfaceControl.preamp (channels.getFirst());
+            return p.present ? std::optional<bool> (p.phantom) : std::nullopt;
+        };
+        stripWindow->setInterfacePhantom = [this, preampsOf] (bool on)
+        {
+            for (const auto c : preampsOf())
+                interfaceControl.setPhantom (c, on);
+        };
+        editorWindows[id] = makePinnedWindow (track[ids::name].toString() + ": Channel Strip", stripWindow, false, closer, "pinStripWindow");
     };
     routing::createStack = [this] (bool summing) { createStackFromSelection (summing); };
     TrackHeader::pluginParameterNames = [this] (const juce::String& insertId)

@@ -271,7 +271,7 @@ ConsoleStripWindow::ConsoleStripWindow (juce::ValueTree t, juce::UndoManager& um
     addKnob (ids::consoleMicGain, "Mic gain", "strip_ptr_mic", 98, 213, 34, lin (20.0f, 70.0f), 20.0f,
              [this] (float v) { return "+" + juce::String (juce::roundToInt (v)) + " dB" + (on (ids::consoleLine, true) ? " (LINE is on: off for the mic)" : ""); });
     addKnob (ids::consoleInput, "Trim", "strip_ptr_trim", 227, 86, 37, lin (-20.0f, 20.0f), 0.0f, db);
-    addKey (ids::consolePhantom, "48V (its lamp only: no microphone here needs power)", "phantom", false);
+    addKey (ids::consolePhantom, "48V: the interface's phantom power for this input (when the interface's control app is running)", "phantom", false);
     addKey (ids::consolePad, "PAD: 20 dB down at the input", "pad", false);
     addKey (ids::consolePhase, "Polarity", "phase", false);
     addKey (ids::consoleLine, "LINE: the line input (off: the mic preamp, its gain and colour)", "line", true);
@@ -442,9 +442,24 @@ void ConsoleStripWindow::addKey (const juce::Identifier& property, const juce::S
     k->colour = juce::String (led) == "line" || juce::String (led) == "dynIn" || juce::String (led) == "eqIn" || juce::String (led) == "filtIn"
                 || juce::String (led) == "insIn" || juce::String (led) == "deEssIn" ? juce::Colour (0xff30d158) : juce::Colour (0xffff9f0a);
     auto* raw = k.get();
-    k->isOn = [this, raw] { return on (raw->property, raw->defaultOn); };
+    k->isOn = [this, raw]
+    {
+        // (48V: the interface's own phantom power, when its preamp is reachable)
+        if (raw->property == ids::consolePhantom && interfacePhantom)
+            if (const auto state = interfacePhantom())
+                return *state;
+        return on (raw->property, raw->defaultOn);
+    };
     k->onClick = [this, raw]
     {
+        if (raw->property == ids::consolePhantom && interfacePhantom && setInterfacePhantom)
+            if (const auto state = interfacePhantom())
+            {
+                setInterfacePhantom (! *state);
+                track.setProperty (raw->property, ! *state, nullptr);
+                repaint();
+                return;
+            }
         undoManager.beginNewTransaction ("Channel strip " + raw->name.upToFirstOccurrenceOf (":", false, false));
         const auto turningOn = ! on (raw->property, raw->defaultOn);
         track.setProperty (raw->property, turningOn, &undoManager);

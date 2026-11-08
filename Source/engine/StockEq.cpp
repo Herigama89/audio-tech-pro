@@ -167,7 +167,9 @@ namespace
     {
         enum Index { hpFreq, lsFreq, lsGain, p1Freq, p1Gain, p1Q, p2Freq, p2Gain, p2Q, p3Freq, p3Gain, p3Q, hsFreq, hsGain, lpFreq, output,
                      p4Freq, p4Gain, p4Q, hpSlope, hpQ, lsQ, hsQ, lpSlope, lpQ,
-                     on1, on2, on3, on4, on5, on6, on7, on8, analyzer, analyzerPost, qCouple, hq, processing, count };
+                     on1, on2, on3, on4, on5, on6, on7, on8, analyzer, analyzerPost, qCouple, hq, processing,
+                     // the dynamic EQ: bands 2..7 (the shelves and bells) each with dynamics on, threshold and range; attack, release
+                     dyn2, thr2, rng2, dyn3, thr3, rng3, dyn4, thr4, rng4, dyn5, thr5, rng5, dyn6, thr6, rng6, dyn7, thr7, rng7, dynAttack, dynRelease, count };
         constexpr int slopes[] { 6, 12, 18, 24, 36, 48 };
 
         /** A cut of any slope from first-order and Butterworth sections; Q lifts the last section's resonance. */
@@ -262,6 +264,56 @@ namespace
                 v[i] = values[i].load (std::memory_order_relaxed);
             if (juce::roundToInt (v[analyzerPost]) == 0)
                 BuiltInEffect::tapOutput (l, r, n);   // (pre: what comes in)
+            // The dynamic EQ: a band with dynamics on moves its gain by up to its range as the level in its band
+            // rises past the threshold (a cut that rides in on harsh peaks, a lift that follows quiet parts)
+            bool anyDynamic = false;
+            for (int k = 0; k < 6; ++k)
+                anyDynamic = anyDynamic || (juce::roundToInt (v[(size_t) (dyn2 + 3 * k)]) == 1 && juce::roundToInt (v[(size_t) (on2 + k)]) == 1);
+            if (anyDynamic && n > dynChunk)
+            {
+                // (in short pieces: the filters follow the detectors every few milliseconds)
+                for (int start = 0; start < n; start += dynChunk)
+                    process (l + start, r + start, std::min (dynChunk, n - start));
+                return;
+            }
+            if (anyDynamic)
+            {
+                const auto attack = (float) std::exp (-1.0 / (sampleRate * 0.001 * std::max (0.1f, v[dynAttack]) / (double) n));
+                const auto release = (float) std::exp (-1.0 / (sampleRate * 0.001 * std::max (1.0f, v[dynRelease]) / (double) n));
+                const int gains[] { lsGain, p1Gain, p2Gain, p3Gain, p4Gain, hsGain };
+                const int freqs[] { lsFreq, p1Freq, p2Freq, p3Freq, p4Freq, hsFreq };
+                const int qs[] { lsQ, p1Q, p2Q, p3Q, p4Q, hsQ };
+                for (int k = 0; k < 6; ++k)
+                {
+                    const auto on = juce::roundToInt (v[(size_t) (dyn2 + 3 * k)]) == 1 && juce::roundToInt (v[(size_t) (on2 + k)]) == 1;
+                    if (! on)
+                    {
+                        dynGain[(size_t) k] = 0.0f;
+                        continue;
+                    }
+                    // the band's level: its own band of the input, as RMS over this piece
+                    auto& det = detector[(size_t) k];
+                    const auto q = k == 0 || k == 5 ? 0.7f : juce::jlimit (0.3f, 8.0f, v[(size_t) qs[k]]);
+                    if (detFreq[(size_t) k] != v[(size_t) freqs[k]] || detQ[(size_t) k] != q)
+                    {
+                        det.setBandPass (sampleRate, juce::jlimit (20.0, sampleRate * 0.45, (double) v[(size_t) freqs[k]]), q);
+                        detFreq[(size_t) k] = v[(size_t) freqs[k]];
+                        detQ[(size_t) k] = q;
+                    }
+                    double sum = 0.0;
+                    for (int i = 0; i < n; ++i)
+                    {
+                        const auto y = det.process (0.5f * (l[i] + r[i]), 0);
+                        sum += (double) y * y;
+                    }
+                    const auto levelDb = gainToDb ((float) std::sqrt (sum / std::max (1, n)) * 1.4142f + 1.0e-9f);
+                    auto& env = dynLevel[(size_t) k];
+                    env = levelDb + (levelDb > env ? attack : release) * (env - levelDb);
+                    const auto over = juce::jmax (0.0f, env - v[(size_t) (thr2 + 3 * k)]);
+                    dynGain[(size_t) k] = v[(size_t) (rng2 + 3 * k)] * juce::jlimit (0.0f, 1.0f, over / 12.0f);
+                    v[(size_t) gains[k]] = juce::jlimit (-30.0f, 30.0f, v[(size_t) gains[k]] + dynGain[(size_t) k]);
+                }
+            }
             if (v != last)
             {
                 update (normal, v.data(), sampleRate);
@@ -314,6 +366,9 @@ namespace
     private:
         FilterSet<14> normal, doubled;
         std::array<float, maxParams> last {};
+        static constexpr int dynChunk = 32;
+        std::array<Biquad, 6> detector {};
+        std::array<float, 6> detFreq {}, detQ {}, dynGain {}, dynLevel { -100.0f, -100.0f, -100.0f, -100.0f, -100.0f, -100.0f };
         juce::dsp::Oversampling<float> oversampler { 2, 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, false };
         int block = 512;
 
@@ -493,7 +548,27 @@ const std::vector<StockEffect>& stockEqEffects()
               { "analyzerPost", "Analyzer Pre/Post", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Pre", "Post" } },
               { "qCouple", "Q-Couple", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
               { "hq", "HQ", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
-              { "processing", "Processing", "", 0.0f, 4.0f, 0.0f, 2.0f, { "Stereo", "Left", "Right", "Mid", "Side" } } }, "EQ", ChannelEq::response,
+              { "processing", "Processing", "", 0.0f, 4.0f, 0.0f, 2.0f, { "Stereo", "Left", "Right", "Mid", "Side" } },
+              { "dyn2", "Band 2 Dynamic", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "thr2", "Band 2 Threshold", dB, -60.0f, 0.0f, -24.0f, -24.0f },
+              { "rng2", "Band 2 Range", dB, -24.0f, 24.0f, -6.0f, 0.0f },
+              { "dyn3", "Band 3 Dynamic", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "thr3", "Band 3 Threshold", dB, -60.0f, 0.0f, -24.0f, -24.0f },
+              { "rng3", "Band 3 Range", dB, -24.0f, 24.0f, -6.0f, 0.0f },
+              { "dyn4", "Band 4 Dynamic", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "thr4", "Band 4 Threshold", dB, -60.0f, 0.0f, -24.0f, -24.0f },
+              { "rng4", "Band 4 Range", dB, -24.0f, 24.0f, -6.0f, 0.0f },
+              { "dyn5", "Band 5 Dynamic", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "thr5", "Band 5 Threshold", dB, -60.0f, 0.0f, -24.0f, -24.0f },
+              { "rng5", "Band 5 Range", dB, -24.0f, 24.0f, -6.0f, 0.0f },
+              { "dyn6", "Band 6 Dynamic", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "thr6", "Band 6 Threshold", dB, -60.0f, 0.0f, -24.0f, -24.0f },
+              { "rng6", "Band 6 Range", dB, -24.0f, 24.0f, -6.0f, 0.0f },
+              { "dyn7", "Band 7 Dynamic", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Off", "On" } },
+              { "thr7", "Band 7 Threshold", dB, -60.0f, 0.0f, -24.0f, -24.0f },
+              { "rng7", "Band 7 Range", dB, -24.0f, 24.0f, -6.0f, 0.0f },
+              { "dynAttack", "Dynamic Attack", " ms", 0.5f, 200.0f, 10.0f, 20.0f },
+              { "dynRelease", "Dynamic Release", " ms", 5.0f, 2000.0f, 150.0f, 200.0f } }, "EQ", ChannelEq::response,
             { 1, 2, 3, 3, 3, 2, 1, 1 } },
           make<ChannelEq> },
 

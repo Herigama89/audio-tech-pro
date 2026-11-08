@@ -256,7 +256,11 @@ public:
             }
             EffectPanel panel (insert, um);
             panel.setMeterSource ([running] (float* dest, int capacity) { return running != nullptr ? running->readMeters (dest, capacity) : 0; });
-            panel.setLiveValue ([type] { return type == "pitchCorrection" ? 22.0f : 8.5f; });
+            panel.setLiveValue ([type]
+            {
+                const auto forced = juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_LIVE", {});
+                return forced.isNotEmpty() ? forced.getFloatValue() : (type == "pitchCorrection" ? 22.0f : 8.5f);
+            });
             panel.setAnalyzerSource ([] (float* dest, int count)
             {
                 // (a stand-in for music: a few harmonics over a falling noise floor)
@@ -556,8 +560,14 @@ public:
         out.createDirectory();
         MainComponent main (false);
         main.setSize (1440, 920);
-        main.applyTheme ({});
+        {
+            theme::Settings t;
+            if (juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_SKIN", {}) == "glasslight")
+                t.skin = theme::Skin::glassLight;
+            main.applyTheme (t);
+        }
         pump (main, 50);
+        theme::ScopedArea inMeter (theme::Area::meter);   // (painted in the MultiMeter's own theme, as in its window)
         MultiMeterPanel meter (main.engine);
         const auto mix = mixLike();
         for (int block = 0; block < 90; ++block)

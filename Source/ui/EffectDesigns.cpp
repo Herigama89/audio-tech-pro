@@ -168,11 +168,40 @@ namespace
 
     void paintChannelEq (juce::Graphics& g, R bounds, const EffectInfo& info, const float* v, float)
     {
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1a2433), 0.0f, 0.0f, juce::Colour (0xff0f1620), 0.0f, (float) bounds.getBottom(), false));
-        g.fillRect (bounds);
         const RF screen (40.0f, 48.0f, (float) bounds.getWidth() - 160.0f, 262.0f);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1d2b3e), 0.0f, screen.getY(), juce::Colour (0xff15202f), 0.0f, screen.getBottom(), false));
-        g.fillRect (screen);
+        if (theme::glassSkin())
+        {
+            // Liquid Glass: a glass card, the screen a dark glass display
+            g.fillAll (theme::console);
+            look::drawGlassPanel (g, bounds.toFloat().reduced (4.0f), 16.0f);
+            g.setColour (juce::Colour (0xff0c0d10));
+            g.fillRoundedRectangle (screen.expanded (6.0f), 12.0f);
+            g.setColour (juce::Colours::white.withAlpha (0.08f));
+            g.drawRoundedRectangle (screen.expanded (6.0f), 12.0f, 1.0f);
+        }
+        else
+        {
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1a2433), 0.0f, 0.0f, juce::Colour (0xff0f1620), 0.0f, (float) bounds.getBottom(), false));
+            g.fillRect (bounds);
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1d2b3e), 0.0f, screen.getY(), juce::Colour (0xff15202f), 0.0f, screen.getBottom(), false));
+            g.fillRect (screen);
+        }
+        if (info.type == "channelEq" && bounds.getHeight() >= 600)
+        {
+            // the dynamic EQ's rows: their captions
+            const auto ink = theme::glassSkin() ? theme::dimText : juce::Colours::white.withAlpha (0.55f);
+            const auto w = (bounds.getWidth() - 160) / 8;
+            g.setColour (ink);
+            g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+            g.drawText ("DYNAMIC EQ", RF (40.0f, 418.0f, (float) w, 26.0f), juce::Justification::centred, false);
+            g.drawText ("ATTACK", RF (40.0f, 476.0f, (float) w, 14.0f), juce::Justification::centred, false);
+            g.drawText ("RELEASE", RF (40.0f + (float) (w * 7), 476.0f, (float) w, 14.0f), juce::Justification::centred, false);
+            g.setFont (juce::FontOptions (10.0f));
+            g.drawText ("threshold", RF (40.0f + (float) (w * 7), 418.0f, (float) w, 13.0f), juce::Justification::centred, false);
+            g.drawText ("then range", RF (40.0f + (float) (w * 7), 430.0f, (float) w, 13.0f), juce::Justification::centred, false);
+            g.setColour (ink.withAlpha (0.25f));
+            g.fillRect (40.0f, 410.0f, (float) (w * 8), 1.0f);
+        }
 
         const auto xOf = [screen] (double f) { return screen.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * screen.getWidth(); };
         const auto yOf = [screen] (double db) { return screen.getCentreY() - (float) (db / 24.0) * screen.getHeight() * 0.5f; };
@@ -337,12 +366,26 @@ namespace
     const juce::Colour reverbEqColours[] { juce::Colour (0xffff5c5c), juce::Colour (0xffff9a3c), juce::Colour (0xff3ddc6a),
                                            juce::Colour (0xff4f9bff), juce::Colour (0xffb07bff), juce::Colour (0xffff7ad0) };
 
-    void paintStudioReverb (juce::Graphics& g, R bounds, const EffectInfo& info, const float* v, float)
+    void paintStudioReverb (juce::Graphics& g, R bounds, const EffectInfo& info, const float* v, float heard)
     {
         const bool details = valueOf (info, v, "view") > 0.5f;
         const R screen (0, 0, bounds.getWidth(), 420);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff26282c), 0.0f, 0.0f, juce::Colour (0xff17181b), 0.0f, (float) screen.getBottom(), false));
-        g.fillRect (screen);
+        const bool glass = theme::glassSkin();
+        if (glass)
+        {
+            // Liquid Glass: a glass card, the cloud on a dark glass screen
+            g.fillAll (theme::console);
+            look::drawGlassPanel (g, bounds.toFloat().reduced (4.0f), 16.0f);
+            g.setColour (juce::Colour (0xff0c0d10));
+            g.fillRoundedRectangle (RF (24.0f, 54.0f, (float) bounds.getWidth() - 48.0f, 300.0f), 14.0f);
+            g.setColour (juce::Colours::white.withAlpha (0.08f));
+            g.drawRoundedRectangle (RF (24.0f, 54.0f, (float) bounds.getWidth() - 48.0f, 300.0f), 14.0f, 1.0f);
+        }
+        else
+        {
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xff26282c), 0.0f, 0.0f, juce::Colour (0xff17181b), 0.0f, (float) screen.getBottom(), false));
+            g.fillRect (screen);
+        }
         const RF plot (60.0f, 66.0f, (float) bounds.getWidth() - 120.0f, 236.0f);
         const auto xOf = [plot] (double f) { return plot.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * plot.getWidth(); };
         g.setFont (juce::FontOptions (11.0f));
@@ -364,14 +407,47 @@ namespace
             const auto size = valueOf (info, v, "size", 50.0f) * 0.01f;
             const auto level = 0.3f + 0.35f * std::min (1.0f, std::log (1.0f + decay) / std::log (21.0f)) + 0.1f * size;
             juce::Random random (42);
+            // (Liquid Glass: the particles drift up and fade like a reverb's tail, and glitter as they go)
+            const auto now = glass ? (float) (juce::Time::getMillisecondCounterHiRes() * 0.001) : 0.0f;
+            const auto speed = 0.35f / std::max (0.3f, std::sqrt (decay));
             for (int i = 0; i < 6000; ++i)
             {
                 const auto t = random.nextFloat();
                 const auto f = 20.0 * std::pow (1000.0, (double) t);
                 const auto top = juce::jlimit (0.03f, 0.95f, level * (float) reverbRatioAt (info, v, f) * 0.8f);
-                const auto y = std::pow (random.nextFloat(), 0.8f) * top;
-                g.setColour (juce::Colour::fromHSV (juce::jmap (t, 0.0f, 0.82f), 0.85f, 1.0f, 0.7f * (1.0f - y / top) + 0.15f));
-                g.fillEllipse (plot.getX() + t * plot.getWidth(), plot.getBottom() - y * plot.getHeight(), 2.0f, 2.0f);
+                auto y = std::pow (random.nextFloat(), 0.8f) * top;
+                const auto seed = random.nextFloat();
+                // (Liquid Glass: only while sound goes through: as many, and as high, as it is loud)
+                if (glass && seed > heard * 1.15f)
+                    continue;
+                auto alpha = 0.7f * (1.0f - y / top) + 0.15f;
+                auto size = 2.0f;
+                auto x = plot.getX() + t * plot.getWidth();
+                if (glass)
+                {
+                    // each rises from the floor to its height again and again, swaying a little
+                    const auto phase = std::fmod (seed + now * speed * (0.6f + seed), 1.0f);
+                    y = phase * top * juce::jlimit (0.25f, 1.0f, heard * 1.3f);
+                    x += 3.0f * std::sin (now * 1.3f + seed * 40.0f);
+                    alpha = 0.75f * (1.0f - phase) + 0.1f;
+                    // a glint now and then
+                    const auto glint = std::pow (0.5f + 0.5f * std::sin (now * (3.0f + 5.0f * seed) + seed * 97.0f), 24.0f);
+                    // (louder: more of them glint, and brighter)
+                    const auto sparkle = glint * juce::jlimit (0.3f, 1.0f, heard * 1.4f);
+                    alpha = juce::jmin (1.0f, alpha * juce::jlimit (0.4f, 1.0f, heard * 1.5f) + sparkle * 0.9f);
+                    size = 2.0f + sparkle * 2.6f;
+                    if (sparkle > 0.15f)
+                    {
+                        // a soft glow round a glinting one
+                        const auto glowSize = size * 4.0f;
+                        const juce::Point<float> at (x + 1.0f, plot.getBottom() - y * plot.getHeight() + 1.0f);
+                        const auto hue = juce::Colour::fromHSV (juce::jmap (t, 0.0f, 0.82f), 0.5f, 1.0f, 1.0f);
+                        g.setGradientFill (juce::ColourGradient (hue.withAlpha (sparkle * 0.45f), at, hue.withAlpha (0.0f), at.translated (glowSize * 0.5f, 0.0f), true));
+                        g.fillEllipse (juce::Rectangle<float> (glowSize, glowSize).withCentre (at));
+                    }
+                }
+                g.setColour (juce::Colour::fromHSV (juce::jmap (t, 0.0f, 0.82f), glass ? 0.7f : 0.85f, 1.0f, alpha));
+                g.fillEllipse (x - size * 0.5f + 1.0f, plot.getBottom() - y * plot.getHeight() - size * 0.5f + 1.0f, size, size);
             }
             // The damping EQ: ratio up the side (1.0 in the middle), its four points
             const auto yOfRatio = [plot] (double r) { return plot.getBottom() - (float) ((r - 0.1) / 1.8) * plot.getHeight(); };
@@ -424,6 +500,11 @@ namespace
 
         // The light panel below
         const R panel (0, 420, bounds.getWidth(), bounds.getHeight() - 420);
+        if (glass)
+        {
+            look::drawGlassPanel (g, panel.toFloat().reduced (20.0f, 10.0f), 14.0f, true);
+            return;
+        }
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xffe1e1e1), 0.0f, (float) panel.getY(), juce::Colour (0xffcfcfcf), 0.0f, (float) panel.getBottom(), false));
         g.fillRect (panel);
         g.setColour (juce::Colours::black.withAlpha (0.12f));
@@ -901,8 +982,32 @@ namespace
         screws (g, b, 14.0f);
     }
 
-    void paintDistortion (juce::Graphics& g, R b, const EffectInfo&, const float*, float)
+    /** Liquid Glass for the hardware-style faces: the window's ground, a glass card tinted in the unit's colour. */
+    void glassFace (juce::Graphics& g, R b, juce::Colour tint, const juce::String& name = {})
     {
+        g.fillAll (theme::console);
+        const auto card = b.toFloat().reduced (8.0f);
+        look::drawGlassPanel (g, card, 18.0f);
+        g.setGradientFill (juce::ColourGradient (tint.withAlpha (theme::glassLight() ? 0.16f : 0.2f), 0.0f, card.getY(),
+                                                 tint.withAlpha (0.0f), 0.0f, card.getY() + card.getHeight() * 0.8f, false));
+        g.fillRoundedRectangle (card.reduced (1.0f), 17.0f);
+        if (name.isNotEmpty())
+        {
+            g.setColour (tint);
+            g.fillEllipse (card.getX() + 20.0f, card.getY() + 20.0f, 9.0f, 9.0f);
+            title (g, R ((int) card.getX() + 36, (int) card.getY() + 10, 400, 30), name, theme::text, 17.0f, juce::Justification::centredLeft);
+        }
+    }
+
+    void paintDistortion (juce::Graphics& g, R b, const EffectInfo& fx, const float*, float)
+    {
+        if (theme::glassSkin())
+        {
+            const bool fuzz = fx.type == "fuzz";
+            glassFace (g, b, fuzz ? juce::Colour (0xffbf5af2) : juce::Colour (0xffff6a1a), fuzz ? "FUZZ" : "DISTORTION");
+            look::drawGlassPanel (g, b.reduced (34, 56).withTrimmedTop (20).toFloat(), 14.0f, true);
+            return;
+        }
         wood (g, b, juce::Colour (0xff7a3a1c));
         const auto panel = b.reduced (34, 46);
         textured (g, panel, juce::Colour (0xff2a2a2a), juce::Colour (0xff141414), 0.12f);
@@ -912,6 +1017,13 @@ namespace
 
     void paintAutoWah (juce::Graphics& g, R b, const EffectInfo&, const float*, float)
     {
+        if (theme::glassSkin())
+        {
+            glassFace (g, b, juce::Colour (0xffff9f0a), "AUTO WAH");
+            look::drawGlassPanel (g, RF (40.0f, 90.0f, 560.0f, (float) b.getHeight() - 116.0f), 14.0f, true);
+            look::drawGlassPanel (g, RF (690.0f, 90.0f, 120.0f, (float) b.getHeight() - 116.0f), 14.0f, true);
+            return;
+        }
         wood (g, b, juce::Colour (0xffc97a3d));
         const auto inner = b.reduced (18).toFloat();
         g.setColour (juce::Colours::black.withAlpha (0.25f));
@@ -941,8 +1053,76 @@ namespace
         }
     }
 
-    void paintGuitarAmp (juce::Graphics& g, R b, const EffectInfo&, const float*, float)
+    /** Amp Designer in glass: each amp family its own colour, the cabinet's grille and the mic shown in theirs. */
+    juce::Colour ampTint (int model)
     {
+        if (model <= 2)  return juce::Colour (0xffd8b47a);   // tweed
+        if (model == 3 || model == 5) return juce::Colour (0xff5e8bd6);   // black panel
+        if (model == 4)  return juce::Colour (0xffc9ced6);   // silver panel
+        if (model == 6 || model == 10) return juce::Colour (0xffb07a4a);   // brown
+        if (model <= 14) return juce::Colour (0xffe8b84a);   // British: gold
+        if (model <= 16) return juce::Colour (0xffff9f0a);   // sunshine
+        if (model <= 18) return juce::Colour (0xffff453a);   // stadium
+        if (model <= 20) return juce::Colour (0xffbf5af2);   // high gain
+        if (model == 21) return juce::Colour (0xff5ac8fa);   // studio
+        if (model == 22) return juce::Colour (0xff30d158);   // boutique retro
+        return juce::Colour (0xff66d4cf);                     // pawnshop
+    }
+
+    void paintGuitarAmp (juce::Graphics& g, R b, const EffectInfo& fx, const float* v, float)
+    {
+        if (theme::glassSkin())
+        {
+            const auto model = juce::roundToInt (valueOf (fx, v, "model"));
+            const auto cab = juce::roundToInt (valueOf (fx, v, "cab"));
+            const auto mic = juce::roundToInt (valueOf (fx, v, "micType"));
+            const auto tint = ampTint (model);
+            const auto cabTint = ampTint (cab);
+            const juce::Colour micTints[] { juce::Colour (0xffc9ced6), juce::Colour (0xffffd60a), juce::Colour (0xff64d2ff), juce::Colour (0xffff9f0a),
+                                            juce::Colour (0xff30d158), juce::Colour (0xffbf5af2), juce::Colour (0xffff453a) };
+            const auto micTint = micTints[juce::jlimit (0, 6, mic)];
+            glassFace (g, b, tint);
+            const RF amp (30.0f, 24.0f, (float) b.getWidth() - 60.0f, 420.0f);
+            // the control strip: a glass panel lit in the amp's colour
+            const auto strip = RF (amp.getX() + 10.0f, amp.getY() + 16.0f, amp.getWidth() - 20.0f, 210.0f);
+            look::drawGlassPanel (g, strip, 14.0f, true);
+            g.setColour (tint.withAlpha (0.9f));
+            g.fillRoundedRectangle (strip.getX() + 18.0f, strip.getY() + 6.0f, strip.getWidth() - 36.0f, 3.0f, 1.5f);
+            // the grille: glass with the cabinet's cloth lines in its colour, the amp's name on a glass plate
+            const auto grille = RF (amp.getX() + 10.0f, strip.getBottom() + 22.0f, amp.getWidth() - 20.0f, amp.getBottom() - strip.getBottom() - 30.0f);
+            look::drawGlassPanel (g, grille, 14.0f, true);
+            {
+                juce::Graphics::ScopedSaveState keep (g);
+                juce::Path clip;
+                clip.addRoundedRectangle (grille.reduced (2.0f), 12.0f);
+                g.reduceClipRegion (clip);
+                for (float y = grille.getY() + 4.0f; y < grille.getBottom(); y += 5.0f)
+                {
+                    g.setColour (cabTint.withAlpha (0.13f));
+                    g.fillRect (grille.getX(), y, grille.getWidth(), 1.5f);
+                }
+                g.setGradientFill (juce::ColourGradient (cabTint.withAlpha (0.18f), grille.getCentreX(), grille.getCentreY(),
+                                                         cabTint.withAlpha (0.0f), grille.getRight(), grille.getBottom(), true));
+                g.fillRect (grille);
+            }
+            const auto plate = RF (grille.getCentreX() - 150.0f, grille.getY() + 14.0f, 300.0f, 34.0f);
+            look::drawKey (g, plate, look::Key::dark, true, tint.withAlpha (0.85f), false, false);
+            if (const auto* p = [&fx] { for (const auto& q : fx.params) if (q.id == "model") return &q; return (const ParamInfo*) nullptr; }())
+                title (g, plate.toNearestInt(), p->text ((float) model), tint.getPerceivedBrightness() > 0.6f ? juce::Colour (0xff1a1205) : juce::Colours::white, 16.0f);
+            // the strip's section names
+            const auto ink = theme::text.withAlpha (0.8f);
+            title (g, R (450, 228, 170, 16), "REVERB", ink, 12.0f);
+            title (g, R (630, 228, 170, 16), "TREM / VIB", ink, 12.0f);
+            title (g, R (630, 186, 85, 14), "DEPTH", ink, 10.5f);
+            title (g, R (720, 186, 85, 14), "SPEED", ink, 10.5f);
+            title (g, R (490, 200, 90, 14), "LEVEL", ink, 10.5f);
+            // the model bar: glass, the mic's colour along its top
+            const auto bar = RF (20.0f, (float) b.getHeight() - 104.0f, (float) b.getWidth() - 40.0f, 90.0f);
+            look::drawGlassPanel (g, bar, 14.0f, true);
+            g.setColour (micTint.withAlpha (0.9f));
+            g.fillRoundedRectangle (bar.getX() + 18.0f, bar.getY() + 5.0f, bar.getWidth() - 36.0f, 3.0f, 1.5f);
+            return;
+        }
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2a2a2c), 0.0f, 0.0f, juce::Colour (0xff0c0c0d), 0.0f, (float) b.getBottom(), false));
         g.fillRect (b);
         const RF amp (30.0f, 24.0f, (float) b.getWidth() - 60.0f, 420.0f);
@@ -1147,8 +1327,19 @@ namespace
 
     void paintMultipressor (juce::Graphics& g, R b, const EffectInfo& info, const float* v, float)
     {
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2c3e57), 0.0f, 0.0f, juce::Colour (0xff1c2a3d), 0.0f, (float) b.getBottom(), false));
-        g.fillRect (b);
+        const bool glass = theme::glassSkin();
+        if (glass)
+        {
+            // Liquid Glass: a glass card (black glass in dark mode, white in light), the table on recessed glass
+            g.fillAll (theme::console);
+            look::drawGlassPanel (g, b.toFloat().reduced (4.0f), 16.0f);
+            look::drawGlassPanel (g, RF (16.0f, 330.0f, (float) b.getWidth() - 32.0f, 9.0f * 30.0f + 16.0f), 12.0f, true);
+        }
+        else
+        {
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2c3e57), 0.0f, 0.0f, juce::Colour (0xff1c2a3d), 0.0f, (float) b.getBottom(), false));
+            g.fillRect (b);
+        }
 
         // As Logic's: each band a column between its crossovers, its level a line you drag up and down, and under the
         // line, live, how far the band is being turned down - with the spectrum of what comes out behind it all
@@ -1169,7 +1360,7 @@ namespace
         {
             g.setColour (juce::Colours::white.withAlpha (0.05f));
             g.fillRect (a.getX(), yOf (db), a.getWidth(), 1.0f);
-            g.setColour (juce::Colours::white.withAlpha (0.3f));
+            g.setColour ((glass ? theme::text : juce::Colours::white).withAlpha (0.3f));
             g.drawText ((db > 0 ? "+" : "") + juce::String ((int) db), RF (a.getX() - 28.0f, yOf (db) - 6.0f, 24.0f, 12.0f), juce::Justification::right, false);
         }
         g.setColour (juce::Colours::white.withAlpha (0.16f));
@@ -1234,7 +1425,7 @@ namespace
         g.setFont (juce::FontOptions (10.0f));
         for (const auto db : { 6, 0, -6, -12, -24, -36, -48, -60 })
         {
-            g.setColour (juce::Colours::white.withAlpha (0.35f));
+            g.setColour ((glass ? theme::text : juce::Colours::white).withAlpha (0.35f));
             g.drawText (juce::String (db), RF ((float) b.getWidth() - 62.0f, yDb ((float) db) - 6.0f, 18.0f, 12.0f), juce::Justification::centred, false);
         }
         const auto bar = [&] (float x, float db)
@@ -1250,26 +1441,27 @@ namespace
         bar ((float) b.getWidth() - 95.0f, meterAt (5, -120.0f));
         bar ((float) b.getWidth() - 40.0f, meterAt (6, -120.0f));
         bar ((float) b.getWidth() - 31.0f, meterAt (7, -120.0f));
-        title (g, R (b.getWidth() - 112, 4, 30, 18), "IN", juce::Colours::white.withAlpha (0.6f), 11.0f);
-        title (g, R (b.getWidth() - 50, 4, 36, 18), "OUT", juce::Colours::white.withAlpha (0.6f), 11.0f);
+        title (g, R (b.getWidth() - 112, 4, 30, 18), "IN", (glass ? theme::text : juce::Colours::white).withAlpha (0.6f), 11.0f);
+        title (g, R (b.getWidth() - 50, 4, 36, 18), "OUT", (glass ? theme::text : juce::Colours::white).withAlpha (0.6f), 11.0f);
 
         // Band titles, row names
         const char* names[] { "LOW", "LOW MID", "HIGH MID", "HIGH" };
         for (int k = 0; k < 4; ++k)
-            title (g, R (190 + k * 240, 268, 220, 22), names[k], multiColours[k], 16.0f);
+            title (g, R (190 + k * 240, 268, 220, 22), names[k], glass && theme::glassLight() ? multiColours[k].withBrightness (juce::jmin (multiColours[k].getBrightness(), 0.62f)) : multiColours[k], 16.0f);
         g.setFont (juce::FontOptions (13.0f));
+        const auto ink = glass ? theme::text : juce::Colours::white;
         for (int row = 0; row < 9; ++row)
         {
-            g.setColour (juce::Colours::white.withAlpha (row % 2 == 0 ? 0.035f : 0.0f));
+            g.setColour ((glass && theme::glassLight() ? juce::Colours::black : juce::Colours::white).withAlpha (row % 2 == 0 ? 0.035f : 0.0f));
             g.fillRect (20, 338 + row * 30, b.getWidth() - 40, 30);
-            g.setColour (juce::Colours::white.withAlpha (0.7f));
+            g.setColour (ink.withAlpha (0.7f));
             g.drawText (multiRows[row], R (24, 338 + row * 30, 160, 30), juce::Justification::centredLeft, false);
         }
-        g.setColour (juce::Colours::white.withAlpha (0.1f));
+        g.setColour (ink.withAlpha (0.1f));
         g.fillRect (20, b.getHeight() - 58, b.getWidth() - 40, 1);
-        title (g, R (24, b.getHeight() - 46, 160, 30), "OUTPUT", juce::Colour (0xffa9dcf2), 15.0f, juce::Justification::centredLeft);
-        title (g, R (330, b.getHeight() - 48, 100, 30), "Lookahead", juce::Colours::white.withAlpha (0.7f), 13.0f, juce::Justification::centredRight);
-        title (g, R (690, b.getHeight() - 48, 100, 30), "Out", juce::Colours::white.withAlpha (0.7f), 13.0f, juce::Justification::centredRight);
+        title (g, R (24, b.getHeight() - 46, 160, 30), "OUTPUT", glass ? theme::text : juce::Colour (0xffa9dcf2), 15.0f, juce::Justification::centredLeft);
+        title (g, R (330, b.getHeight() - 48, 100, 30), "Lookahead", ink.withAlpha (0.7f), 13.0f, juce::Justification::centredRight);
+        title (g, R (690, b.getHeight() - 48, 100, 30), "Out", ink.withAlpha (0.7f), 13.0f, juce::Justification::centredRight);
     }
 
     //==============================================================================
@@ -4279,6 +4471,11 @@ namespace
                 paintChannelEq (g, b, info, v, live);
                 paintChannelEqIcons (g, b.getWidth(), v);
                 // The bar along the bottom
+                if (theme::glassSkin())
+                {
+                    look::drawGlassPanel (g, RF (14.0f, (float) b.getHeight() - 58.0f, (float) b.getWidth() - 28.0f, 46.0f), 12.0f, true);
+                    return;
+                }
                 g.setColour (juce::Colour (0xff0b1018));
                 g.fillRect (0, b.getHeight() - 56, b.getWidth(), 56);
                 g.setColour (juce::Colours::white.withAlpha (0.08f));
@@ -4307,8 +4504,25 @@ namespace
             c.graphs.push_back ({ R (40, 48, screenW, 262), { { "hpFreq", {}, "hpQ", "on1" }, { "lsFreq", "lsGain", "lsQ", "on2" }, { "p1Freq", "p1Gain", "p1Q", "on3" }, { "p2Freq", "p2Gain", "p2Q", "on4" },
                         { "p3Freq", "p3Gain", "p3Q", "on5" }, { "p4Freq", "p4Gain", "p4Q", "on6" }, { "hsFreq", "hsGain", "hsQ", "on7" }, { "lpFreq", {}, "lpQ", "on8" } } });
             c.analyzer = true;
-            d["channelEq"] = c;
             d["linearEq"] = c;
+            // The Channel EQ's dynamic EQ: under each shelf and bell, DYN, its threshold and range; attack and release
+            {
+                auto& dyn = c;
+                dyn.height = 600;
+                for (auto& ctl : dyn.controls)
+                    if (ctl.bounds.getY() == 446)
+                        ctl.bounds.setY (556);
+                for (int b = 1; b <= 6; ++b)
+                {
+                    const auto n = juce::String (b + 1);
+                    dyn.controls.push_back ({ "dyn" + n, Kind::toggle, R (column (b) + 8, 418, w - 16, 26), "=DYN", bandColours[b] });
+                    dyn.controls.push_back ({ "thr" + n, Kind::field, R (column (b), 448, w, 28), "-", bandColours[b] });
+                    dyn.controls.push_back ({ "rng" + n, Kind::field, R (column (b), 478, w, 28), "-", bandColours[b] });
+                }
+                dyn.controls.push_back ({ "dynAttack", Kind::field, R (column (0), 448, w, 28), "-", juce::Colours::white.withAlpha (0.7f) });
+                dyn.controls.push_back ({ "dynRelease", Kind::field, R (column (7), 448, w, 28), "-", juce::Colours::white.withAlpha (0.7f) });
+            }
+            d["channelEq"] = c;
             // (the linear phase one has no oversampling or one-side processing: always both, always exact)
             d["linearEq"].enabled = [] (const juce::String& id, const EffectInfo&, const float*) { return id != "hq" && id != "processing"; };
         }
@@ -4346,6 +4560,7 @@ namespace
             c.knobs = KnobStyle::light;
             c.label = juce::Colour (0xff3b3b3b); c.value = juce::Colour (0xffff6a3d); c.accent = juce::Colour (0xffff6a3d); c.track = juce::Colour (0xffa9a9a9);
             c.paint = paintStudioReverb;
+            c.live = true;   // (the Liquid Glass particles move)
             c.pageParam = "view";
             const auto white = juce::Colours::white.withAlpha (0.6f), orange = juce::Colour (0xffff6a3d);
             c.controls = {
@@ -5622,6 +5837,22 @@ void DesignLook::drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h
         return;
     }
     const auto cx = (float) x + (float) w * 0.5f;
+    if (theme::glassSkin())
+    {
+        // Liquid Glass: a recessed glass slot, lit below the cap in the accent, and the Dark VU cap
+        const auto slot = RF (cx - 4.0f, (float) y - 2.0f, 8.0f, (float) h + 4.0f);
+        look::drawGlassPanel (g, slot, 4.0f, true);
+        const auto lit = slot.withTop (juce::jlimit (slot.getY(), slot.getBottom(), pos)).reduced (1.5f, 1.0f);
+        g.setColour (theme::accent.withAlpha (s.isEnabled() ? 0.85f : 0.3f));
+        g.fillRoundedRectangle (lit, 2.5f);
+        const auto capHeight = juce::jlimit (26.0f, 46.0f, (float) h * 0.2f);
+        const auto cap = RF (cx - 20.0f, pos - capHeight * 0.5f, 40.0f, capHeight);
+        if (! looks::drawFaderCap (g, cap, true, s.isEnabled() ? 1.0f : 0.5f))
+        {
+            look::drawGlassPanel (g, cap.withSizeKeepingCentre (30.0f, capHeight * 0.6f), 5.0f);
+        }
+        return;
+    }
     if (design.knobs == KnobStyle::black || design.knobs == KnobStyle::chrome)
     {
         // A hardware fader: a dark rounded slot and a rounded cap (its own colour, or grey)

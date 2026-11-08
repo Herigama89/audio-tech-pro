@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <optional>
 #include "../engine/ConsoleChannel.h"
 #include "SpectrumAnalyzer.h"
 
@@ -31,6 +32,11 @@ public:
                         std::function<int (float*, int)> analyzerSource = {}, std::function<double()> sampleRate = {},
                         Levels levels = {});
     ~ConsoleStripWindow() override;
+
+    /** The interface's 48 V for this track's input: its state (nothing when no interface preamp is reachable)
+        and how to switch it. With them the 48V key turns the interface's phantom power on and off. */
+    std::function<std::optional<bool>()> interfacePhantom;
+    std::function<void (bool)> setInterfacePhantom;
 
     void paint (juce::Graphics& g) override;
     void paintOverChildren (juce::Graphics& g) override;

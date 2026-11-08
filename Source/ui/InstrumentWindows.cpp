@@ -322,7 +322,9 @@ void EffectPanel::buildDesign (const EffectInfo& info)
             auto* l = extraLabels.add (new juce::Label ({}, labelText));
             l->setFont (juce::FontOptions (15.0f));
             // (a control's own colour, for one that sits on a different background, e.g. on a screen)
-            const bool ownColour = c.kind != effectdesign::Kind::field && ! c.colour.isTransparent();
+            const bool ownColour = c.kind != effectdesign::Kind::field && ! c.colour.isTransparent()
+                                && ! (theme::glassSkin() && design->photoScale <= 0.0f
+                                      && std::abs (c.colour.getPerceivedBrightness() - theme::console.getPerceivedBrightness()) < 0.35f);
             l->setColour (juce::Label::textColourId, ownColour ? c.colour : effectdesign::labelColourOf (*design));
             l->setJustificationType (juce::Justification::centred);
             l->setInterceptsMouseClicks (false, false);
@@ -401,7 +403,16 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                 if (c.kind == effectdesign::Kind::field)
                 {
                     k->slider.getProperties().set ("field", true);
-                    k->slider.getProperties().set ("colour", c.colour.toString());
+                    // (Liquid Glass: a value colour that would vanish on the glass is darkened, or gives way to the theme's text)
+                    auto ink = c.colour;
+                    if (theme::glassSkin() && design->photoScale <= 0.0f && ! ink.isTransparent())
+                    {
+                        if (ink.getSaturation() < 0.2f)
+                            ink = theme::text;
+                        else if (theme::glassLight())
+                            ink = ink.withBrightness (juce::jmin (ink.getBrightness(), 0.62f)).withMultipliedSaturation (1.1f);
+                    }
+                    k->slider.getProperties().set ("colour", ink.toString());
                     k->slider.setSliderStyle (juce::Slider::RotaryVerticalDrag);
                     k->slider.setTextBoxStyle (juce::Slider::TextBoxBelow, true, c.bounds.getWidth(), c.bounds.getHeight());
                     k->slider.setMouseDragSensitivity (300);
@@ -548,7 +559,9 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                 for (size_t n = 0; n < p->choices.size(); ++n)
                     box->addItem (p->choices[n], (int) n + 1);
                 box->getProperties().set ("centred", c.bounds.getHeight() >= 38);
-                if (! c.colour.isTransparent())
+                // (Liquid Glass: a writing colour that would vanish on the glass gives way to the theme's text)
+                const bool glassFace = theme::glassSkin() && design->photoScale <= 0.0f;
+                if (! c.colour.isTransparent() && ! (glassFace && std::abs (c.colour.getPerceivedBrightness() - theme::console.getPerceivedBrightness()) < 0.35f))
                     box->getProperties().set ("ink", c.colour.toString());
                 box->setWantsKeyboardFocus (false);
                 box->onChange = [box, setValue, current, id = c.id, name = p->name]

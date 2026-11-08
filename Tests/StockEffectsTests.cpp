@@ -1509,3 +1509,39 @@ TEST_CASE ("Vintage EQs: the IN switches, the tubes, the console's polarity and 
     const auto [fl, fr] = run (*off, sine (200.0, 0.5, 0.8f), sine (200.0, 0.5, 0.8f));
     CHECK (harmonics (fl, 200.0) < harmonics (tl, 200.0) * 0.5);
 }
+
+TEST_CASE ("Channel EQ's dynamic EQ cuts a band only when it is loud", "[effects]")
+{
+    // A 1 kHz tone through the Mid bell (flat, dynamics on: up to 9 dB of cut past -30 dB)
+    const auto rms = [] (float level, bool dynamic)
+    {
+        auto e = make ("channelEq");
+        set (*e, "p2Freq", 1000.0f);
+        set (*e, "p2Gain", 0.0f);
+        set (*e, "dyn4", dynamic ? 1.0f : 0.0f);
+        set (*e, "thr4", -30.0f);
+        set (*e, "rng4", -9.0f);
+        std::vector<float> l (block), r (block);
+        double sum = 0.0;
+        int counted = 0;
+        double phase = 0.0;
+        for (int b = 0; b < 200; ++b)
+        {
+            for (int i = 0; i < block; ++i)
+            {
+                l[(size_t) i] = r[(size_t) i] = level * (float) std::sin (phase);
+                phase += juce::MathConstants<double>::twoPi * 1000.0 / rate;
+            }
+            e->process (l.data(), r.data(), block);
+            if (b >= 150)
+                for (int i = 0; i < block; ++i, ++counted)
+                    sum += (double) l[(size_t) i] * l[(size_t) i];
+        }
+        return std::sqrt (sum / counted);
+    };
+    // loud: cut by several dB; quiet (below the threshold): untouched
+    const auto loudCut = juce::Decibels::gainToDecibels (rms (0.5f, true) / rms (0.5f, false));
+    CHECK (loudCut < -5.0);
+    const auto quietCut = juce::Decibels::gainToDecibels (rms (0.005f, true) / rms (0.005f, false));
+    CHECK (std::abs (quietCut) < 0.5);
+}
