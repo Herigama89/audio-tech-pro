@@ -672,13 +672,26 @@ public:
                             if (g.reduceClipRegion (r.getIntersection (main.getLocalBounds()))) main.paintEntireComponent (g, true);
                         } });
             };
+            // The same frame as the mixer now draws it: one area round all the moving meters
+            auto batchedFrame = [&]
+            {
+                juce::Rectangle<int> all;
+                for (auto* st : main.mixer.strips)
+                    for (juce::Component* c : { (juce::Component*) &st->meter, (juce::Component*) &st->grColumn })
+                        all = all.getUnion (main.getLocalArea (c, c->getLocalBounds()).getSmallestIntegerContainer());
+                return ms ([&] { juce::Graphics g (canvasImage); juce::Graphics::ScopedSaveState ss (g);
+                                 if (g.reduceClipRegion (all.getIntersection (main.getLocalBounds()))) main.paintEntireComponent (g, true); });
+            };
             const auto frameWide = meterFrame();
+            const auto batchedWide = batchedFrame();
             main.mixer.narrowButton.setToggleState (true, juce::sendNotification);
             main.mixer.resized();
             { juce::Graphics g (canvasImage); main.paintEntireComponent (g, true); }
             CALLGRIND_START_INSTRUMENTATION;
             auto frameNarrow = meterFrame();
             CALLGRIND_STOP_INSTRUMENTATION;
+            const auto batchedNarrow = batchedFrame();
+            std::cout << "           batched meter frame: wide " << juce::String (batchedWide, 2) << " ms   narrow " << juce::String (batchedNarrow, 2) << " ms" << std::endl;
             if (std::getenv ("RIFF_PERF_DETAIL") != nullptr && ! main.mixer.strips.isEmpty())
             {
                 // Where a meter's repaint goes: each ancestor's own paint and every component painted in that rect

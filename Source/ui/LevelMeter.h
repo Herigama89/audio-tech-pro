@@ -7,6 +7,55 @@
 namespace riff
 {
 
+/** Meters moving all over the mixer, redrawn as one area a frame rather than dozens of little ones: each little
+    repaint costs a walk through the whole window (and on some systems they're merged anyway), so while a batch is
+    open (the mixer's meter update) the areas are collected - per "batch root" (a component with the property
+    "repaintBatchRoot", e.g. the strips' holder) - and repainted together when it closes. */
+namespace repaintbatch
+{
+    inline bool active = false;
+    inline std::vector<std::pair<juce::Component::SafePointer<juce::Component>, juce::Rectangle<int>>> pending;
+
+    inline void request (juce::Component& c, juce::Rectangle<int> area)
+    {
+        if (! active)
+        {
+            c.repaint (area);
+            return;
+        }
+        juce::Component* root = c.getParentComponent();
+        while (root != nullptr && ! root->getProperties().contains ("repaintBatchRoot") && root->getParentComponent() != nullptr)
+            root = root->getParentComponent();
+        if (root == nullptr)
+        {
+            c.repaint (area);
+            return;
+        }
+        const auto inRoot = root->getLocalArea (&c, area.toFloat()).getSmallestIntegerContainer();
+        for (auto& [r, a] : pending)
+            if (r.getComponent() == root)
+            {
+                a = a.getUnion (inRoot);
+                return;
+            }
+        pending.emplace_back (root, inRoot);
+    }
+    inline void request (juce::Component& c) { request (c, c.getLocalBounds()); }
+
+    struct Scope
+    {
+        Scope() { active = true; }
+        ~Scope()
+        {
+            active = false;
+            for (auto& [r, a] : pending)
+                if (auto* root = r.getComponent())
+                    root->repaint (a);
+            pending.clear();
+        }
+    };
+}
+
 /** A stereo peak meter with instant attack and gentle release, -60..0 dBFS. */
 class LevelMeter final : public juce::Component, public juce::SettableTooltipClient
 {
@@ -34,7 +83,7 @@ public:
             seenReset = resetGeneration();
             peakL = peakR = 0.0f;
             clipHold = 0;
-            repaint();
+            repaintbatch::request (*this);
         }
         // Silent and already dark: nothing to draw (many quiet meters cost nothing).
         if (left < 1.0e-4f && right < 1.0e-4f && levelL < 1.0e-4f && levelR < 1.0e-4f && clipHold == 0
@@ -72,7 +121,7 @@ public:
             litR = shownR;
             peakSegL = markL;
             peakSegR = markR;
-            repaint();
+            repaintbatch::request (*this);
         }
     }
 

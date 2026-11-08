@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
 endif()
 
-project(AudioTechPro VERSION 1.14.4 LANGUAGES C CXX)
+project(AudioTechPro VERSION 1.14.5 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -162,10 +162,6 @@ endif()
 # Audio Units exist only on macOS.
 if(APPLE)
     list(APPEND RIFF_DEFINITIONS JUCE_PLUGINHOST_AU=1)
-    # Each changed part of the window drawn on its own (through a Metal layer). Without it, macOS merges everything
-    # that changed in a frame into one rectangle - a meter on the left and the clock on the right, and the whole
-    # window is redrawn 30 times a second: the lag.
-    list(APPEND RIFF_DEFINITIONS JUCE_COREGRAPHICS_RENDER_WITH_MULTIPLE_PAINT_CALLS=1)
 endif()
 
 if(RIFF_ARA)

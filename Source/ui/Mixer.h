@@ -44,7 +44,7 @@ public:
             if (std::abs (next - vuNeedle) > 0.1f)
             {
                 vuNeedle = next;
-                repaint (vuArea);
+                repaintbatch::request (*this, vuArea);
             }
         }
     }
@@ -198,7 +198,7 @@ private:
     {
     public:
         GrColumn() { setOpaque (true); setInterceptsMouseClicks (false, false); }
-        void setLit (int n) { if (n != lit) { lit = n; repaint(); } }
+        void setLit (int n) { if (n != lit) { lit = n; repaintbatch::request (*this); } }
         int leds() const { return juce::jmax (4, (getHeight() - 2) / 4); }
         void paint (juce::Graphics& g) override
         {

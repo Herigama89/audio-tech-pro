@@ -1870,7 +1870,7 @@ void ChannelStrip::pushGainReduction (float db)
         if (std::abs (next - grNeedle) > 0.05f)
         {
             grNeedle = next;
-            repaint (vuArea);
+            repaintbatch::request (*this, vuArea);
         }
     }
 
@@ -2815,6 +2815,8 @@ MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p,
     closeButton.onClick = [this] { if (onClose) onClose(); };
     addAndMakeVisible (closeButton);
 
+    stripHolder.getProperties().set ("repaintBatchRoot", true);
+    body.getProperties().set ("repaintBatchRoot", true);
     viewport.setViewedComponent (&stripHolder, false);
     viewport.setScrollBarsShown (false, true);
     body.addAndMakeVisible (viewport);
@@ -3149,6 +3151,9 @@ void MixerPanel::timerCallback()
 
     if (! isShowing() && ! extraShowing)
         return;
+
+    // Every meter that moves this frame, redrawn together (one area for the strips, not one per meter)
+    const repaintbatch::Scope batch;
 
     // Each track's level is read once and goes to every strip showing that track.
     std::map<juce::String, std::pair<float, float>> levels;
