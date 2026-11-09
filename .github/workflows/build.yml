@@ -24,10 +24,22 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+      # (a compile cache kept between runs: only the files that changed are compiled again, not all of JUCE)
+      - name: Compile cache
+        run: brew install ccache && ccache --max-size=3G && ccache --zero-stats
+      - uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-mac-${{ github.sha }}
+          restore-keys: ccache-mac-
       - name: Build the app and the disk image (.dmg)
         env:
           RIFF_BUILD_TESTS: "ON"
-        run: sh scripts/make-mac-dmg.sh
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+          CMAKE_OBJC_COMPILER_LAUNCHER: ccache
+          CMAKE_OBJCXX_COMPILER_LAUNCHER: ccache
+        run: sh scripts/make-mac-dmg.sh && ccache --show-stats
       - name: Test
         # (failures are listed in one annotation on the run's page, so they can be read without the log)
         run: |
@@ -55,6 +67,8 @@ jobs:
           path: out/
 
   windows:
+    # (paused: the Mac version first - set back to run when Windows is worked on again)
+    if: ${{ false }}
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
@@ -104,7 +118,7 @@ jobs:
           path: out/
 
   release:
-    needs: [ mac, windows ]
+    needs: [ mac ]
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -124,6 +138,5 @@ jobs:
           name: Audio Tech Pro ${{ steps.version.outputs.number }}
           body: |
             Mac (Apple Silicon and Intel, macOS 11+): open the .dmg and drag Audio Tech Pro onto Applications, or use the .pkg installer. The first time, right-click the app and choose Open.
-            Windows (64-bit): run the Setup.exe. If SmartScreen warns, click More info > Run anyway.
           files: files/*
           overwrite_files: true
