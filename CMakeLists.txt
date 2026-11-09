@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
 endif()
 
-project(AudioTechPro VERSION 1.14.9 LANGUAGES C CXX)
+project(AudioTechPro VERSION 1.14.10 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -242,6 +242,7 @@ juce_add_binary_data(AudioTechProData
 # Everything on screen except the app's entry point (the snapshot tool reuses it).
 set(RIFF_UI_SOURCES
     Source/MainComponent.cpp
+    Source/ui/NativeLayers.cpp
     Source/MainCommands.cpp
     Source/MainAssistant.cpp
     Source/MainExtras.cpp
@@ -427,7 +428,7 @@ endif()
 # Hosting Audio Units needs CoreAudioKit (for the generic plugin view).
 if(APPLE)
     # Screen recording (ScreenCaptureKit is weak-linked: the rest of the app runs on older macOS)
-    target_sources(AudioTechPro PRIVATE Source/ui/ScreenRecorder_mac.mm Source/ui/PluginWindowKeys_mac.mm)
+    target_sources(AudioTechPro PRIVATE Source/ui/ScreenRecorder_mac.mm Source/ui/PluginWindowKeys_mac.mm Source/ui/NativeLayers_mac.mm)
     set_source_files_properties(Source/ui/PluginWindowKeys_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 
     # Sign the app so macOS's privacy permissions (screen recording, microphone) stay with it when it's
@@ -439,7 +440,7 @@ if(APPLE)
     set_source_files_properties(Source/ui/ScreenRecorder_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(AudioTechPro PRIVATE "-framework AVFoundation" "-framework CoreMedia" "-framework CoreVideo"
                                                "-weak_framework ScreenCaptureKit")
-    target_link_libraries(AudioTechPro PRIVATE "-framework CoreAudioKit" "-framework IOKit")
+    target_link_libraries(AudioTechPro PRIVATE "-framework CoreAudioKit" "-framework IOKit" "-framework QuartzCore")
     # The window drawn by the graphics card (View > Draw with the Graphics Card)
     target_link_libraries(AudioTechPro PRIVATE juce::juce_opengl)
     target_compile_definitions(AudioTechPro PRIVATE RIFF_GPU_DRAWING=1 GL_SILENCE_DEPRECATION=1)
@@ -462,9 +463,9 @@ if(RIFF_BUILD_SNAPSHOTS)
     target_compile_definitions(Snapshots PRIVATE ${RIFF_DEFINITIONS} JUCE_MODAL_LOOPS_PERMITTED=1 RIFF_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(Snapshots PRIVATE AudioTechProData juce::juce_gui_extra juce::juce_audio_utils juce::juce_dsp)
     if(APPLE)
-        target_sources(Snapshots PRIVATE Source/ui/ScreenRecorder_mac.mm Source/ui/PluginWindowKeys_mac.mm)
+        target_sources(Snapshots PRIVATE Source/ui/ScreenRecorder_mac.mm Source/ui/PluginWindowKeys_mac.mm Source/ui/NativeLayers_mac.mm)
         target_link_libraries(Snapshots PRIVATE "-framework CoreAudioKit" "-framework AVFoundation" "-framework CoreMedia"
-                                                "-framework CoreVideo" "-weak_framework ScreenCaptureKit")
+                                                "-framework CoreVideo" "-weak_framework ScreenCaptureKit" "-framework QuartzCore")
     endif()
 endif()
 

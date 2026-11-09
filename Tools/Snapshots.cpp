@@ -671,6 +671,29 @@ public:
             main.mixer.resized();
             pump (main, 20);
         }
+        // What would keep the Mac's layers off (something drawn over a meter or the playhead's area)
+        {
+            int covered = 0, total = 0;
+            std::vector<juce::Component*> all;
+            std::function<void (juce::Component&)> walk = [&] (juce::Component& p) { for (auto* ch : p.getChildren()) { if (dynamic_cast<LevelMeter*> (ch) != nullptr) all.push_back (ch); walk (*ch); } };
+            walk (main.mixer);
+            for (auto* c : all)
+                    {
+                        ++total;
+                        if (layers::coveredByOthers (*c))
+                        {
+                            if (covered++ < 3)
+                                for (auto* p = c->getParentComponent(); p != nullptr; p = p->getParentComponent())
+                                    for (int i = p->getNumChildComponents(); --i >= 0;)
+                                    {
+                                        auto* o = p->getChildComponent (i);
+                                        if (o->isVisible() && main.getLocalArea (p, o->getBoundsInParent()).intersects (main.getLocalArea (c, c->getLocalBounds())) && o != c && ! o->isParentOf (c))
+                                            std::cout << "    over it: " << typeid (*o).name() << " " << o->getBounds().toString() << std::endl;
+                                    }
+                        }
+                    }
+            std::cout << "LAYERS meters covered " << covered << "/" << total << ", canvas covered " << (int) layers::coveredByOthers (main.canvas) << std::endl;
+        }
         std::unique_ptr<Mover> mover;
         if (std::getenv ("RIFF_IDLE_PLAY") != nullptr)
             mover = std::make_unique<Mover> (main);

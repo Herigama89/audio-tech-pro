@@ -209,6 +209,14 @@ public:
     /** Post-fader peak of a track since the last call (by the track's slot in the graph). */
     std::pair<float, float> takeTrackLevel (int slot) noexcept;
 
+    /** How long before it's heard a track's plugins worked on what they report now (its gain reduction): rendered
+        ahead (Process Buffer Range), the lookahead; played live, 0. The mixer shows their meters that much later. */
+    double reportLeadSeconds (int slot) const noexcept
+    {
+        return juce::isPositiveAndBelow (slot, PlaybackGraph::maxTracks) && slotRenderedAhead[(size_t) slot].load (std::memory_order_relaxed)
+                   ? aheadLeadSeconds.load (std::memory_order_relaxed) : 0.0;
+    }
+
     /** The spectrum analyzer listens to one track (after its EQ and Dynamics): its slot, or -1 for none. */
     void setAnalyzerSlot (int slot) noexcept { analyzerSlot.store (slot); }
 
@@ -671,6 +679,8 @@ private:
     std::atomic<int> busPluginSamples { 0 };
     static float rmsOf (const float* left, const float* right, int n) noexcept;
     std::array<std::atomic<float>, PlaybackGraph::maxTracks * 2> trackPeaks {};
+    std::array<std::atomic<bool>, PlaybackGraph::maxTracks> slotRenderedAhead {};   // (heard from the ring just now)
+    std::atomic<double> aheadLeadSeconds { 0.0 };   // how far ahead of what's heard the ring's thread works
     std::array<std::atomic<float>, PlaybackGraph::maxTracks> stripInPeaks {}, stripOutPeaks {};   // the channel strip's LED meters
     std::atomic<bool> bouncing { false };
     juce::String labelledDevice;

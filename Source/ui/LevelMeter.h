@@ -4,6 +4,7 @@
 #include "Skin.h"
 #include "Pictures.h"
 #include "Profile.h"
+#include "NativeLayers.h"
 
 namespace riff
 {
@@ -99,6 +100,8 @@ public:
             repaintbatch::request (*this);
         }
         // Silent and already dark: nothing to draw (many quiet meters cost nothing).
+        if (wantsLayers && (peakSegL > 0 || peakSegR > 0) && left < 1.0e-4f && right < 1.0e-4f)
+            updateLayers();   // (a held peak's layer follows the meter when it scrolls)
         if (left < 1.0e-4f && right < 1.0e-4f && levelL < 1.0e-4f && levelR < 1.0e-4f && clipHold == 0
             && (b.holdTicks < 0 || (peakL < 1.0e-4f && peakR < 1.0e-4f)))
             return;
@@ -129,13 +132,27 @@ public:
         // dozens of strips, redrawing every meter 30 times a second whether it moved or not made the mixer crawl)
         const auto shownL = segmentsLit (levelL), shownR = segmentsLit (levelR);
         const auto markL = segmentsLit (peakL), markR = segmentsLit (peakR);
-        if (shownL != litL || shownR != litR || markL != peakSegL || markR != peakSegR || wasClipped != (clipHold != 0) || photoLeds)
-        {
-            litL = shownL;
-            litR = shownR;
-            peakSegL = markL;
-            peakSegR = markR;
+        const bool changed = shownL != litL || shownR != litR || markL != peakSegL || markR != peakSegR;
+        litL = shownL;
+        litR = shownR;
+        peakSegL = markL;
+        peakSegR = markR;
+        // As layers (macOS): the graphics card moves the lit bars, nothing is drawn again
+        if (wantsLayers && updateLayers())
+            return;
+        if (changed || wasClipped != (clipHold != 0) || photoLeds)
             repaintbatch::request (*this);
+    }
+
+    /** Its lit bars as Core Animation layers when they can be (the mixer's meters, on a Mac): moving them is the
+        graphics card's job, as Logic's meters - the window isn't drawn again 60 times a second. */
+    void useNativeLayers (bool shouldUse)
+    {
+        wantsLayers = shouldUse;
+        if (! shouldUse)
+        {
+            overlay.reset();
+            if (inLayers) { inLayers = false; repaint(); }
         }
     }
 
@@ -226,21 +243,117 @@ public:
         }
         // The LED columns: drawn once (dark and lit) for this size, then each frame just the two pictures,
         // the lit one up to the level
-        const auto inner = getLocalBounds().withTrimmedBottom (label.isNotEmpty() ? 16 : 0).reduced (2, 3);
-        const auto columnWidth = juce::jmax (1, (inner.getWidth() - 2) / 2);
+        const auto [colL, colR] = columns();
+        // (as layers: only the dark columns here, the lit parts are the layers over them)
+        const auto shownL = inLayers ? 0 : litL, shownR = inLayers ? 0 : litR;
+        const auto markL = inLayers ? 0 : peakSegL, markR = inLayers ? 0 : peakSegR;
         if (theme::levelMeters() == 1)
         {
             // Smooth bars (Themes > Level meters), with a peak line
-            drawSmooth (g, inner.withWidth (columnWidth), litL, peakSegL);
-            drawSmooth (g, inner.withTrimmedLeft (columnWidth + 2).withWidth (columnWidth), litR, peakSegR);
+            drawSmooth (g, colL, shownL, markL);
+            drawSmooth (g, colR, shownR, markR);
             return;
         }
-        drawColumn (g, inner.withWidth (columnWidth), litL, peakSegL);
-        drawColumn (g, inner.withTrimmedLeft (columnWidth + 2).withWidth (columnWidth), litR, peakSegR);
+        drawColumn (g, colL, shownL, markL);
+        drawColumn (g, colR, shownR, markR);
     }
 
 private:
     static constexpr float segment = 3.0f, gap = 1.0f;
+
+    std::pair<juce::Rectangle<int>, juce::Rectangle<int>> columns() const
+    {
+        const auto inner = getLocalBounds().withTrimmedBottom (label.isNotEmpty() ? 16 : 0).reduced (2, 3);
+        const auto columnWidth = juce::jmax (1, (inner.getWidth() - 2) / 2);
+        return { inner.withWidth (columnWidth), inner.withTrimmedLeft (columnWidth + 2).withWidth (columnWidth) };
+    }
+
+    /** The lit column, whole, as one picture at the screen's pixels (the layers show the part that's lit). */
+    const juce::Image& litPicture (juce::Rectangle<int> column, bool smooth)
+    {
+        auto scale = juce::Component::getApproximateScaleFactorForComponent (this);
+        if (auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect (getScreenBounds()))
+            scale *= (float) display->scale;
+        auto key = theme::paletteKey();
+        pictures::mix (key, (juce::uint64) (juce::uint32) column.getWidth() << 32 | (juce::uint64) (juce::uint32) column.getHeight());
+        pictures::mix (key, (juce::uint64) juce::roundToInt (scale * 1000.0f));
+        pictures::mix (key, smooth ? 0x5301ull : 0x5302ull);
+        pictures::mix (key, theme::meterGreen.getARGB());
+        pictures::mix (key, theme::meterAmber.getARGB());
+        pictures::mix (key, theme::meterRed.getARGB());
+        if (key == layerPictureKey && layerPicture.isValid())
+            return layerPicture;
+        layerPictureKey = key;
+        const auto w = juce::jmax (1, juce::roundToInt ((float) column.getWidth() * scale));
+        const auto h = juce::jmax (1, juce::roundToInt ((float) column.getHeight() * scale));
+        layerPicture = juce::Image (juce::Image::ARGB, w, h, true, juce::SoftwareImageType());
+        juce::Graphics ig (layerPicture);
+        ig.addTransform (juce::AffineTransform::scale ((float) w / (float) column.getWidth(), (float) h / (float) column.getHeight()));
+        const auto local = column.withZeroOrigin().toFloat();
+        if (smooth)
+        {
+            juce::ColourGradient grad (theme::meterRed, 0.0f, local.getY(), theme::meterGreen.darker (0.15f), 0.0f, local.getBottom(), false);
+            grad.addColour (0.04, theme::meterRed);
+            grad.addColour (0.10, theme::meterAmber);
+            grad.addColour (0.30, theme::meterGreen.brighter (0.2f));
+            ig.setGradientFill (grad);
+            ig.fillRect (local);
+        }
+        else
+            drawBar (ig, local, 1.0f);
+        return layerPicture;
+    }
+
+    /** The layers placed for the levels now; false when they can't be used (the meter draws everything). */
+    bool updateLayers()
+    {
+        if (overlay == nullptr)
+            overlay = std::make_unique<layers::Overlay> (*this, 4);
+        const auto [colL, colR] = columns();
+        const bool on = ! photoLeds && overlay->update (colL.getUnion (colR).toFloat());
+        if (on != inLayers)
+        {
+            inLayers = on;
+            repaint();
+        }
+        if (! on)
+            return false;
+        const bool smooth = theme::levelMeters() == 1;
+        const auto& picture = litPicture (colL, smooth);
+        const auto count = segmentCount();
+        auto place = [&] (int barIndex, int peakIndex, juce::Rectangle<int> r, int lit, int peak)
+        {
+            const auto full = r.toFloat();
+            auto rows = [&] (int from, int to)   // as drawColumn's lightUpTo: segments [from, to) from the bottom
+            {
+                if (to <= from)
+                    return juce::Rectangle<float>();
+                const auto top = std::floor ((float) r.getHeight() - (float) to * (segment + gap) + gap - 0.5f);
+                const auto bottom = std::ceil ((float) r.getHeight() - (float) from * (segment + gap) + 0.5f);
+                return full.withTop (full.getY() + juce::jmax (0.0f, top)).withBottom (full.getY() + juce::jmin ((float) r.getHeight(), bottom));
+            };
+            if (smooth)
+            {
+                const auto heightOf = [&] (int segments) { return juce::roundToInt ((float) r.getHeight() * (float) segments / (float) juce::jmax (1, count)); };
+                const auto h = heightOf (lit);
+                overlay->picture (barIndex, full, h > 0 ? full.withTop (full.getBottom() - (float) h) : juce::Rectangle<float>(), picture);
+                if (peak > 0)
+                {
+                    const auto y = juce::jlimit (r.getY(), r.getBottom() - 2, r.getBottom() - heightOf (peak));
+                    overlay->solid (peakIndex, juce::Rectangle<int> (r.getX(), y, r.getWidth(), 2).toFloat(),
+                                    peak >= count ? theme::meterRed : juce::Colour (0xffe8e9ec));
+                }
+                else
+                    overlay->solid (peakIndex, {}, juce::Colours::transparentBlack);
+                return;
+            }
+            overlay->picture (barIndex, full, rows (0, lit), picture);
+            overlay->picture (peakIndex, full, peak > lit ? rows (peak - 1, peak) : juce::Rectangle<float>(), picture);
+        };
+        place (0, 2, colL, litL, peakSegL);
+        place (1, 3, colR, litR, peakSegR);
+        return true;
+    }
     int segmentCount() const
     {
         const auto h = (float) getHeight() - (label.isNotEmpty() ? 16.0f : 0.0f) - 6.0f;
@@ -443,6 +556,10 @@ private:
     float levelL = 0, levelR = 0, peakL = 0, peakR = 0;
     static int& resetGeneration() { static int g = 0; return g; }
     int seenReset = 0;
+    bool wantsLayers = false, inLayers = false;
+    std::unique_ptr<layers::Overlay> overlay;
+    juce::Image layerPicture;
+    juce::uint64 layerPictureKey = 0;
 };
 
 } // namespace riff

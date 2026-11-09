@@ -527,6 +527,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     addAndMakeVisible (meter);
     addAndMakeVisible (grColumn);
     meter.usePhotoLeds (isMaster());   // the master's meter: the photo's blue LEDs (Studio White)
+    meter.useNativeLayers (true);       // (its lit bars: layers the graphics card moves, on a Mac)
 
     if (! isMaster() && ! isVca())
     {
@@ -1886,6 +1887,32 @@ void ChannelStrip::pushGainReduction (float db)
     }
 }
 
+float MixerPanel::whenHeard (const juce::String& owner, float reported, double leadSeconds)
+{
+    auto& r = reportedReductions[owner];
+    if (leadSeconds <= 0.0)
+    {
+        r.waiting.clear();
+        return r.shown = reported;
+    }
+    const auto now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    r.waiting.emplace_back (now + leadSeconds, reported);
+    // (what's due now: the most of it - between frames the meter keeps what it showed)
+    bool due = false;
+    float most = 0.0f;
+    while (! r.waiting.empty() && r.waiting.front().first <= now)
+    {
+        most = juce::jmax (most, r.waiting.front().second);
+        r.waiting.pop_front();
+        due = true;
+    }
+    while (r.waiting.size() > 600)
+        r.waiting.pop_front();
+    if (due)
+        r.shown = most;
+    return r.shown;
+}
+
 void ChannelStrip::showInputMenu()
 {
     if (isMaster() || isVca())
@@ -3210,7 +3237,8 @@ void MixerPanel::update()
         for (const auto& insert : model::insertsOf (chain != chains.end() ? chain->second : juce::ValueTree()))
             if (! (bool) insert[ids::bypass])
                 gr = juce::jmax (gr, effects.takeGainReduction (insert[ids::id].toString()));
-        return reductions[owner] = gr;
+        const auto lead = owner == model::masterOwner ? 0.0 : engine.reportLeadSeconds (player.slotOf (owner));
+        return reductions[owner] = whenHeard (owner, gr, lead);
     };
 
     const auto playhead = engine.getPlayheadSeconds();

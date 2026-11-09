@@ -489,6 +489,7 @@ private:
     std::unique_ptr<juce::FileChooser> fileChooser;
     juce::ScopedMessageBox messageBox;
     double lastPaintedPlayhead = -1.0;
+    riff::layers::PlayheadLine playheadLayer { canvas };
 
     // Settings kept between sessions (not part of any project).
     juce::ApplicationProperties appProperties;

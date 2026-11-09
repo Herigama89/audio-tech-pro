@@ -1261,6 +1261,8 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
 
     bool liveMidiPending = ! liveMidi.isEmpty();
     int offset = 0;
+    if (! ahead && aheadLeadSeconds.load (std::memory_order_relaxed) > 0.0)
+        aheadLeadSeconds.store (0.0, std::memory_order_relaxed);   // (all live again: plugins' meters as they report)
 
     while (offset < numSamples)
     {
@@ -1286,9 +1288,16 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
             aheadPrefetching = false;
             n = juce::jmin (n, chunk->n - chunk->read);
             if (chunk->read == 0)
+            {
                 for (size_t k = 0; k < chunk->peaks.size(); ++k)   // (its tracks' levels, now that it's heard)
                     if (chunk->peaks[k] > 0.0f)
                         storeMax (trackPeaks[k], chunk->peaks[k]);
+                // (which tracks came from it, and how far ahead its thread is: their plugins' meters wait that long)
+                for (size_t t = 0; t < slotRenderedAhead.size(); ++t)
+                    slotRenderedAhead[t].store (chunk->peaks[2 * t] > 0.0f || chunk->peaks[2 * t + 1] > 0.0f, std::memory_order_relaxed);
+                const auto queued = aheadWritten.load (std::memory_order_relaxed) - aheadRead.load (std::memory_order_relaxed);
+                aheadLeadSeconds.store ((double) queued * (double) chunk->n / juce::jmax (1.0, rateNow), std::memory_order_relaxed);
+            }
             playheadSample.store (chunk->playing ? chunk->position + chunk->read : chunk->position);   // (stopped: it stays put)
             isPlayingNow = chunk->playing;
         }

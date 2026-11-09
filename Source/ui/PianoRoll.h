@@ -5,6 +5,7 @@
 #include "NoteViews.h"
 #include "PlayerEditor.h"
 #include "NoteToolIcons.h"
+#include "NativeLayers.h"
 
 namespace riff
 {
@@ -136,6 +137,8 @@ public:
     void playheadMoved();
 private:
     float shownPlayheadX = -1.0e6f;
+    riff::layers::PlayheadLine playheadLayer { *this };
+    bool playheadAsLayer = false;
     double xToContent (float x) const;
     int yToPitch (int y) const;
     int pitchToY (int pitch) const;

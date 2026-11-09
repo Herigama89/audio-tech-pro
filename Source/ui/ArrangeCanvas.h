@@ -137,6 +137,9 @@ private:
     void addStretchMenu (juce::PopupMenu& menu, juce::ValueTree region);
 
 public:
+    /** The playhead is a layer over the window (macOS): not drawn here. */
+    bool playheadAsLayer = false;
+
     /** Region commands the window's menus and keys run too. */
     std::function<void()> onSplit, onDelete, onRepeat, onJoin, onMuteRegions;
 

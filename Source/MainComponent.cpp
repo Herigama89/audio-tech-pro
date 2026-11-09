@@ -545,6 +545,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     };
    #if RIFF_GPU_DRAWING
     setGpuDrawing (appProperties.getUserSettings()->getBoolValue ("gpuDrawing", true));
+    riff::layers::setEnabled (appProperties.getUserSettings()->getBoolValue ("layerMeters", true));
    #endif
     engine.setSuspendWhenSilent (appProperties.getUserSettings()->getBoolValue ("suspendPlugins", true));
     eco::mode = juce::jlimit (0, 2, appProperties.getUserSettings()->getIntValue ("ecoMode", 0));
@@ -2723,7 +2724,27 @@ void MainComponent::screenFrame()
 
 void MainComponent::movePlayhead (bool drawFrame, double playhead)
 {
-    if (drawFrame && ! juce::exactlyEqual (playhead, lastPaintedPlayhead))
+    if (! drawFrame)
+        return;
+    // As a layer over the window (macOS, as Logic): the graphics card moves the line, the tracks aren't drawn again.
+    // (While recording the canvas is drawn anyway - the new region grows.)
+    const bool layered = ! engine.isRecording()
+                      && playheadLayer.place (canvas.getLocalBounds().toFloat(), timeline.timeToX (playhead), true);
+    if (! layered)
+        playheadLayer.hide();
+    if (layered != canvas.playheadAsLayer)
+    {
+        canvas.playheadAsLayer = layered;
+        canvas.repaint();
+    }
+    if (layered)
+    {
+        lastPaintedPlayhead = playhead;
+        if (pianoRoll.isShowing())
+            pianoRoll.playheadMoved();
+        return;
+    }
+    if (! juce::exactlyEqual (playhead, lastPaintedPlayhead))
     {
         // Only the strips where the playhead was and is now are drawn again (not every track and region).
         const auto oldX = juce::roundToInt (timeline.timeToX (lastPaintedPlayhead)), newX = juce::roundToInt (timeline.timeToX (playhead));

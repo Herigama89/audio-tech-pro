@@ -867,8 +867,11 @@ void PianoRoll::paint (juce::Graphics& g)
 
         // Playhead
         const auto playX = contentToX (engine.getShownPlayheadSeconds() - regionStart + offset);
-        g.setColour (juce::Colours::white);
-        g.fillRect (playX - 0.5f, (float) area.getY(), 1.5f, (float) area.getHeight());
+        if (! playheadAsLayer)
+        {
+            g.setColour (juce::Colours::white);
+            g.fillRect (playX - 0.5f, (float) area.getY(), 1.5f, (float) area.getHeight());
+        }
     }
 
     if (! rubberBand.isEmpty())
@@ -1691,9 +1694,21 @@ void PianoRoll::playheadMoved()
         return;
     const double regionStart = region[ids::start], offset = region[ids::offset];
     const auto x = contentToX (engine.getShownPlayheadSeconds() - regionStart + offset);
+    const auto area = gridArea();
+    // As a layer (macOS): the graphics card moves it, nothing here is drawn again
+    const bool layered = playheadLayer.place (area.toFloat(), x, false);
+    if (layered != playheadAsLayer)
+    {
+        playheadAsLayer = layered;
+        repaint (area);
+    }
+    if (layered)
+    {
+        shownPlayheadX = x;
+        return;
+    }
     if (std::abs (x - shownPlayheadX) < 0.25f)
         return;
-    const auto area = gridArea();
     for (const auto at : { shownPlayheadX, x })
         if (at > (float) area.getX() - 4.0f && at < (float) area.getRight() + 4.0f)
             repaint (juce::roundToInt (at) - 3, area.getY(), 7, area.getHeight());

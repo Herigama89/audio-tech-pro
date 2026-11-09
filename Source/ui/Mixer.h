@@ -1,5 +1,7 @@
 #pragma once
 
+#include <deque>
+
 #include <JuceHeader.h>
 #include "ParameterNames.h"
 #include <set>
@@ -458,6 +460,11 @@ private:
     void screenFrame();
     std::unique_ptr<juce::VBlankAttachment> screenFrames;
     double lastScreenFrameMs = 0.0, lastMeterFrameMs = 0.0;
+    /** Gain reductions as their plugins reported them, kept until the audio they're for is heard (a track rendered
+        ahead reports up to the whole lookahead early: its compression meter ran ahead of the music). */
+    struct Reported { std::deque<std::pair<double, float>> waiting; float shown = 0.0f; };
+    std::map<juce::String, Reported> reportedReductions;
+    float whenHeard (const juce::String& owner, float reported, double leadSeconds);
     void rebuild();
 
     juce::UndoManager& undoManager;

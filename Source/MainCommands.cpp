@@ -104,6 +104,12 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case commands::toggleSuspendPlugins: info.setTicked (engine.getSuspendWhenSilent()); break;
         case commands::compareBypass:   info.setTicked (engine.getCompare()); break;
         case commands::toggleEco:       info.setTicked (eco::active()); break;
+        case commands::toggleLayerMeters:
+            info.setTicked (riff::layers::available());
+           #if ! JUCE_MAC
+            info.setActive (false);
+           #endif
+            break;
         case commands::toggleMidiMerge: info.setTicked ((bool) project[ids::midiMerge]); break;
         case commands::eventList:       info.setActive (region.isValid() && model::isMidiRegion (region)); break;
 
@@ -293,6 +299,11 @@ bool MainComponent::perform (const InvocationInfo& info)
         case commands::toggleToolbar:          setPanelShown ("viewFunctionToolbar", showToolbarRow, ! showToolbarRow); break;
         case commands::toggleStatusBar:        setPanelShown ("viewStatusBar", showStatusBar, ! showStatusBar); break;
         case commands::toggleMeters:           setPanelShown ("viewMeters", showMeters, ! showMeters); break;
+        case commands::toggleLayerMeters:
+            appProperties.getUserSettings()->setValue ("layerMeters", ! riff::layers::available());
+            riff::layers::setEnabled (! riff::layers::available());
+            repaint();
+            break;
         case commands::toggleGpuDrawing:
             appProperties.getUserSettings()->setValue ("gpuDrawing", ! gpuDrawing);
             setGpuDrawing (! gpuDrawing);
@@ -555,7 +566,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             // As in Logic: show or hide each panel of the main window.
             add ({ commands::toggleControlBar, commands::toggleToolbar, commands::toggleInspector, commands::showSmartControls,
                    commands::showLibrary, commands::showMixer, commands::showPianoRoll, commands::showLoopBrowser,
-                   commands::toggleTrackHeaders, commands::toggleHeaderInserts, commands::toggleHeaderIO, commands::toggleMeters, commands::toggleStatusBar, commands::toggleGpuDrawing, commands::toggleEco });
+                   commands::toggleTrackHeaders, commands::toggleHeaderInserts, commands::toggleHeaderIO, commands::toggleMeters, commands::toggleStatusBar, commands::toggleGpuDrawing, commands::toggleLayerMeters, commands::toggleEco });
             menu.addSeparator();
             add ({ commands::showAllPanels, commands::hideAllPanels });
             menu.addSeparator();

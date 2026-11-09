@@ -255,7 +255,7 @@ void ArrangeCanvas::paint (juce::Graphics& g)
 
     // Playhead
     const auto px = timeline.timeToX (engine.getShownPlayheadSeconds());
-    if (px >= 0.0f && px <= (float) getWidth())
+    if (! playheadAsLayer && px >= 0.0f && px <= (float) getWidth())
     {
         g.setColour (juce::Colours::white);
         g.fillRect (px - 0.5f, 0.0f, 1.5f, (float) getHeight());
