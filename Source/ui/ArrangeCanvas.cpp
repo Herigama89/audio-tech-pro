@@ -1,3 +1,4 @@
+#include "Profile.h"
 #include "ArrangeCanvas.h"
 #include "../import/ProjectImport.h"
 #include "Commands.h"
@@ -90,6 +91,7 @@ double ArrangeCanvas::snap (double t) const
 //==============================================================================
 void ArrangeCanvas::paint (juce::Graphics& g)
 {
+    RIFF_PROFILE ("Tracks area");
     g.fillAll (theme::background);
 
     const int numTracks = model::numTracks (project);
@@ -252,7 +254,7 @@ void ArrangeCanvas::paint (juce::Graphics& g)
     paintRuler (g);
 
     // Playhead
-    const auto px = timeline.timeToX (engine.getPlayheadSeconds());
+    const auto px = timeline.timeToX (engine.getShownPlayheadSeconds());
     if (px >= 0.0f && px <= (float) getWidth())
     {
         g.setColour (juce::Colours::white);

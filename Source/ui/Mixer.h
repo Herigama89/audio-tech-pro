@@ -454,6 +454,10 @@ private:
 
     void handleAsyncUpdate() override;
     void timerCallback() override;
+    void update();
+    void screenFrame();
+    std::unique_ptr<juce::VBlankAttachment> screenFrames;
+    double lastScreenFrameMs = 0.0, lastMeterFrameMs = 0.0;
     void rebuild();
 
     juce::UndoManager& undoManager;

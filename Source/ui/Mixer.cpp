@@ -1,3 +1,4 @@
+#include "Profile.h"
 #include "Mixer.h"
 #include "Eco.h"
 #include "InsertBar.h"
@@ -1450,6 +1451,7 @@ void ChannelStrip::itemDropped (const SourceDetails& details)
 
 void ChannelStrip::paintOverChildren (juce::Graphics& g)
 {
+    RIFF_PROFILE ("Mixer strip (over)");
     // The input clipped at the preamp: a red frame round its gain
     if (preampClipped && preampGain.isVisible())
     {
@@ -1547,6 +1549,7 @@ juce::Rectangle<int> ChannelStrip::faderArea() const
 
 void ChannelStrip::paint (juce::Graphics& g)
 {
+    RIFF_PROFILE ("Mixer strip");
     // The face, from its picture: made again only when something printed on it changes (or its size, the theme,
     // the screen's scale). A meter moving redraws just its own corner of the picture - in narrow mode too.
     // Only a meter (or the gain-reduction LEDs) being redrawn: they cover themselves completely - nothing to do here
@@ -2556,6 +2559,7 @@ void MasterBusCompressorPanel::updateMeter()
 
 void MasterBusCompressorPanel::paint (juce::Graphics& g)
 {
+    RIFF_PROFILE ("Bus compressor");
     auto bounds = getLocalBounds();
 
     // The centre section: the picture's black panel.
@@ -2828,6 +2832,7 @@ MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p,
     addAndMakeVisible (outer);
 
     startTimerHz (30);
+    screenFrames = std::make_unique<juce::VBlankAttachment> (this, [this] { screenFrame(); });
 }
 
 MixerPanel::~MixerPanel()
@@ -3139,6 +3144,27 @@ void MixerPanel::rebuild()
 
 void MixerPanel::timerCallback()
 {
+    // (the screen's frames drive the meters while the mixer's on screen; this keeps the Inspector's strips going otherwise)
+    if (juce::Time::getMillisecondCounterHiRes() - lastScreenFrameMs < 250.0)
+        return;
+    update();
+}
+
+void MixerPanel::screenFrame()
+{
+    // The meters move in step with the screen: every other frame at 60 Hz (every 4th at 120) - evenly 30 times a
+    // second, never two updates in one frame and none in the next (the stutter a free-running timer gives)
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    lastScreenFrameMs = now;
+    if (now - lastMeterFrameMs < 1000.0 / 30.0 - 5.0)
+        return;
+    lastMeterFrameMs = now;
+    update();
+}
+
+void MixerPanel::update()
+{
+    RIFF_PROFILE ("Mixer update");
     // Eco mode: the meters 15 times a second (the levels in between are kept: a peak isn't missed), and not at all
     // while the app isn't in front
     if (eco::skipFrame (ecoFrame))
@@ -3255,6 +3281,7 @@ void MixerPanel::setMasterLevels (float left, float right)
 
 void MixerPanel::paint (juce::Graphics& g)
 {
+    RIFF_PROFILE ("Mixer background");
     const auto frame = theme::glassSkin() ? theme::console : theme::whiteSkin() ? theme::consoleDark : juce::Colour (0xff2b2a2d);   // the console's frame, behind the strips
     if (theme::xenonSkin())
     {

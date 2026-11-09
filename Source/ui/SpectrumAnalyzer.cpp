@@ -1,3 +1,4 @@
+#include "Profile.h"
 #include "SpectrumAnalyzer.h"
 #include "Eco.h"
 #include "Theme.h"
@@ -120,6 +121,7 @@ std::vector<float> SpectrumAnalyzer::analyse (const float* samples, int numSampl
 
 void SpectrumAnalyzer::timerCallback()
 {
+    RIFF_PROFILE ("Analyzer update");
     // (each analyser its own count: shared, two would starve each other in Eco mode)
     if (eco::skipFrame (ecoFrame))
         return;   // (Eco mode: 15 a second; nothing while the app isn't in front)
@@ -178,6 +180,7 @@ void SpectrumAnalyzer::timerCallback()
 
 void SpectrumAnalyzer::paint (juce::Graphics& g)
 {
+    RIFF_PROFILE ("Analyzer");
     if (! options.enabled)
         return;
     const auto area = getLocalBounds().toFloat();

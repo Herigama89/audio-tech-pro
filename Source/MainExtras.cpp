@@ -1,4 +1,5 @@
 // Undo History, Settings, templates, project alternatives, Autopunch and the Event List.
+#include "ui/Profile.h"
 #include "ui/Eco.h"
 #include "MainComponent.h"
 #include "engine/AudioEdit.h"
@@ -1311,6 +1312,14 @@ void MainComponent::updatePerformance()
     }
     else
         r.device = "No audio device open";
+    if (now - lastProfileTake > 1000.0)
+    {
+        uiParts.clear();
+        for (const auto& [name, e] : profile::take ((now - lastProfileTake) / 1000.0))
+            uiParts.push_back ({ name, (float) e.ms, e.calls });
+        lastProfileTake = now;
+    }
+    r.uiParts = uiParts;
     r.uiFps = uiGapAverage > 0.0f ? 1000.0f / uiGapAverage : 0.0f;
     r.uiWorstMs = uiWorstGap;
     r.drawing = gpuDrawing ? "the graphics card" : "the system";

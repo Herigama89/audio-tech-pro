@@ -3,6 +3,7 @@
 #include "Theme.h"
 #include "Skin.h"
 #include "Pictures.h"
+#include "Profile.h"
 
 namespace riff
 {
@@ -177,6 +178,7 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        RIFF_PROFILE ("Level meters");
         auto area = getLocalBounds();
 
         if (label.isNotEmpty())

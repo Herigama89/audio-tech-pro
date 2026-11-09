@@ -1,3 +1,4 @@
+#include "Profile.h"
 #include "InstrumentWindows.h"
 #include "Eco.h"
 #include "ControlMenu.h"
@@ -796,6 +797,7 @@ void EffectPanel::updateSpectrum()
 
 void EffectPanel::timerCallback()
 {
+    RIFF_PROFILE ("Plugin windows update");
     if (eco::skipFrame (ecoFrame))
         return;   // (Eco mode: its meters 15 times a second; still while the app isn't in front)
     if (meterSource != nullptr && design != nullptr && design->meters)
@@ -901,6 +903,7 @@ void EffectPanel::refresh()
 
 void EffectPanel::paint (juce::Graphics& g)
 {
+    RIFF_PROFILE ("Plugin windows");
     const auto* info = findBuiltInEffect (insert[ids::effect].toString());
     const auto accent = look->accent;
     if (design != nullptr && info != nullptr)

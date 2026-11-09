@@ -1,3 +1,4 @@
+#include "ui/Profile.h"
 #include "ui/Eco.h"
 #include "ui/NemixPanel.h"
 #include "ui/InsertBar.h"
@@ -818,6 +819,7 @@ MainComponent::MainComponent (bool openAudioDevice)
         return names;
     };
     startTimerHz (30);
+    screenFrames = std::make_unique<juce::VBlankAttachment> (this, [this] { screenFrame(); });
 
     juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<ArrangeCanvas> (&canvas)]
     {
@@ -1005,6 +1007,7 @@ void MainComponent::setCompare (bool on)
 
 void MainComponent::paint (juce::Graphics& g)
 {
+    RIFF_PROFILE ("Window background");
     g.fillAll (theme::background);
 
     // The bar over the tracks
@@ -2580,6 +2583,7 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 
 void MainComponent::timerCallback()
 {
+    RIFF_PROFILE ("Main update");
     updateLiveMidiTrack();
     updatePerformance();
     updateQuickHelp();
@@ -2700,6 +2704,25 @@ void MainComponent::timerCallback()
         }
     }
 
+    // (no screen-frame callbacks lately - the window hidden, say: the playhead moves with this update instead)
+    if (juce::Time::getMillisecondCounterHiRes() - lastScreenFrameMs > 250.0)
+        movePlayhead (drawFrame, offline ? playhead : engine.updateShownPlayhead());
+}
+
+void MainComponent::screenFrame()
+{
+    // Each frame the screen shows (60 or 120 a second, in step with it): the playhead moved on, smoothly
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    if (eco::active() && now - lastScreenFrameMs < 30.0)
+        return;   // (Eco mode: 30 a second is plenty)
+    lastScreenFrameMs = now;
+    if (engine.isRenderingOffline())
+        return;
+    movePlayhead (true, engine.updateShownPlayhead());
+}
+
+void MainComponent::movePlayhead (bool drawFrame, double playhead)
+{
     if (drawFrame && ! juce::exactlyEqual (playhead, lastPaintedPlayhead))
     {
         // Only the strips where the playhead was and is now are drawn again (not every track and region).

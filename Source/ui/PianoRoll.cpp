@@ -1,3 +1,4 @@
+#include "Profile.h"
 #include "PianoRoll.h"
 #include "Theme.h"
 #include "../model/Project.h"
@@ -709,6 +710,7 @@ void PianoRoll::resized()
 
 void PianoRoll::paint (juce::Graphics& g)
 {
+    RIFF_PROFILE ("Piano roll");
     g.fillAll (theme::background);
 
     g.setColour (theme::toolbar);
@@ -864,7 +866,7 @@ void PianoRoll::paint (juce::Graphics& g)
         }
 
         // Playhead
-        const auto playX = contentToX (engine.getPlayheadSeconds() - regionStart + offset);
+        const auto playX = contentToX (engine.getShownPlayheadSeconds() - regionStart + offset);
         g.setColour (juce::Colours::white);
         g.fillRect (playX - 0.5f, (float) area.getY(), 1.5f, (float) area.getHeight());
     }
@@ -1688,7 +1690,7 @@ void PianoRoll::playheadMoved()
     if (! region.isValid())
         return;
     const double regionStart = region[ids::start], offset = region[ids::offset];
-    const auto x = contentToX (engine.getPlayheadSeconds() - regionStart + offset);
+    const auto x = contentToX (engine.getShownPlayheadSeconds() - regionStart + offset);
     if (std::abs (x - shownPlayheadX) < 0.25f)
         return;
     const auto area = gridArea();

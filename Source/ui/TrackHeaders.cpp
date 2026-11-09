@@ -1,3 +1,4 @@
+#include "Profile.h"
 #include "TrackHeaders.h"
 #include "Theme.h"
 #include "ConsoleLook.h"
@@ -248,6 +249,7 @@ void TrackHeader::followAutomation (double time)
 
 void TrackHeader::paint (juce::Graphics& g)
 {
+    RIFF_PROFILE ("Track headers");
     updateIO();   // (the input or output may have changed)
     const bool selected = timeline.isTrackSelected (track[ids::id].toString());
     auto area = getLocalBounds();
@@ -1087,6 +1089,7 @@ int HeaderInserts::slotAt (int y) const
 
 void HeaderInserts::paint (juce::Graphics& g)
 {
+    RIFF_PROFILE ("Track header inserts");
     const auto c = chain();
     const auto count = juce::jlimit (1, maxSlots, getHeight() / slotHeight);
     for (int i = 0; i < count; ++i)

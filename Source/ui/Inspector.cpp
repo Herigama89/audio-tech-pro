@@ -1,3 +1,4 @@
+#include "Profile.h"
 #include "Inspector.h"
 #include "TrackIcons.h"
 #include "Theme.h"
@@ -498,6 +499,7 @@ int Inspector::boxesHeight() const
 
 void Inspector::paint (juce::Graphics& g)
 {
+    RIFF_PROFILE ("Inspector");
     g.fillAll (theme::whiteSkin() ? theme::consoleShade : juce::Colour (0xff2b2a2d));
 
     auto header = getLocalBounds().removeFromTop (headerHeight);

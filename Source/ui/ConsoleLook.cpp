@@ -1,3 +1,4 @@
+#include "Profile.h"
 #include "ConsoleLook.h"
 #include "Theme.h"
 #include "ToolIcons.h"
@@ -460,6 +461,7 @@ namespace look
 
     void drawGlassPanel (juce::Graphics& g, juce::Rectangle<float> area, float corner, bool recessed)
     {
+        RIFF_PROFILE ("Glass panels");
         const auto light = theme::glassLight();
         if (recessed)
         {
@@ -483,6 +485,7 @@ namespace look
     void drawGlassKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
                         juce::Colour ring, bool fromCentre, bool enabled)
     {
+        RIFF_PROFILE ("Glass knobs");
         const auto size = juce::jmin (area.getWidth(), area.getHeight());
         const auto c = area.getCentre();
         const auto outer = size * 0.5f;

@@ -559,6 +559,13 @@ private:
     std::map<juce::String, float> trackLoads;   // smoothed, by track id
     double lastPerformanceMs = 0.0;
     float uiGapAverage = 33.0f, uiWorstGap = 0.0f;
+    double lastProfileTake = 0.0;
+    // The playhead moves with the screen's own frames (as Logic's does), not a timer that drifts against them
+    void screenFrame();
+    void movePlayhead (bool drawFrame, double playhead);
+    double lastScreenFrameMs = 0.0;
+    std::unique_ptr<juce::VBlankAttachment> screenFrames;
+    std::vector<PerformanceReading::UiPart> uiParts;
     void updatePerformance();
     void showPerformanceWindow();
 

@@ -436,6 +436,30 @@ double AudioEngine::getPlayheadSeconds() const noexcept
     return (double) playheadSample.load() / sampleRate.load();
 }
 
+double AudioEngine::updateShownPlayhead() noexcept
+{
+    const auto raw = getPlayheadSeconds();
+    const auto now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    if (! isPlaying())
+    {
+        shownPlayhead = shownFromRaw = raw;
+        shownRawAt = now;
+        return raw;
+    }
+    if (! juce::exactlyEqual (raw, shownFromRaw))
+    {
+        shownFromRaw = raw;
+        shownRawAt = now;
+    }
+    // On from the audio's last step by the time since (never more than a moment: if the audio stalls, so does this)
+    const auto estimate = shownFromRaw + juce::jmin (now - shownRawAt, 0.08);
+    if (std::abs (estimate - shownPlayhead) > 0.25)
+        shownPlayhead = estimate;                                // a jump: located, or round the cycle
+    else
+        shownPlayhead = juce::jmax (shownPlayhead, estimate);    // (never a step back: that's a judder too)
+    return shownPlayhead;
+}
+
 void AudioEngine::setPlayheadSeconds (double seconds) noexcept
 {
     const auto at = (juce::int64) std::llround (juce::jmax (0.0, seconds) * sampleRate.load());

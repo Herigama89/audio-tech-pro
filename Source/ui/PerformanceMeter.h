@@ -18,6 +18,8 @@ struct PerformanceReading
     float uiFps = 0.0f;      // how often the window gets its turn (its updates, 30 a second when all's well)
     float uiWorstMs = 0.0f;  // the longest the window was held up in the last couple of seconds (a stutter)
     juce::String drawing;    // "graphics card" or "the system"
+    struct UiPart { juce::String name; float msPerSecond = 0.0f; int timesPerSecond = 0; };
+    std::vector<UiPart> uiParts;   // where the window's time goes (the heaviest first)
     struct TrackLoad { juce::String name; float load = 0.0f; };
     std::vector<TrackLoad> tracks;   // the heaviest first
 };
@@ -121,6 +123,16 @@ public:
         g.drawText ("Screen: " + juce::String (juce::roundToInt (reading.uiFps)) + " updates/s, longest hold-up "
                         + juce::String (juce::roundToInt (reading.uiWorstMs)) + " ms (drawn by " + reading.drawing + ")",
                     r.removeFromTop (18), juce::Justification::centredLeft, true);
+        // Where the window's time goes, each second (a screenshot of this tells what's slow on this computer)
+        g.setColour (theme::dimText);
+        int shown = 0;
+        for (const auto& part : reading.uiParts)
+        {
+            if (shown++ >= 8 || part.msPerSecond < 0.5f)
+                break;
+            g.drawText ("   " + part.name + ": " + juce::String (part.msPerSecond, 1) + " ms/s (" + juce::String (part.timesPerSecond) + "x)",
+                        r.removeFromTop (16), juce::Justification::centredLeft, true);
+        }
         r.removeFromTop (8);
 
         auto bar = [&] (const juce::String& name, float value, float peakValue, juce::Rectangle<int> row)

@@ -1,3 +1,4 @@
+#include "Profile.h"
 #include "ConsoleStripWindow.h"
 #include "Eco.h"
 #include "Theme.h"
@@ -521,6 +522,7 @@ void ConsoleStripWindow::refresh()
 
 void ConsoleStripWindow::timerCallback()
 {
+    RIFF_PROFILE ("Channel strip window update");
     // (each window its own count: shared, two windows would starve each other in Eco mode)
     if (eco::skipFrame (ecoFrame))
         return;   // (Eco mode)
@@ -683,6 +685,7 @@ void ConsoleStripWindow::paintGlass (juce::Graphics& g)
 
 void ConsoleStripWindow::paint (juce::Graphics& g)
 {
+    RIFF_PROFILE ("Channel strip window");
     if (theme::glassSkin())
     {
         paintGlass (g);

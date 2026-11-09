@@ -1,3 +1,4 @@
+#include "Profile.h"
 #include "../engine/BandAnalysis.h"
 #include "MultiMeter.h"
 #include "Theme.h"
@@ -156,6 +157,7 @@ void MultiMeterPanel::showGoniometer (bool gonio)
 
 void MultiMeterPanel::timerCallback()
 {
+    RIFF_PROFILE ("MultiMeter update");
     const auto rate = engine.getSampleRate() > 0.0 ? engine.getSampleRate() : 48000.0;
     if (std::abs (rate - preparedRate) > 0.5)
     {
@@ -345,6 +347,7 @@ void MultiMeterPanel::paintOverChildren (juce::Graphics&)
 
 void MultiMeterPanel::paint (juce::Graphics& g)
 {
+    RIFF_PROFILE ("MultiMeter");
     // In the MultiMeter's own theme, when it has one (Themes > Theme for: MultiMeter), until paintOverChildren
     theme::enterArea (theme::Area::meter);
     entered = true;

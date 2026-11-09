@@ -81,6 +81,11 @@ public:
     /** True while an export or a mix measurement renders the song offline. */
     bool isRenderingOffline() const noexcept  { return bouncing.load(); }
     double getPlayheadSeconds() const noexcept;
+    /** Message thread: the playhead for drawing - moving on smoothly between the audio's steps (it only moves a whole
+        buffer at a time, 10-20 ms, which the eye sees as a stutter), as Logic's does. Call once a screen frame. */
+    double updateShownPlayhead() noexcept;
+    /** What updateShownPlayhead last worked out (for painting, so a frame draws one position everywhere). */
+    double getShownPlayheadSeconds() const noexcept { return isPlaying() ? shownPlayhead : getPlayheadSeconds(); }
     void setPlayheadSeconds (double seconds) noexcept;
 
     /** Like setPlayheadSeconds but allows negative times, for a count-in before bar 1. */
@@ -643,6 +648,7 @@ private:
     std::atomic<bool> masterTapOn { false };
     juce::AbstractFifo masterFifo { 65536 };
     std::vector<float> masterTapL = std::vector<float> (65536, 0.0f), masterTapR = std::vector<float> (65536, 0.0f);
+    double shownPlayhead = 0.0, shownFromRaw = -1.0, shownRawAt = 0.0;
     std::atomic<int> stripTapSlot { -1 };
     juce::AbstractFifo stripTapFifo { 65536 };
     std::vector<float> stripTapL = std::vector<float> (65536, 0.0f), stripTapR = std::vector<float> (65536, 0.0f);
