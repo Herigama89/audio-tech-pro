@@ -162,9 +162,6 @@ endif()
 # Audio Units exist only on macOS.
 if(APPLE)
     list(APPEND RIFF_DEFINITIONS JUCE_PLUGINHOST_AU=1)
-    # Each changed part of the window drawn on its own (JUCE's Metal-layer path): without it macOS merges a frame's
-    # changes - the mixer's meters, the clock, the playhead - into one rectangle round them all, most of the window
-    list(APPEND RIFF_DEFINITIONS JUCE_COREGRAPHICS_RENDER_WITH_MULTIPLE_PAINT_CALLS=1)
 endif()
 
 if(RIFF_ARA)

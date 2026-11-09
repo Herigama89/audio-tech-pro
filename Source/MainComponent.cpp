@@ -543,10 +543,7 @@ MainComponent::MainComponent (bool openAudioDevice)
         appProperties.getUserSettings()->setValue ("meterRelease", (double) LevelMeter::ballistics().release);
     };
    #if RIFF_GPU_DRAWING
-    // (drawn by macOS by default: JUCE's graphics-card renderer works out every rounded shape, gradient and letter
-    // on the processor first and then sends it over - slower for a window as full of them as the Liquid Glass one,
-    // and it holds the window up while it draws. View > Draw with the Graphics Card still turns it on.)
-    setGpuDrawing (appProperties.getUserSettings()->getBoolValue ("gpuDrawing2", false));
+    setGpuDrawing (appProperties.getUserSettings()->getBoolValue ("gpuDrawing", true));
    #endif
     engine.setSuspendWhenSilent (appProperties.getUserSettings()->getBoolValue ("suspendPlugins", true));
     eco::mode = juce::jlimit (0, 2, appProperties.getUserSettings()->getIntValue ("ecoMode", 0));
