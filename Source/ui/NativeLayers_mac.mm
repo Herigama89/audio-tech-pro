@@ -1,8 +1,11 @@
 // Core Animation layers over JUCE windows (see NativeLayers.h). Manual retain/release (not compiled with ARC).
+// (JUCE first: its OpenGL header must come before the system's; without its namespace opened, so the system's
+// own Point and Rect don't clash with JUCE's)
+#define DONT_SET_USING_JUCE_NAMESPACE 1
+#include "NativeLayers.h"
+
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
-
-#include "NativeLayers.h"
 
 #include <cstring>
 #include <map>
