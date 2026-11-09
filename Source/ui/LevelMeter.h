@@ -32,11 +32,17 @@ namespace repaintbatch
             return;
         }
         const auto inRoot = root->getLocalArea (&c, area.toFloat()).getSmallestIntegerContainer();
+        // Joined only with an area in the same row (the meters with the meters, the VUs up top with the VUs): one
+        // area round a VU at the top and a meter at the bottom would be the whole strip, knobs and all
         for (auto& [r, a] : pending)
             if (r.getComponent() == root)
             {
-                a = a.getUnion (inRoot);
-                return;
+                const auto overlap = juce::jmin (a.getBottom(), inRoot.getBottom()) - juce::jmax (a.getY(), inRoot.getY());
+                if (overlap >= juce::jmin (a.getHeight(), inRoot.getHeight()) / 2)
+                {
+                    a = a.getUnion (inRoot);
+                    return;
+                }
             }
         pending.emplace_back (root, inRoot);
     }

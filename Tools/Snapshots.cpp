@@ -51,6 +51,7 @@
 #include "engine/AudioEngine.h"
 #include "ui/ConsoleLook.h"
 
+extern void (*juceRepaintProbe) (juce::Component&, juce::Rectangle<int>);
 namespace riff
 {
 
@@ -623,6 +624,91 @@ public:
     }
 
     /** Where the time goes as a song grows (for the lag with many channels and plug-ins). */
+    /** What the window redraws on its own, mixer open, nothing playing: every repaint asked for in 3 s, by component. */
+    int idleOnly()
+    {
+        out.createDirectory();
+        audioFolder = out.getChildFile ("demo-audio");
+        audioFolder.createDirectory();
+        MainComponent main (false);
+        main.setSize (2560, 1440);
+        main.setVisible (true);
+        buildDemoProject (main);
+        const auto file = makeAudio ("idle", 20.0, 220.0f, 1.0f, 99);
+        for (int t = 0; t < 24; ++t)
+        {
+            auto track = model::addTrack (main.project, "T" + juce::String (t), nullptr);
+            model::addRegion (track, file, 0.0, 20.0, nullptr);
+            for (auto* type : { "channelEq", "compressor" })
+                model::addBuiltinInsert (model::chainFor (main.project, track[ids::id].toString()), type, -1, nullptr);
+        }
+        main.showMixer();
+        pump (main, 100);
+        static std::map<juce::String, std::pair<int, juce::int64>> counts;
+        juceRepaintProbe = [] (juce::Component& c, juce::Rectangle<int> r)
+        {
+            auto name = juce::String (typeid (c).name());
+            if (auto* p = c.getParentComponent()) name << " in " << typeid (*p).name();
+            auto& [n, area] = counts[name];
+            ++n;
+            area += (juce::int64) r.getWidth() * r.getHeight();
+        };
+        // As if playing: every strip's level and gain reduction moving, 30 times a second
+        struct Mover : juce::Timer
+        {
+            MainComponent& m; juce::Random rnd;
+            explicit Mover (MainComponent& mm) : m (mm) { startTimerHz (30); }
+            void timerCallback() override
+            {
+                const juce::Component::SafePointer<juce::Component> keep;
+                const repaintbatch::Scope batch;
+                for (auto* st : m.mixer.strips) { st->pushLevels (rnd.nextFloat(), rnd.nextFloat()); st->pushGainReduction (rnd.nextFloat() * 8.0f); }
+            }
+        };
+        if (std::getenv ("RIFF_IDLE_PLAY") != nullptr && std::getenv ("RIFF_IDLE_NARROW") != nullptr)
+        {
+            main.mixer.narrowButton.setToggleState (true, juce::sendNotification);
+            main.mixer.resized();
+            pump (main, 20);
+        }
+        std::unique_ptr<Mover> mover;
+        if (std::getenv ("RIFF_IDLE_PLAY") != nullptr)
+            mover = std::make_unique<Mover> (main);
+        static std::vector<std::pair<juce::Component*, juce::Rectangle<int>>> lastRects;
+        const auto t0 = juce::Time::getMillisecondCounterHiRes();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (3000);
+        // One frame's areas, painted as the window would: what a frame costs
+        lastRects.clear();
+        juceRepaintProbe = [] (juce::Component& c, juce::Rectangle<int> r) { lastRects.emplace_back (&c, r); };
+        if (mover != nullptr) mover->timerCallback();
+        juceRepaintProbe = nullptr;
+        mover.reset();
+        {
+            juce::Image canvasImage (juce::Image::ARGB, main.getWidth(), main.getHeight(), true);
+            { juce::Graphics g (canvasImage); main.paintEntireComponent (g, true); }
+            juce::RectangleList<int> region;
+            for (auto& [c, r] : lastRects)
+                if (c->getParentComponent() == nullptr || c->getProperties().contains ("repaintBatchRoot") || dynamic_cast<LevelMeter*> (c) != nullptr)
+                    region.add (main.getLocalArea (c, r.toFloat()).getSmallestIntegerContainer());
+            double total = 0.0;
+            for (const auto& r : region)
+            {
+                const auto a = juce::Time::getMillisecondCounterHiRes();
+                juce::Graphics g (canvasImage);
+                if (g.reduceClipRegion (r)) main.paintEntireComponent (g, true);
+                total += juce::Time::getMillisecondCounterHiRes() - a;
+                std::cout << "  FRAME AREA " << r.toString() << std::endl;
+            }
+            std::cout << "FRAME " << region.getNumRectangles() << " areas, " << juce::String (total, 2) << " ms to paint" << std::endl;
+        }
+        std::cout << "IDLE " << juce::String (juce::Time::getMillisecondCounterHiRes() - t0, 0) << " ms" << std::endl;
+        std::vector<std::pair<juce::String, std::pair<int, juce::int64>>> sorted (counts.begin(), counts.end());
+        std::sort (sorted.begin(), sorted.end(), [] (auto& a, auto& b) { return a.second.second > b.second.second; });
+        for (auto& [name, v] : sorted)
+            std::cout << "  " << v.first << " repaints, " << (v.second / 1000) << " kpx  " << name << std::endl;
+        return 0;
+    }
+
     int perfOnly()
     {
         out.createDirectory();
@@ -2693,6 +2779,12 @@ int main (int argc, char* argv[])
     if (argc > 2 && juce::String (argv[1]) == "stretch")
     {
         const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).stretchOnly();
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        return r;
+    }
+    if (argc > 2 && juce::String (argv[1]) == "idle")
+    {
+        const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).idleOnly();
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         return r;
     }
