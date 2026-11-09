@@ -76,6 +76,12 @@ public:
     /** How every meter's peak marks behave (as Pro Tools' meter options, right-click any meter): how long a peak
         stays (ticks of 1/30 s; -1 for ever, 0 none), and how fast the bars fall back (a factor a tick). */
     struct Ballistics { int holdTicks = 60; float release = 0.85f; };
+
+    /** How many 30ths of a second this update stands for (the mixer updates with the screen, 60 or 30 times a
+        second: the meters fall and hold for the same time either way). */
+    inline static float frameTicks = 1.0f;
+    /** A per-30th-of-a-second easing step, for this update's length. */
+    static float eased (float perTick) noexcept { return 1.0f - std::pow (1.0f - perTick, frameTicks); }
     static Ballistics& ballistics() { static Ballistics b; return b; }
     /** Called when they're changed from a meter's menu (the app keeps them). */
     static inline std::function<void()> onBallisticsChanged;
@@ -96,23 +102,24 @@ public:
         if (left < 1.0e-4f && right < 1.0e-4f && levelL < 1.0e-4f && levelR < 1.0e-4f && clipHold == 0
             && (b.holdTicks < 0 || (peakL < 1.0e-4f && peakR < 1.0e-4f)))
             return;
-        levelL = juce::jmax (left,  levelL * b.release);
-        levelR = juce::jmax (right, levelR * b.release);
+        const auto release = std::pow (b.release, frameTicks);
+        levelL = juce::jmax (left,  levelL * release);
+        levelR = juce::jmax (right, levelR * release);
         if (levelL < 1.0e-4f) levelL = 0.0f;
         if (levelR < 1.0e-4f) levelR = 0.0f;
         const auto wasClipped = clipHold != 0;
         if (juce::jmax (left, right) >= 0.999f)
             clipHold = b.holdTicks < 0 ? -1 : juce::jmax (60, b.holdTicks);   // the clip light: as long as the peaks (2 s at least)
         else if (clipHold > 0)
-            --clipHold;
+            clipHold = juce::jmax (0, clipHold - juce::jmax (1, juce::roundToInt (frameTicks)));
 
         // The peak marks: held, then falling back with the bars
-        auto updatePeak = [&b] (float level, float& peak, int& age)
+        auto updatePeak = [&b, release] (float level, float& peak, float& age)
         {
             if (b.holdTicks == 0) { peak = 0.0f; return; }
-            if (level >= peak) { peak = level; age = 0; return; }
-            if (b.holdTicks < 0 || ++age <= b.holdTicks) return;
-            peak = juce::jmax (level, peak * b.release);
+            if (level >= peak) { peak = level; age = 0.0f; return; }
+            if (b.holdTicks < 0 || (age += frameTicks) <= (float) b.holdTicks) return;
+            peak = juce::jmax (level, peak * release);
             if (peak < 1.0e-4f) peak = 0.0f;
         };
         updatePeak (levelL, peakL, peakAgeL);
@@ -431,7 +438,8 @@ private:
 
     juce::String label;
     bool photoLeds = false;
-    int clipHold = 0, litL = 0, litR = 0, peakSegL = 0, peakSegR = 0, peakAgeL = 0, peakAgeR = 0;
+    int clipHold = 0, litL = 0, litR = 0, peakSegL = 0, peakSegR = 0;
+    float peakAgeL = 0.0f, peakAgeR = 0.0f;
     float levelL = 0, levelR = 0, peakL = 0, peakR = 0;
     static int& resetGeneration() { static int g = 0; return g; }
     int seenReset = 0;

@@ -1869,7 +1869,7 @@ void ChannelStrip::pushGainReduction (float db)
     if (! vuArea.isEmpty() && theme::stripMeterKind() == 1)
     {
         const auto target = juce::jlimit (0.0f, 20.0f, db);
-        const auto next = grNeedle + (target - grNeedle) * (target > grNeedle ? 0.5f : 0.15f);
+        const auto next = grNeedle + (target - grNeedle) * LevelMeter::eased (target > grNeedle ? 0.5f : 0.15f);
         if (std::abs (next - grNeedle) > 0.05f)
         {
             grNeedle = next;
@@ -1878,7 +1878,7 @@ void ChannelStrip::pushGainReduction (float db)
     }
 
     // Instant up, about 300 ms down.
-    const auto next = db >= grShown ? db : grShown * 0.82f;
+    const auto next = db >= grShown ? db : grShown * std::pow (0.82f, LevelMeter::frameTicks);
     if (std::abs (next - grShown) > 0.05f || (next < 0.05f && grShown > 0.0f))
     {
         grShown = next < 0.05f ? 0.0f : next;
@@ -3156,10 +3156,15 @@ void MixerPanel::screenFrame()
     // second, never two updates in one frame and none in the next (the stutter a free-running timer gives)
     const auto now = juce::Time::getMillisecondCounterHiRes();
     lastScreenFrameMs = now;
-    if (now - lastMeterFrameMs < 1000.0 / 30.0 - 5.0)
+    // (every frame up to 60 a second - Logic's meters move with the screen; Eco mode: 30)
+    const auto period = eco::active() ? 1000.0 / 30.0 : 1000.0 / 60.0;
+    if (now - lastMeterFrameMs < period - 4.0)
         return;
+    const auto elapsed = juce::jlimit (1000.0 / 120.0, 100.0, now - lastMeterFrameMs);
     lastMeterFrameMs = now;
+    LevelMeter::frameTicks = (float) (elapsed * 30.0 / 1000.0);
     update();
+    LevelMeter::frameTicks = 1.0f;
 }
 
 void MixerPanel::update()

@@ -464,6 +464,7 @@ private:
         const SlotSet* slots = nullptr;      // just these tracks (nullptr: every track)...
         bool exclude = false;                // ...or every track but these
         std::array<const float*, PlaybackGraph::maxBuses * 2> busPreload {};   // what other passes sent the buses (added first)
+        float* peakSink = nullptr;           // (rendering ahead: the chunk's own track peaks, shown when it's heard)
 
         bool plays (int slot) const noexcept
         {
@@ -501,6 +502,9 @@ private:
         SlotSet live;
         std::array<int, aheadBusCarry> carriedBus {};   // which buses' sends from the ahead tracks it carries (-1: none)
         juce::AudioBuffer<float> audio { 2 + 2 * aheadBusCarry, aheadMaxChunk };   // the mix of the ahead tracks, then each carried bus
+        // each ahead track's peaks in this chunk: shown when the chunk is heard, not when it was worked out (up to
+        // the whole lookahead earlier - the mixer's meters ran ahead of the music)
+        std::array<float, PlaybackGraph::maxTracks * 2> peaks {};
     };
     std::array<AheadChunk, aheadSlots> aheadRing;
     std::atomic<juce::uint64> aheadWritten { 0 }, aheadRead { 0 };
@@ -649,6 +653,7 @@ private:
     juce::AbstractFifo masterFifo { 65536 };
     std::vector<float> masterTapL = std::vector<float> (65536, 0.0f), masterTapR = std::vector<float> (65536, 0.0f);
     double shownPlayhead = 0.0, shownFromRaw = -1.0, shownRawAt = 0.0;
+    std::atomic<double> outputDelaySeconds { 0.0 };
     std::atomic<int> stripTapSlot { -1 };
     juce::AbstractFifo stripTapFifo { 65536 };
     std::vector<float> stripTapL = std::vector<float> (65536, 0.0f), stripTapR = std::vector<float> (65536, 0.0f);

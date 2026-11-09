@@ -452,7 +452,8 @@ double AudioEngine::updateShownPlayhead() noexcept
         shownRawAt = now;
     }
     // On from the audio's last step by the time since (never more than a moment: if the audio stalls, so does this)
-    const auto estimate = shownFromRaw + juce::jmin (now - shownRawAt, 0.08);
+    const auto estimate = juce::jmax (0.0, shownFromRaw + juce::jmin (now - shownRawAt, 0.08)
+                                               - juce::jlimit (0.0, 0.2, outputDelaySeconds.load (std::memory_order_relaxed)));
     if (std::abs (estimate - shownPlayhead) > 0.25)
         shownPlayhead = estimate;                                // a jump: located, or round the cycle
     else
@@ -980,6 +981,9 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 
     // The callback hands over only the outputs that are switched on, packed together: where each one lands
     setActiveOutputs (device->getActiveOutputChannels());
+    // (how long after a block is handed over it's heard: the drawn playhead sits there, as Logic's does)
+    const auto rate = juce::jmax (1.0, device->getCurrentSampleRate());
+    outputDelaySeconds.store ((device->getOutputLatencyInSamples() + device->getCurrentBufferSizeSamples()) / rate);
 }
 
 void AudioEngine::setActiveOutputs (const juce::BigInteger& active)
@@ -1281,6 +1285,10 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
             }
             aheadPrefetching = false;
             n = juce::jmin (n, chunk->n - chunk->read);
+            if (chunk->read == 0)
+                for (size_t k = 0; k < chunk->peaks.size(); ++k)   // (its tracks' levels, now that it's heard)
+                    if (chunk->peaks[k] > 0.0f)
+                        storeMax (trackPeaks[k], chunk->peaks[k]);
             playheadSample.store (chunk->playing ? chunk->position + chunk->read : chunk->position);   // (stopped: it stays put)
             isPlayingNow = chunk->playing;
         }
@@ -2236,8 +2244,17 @@ bool AudioEngine::processTrack (const PlaybackGraph::Track& track, Pass& pass, c
         juce::FloatVectorOperations::copy (slotOutputs.getWritePointer (track.slot * 2 + 1), tR, n);
     }
 
-    storeMax (trackPeaks[(size_t) track.slot * 2], peakL);
-    storeMax (trackPeaks[(size_t) track.slot * 2 + 1], peakR);
+    if (auto* sink = pass.peakSink)
+    {
+        // (rendered ahead: kept with its chunk, to be shown when that's heard)
+        sink[(size_t) track.slot * 2] = juce::jmax (sink[(size_t) track.slot * 2], peakL);
+        sink[(size_t) track.slot * 2 + 1] = juce::jmax (sink[(size_t) track.slot * 2 + 1], peakR);
+    }
+    else
+    {
+        storeMax (trackPeaks[(size_t) track.slot * 2], peakL);
+        storeMax (trackPeaks[(size_t) track.slot * 2 + 1], peakR);
+    }
     return true;
 }
 
@@ -2614,7 +2631,10 @@ void AudioEngine::runAhead (AheadThread& self)
         mainPass.slots = &chunk.live;
         mainPass.exclude = true;
         mainPass.busPreload.fill (nullptr);
+        chunk.peaks.fill (0.0f);
+        mainPass.peakSink = chunk.peaks.data();
         renderChunk (*graph, mainPass, nullptr, 0, 0, chunk.audio.getWritePointer (0), chunk.audio.getWritePointer (1), n, resetNotes, false);
+        mainPass.peakSink = nullptr;
 
         // What the ahead tracks sent the live buses
         for (int k = 0; k < aheadBusCarry; ++k)

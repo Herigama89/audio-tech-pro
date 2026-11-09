@@ -1,3 +1,4 @@
+#include "LevelMeter.h"
 #include "Profile.h"
 #include "ConsoleLook.h"
 #include "Theme.h"
@@ -1186,7 +1187,7 @@ void GainReductionMeter::push (float reductionDb)
 {
     const auto target = juce::jlimit (0.0f, fullScaleDb, reductionDb);
     // Moving-coil ballistics: quick to swing over, slower to fall back.
-    const auto next = needle + (target - needle) * (target > needle ? 0.45f : 0.16f);
+    const auto next = needle + (target - needle) * LevelMeter::eased (target > needle ? 0.45f : 0.16f);
     if (std::abs (next - needle) < 0.03f && std::abs (next - target) < 0.03f)
         return;   // (resting: nothing that moves on screen)
     needle = next;

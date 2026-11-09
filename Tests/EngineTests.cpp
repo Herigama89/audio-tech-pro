@@ -3074,3 +3074,48 @@ TEST_CASE ("Render ahead: an armed track is heard live while the rest plays from
     CHECK_THAT (out.getSample (0, 64), WithinAbs (0.25f * 0.8f, 1.0e-4));
     CHECK_THAT (f.engine.getPlayheadSeconds(), WithinAbs (1.0 + 128.0 / 48000.0, 1.0e-9));
 }
+
+TEST_CASE ("Render ahead: a track's meter moves when its sound is heard, not when it was worked out", "[engine][ahead]")
+{
+    // A track silent for its first second, then loud: rendered ahead, its meter stays down until the callback hands
+    // the loud part to the device - not a lookahead early
+    RoutingFixture f;
+    f.engine.setProcessAhead (1024);
+    f.engine.setAheadWaitForever (true);
+    f.engine.prepare (48000.0, 128);
+    const auto file = f.temp.dir.getChildFile ("late.wav");
+    {
+        juce::AudioBuffer<float> data (2, 96000);
+        data.clear();
+        for (int c = 0; c < 2; ++c)
+            for (int i = 48000; i < 96000; ++i)
+                data.setSample (c, i, 0.5f);
+        std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
+        juce::WavAudioFormat wav;
+        auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (48000.0).withNumChannels (2).withBitsPerSample (32)
+                                                       .withSampleFormat (juce::AudioFormatWriterOptions::SampleFormat::floatingPoint));
+        writer->writeFromAudioSampleBuffer (data, 0, 96000);
+    }
+    auto track = f.audioTrack ("Late", file);
+    f.router.setProject (f.project);
+    f.router.rebuildNow();
+    const auto slot = f.router.slotOf (track[ids::id].toString());
+    f.engine.play();
+    juce::AudioBuffer<float> block (2, 128);
+    int meterAt = -1, heardAt = -1;
+    for (int done = 0; done < 60000; done += 128)
+    {
+        f.engine.render (nullptr, 0, block.getArrayOfWritePointers(), 2, 128);
+        const auto [l, r] = f.engine.takeTrackLevel (slot);
+        if (meterAt < 0 && l > 0.4f)
+            meterAt = done;
+        if (heardAt < 0 && block.getMagnitude (0, 0, 128) > 0.1f)
+            heardAt = done;
+    }
+    REQUIRE (meterAt >= 0);
+    REQUIRE (heardAt >= 0);
+    // (within a chunk of it - the meter takes a chunk's peaks as it starts being heard - not the whole lookahead)
+    INFO ("meter at " << meterAt << ", heard at " << heardAt);
+    CHECK (meterAt >= heardAt - 1024);
+    CHECK (meterAt <= heardAt + 128);
+}

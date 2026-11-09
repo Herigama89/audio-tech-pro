@@ -40,7 +40,7 @@ public:
         {
             // The VU: 0 VU at -18 dBFS, with a needle's sluggish rise and fall
             const auto vu = juce::jlimit (-22.0f, 4.0f, juce::Decibels::gainToDecibels (juce::jmax (left, right), -100.0f) + 18.0f);
-            const auto next = vuNeedle + (vu - vuNeedle) * (vu > vuNeedle ? 0.28f : 0.12f);
+            const auto next = vuNeedle + (vu - vuNeedle) * LevelMeter::eased (vu > vuNeedle ? 0.28f : 0.12f);
             if (std::abs (next - vuNeedle) > 0.1f)
             {
                 vuNeedle = next;
