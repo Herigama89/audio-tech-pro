@@ -133,10 +133,9 @@ namespace
             [w->overlay setWantsLayer: YES];
             [view addSubview: w->overlay positioned: NSWindowAbove relativeTo: nil];
             w->host = view;
-            // Top-left origin inside it, as the components (whichever way up the window's own layers are)
+            // (top-left origin inside it, as the components: AppKit already turns it that way up inside JUCE's
+            // flipped view - flipping it here too put the meters at the top of the window, the playhead at the bottom)
             w->root.geometryFlipped = NO;
-            if (! [w->root contentsAreFlipped])
-                w->root.geometryFlipped = YES;
         }
         else if ([[view subviews] lastObject] != w->overlay)
         {
