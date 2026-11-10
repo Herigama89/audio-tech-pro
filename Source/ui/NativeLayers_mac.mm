@@ -133,9 +133,7 @@ namespace
             [w->overlay setWantsLayer: YES];
             [view addSubview: w->overlay positioned: NSWindowAbove relativeTo: nil];
             w->host = view;
-            // (top-left origin inside it, as the components: AppKit already turns it that way up inside JUCE's
-            // flipped view - flipping it here too put the meters at the top of the window, the playhead at the bottom)
-            w->root.geometryFlipped = NO;
+            // (the way up: below)
         }
         else if ([[view subviews] lastObject] != w->overlay)
         {
@@ -145,6 +143,10 @@ namespace
             [view addSubview: w->overlay positioned: NSWindowAbove relativeTo: nil];
             [w->overlay release];
         }
+        // Top-left origin inside it, as the components. Kept so every frame: left as it was set up, the layers came
+        // out upside down (the meters at the top of the window, the playhead in the mixer)
+        if (! w->root.geometryFlipped)
+            w->root.geometryFlipped = YES;
         if (! NSEqualRects ([w->overlay frame], [view bounds]))
             [w->overlay setFrame: [view bounds]];
         return w.get();
