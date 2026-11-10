@@ -546,6 +546,8 @@ MainComponent::MainComponent (bool openAudioDevice)
    #if RIFF_GPU_DRAWING
     setGpuDrawing (appProperties.getUserSettings()->getBoolValue ("gpuDrawing", true));
     riff::layers::setEnabled (appProperties.getUserSettings()->getBoolValue ("layerMeters", true));
+    inputMeter.useNativeLayers (true);    // (the editor's tall in/out meters too: layers, nothing drawn again)
+    outputMeter.useNativeLayers (true);
    #endif
     engine.setSuspendWhenSilent (appProperties.getUserSettings()->getBoolValue ("suspendPlugins", true));
     eco::mode = juce::jlimit (0, 2, appProperties.getUserSettings()->getIntValue ("ecoMode", 0));
@@ -1368,7 +1370,7 @@ void MainComponent::scrollBarMoved (juce::ScrollBar* bar, double newRangeStart)
     else
         timeline.scrollY = juce::jmax (0, juce::roundToInt (newRangeStart));
 
-    timeline.changed();
+    timeline.viewMoved();
 }
 
 //==============================================================================
@@ -1382,7 +1384,7 @@ void MainComponent::zoomHorizontally (double factor)
     timeline.pixelsPerSecond = juce::jlimit (TimelineState::minPixelsPerSecond, TimelineState::maxPixelsPerSecond,
                                              timeline.pixelsPerSecond * factor);
     timeline.scrollSeconds = juce::jmax (0.0, timeAtX - (double) x / timeline.pixelsPerSecond);
-    timeline.changed();
+    timeline.viewMoved();
 }
 
 //==============================================================================
@@ -2526,6 +2528,11 @@ void MainComponent::valueTreePropertyChanged (juce::ValueTree& tree, const juce:
 
 void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
+    if (source == &timeline && timeline.viewOnly)
+    {
+        updateScrollBars();   // (only scrolled or zoomed: the selection, the editor and the menus are as they were)
+        return;
+    }
     if (source == &timeline)
     {
         mixer.setSelectedTracks (timeline.selectedTrackIds(), timeline.selectedTrackId);   // one selection, as in Logic
@@ -2701,7 +2708,7 @@ void MainComponent::timerCallback()
         if (x > (float) canvas.getWidth() - 20.0f || x < 0.0f)
         {
             timeline.scrollSeconds = juce::jmax (0.0, playhead - 0.05 * canvas.getWidth() / timeline.pixelsPerSecond);
-            timeline.changed();
+            timeline.viewMoved();
         }
     }
 

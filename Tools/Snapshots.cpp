@@ -642,7 +642,9 @@ public:
             for (auto* type : { "channelEq", "compressor" })
                 model::addBuiltinInsert (model::chainFor (main.project, track[ids::id].toString()), type, -1, nullptr);
         }
-        main.showMixer();
+        const bool editorOnly = std::getenv ("RIFF_IDLE_EDITOR") != nullptr;
+        if (! editorOnly)
+            main.showMixer();
         pump (main, 100);
         static std::map<juce::String, std::pair<int, juce::int64>> counts;
         juceRepaintProbe = [] (juce::Component& c, juce::Rectangle<int> r)
@@ -658,9 +660,21 @@ public:
         {
             MainComponent& m; juce::Random rnd;
             explicit Mover (MainComponent& mm) : m (mm) { startTimerHz (30); }
+            double t = 1.0;
             void timerCallback() override
             {
                 const juce::Component::SafePointer<juce::Component> keep;
+                if (std::getenv ("RIFF_IDLE_EDITOR") != nullptr)
+                {
+                    // the editor while playing: the playhead on, the in/out meters and the clock moving
+                    t += 1.0 / 30.0;
+                    m.movePlayhead (true, t);
+                    m.inputMeter.push (rnd.nextFloat(), rnd.nextFloat());
+                    m.outputMeter.push (rnd.nextFloat(), rnd.nextFloat());
+                    m.positionLabel.setText (juce::String (t, 3), juce::dontSendNotification);
+                    m.clockLabel.setText (juce::String (t * 2.0, 3), juce::dontSendNotification);
+                    return;
+                }
                 const repaintbatch::Scope batch;
                 for (auto* st : m.mixer.strips) { st->pushLevels (rnd.nextFloat(), rnd.nextFloat()); st->pushGainReduction (rnd.nextFloat() * 8.0f); }
             }
@@ -711,7 +725,8 @@ public:
             { juce::Graphics g (canvasImage); main.paintEntireComponent (g, true); }
             juce::RectangleList<int> region;
             for (auto& [c, r] : lastRects)
-                if (c->getParentComponent() == nullptr || c->getProperties().contains ("repaintBatchRoot") || dynamic_cast<LevelMeter*> (c) != nullptr)
+                if (c->getParentComponent() == nullptr || c->getProperties().contains ("repaintBatchRoot") || dynamic_cast<LevelMeter*> (c) != nullptr
+                    || std::getenv ("RIFF_IDLE_EDITOR") != nullptr)
                     region.add (main.getLocalArea (c, r.toFloat()).getSmallestIntegerContainer());
             double total = 0.0;
             for (const auto& r : region)
@@ -725,6 +740,51 @@ public:
             std::cout << "FRAME " << region.getNumRectangles() << " areas, " << juce::String (total, 2) << " ms to paint" << std::endl;
         }
         std::cout << "IDLE " << juce::String (juce::Time::getMillisecondCounterHiRes() - t0, 0) << " ms" << std::endl;
+        if (std::getenv ("RIFF_IDLE_SCROLL") != nullptr)
+        {
+            // Scrolling the editor: what each step repaints, and what painting it costs
+            juce::Image shot (juce::Image::ARGB, main.getWidth(), main.getHeight(), true);
+            profile::take (1.0);
+            for (const bool vertical : { false, true })
+            {
+                double total = 0.0;
+                juce::int64 px = 0;
+                for (int step = 0; step < 30; ++step)
+                {
+                    lastRects.clear();
+                    juceRepaintProbe = [] (juce::Component& c, juce::Rectangle<int> r) { lastRects.emplace_back (&c, r); };
+                    if (vertical) main.timeline.scrollY = (step % 2) * 40 + 10;
+                    else main.timeline.scrollSeconds += 0.2;
+                    main.timeline.viewMoved();
+                    juce::MessageManager::getInstance()->runDispatchLoopUntil (5);
+                    juceRepaintProbe = nullptr;
+                    juce::RectangleList<int> region;
+                    for (auto& [c, r] : lastRects)
+                        region.add (main.getLocalArea (c, r.toFloat()).getSmallestIntegerContainer());
+                    const auto a = juce::Time::getMillisecondCounterHiRes();
+                    juce::Graphics g (shot);
+                    if (g.reduceClipRegion (region)) main.paintEntireComponent (g, true);
+                    total += juce::Time::getMillisecondCounterHiRes() - a;
+                    px += (juce::int64) region.getBounds().getWidth() * region.getBounds().getHeight();
+                }
+                std::cout << (vertical ? "SCROLL V" : "SCROLL H") << " " << juce::String (total / 30.0, 2) << " ms a step, " << (px / 30 / 1000) << " kpx" << std::endl;
+                std::map<juce::String, int> who;
+                for (auto& [c, r] : lastRects) who[juce::String (typeid (*c).name()) + " " + r.toString()]++;
+                for (auto& [n, k] : who) std::cout << "    " << k << "x " << n << std::endl;
+                for (auto& [name, e] : profile::take (1.0))
+                    std::cout << "    PROFILE " << name << " " << juce::String (e.ms / 30.0, 2) << " ms a step, " << e.calls << " calls" << std::endl;
+            }
+            {
+                juce::Graphics g (shot);
+                main.paintEntireComponent (g, true);
+                juce::PNGImageFormat png;
+                juce::FileOutputStream os (out.getChildFile ("editor-scrolled.png"));
+                os.setPosition (0); os.truncate();
+                png.writeImageToStream (shot, os);
+            }
+            for (auto& [name, e] : profile::take (1.0))
+                std::cout << "  PROFILE " << name << " " << juce::String (e.ms, 1) << " ms " << e.calls << " calls" << std::endl;
+        }
         std::vector<std::pair<juce::String, std::pair<int, juce::int64>>> sorted (counts.begin(), counts.end());
         std::sort (sorted.begin(), sorted.end(), [] (auto& a, auto& b) { return a.second.second > b.second.second; });
         for (auto& [name, v] : sorted)

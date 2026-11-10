@@ -241,6 +241,11 @@ struct TimelineState : public juce::ChangeBroadcaster
 
     /** Call after changing anything above. Synchronous so scrolled views stay in lock-step. */
     void changed() { sendSynchronousChangeMessage(); }
+
+    /** Only the view moved (scrolled or zoomed): listeners that don't show it skip the change (scrolling sideways
+        doesn't draw the track headers again, or update the menus). */
+    bool viewOnly = false;
+    void viewMoved() { const juce::ScopedValueSetter<bool> only (viewOnly, true); changed(); }
 };
 
 } // namespace riff

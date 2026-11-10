@@ -641,6 +641,8 @@ int gridStyle() { return editorSettings().gridStyle; }
 
 void drawGridLine (juce::Graphics& g, float x, float top, float height, bool isBar, bool isBeat, juce::Colour colour)
 {
+    // (on whole pixels: a sharp line, and a solid fill - many times quicker than one blended over two columns)
+    x = std::round (x);
     switch (gridStyle())
     {
         case 5: return;                                       // none
@@ -663,6 +665,8 @@ void drawGridLine (juce::Graphics& g, float x, float top, float height, bool isB
 void shadeGridSpan (juce::Graphics& g, float x0, float x1, float top, float height)
 {
     g.setColour (juce::Colours::black.withAlpha (0.17f));
+    x0 = std::round (x0);
+    x1 = std::round (x1);
     g.fillRect (x0, top, x1 - x0, height);
 }
 bool imageSkin() { return settingsNow().skin == Skin::studio; }

@@ -20,6 +20,7 @@ ArrangeCanvas::ArrangeCanvas (juce::UndoManager& um, TimelineState& tl, AudioEng
     : undoManager (um), timeline (tl), engine (e), fileCache (fc), waveforms (wf)
 {
     setWantsKeyboardFocus (true); // key presses bubble up to MainComponent
+    setOpaque (true);             // (it fills itself: what's behind isn't drawn again when it scrolls)
     timeline.addChangeListener (this);
 }
 
@@ -92,9 +93,21 @@ double ArrangeCanvas::snap (double t) const
 void ArrangeCanvas::paint (juce::Graphics& g)
 {
     RIFF_PROFILE ("Tracks area");
-    g.fillAll (theme::background);
-
     const int numTracks = model::numTracks (project);
+
+    // The background only where no lane covers it (under the last track; a lane that isn't opaque): filling it all
+    // first, then every lane over it, painted the whole area twice
+    {
+        const auto below = timeline.trackTop (numTracks);
+        if (below < getHeight())
+        {
+            g.setColour (theme::background);
+            g.fillRect (0, juce::jmax (0, below), getWidth(), getHeight() - juce::jmax (0, below));
+        }
+        // (the ruler's band: the ruler paints over it, but not every pixel of it opaquely)
+        g.setColour (theme::background);
+        g.fillRect (0, 0, getWidth(), TimelineState::rulerHeight);
+    }
 
     // Lanes
     for (int i = 0; i < numTracks; ++i)
@@ -106,7 +119,13 @@ void ArrangeCanvas::paint (juce::Graphics& g)
         const auto track = project.getChild (i);
         const bool selected = timeline.isTrackSelected (track[ids::id].toString());
 
-        g.setColour (selected ? theme::selection.withAlpha (0.6f) : (i % 2 == 0 ? theme::laneA : theme::laneB));
+        const auto lane = selected ? theme::selection.withAlpha (0.6f) : (i % 2 == 0 ? theme::laneA : theme::laneB);
+        if (! lane.isOpaque())
+        {
+            g.setColour (theme::background);
+            g.fillRect (0, top, getWidth(), timeline.heightOf (i));
+        }
+        g.setColour (lane);
         g.fillRect (0, top, getWidth(), timeline.heightOf (i));
         if (theme::trackColouring() == 2)
         {
@@ -116,7 +135,10 @@ void ArrangeCanvas::paint (juce::Graphics& g)
         }
     }
 
-    paintGrid (g);
+    {
+        RIFF_PROFILE ("Tracks area: grid");
+        paintGrid (g);
+    }
 
     // Tint the lanes inside an active cycle.
     if ((bool) project[ids::cycleEnabled])
@@ -128,6 +150,7 @@ void ArrangeCanvas::paint (juce::Graphics& g)
 
     for (int i = 0; i < numTracks; ++i)
     {
+        RIFF_PROFILE ("Tracks area: regions");
         const auto track = project.getChild (i);
         for (const auto& region : track)
             paintRegion (g, region, i);
@@ -251,7 +274,10 @@ void ArrangeCanvas::paint (juce::Graphics& g)
         g.drawRect (rubberBand, 1.0f);
     }
 
-    paintRuler (g);
+    {
+        RIFF_PROFILE ("Tracks area: ruler");
+        paintRuler (g);
+    }
 
     // Playhead
     const auto px = timeline.timeToX (engine.getShownPlayheadSeconds());
@@ -272,8 +298,10 @@ void ArrangeCanvas::paintGrid (juce::Graphics& g)
     const auto grid = gridBeats();
     const auto map = model::tempoMapOf (project);
 
-    const auto b0 = map.beatAt (timeline.scrollSeconds);
-    const auto b1 = map.beatAt (timeline.xToTime ((float) getWidth()));
+    // (only the part being drawn: a strip, or the whole width)
+    const auto clip = g.getClipBounds();
+    const auto b0 = map.beatAt (juce::jmax (0.0, timeline.xToTime ((float) juce::jmax (0, clip.getX() - 2))));
+    const auto b1 = map.beatAt (timeline.xToTime ((float) juce::jmin (getWidth(), clip.getRight() + 2)));
     const auto bottom = (float) juce::jmin (getHeight(), timeline.trackTop (model::numTracks (project)));
     const auto top = (float) TimelineState::rulerHeight;
 
@@ -1066,11 +1094,46 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
         const auto corner = juce::jmin (9.0f, bounds.getHeight() * 0.25f);
         const auto shown = bounds.getIntersection (g.getClipBounds().toFloat().expanded (12.0f, 0.0f));
         const auto pane = bounds.withLeft (juce::jmax (bounds.getX(), shown.getX() - 12.0f)).withRight (juce::jmin (bounds.getRight(), shown.getRight() + 12.0f));
-        g.setGradientFill (juce::ColourGradient (base.withAlpha (light ? 0.42f : 0.36f), 0.0f, pane.getY(),
-                                                 base.withAlpha (light ? 0.2f : 0.14f), 0.0f, pane.getBottom(), false));
-        g.fillRoundedRectangle (pane, corner);
+        // (as the pane over its old full-size 12% halo fill: the same colour, in one layer)
+        const juce::ColourGradient tint (base.withAlpha (light ? 0.49f : 0.437f), 0.0f, pane.getY(),
+                                         base.withAlpha (light ? 0.296f : 0.243f), 0.0f, pane.getBottom(), false);
+        // (its soft edge first, as a thin ring: a second full-size fill under the pane cost as much as the pane)
         g.setColour (base.withAlpha (0.12f));
-        g.fillRoundedRectangle (pane.expanded (1.5f), corner + 1.5f);
+        g.drawRoundedRectangle (pane.expanded (0.75f), corner + 0.75f, 1.5f);
+        {
+            // The pane: its rounded ends as a gradient, the middle in 2-pixel bands of solid colour (looks the same,
+            // and solid fills are many times quicker than a gradient over a long region)
+            const auto ends = std::ceil (corner) + 1.0f;
+            const auto x0 = juce::roundToInt (pane.getX()), x1 = juce::roundToInt (pane.getRight());
+            const auto midTop = (int) std::ceil (pane.getY() + ends), midBottom = (int) std::floor (pane.getBottom() - ends);
+            const auto paneTop = (int) std::floor (pane.getY()), paneBottom = (int) std::ceil (pane.getBottom());
+            if (midBottom - midTop < 4)
+            {
+                g.setGradientFill (tint);   // (a short region: as it was)
+                g.fillRoundedRectangle (pane, corner);
+            }
+            else
+            {
+                // (the ends, clipped to them: the rounded corners)
+                for (const auto cap : { juce::Rectangle<int>::leftTopRightBottom (x0 - 1, paneTop, x1 + 1, midTop),
+                                        juce::Rectangle<int>::leftTopRightBottom (x0 - 1, midBottom, x1 + 1, paneBottom) })
+                {
+                    const juce::Graphics::ScopedSaveState keep (g);
+                    if (! g.reduceClipRegion (cap))
+                        continue;
+                    g.setGradientFill (tint);
+                    g.fillRoundedRectangle (pane, corner);
+                }
+                const auto clipNow = g.getClipBounds();
+                for (int y = midTop; y < midBottom; y += 2)
+                {
+                    if (y + 2 <= clipNow.getY() || y >= clipNow.getBottom())
+                        continue;
+                    g.setColour (tint.getColourAtPosition (((double) y + 1.0 - pane.getY()) / juce::jmax (1.0f, pane.getHeight())));
+                    g.fillRect (x0, y, x1 - x0, juce::jmin (2, midBottom - y));
+                }
+            }
+        }
         g.setColour (base.withAlpha (light ? 0.85f : 0.8f));
         g.drawRoundedRectangle (pane.reduced (0.5f), corner, 1.0f);
         g.setColour (juce::Colours::white.withAlpha (light ? 0.7f : 0.3f));
@@ -1151,6 +1214,7 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
     // Waveform, drawn only for the visible part
     if (! missing && ! isMidi)
     {
+        RIFF_PROFILE ("Tracks area: waveforms");
         auto& thumb = waveforms.get (file);
         const auto body = bounds.withTrimmedTop ((float) regionHeader + 1.0f).reduced (0.0f, 2.0f);
         const auto x0 = juce::jmax (body.getX(), visible.getX());
@@ -2650,7 +2714,7 @@ void ArrangeCanvas::mouseWheelMove (const juce::MouseEvent& e, const juce::Mouse
         timeline.scrollY = juce::jlimit (0, maxScrollY, timeline.scrollY - juce::roundToInt (dy * pixelsPerUnit));
     }
 
-    timeline.changed();
+    timeline.viewMoved();
     if (onViewChanged)
         onViewChanged();
 }

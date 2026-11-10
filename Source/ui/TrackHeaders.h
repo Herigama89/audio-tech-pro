@@ -168,7 +168,16 @@ private:
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree&) override        { if (parent == project) rebuild(); }
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree&, int) override { if (parent == project) rebuild(); }
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override         { if (parent == project) rebuild(); }
-    void changeListenerCallback (juce::ChangeBroadcaster*) override                      { resized(); repaint(); }
+    void changeListenerCallback (juce::ChangeBroadcaster*) override
+    {
+        // (scrolled sideways or zoomed: nothing here moved)
+        if (timeline.viewOnly && timeline.scrollY == shownScrollY)
+            return;
+        shownScrollY = timeline.scrollY;
+        resized();
+        repaint();
+    }
+    int shownScrollY = -1;
 
     void rebuild();
 
