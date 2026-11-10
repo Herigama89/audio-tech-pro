@@ -545,7 +545,9 @@ MainComponent::MainComponent (bool openAudioDevice)
     };
    #if RIFF_GPU_DRAWING
     setGpuDrawing (appProperties.getUserSettings()->getBoolValue ("gpuDrawing", true));
-    riff::layers::setEnabled (appProperties.getUserSettings()->getBoolValue ("layerMeters", true));
+    // (the meters and playhead as Core Animation layers: off - the app's own drawing runs smoothly now, and the
+    // layers showed upside down on some Macs)
+    riff::layers::setEnabled (false);
     inputMeter.useNativeLayers (true);    // (the editor's tall in/out meters too: layers, nothing drawn again)
     outputMeter.useNativeLayers (true);
    #endif

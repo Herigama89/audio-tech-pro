@@ -566,7 +566,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             // As in Logic: show or hide each panel of the main window.
             add ({ commands::toggleControlBar, commands::toggleToolbar, commands::toggleInspector, commands::showSmartControls,
                    commands::showLibrary, commands::showMixer, commands::showPianoRoll, commands::showLoopBrowser,
-                   commands::toggleTrackHeaders, commands::toggleHeaderInserts, commands::toggleHeaderIO, commands::toggleMeters, commands::toggleStatusBar, commands::toggleGpuDrawing, commands::toggleLayerMeters, commands::toggleEco });
+                   commands::toggleTrackHeaders, commands::toggleHeaderInserts, commands::toggleHeaderIO, commands::toggleMeters, commands::toggleStatusBar, commands::toggleGpuDrawing, commands::toggleEco });
             menu.addSeparator();
             add ({ commands::showAllPanels, commands::hideAllPanels });
             menu.addSeparator();
