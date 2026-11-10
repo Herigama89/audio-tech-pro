@@ -123,6 +123,9 @@ void MainComponent::setGpuDrawing (bool on)
         openGL->setComponentPaintingEnabled (true);
         openGL->setContinuousRepainting (false);   // (only what changed is drawn, as before - by the graphics card)
         openGL->setMultisamplingEnabled (false);
+        // (room on the graphics card for the tracks area's tiles - a screen of them is ~40 MB at Retina - so they're
+        // sent to it once, not again on every frame)
+        openGL->setImageCacheSize ((size_t) 192 * 1024 * 1024);
         openGL->attachTo (*this);
     }
     else if (! on && openGL != nullptr)

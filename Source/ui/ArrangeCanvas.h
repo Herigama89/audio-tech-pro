@@ -38,6 +38,14 @@ public:
 
     void paint (juce::Graphics& g) override;
 
+    /** What's drawn changed (here: all of it, or that part). The tracks area is kept as tiles - pictures drawn once
+        and only moved when it scrolls, as Logic does - so a change must say so: the tiles there are drawn again. */
+    void repaint()                                     { contentChanged = true; juce::Component::repaint(); }
+    void repaint (juce::Rectangle<int> area)           { changedArea.add (area); juce::Component::repaint (area); }
+    void repaint (int x, int y, int w, int h)          { repaint (juce::Rectangle<int> (x, y, w, h)); }
+    /** Only the playhead moved (nothing under it changed: drawn from the tiles). */
+    void repaintPlayhead (juce::Rectangle<int> area)   { juce::Component::repaint (area); }
+
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseDrag (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
@@ -168,13 +176,33 @@ private:
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override             { repaint(); }
     void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override      { repaint(); }
     void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override              { repaint(); }
-    void changeListenerCallback (juce::ChangeBroadcaster*) override                    { repaint(); }
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;
+
+    // The tiles (see repaint): 256-point squares of the tracks area in its own coordinates (from the song's start
+    // and the first track's top), drawn once at the screen's pixels; scrolling draws only the ones that come into view
+    static constexpr int tileSize = 256;
+    struct Tile { juce::Image image; juce::uint32 lastUsed = 0; };
+    std::map<std::pair<int, int>, Tile> tiles;
+    float tilesScale = 0.0f;
+    double tilesZoom = 0.0, shownZoom = 0.0;
+    juce::uint64 tilesLook = 0;
+    juce::uint32 tilesClock = 0;
+    bool contentChanged = true;
+    juce::RectangleList<int> changedArea;
+    bool tilesUsable (float scale) const;
+    void dropTiles (juce::Rectangle<int> viewArea);
+    bool paintFromTiles (juce::Graphics& g, float scale, bool mayDraw);
+    void paintContent (juce::Graphics& g);
+    void paintRegionLabels (juce::Graphics& g);
+    bool labelsApart = false;   // (drawn over the tiles: a name stays at the window's left edge as you scroll)
 
     juce::Rectangle<float> regionBounds (const juce::ValueTree& region, int trackIndex) const;
     juce::ValueTree regionAt (juce::Point<float> pos, int& trackIndexOut) const;
     void paintRuler (juce::Graphics& g);
     void paintGrid (juce::Graphics& g);
     void paintRegion (juce::Graphics& g, const juce::ValueTree& region, int trackIndex);
+    juce::String regionLabel (const juce::ValueTree& region);
+    void paintLoopRepeats (juce::Graphics& g, const juce::ValueTree& region, int trackIndex);
     void paintMidiNotes (juce::Graphics& g, const juce::ValueTree& region, juce::Rectangle<float> body, juce::Colour colour);
     void setWaveformFill (juce::Graphics&, juce::Colour trackColour, juce::Rectangle<float> area, bool live = false);
     void paintLiveTakes (juce::Graphics& g);

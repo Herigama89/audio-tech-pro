@@ -782,6 +782,17 @@ public:
                 os.setPosition (0); os.truncate();
                 png.writeImageToStream (shot, os);
             }
+            {
+                // the same, drawn directly (no tiles): to compare
+                main.canvas.repaint();
+                juce::Image direct (juce::Image::ARGB, main.getWidth(), main.getHeight(), true);
+                juce::Graphics g (direct);
+                main.paintEntireComponent (g, true);
+                juce::PNGImageFormat png;
+                juce::FileOutputStream os (out.getChildFile ("editor-direct.png"));
+                os.setPosition (0); os.truncate();
+                png.writeImageToStream (direct, os);
+            }
             for (auto& [name, e] : profile::take (1.0))
                 std::cout << "  PROFILE " << name << " " << juce::String (e.ms, 1) << " ms " << e.calls << " calls" << std::endl;
         }

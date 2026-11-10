@@ -90,9 +90,8 @@ double ArrangeCanvas::snap (double t) const
 //==============================================================================
 // Painting
 //==============================================================================
-void ArrangeCanvas::paint (juce::Graphics& g)
+void ArrangeCanvas::paintContent (juce::Graphics& g)
 {
-    RIFF_PROFILE ("Tracks area");
     const int numTracks = model::numTracks (project);
 
     // The background only where no lane covers it (under the last track; a lane that isn't opaque): filling it all
@@ -156,17 +155,170 @@ void ArrangeCanvas::paint (juce::Graphics& g)
             paintRegion (g, region, i);
     }
 
-    for (int i = 0; i < numTracks; ++i)
+
+}
+
+void ArrangeCanvas::changeListenerCallback (juce::ChangeBroadcaster* source)
+{
+    if (source == &timeline && timeline.viewOnly && juce::exactlyEqual (timeline.pixelsPerSecond, shownZoom))
     {
-        const auto track = project.getChild (i);
-        if ((bool) track[ids::showAutomation])
-            paintAutomation (g, track, i);
-        else if (model::isBusTrack (track))
+        juce::Component::repaint();   // (only scrolled: the tiles move, nothing in them changed)
+        return;
+    }
+    repaint();
+}
+
+bool ArrangeCanvas::tilesUsable (float scale) const
+{
+    // (drawn as it is while it changes under the pointer, while recording, or when too small for a tile)
+    return std::abs (scale - std::round (scale)) < 0.01f && scale >= 1.0f
+        && getWidth() >= tileSize && getHeight() - TimelineState::rulerHeight >= tileSize
+        && timeline.pixelsPerSecond > 0.0
+        && dragMode == DragMode::none && ! isMouseButtonDown() && dropHighlightTrack == -2
+        && ! engine.isRecording();
+}
+
+void ArrangeCanvas::dropTiles (juce::Rectangle<int> viewArea)
+{
+    const auto scrollX = timeline.scrollSeconds * timeline.pixelsPerSecond;
+    const auto left = (int) std::floor (((double) viewArea.getX() + scrollX) / tileSize) - 1;
+    const auto right = (int) std::floor (((double) viewArea.getRight() + scrollX) / tileSize) + 1;
+    const auto top = (int) std::floor ((double) (viewArea.getY() - TimelineState::rulerHeight + timeline.scrollY) / tileSize) - 1;
+    const auto bottom = (int) std::floor ((double) (viewArea.getBottom() - TimelineState::rulerHeight + timeline.scrollY) / tileSize) + 1;
+    for (auto it = tiles.begin(); it != tiles.end();)
+    {
+        const auto [i, j] = it->first;
+        if (i >= left && i <= right && j >= top && j <= bottom)
+            it = tiles.erase (it);
+        else
+            ++it;
+    }
+}
+
+bool ArrangeCanvas::paintFromTiles (juce::Graphics& g, float scale, bool mayDraw)
+{
+    RIFF_PROFILE ("Tracks area: tiles");
+    const auto s = std::round (scale);
+    const auto look = theme::paletteKey();
+    if (! juce::exactlyEqual (s, tilesScale) || ! juce::exactlyEqual (timeline.pixelsPerSecond, tilesZoom) || look != tilesLook)
+    {
+        tiles.clear();
+        tilesScale = s;
+        tilesZoom = timeline.pixelsPerSecond;
+        tilesLook = look;
+    }
+    const auto lanes = g.getClipBounds().getIntersection (getLocalBounds().withTrimmedTop (TimelineState::rulerHeight));
+    if (lanes.isEmpty())
+        return true;
+
+    // Scrolled to whole pixels of the screen: the tiles go down pixel for pixel (no blur, no seams)
+    const auto scrollX = std::round (timeline.scrollSeconds * timeline.pixelsPerSecond * s) / s;
+    const auto scrollY = timeline.scrollY;
+    const auto i0 = (int) std::floor (((double) lanes.getX() + scrollX) / tileSize), i1 = (int) std::floor (((double) lanes.getRight() - 1 + scrollX) / tileSize);
+    const auto j0 = (int) std::floor ((double) (lanes.getY() - TimelineState::rulerHeight + scrollY) / tileSize);
+    const auto j1 = (int) std::floor ((double) (lanes.getBottom() - 1 - TimelineState::rulerHeight + scrollY) / tileSize);
+
+    if (! mayDraw)
+        for (int j = j0; j <= j1; ++j)
+            for (int i = i0; i <= i1; ++i)
+                if (tiles.find ({ i, j }) == tiles.end())
+                    return false;
+
+    ++tilesClock;
+    for (int j = j0; j <= j1; ++j)
+        for (int i = i0; i <= i1; ++i)
         {
-            g.setColour (theme::dimText.withAlpha (0.6f));
-            g.setFont (juce::FontOptions (12.0f));
-            g.drawText ("Aux bus: tracks reach it through sends in the mixer", 12, timeline.trackTop (i),
-                        getWidth() - 24, timeline.heightOf (i), juce::Justification::centredLeft);
+            auto& tile = tiles[{ i, j }];
+            if (! tile.image.isValid())
+            {
+                // Drawn once: the view moved so this square is at the top left, and drawn as usual
+                RIFF_PROFILE ("Tracks area: new tiles");
+                const auto px = juce::roundToInt ((float) tileSize * s);
+                tile.image = juce::Image (juce::Image::RGB, px, px, false);
+                juce::Graphics tg (tile.image);
+                tg.addTransform (juce::AffineTransform::translation (0.0f, (float) -TimelineState::rulerHeight).scaled (s));
+                tg.reduceClipRegion (juce::Rectangle<int> (0, TimelineState::rulerHeight, tileSize, tileSize));
+                const juce::ScopedValueSetter<double> across (timeline.scrollSeconds, (double) i * tileSize / timeline.pixelsPerSecond);
+                const juce::ScopedValueSetter<int> down (timeline.scrollY, j * tileSize);
+                paintContent (tg);
+            }
+            tile.lastUsed = tilesClock;
+            const auto x = (float) ((double) i * tileSize - scrollX), y = (float) (j * tileSize - scrollY + TimelineState::rulerHeight);
+            const juce::Graphics::ScopedSaveState keep (g);
+            g.reduceClipRegion (lanes);
+            g.drawImageTransformed (tile.image, juce::AffineTransform::scale (1.0f / s).translated (x, y));
+        }
+
+    // (at most about four screens of tiles kept: the ones longest out of view go)
+    const auto onScreen = (size_t) ((getWidth() / tileSize + 2) * ((getHeight() - TimelineState::rulerHeight) / tileSize + 2));
+    while (tiles.size() > onScreen * 4)
+    {
+        auto oldest = tiles.begin();
+        for (auto it = tiles.begin(); it != tiles.end(); ++it)
+            if (it->second.lastUsed < oldest->second.lastUsed)
+                oldest = it;
+        if (oldest->second.lastUsed == tilesClock)
+            break;
+        tiles.erase (oldest);
+    }
+    return true;
+}
+
+void ArrangeCanvas::paint (juce::Graphics& g)
+{
+    RIFF_PROFILE ("Tracks area");
+    const int numTracks = model::numTracks (project);
+    const auto scale = g.getInternalContext().getPhysicalPixelScaleFactor();
+    shownZoom = timeline.pixelsPerSecond;
+    // Drawn scrolled to whole pixels of the screen, from the tiles or not: the same picture either way (a grid line
+    // doesn't step a pixel when the tiles take over), and the tiles go down pixel for pixel
+    const auto snappedScroll = timeline.pixelsPerSecond > 0.0 && scale > 0.0f
+        ? std::round (timeline.scrollSeconds * timeline.pixelsPerSecond * scale) / (scale * timeline.pixelsPerSecond)
+        : timeline.scrollSeconds;
+    const juce::ScopedValueSetter<double> snapped (timeline.scrollSeconds, snappedScroll);
+
+    // What changed is drawn as it is (and its tiles go); a scroll or the playhead moving: drawn from the tiles
+    const bool changedAll = std::exchange (contentChanged, false);
+    const auto changed = std::exchange (changedArea, {});
+    bool fromTiles = false;
+    labelsApart = true;   // (the names: over the tiles, below)
+    if (! tilesUsable (scale))
+        tiles.clear();
+    else if (changedAll)
+        tiles.clear();
+    else
+    {
+        for (const auto& r : changed)
+            dropTiles (r);
+        if (changed.isEmpty())
+            fromTiles = paintFromTiles (g, scale, true);
+        else
+            fromTiles = ! g.getClipBounds().intersects (changed.getBounds()) && paintFromTiles (g, scale, false);
+    }
+    if (! fromTiles)
+    {
+        const juce::Graphics::ScopedSaveState keep (g);
+        paintContent (g);
+    }
+    paintRegionLabels (g);
+    labelsApart = false;
+
+    // Over the tiles too: automation lines and the bus note (they're drawn from the window's left edge)
+    {
+        const juce::Graphics::ScopedSaveState keep (g);
+        g.reduceClipRegion (getLocalBounds().withTrimmedTop (TimelineState::rulerHeight));
+        for (int i = 0; i < numTracks; ++i)
+        {
+            const auto track = project.getChild (i);
+            if ((bool) track[ids::showAutomation])
+                paintAutomation (g, track, i);
+            else if (model::isBusTrack (track))
+            {
+                g.setColour (theme::dimText.withAlpha (0.6f));
+                g.setFont (juce::FontOptions (12.0f));
+                g.drawText ("Aux bus: tracks reach it through sends in the mixer", 12, timeline.trackTop (i),
+                            getWidth() - 24, timeline.heightOf (i), juce::Justification::centredLeft);
+            }
         }
     }
 
@@ -303,7 +455,9 @@ void ArrangeCanvas::paintGrid (juce::Graphics& g)
     const auto b0 = map.beatAt (juce::jmax (0.0, timeline.xToTime ((float) juce::jmax (0, clip.getX() - 2))));
     const auto b1 = map.beatAt (timeline.xToTime ((float) juce::jmin (getWidth(), clip.getRight() + 2)));
     const auto bottom = (float) juce::jmin (getHeight(), timeline.trackTop (model::numTracks (project)));
-    const auto top = (float) TimelineState::rulerHeight;
+    // (from a whole number of 4-pixel steps above the first track's top: a dotted grid's dots stay on the tracks as
+    // they scroll - and are the same drawn in tiles; the ruler covers the bit above)
+    const auto top = (float) (TimelineState::rulerHeight - ((timeline.scrollY % 4) + 4) % 4);
 
     // Shaded grids: every other bar (or beat) a shade darker
     if (const auto style = theme::gridStyle(); style == 1 || style == 4)
@@ -1058,11 +1212,90 @@ bool ArrangeCanvas::handleAutomationMouseDown (const juce::MouseEvent& e, int tr
     return true;
 }
 
+juce::String ArrangeCanvas::regionLabel (const juce::ValueTree& region)
+{
+    const bool isMidi = model::isMidiRegion (region);
+    const juce::File file (region[ids::file].toString());
+    const bool missing = ! isMidi && ! fileExists (file);
+    auto label = region[ids::name].toString();
+
+    if (const auto takes = model::numTakes (region); takes > 0)
+        label << "  (" << ((int) region.getProperty (ids::activeTake, 0) + 1) << " of " << takes << ")  "
+              << juce::String::fromUTF8 ("\xe2\x96\xbe"); // down-pointing triangle
+
+    if (model::isRegionMuted (region))
+        label = juce::String::fromUTF8 ("\xe2\x80\xa2 ") + label + "  (muted)";
+    if (missing)
+        label << "  (file missing)";
+    else if (! isMidi && fileCache.isPending (file))
+        label << "  (loading...)";
+    return label;
+}
+
+void ArrangeCanvas::paintRegionLabels (juce::Graphics& g)
+{
+    // The regions' names over the tiles: one whose start is off to the left keeps its name at the window's edge
+    const auto clip = g.getClipBounds().toFloat();
+    const auto lanes = getLocalBounds().toFloat().withTrimmedTop ((float) TimelineState::rulerHeight);
+    g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+    const int numTracks = model::numTracks (project);
+    for (int i = 0; i < numTracks; ++i)
+    {
+        if (timeline.heightOf (i) == 0)
+            continue;
+        const auto track = project.getChild (i);
+        for (const auto& region : track)
+        {
+            if (! region.hasType (ids::REGION))
+                continue;
+            const auto header = regionBounds (region, i).withHeight ((float) regionHeader);
+            const auto textArea = header.withLeft (juce::jmax (header.getX(), 0.0f)).reduced (5.0f, 0.0f);
+            if (textArea.getWidth() <= 0.0f || ! textArea.intersects (clip) || ! textArea.intersects (lanes))
+                continue;
+            const bool isMidi = model::isMidiRegion (region);
+            const bool missing = ! isMidi && ! fileExists (juce::File (region[ids::file].toString()));
+            const auto base = missing ? theme::danger : (model::isRegionMuted (region) ? juce::Colour (0xff6b6b70) : model::trackColour (track));
+            const bool glass = theme::glassRegions() && ! missing;
+            g.setColour (glass && theme::glassSkin() ? (theme::glassLight() ? base.darker (0.55f) : base.brighter (0.7f))
+                                                     : glass ? theme::text : juce::Colour (0xff15161a));
+            const juce::Graphics::ScopedSaveState keep (g);
+            g.reduceClipRegion (lanes.getSmallestIntegerContainer());
+            g.drawText (regionLabel (region), textArea, juce::Justification::centredLeft, true);
+        }
+    }
+}
+
 juce::Rectangle<float> ArrangeCanvas::regionBounds (const juce::ValueTree& region, int trackIndex) const
 {
     const auto x = timeline.timeToX (region[ids::start]);
     const auto w = (float) ((double) region[ids::length] * timeline.pixelsPerSecond);
     return { x, (float) timeline.trackTop (trackIndex) + 3.0f, juce::jmax (2.0f, w), (float) timeline.heightOf (trackIndex) - 6.0f };
+}
+
+void ArrangeCanvas::paintLoopRepeats (juce::Graphics& g, const juce::ValueTree& region, int trackIndex)
+{
+    // A looped region's repeats: lighter copies of its outline, up to the loop end.
+    if (! (bool) region.getProperty (ids::loop, false))
+        return;
+    const auto bounds = regionBounds (region, trackIndex);
+    const bool muted = model::isRegionMuted (region);
+    const auto colour = muted ? juce::Colour (0xff6b6b70) : model::trackColour (region.getParent());
+    {
+        const double length = region[ids::length];
+        const auto loopEnd = model::loopEndOf (region);
+        for (double t = model::regionEnd (region); t < loopEnd - 1.0e-6 && length > 0.0; t += length)
+        {
+            const auto x = timeline.timeToX (t);
+            const auto w = (float) (juce::jmin (length, loopEnd - t) * timeline.pixelsPerSecond);
+            if (x > (float) getWidth())
+                break;
+            const juce::Rectangle<float> ghost { x, bounds.getY(), w, bounds.getHeight() };
+            g.setColour (colour.withAlpha (0.28f));
+            g.fillRoundedRectangle (ghost.reduced (0.5f, 0.0f), 3.0f);
+            g.setColour (colour.withAlpha (0.7f));
+            g.drawRoundedRectangle (ghost.reduced (1.0f), 3.0f, 1.0f);
+        }
+    }
 }
 
 void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& region, int trackIndex)
@@ -1073,7 +1306,16 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
                                .getIntersection (g.getClipBounds().toFloat().expanded (2.0f));
 
     if (visible.isEmpty())
+    {
+        // (a looped region's repeats can be in view when the region itself isn't)
+        if (! (bool) region.getProperty (ids::loop, false))
+            return;
+        const auto repeats = bounds.withLeft (bounds.getRight()).withRight (timeline.timeToX (model::loopEndOf (region)));
+        if (! repeats.intersects (g.getClipBounds().toFloat().expanded (2.0f)))
+            return;
+        paintLoopRepeats (g, region, trackIndex);
         return;
+    }
 
     const bool muted = model::isRegionMuted (region);
     const auto colour = muted ? juce::Colour (0xff6b6b70) : model::trackColour (region.getParent());
@@ -1182,22 +1424,12 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
         g.fillRect (headerShown.withTrimmedTop (1.5f));
         g.setColour (juce::Colour (0xff15161a));
     }
-    g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
-    const auto textArea = header.withLeft (juce::jmax (header.getX(), 0.0f)).reduced (5.0f, 0.0f);
-    auto label = region[ids::name].toString();
-
-    if (const auto takes = model::numTakes (region); takes > 0)
-        label << "  (" << ((int) region.getProperty (ids::activeTake, 0) + 1) << " of " << takes << ")  "
-              << juce::String::fromUTF8 ("\xe2\x96\xbe"); // down-pointing triangle
-
-    if (muted)
-        label = juce::String::fromUTF8 ("\xe2\x80\xa2 ") + label + "  (muted)";
-    if (missing)
-        label << "  (file missing)";
-    else if (! isMidi && fileCache.isPending (file))
-        label << "  (loading...)";
-
-    g.drawText (label, textArea, juce::Justification::centredLeft, true);
+    if (! labelsApart)
+    {
+        g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+        const auto textArea = header.withLeft (juce::jmax (header.getX(), 0.0f)).reduced (5.0f, 0.0f);
+        g.drawText (regionLabel (region), textArea, juce::Justification::centredLeft, true);
+    }
 
     if (isMidi)
         paintMidiNotes (g, region, bounds.withTrimmedTop ((float) regionHeader + 1.0f).reduced (0.0f, 3.0f), colour);
@@ -1337,24 +1569,7 @@ void ArrangeCanvas::paintRegion (juce::Graphics& g, const juce::ValueTree& regio
         g.drawRoundedRectangle (bounds.reduced (0.5f), 3.0f, selected ? 2.0f : 1.0f);
     }
 
-    // A looped region's repeats: lighter copies of its outline, up to the loop end.
-    if ((bool) region.getProperty (ids::loop, false))
-    {
-        const double length = region[ids::length];
-        const auto loopEnd = model::loopEndOf (region);
-        for (double t = model::regionEnd (region); t < loopEnd - 1.0e-6 && length > 0.0; t += length)
-        {
-            const auto x = timeline.timeToX (t);
-            const auto w = (float) (juce::jmin (length, loopEnd - t) * timeline.pixelsPerSecond);
-            if (x > (float) getWidth())
-                break;
-            const juce::Rectangle<float> ghost { x, bounds.getY(), w, bounds.getHeight() };
-            g.setColour (colour.withAlpha (0.28f));
-            g.fillRoundedRectangle (ghost.reduced (0.5f, 0.0f), 3.0f);
-            g.setColour (colour.withAlpha (0.7f));
-            g.drawRoundedRectangle (ghost.reduced (1.0f), 3.0f, 1.0f);
-        }
-    }
+    paintLoopRepeats (g, region, trackIndex);
 }
 
 //==============================================================================

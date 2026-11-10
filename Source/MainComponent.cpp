@@ -2762,8 +2762,8 @@ void MainComponent::movePlayhead (bool drawFrame, double playhead)
             canvas.repaint();   // the new region grows as you record
         else
         {
-            canvas.repaint (oldX - 8, 0, 16, canvas.getHeight());
-            canvas.repaint (newX - 8, 0, 16, canvas.getHeight());
+            canvas.repaintPlayhead ({ oldX - 8, 0, 16, canvas.getHeight() });
+            canvas.repaintPlayhead ({ newX - 8, 0, 16, canvas.getHeight() });
         }
         if (pianoRoll.isShowing())
             pianoRoll.playheadMoved();   // (its playhead: just the strips it moves across)
