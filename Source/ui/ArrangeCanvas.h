@@ -64,8 +64,15 @@ public:
     void itemDragExit (const SourceDetails&) override { fileDragExit ({}); }
     void itemDropped (const SourceDetails& details) override
     {
+        lastImported = {};
         filesDropped ({ details.description.toString().fromFirstOccurrenceOf ("file:", false, false) }, details.localPosition.x, details.localPosition.y);
+        if (lastImported.isValid() && onLibraryRegion)
+            onLibraryRegion (lastImported);
     }
+
+    /** A region just added from the Loop Browser (to fit it to the song's tempo and key). */
+    std::function<void (juce::ValueTree region)> onLibraryRegion;
+    juce::ValueTree lastImported;   // (the last region importFiles added)
 
     /** After regions were moved, pasted or trimmed (or deleted from `tracks`): what the Drag mode does next
         (No Overlap shortens what they cover, X-Fade crossfades, Shuffle closes the gaps). */

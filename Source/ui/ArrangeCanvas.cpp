@@ -3019,6 +3019,7 @@ void ArrangeCanvas::importFiles (const juce::StringArray& files, int trackIndex,
 
         lastRegion = model::addRegion (track, file, time, length, &undoManager);
     }
+    lastImported = lastRegion;
 
     if (lastRegion.isValid())
     {

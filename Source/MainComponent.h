@@ -185,6 +185,7 @@ private:
                                                     std::function<void()> closer, const juce::String& pinKey);
     void showControllerAssignments();
     void toggleLibrary (LibraryPanel::Page page);
+    void fitLibraryRegion (juce::ValueTree region);
     void toggleSmartControls();
     void showGroupSettings();
     void showIOLabels();

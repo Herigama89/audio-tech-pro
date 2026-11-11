@@ -595,6 +595,39 @@ public:
         return 0;
     }
 
+    /** The Loop Browser, with a folder of samples (their names say what they are; the rest is heard). */
+    int libraryOnly()
+    {
+        out.createDirectory();
+        audioFolder = out.getChildFile ("Loops");
+        audioFolder.createDirectory();
+        int seed = 1;
+        for (const auto* name : { "Roots Groove Kit 01 92bpm", "Rimshot Skank Loop 90bpm", "Dub Bass Walk 90bpm Amin", "Sub Bass Long C",
+                                  "Organ Bubble Chords 95bpm Gmaj", "Piano Skank Offbeat 88bpm Dmin", "Clean Guitar Chop 90bpm Emin",
+                                  "Warm Pad Swell Fmaj", "Vocal Chop Hey A", "Kick Deep 03", "Shaker 16ths 120bpm", "Riser White Noise 128bpm",
+                                  "Synth Bass Pluck 100bpm F#min", "Rhodes Neo Soul 85bpm Bbmaj", "Conga Groove 96bpm", "Brass Stab Ebmaj" })
+            makeAudio (name, juce::String (name).contains ("bpm") ? 8.0 : 1.2, 110.0f + 20.0f * (float) seed, 0.5f, seed++);
+        MainComponent main (false);
+        main.setSize (1440, 920);
+        main.setVisible (true);
+        {
+            theme::Settings t;
+            if (juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_SKIN", {}) == "glasslight")
+                t.skin = theme::Skin::glassLight;
+            main.applyTheme (t);
+        }
+        main.appProperties.getUserSettings()->setValue ("loopFolder", audioFolder.getFullPathName());
+        main.appProperties.getUserSettings()->setValue ("libCategory", -1);
+        main.appProperties.getUserSettings()->setValue ("libKind", 2);
+        main.appProperties.getUserSettings()->setValue ("libKey", 1);
+        main.toggleLibrary (LibraryPanel::Page::loops);
+        pump (main, 4000);
+        main.libraryPanel->list.selectRow (8);
+        pump (main, 1500);
+        save (main, "library.png");
+        return 0;
+    }
+
     int automixOnly()
     {
         out.createDirectory();
@@ -2879,6 +2912,12 @@ int main (int argc, char* argv[])
     if (argc > 2 && juce::String (argv[1]) == "idle")
     {
         const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).idleOnly();
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        return r;
+    }
+    if (argc > 2 && juce::String (argv[1]) == "library")
+    {
+        const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).libraryOnly();
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         return r;
     }

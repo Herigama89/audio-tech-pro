@@ -770,6 +770,33 @@ void MainComponent::showControllerAssignments()
 namespace riff
 {
 
+void MainComponent::fitLibraryRegion (juce::ValueTree region)
+{
+    // A loop from the Loop Browser follows the song: stretched from its own tempo (Flex with Smart Tempo), moved
+    // from its own key (Pitch Source: it follows the key track) - as the browser's switches say
+    if (libraryPanel == nullptr || ! region.isValid())
+        return;
+    const juce::File file (region[ids::file].toString());
+    const auto fit = libraryPanel->fitFor (file);
+    auto track = region.getParent();
+    if (fit.sourceBpm > 0.0)
+    {
+        const auto song = model::tempoMapOf (project).bpmAt ((double) region[ids::start]);
+        region.setProperty (ids::flex, true, &undoManager);
+        region.setProperty (ids::smartTempo, "on", &undoManager);
+        region.setProperty (ids::sourceBpm, fit.sourceBpm, &undoManager);
+        if (track.getProperty (ids::flexMode, "off").toString() == "off")
+            track.setProperty (ids::flexMode, "polyphonic", &undoManager);
+        if (song > 0.0)
+            region.setProperty (ids::length, (double) region[ids::length] * fit.sourceBpm / song, &undoManager);
+    }
+    if (fit.sourceKeyRoot >= 0)
+    {
+        region.setProperty (ids::pitchSource, true, &undoManager);
+        region.setProperty (ids::pitchSourceKey, fit.sourceKeyRoot, &undoManager);
+    }
+}
+
 void MainComponent::toggleLibrary (LibraryPanel::Page page)
 {
     if (libraryPanel == nullptr)
@@ -814,7 +841,25 @@ void MainComponent::toggleLibrary (LibraryPanel::Page page)
         };
         libraryPanel->onAddFile = [this] (const juce::File& file)
         {
+            canvas.lastImported = {};
             canvas.importFiles ({ file.getFullPathName() }, selectedTrackIndex(), canvas.snap (engine.getPlayheadSeconds()));
+            if (canvas.lastImported.isValid())
+                fitLibraryRegion (canvas.lastImported);
+        };
+        canvas.onLibraryRegion = [this] (juce::ValueTree region) { fitLibraryRegion (region); };
+        libraryPanel->songNow = [this]
+        {
+            LibraryPanel::Song song;
+            const auto at = engine.getPlayheadSeconds();
+            const auto map = model::tempoMapOf (project);
+            song.bpm = map.bpmAt (at);
+            const auto [root, minor] = model::keyAt (project, at);
+            song.keyRoot = root;
+            song.minor = minor;
+            song.playing = engine.isPlaying();
+            const auto beat = map.beatAt (at);
+            song.toNextBeat = juce::jmax (0.0, map.secondsAt (std::floor (beat + 1.0e-6) + 1.0) - at);
+            return song;
         };
     }
 

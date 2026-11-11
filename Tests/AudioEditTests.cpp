@@ -823,3 +823,108 @@ TEST_CASE ("Drum parts, scored: a realistic kit (clicks, wires, overlapping meta
     }
     std::cout << "mean SDR " << juce::String (meanSdr, 2) << " dB" << std::endl;
 }
+
+#include "../Source/engine/SampleInfo.h"
+
+TEST_CASE ("Loop Browser: what a sample is, from its name", "[library]")
+{
+    using namespace riff::sampleinfo;
+    bool cat = false, loop = false;
+    auto i = fromName (juce::File ("/s/Reggae/Dub Bass Walk 90bpm Amin.wav"), cat, loop);
+    CHECK (i.category == Category::bass);
+    CHECK (i.loop);
+    CHECK (i.bpm == 90.0);
+    CHECK (i.keyRoot == 9);
+    CHECK (i.minor);
+    CHECK (keyName (i) == "A min");
+
+    i = fromName (juce::File ("/s/Drums/Kicks/Kick Deep 03.wav"), cat, loop);
+    CHECK (i.category == Category::drums);
+    i = fromName (juce::File ("/s/x/OrganBubble_95_Gmaj.wav"), cat, loop);
+    CHECK (i.category == Category::keys);
+    CHECK (i.bpm == 95.0);
+    CHECK (i.keyRoot == 7);
+    CHECK_FALSE (i.minor);
+    i = fromName (juce::File ("/s/x/Vocal Chop F#.wav"), cat, loop);
+    CHECK (i.category == Category::vocals);
+    CHECK (i.keyRoot == 6);
+    CHECK (i.keyIsNote);
+    i = fromName (juce::File ("/s/x/808 Long C.wav"), cat, loop);
+    CHECK (i.category == Category::bass);
+    CHECK (i.bpm == 0.0);
+    i = fromName (juce::File ("/s/x/Shaker 16ths 120 BPM.wav"), cat, loop);
+    CHECK (i.category == Category::percussion);
+    CHECK (i.bpm == 120.0);
+    i = fromName (juce::File ("/s/x/Riser White Noise.wav"), cat, loop);
+    CHECK (i.category == Category::fx);
+}
+
+TEST_CASE ("Loop Browser: fitting a key to the song's, the nearest way", "[library]")
+{
+    using namespace riff::sampleinfo;
+    CHECK (shiftToKey (9, true, 0, false) == 0);    // A minor in C major: its relative minor
+    CHECK (shiftToKey (2, true, 9, true) == -5);    // D minor -> A minor: 5 down (not 7 up)
+    CHECK (shiftToKey (7, false, 0, false) == 5);   // G major -> C major: 5 up
+    CHECK (shiftToKey (0, false, 9, true) == 0);    // C major in A minor
+    CHECK (sourceRootFor (9, true, false) == 0);
+}
+
+TEST_CASE ("Loop Browser: a loop's tempo and key, by listening", "[library]")
+{
+    using namespace riff::sampleinfo;
+    constexpr double rate = 44100.0;
+    for (const auto bpm : { 92.0, 128.0 })
+    {
+        // 4 bars of a beat: kicks on 1 and 3, hats on the eighths (with a little swing in level)
+        const auto beat = 60.0 / bpm;
+        const int n = (int) (16 * beat * rate);
+        juce::AudioBuffer<float> loop (1, n);
+        loop.clear();
+        juce::Random random (3);
+        for (int s = 0; s < n; ++s)
+        {
+            const auto t = s / rate;
+            const auto inBar = std::fmod (t, 4 * beat);
+            const auto k = std::fmod (inBar, 2 * beat);
+            const auto h = std::fmod (t, beat * 0.5);
+            loop.setSample (0, s, (float) (0.8 * std::sin (2 * juce::MathConstants<double>::pi * 55.0 * k) * std::exp (-k * 18.0)
+                                           + 0.2 * (random.nextFloat() * 2 - 1) * std::exp (-h * 60.0)));
+        }
+        INFO (tempoOf (loop, rate));
+        CHECK (std::abs (tempoOf (loop, rate) - bpm) < 0.5);
+    }
+
+    // chords of A minor (Am, F, C, G): its key
+    {
+        const int n = (int) (8.0 * rate);
+        juce::AudioBuffer<float> keys (1, n);
+        keys.clear();
+        const int chords[4][3] { { 57, 60, 64 }, { 53, 57, 60 }, { 48, 52, 55 }, { 55, 59, 62 } };
+        for (int s = 0; s < n; ++s)
+        {
+            const auto& chord = chords[(s / (int) (2.0 * rate)) % 4];
+            double x = 0.0;
+            for (const auto note : chord)
+                x += std::sin (2 * juce::MathConstants<double>::pi * 440.0 * std::pow (2.0, (note - 69) / 12.0) * s / rate);
+            // (the tonic held under it, as a bass would)
+            x += 0.8 * std::sin (2 * juce::MathConstants<double>::pi * 110.0 * s / rate);
+            keys.setSample (0, s, (float) (0.15 * x));
+        }
+        bool note = false;
+        float confidence = 0.0f;
+        const auto [root, minor] = keyOf (keys, rate, note, confidence);
+        CHECK (root == 9);
+        CHECK (minor);
+        CHECK_FALSE (note);
+    }
+    // one note: a note
+    {
+        juce::AudioBuffer<float> one (1, (int) rate);
+        for (int s = 0; s < one.getNumSamples(); ++s)
+            one.setSample (0, s, (float) (0.5 * std::sin (2 * juce::MathConstants<double>::pi * 98.0 * s / rate) * std::exp (-s / rate * 3.0)));
+        bool note = false;
+        float confidence = 0.0f;
+        CHECK (keyOf (one, rate, note, confidence).first == 7);   // G
+        CHECK (note);
+    }
+}

@@ -213,9 +213,31 @@ bool AudioEngine::previewFile (const juce::File& file)
     previewHold = std::move (buffer);
     previewBuffer = previewHold.get();
     previewPosition = 0.0;
+    previewDelay = 0.0;
     previewStep = reader->sampleRate / juce::jmax (1.0, sampleRate.load());
     previewPlaying.store (true);
     return true;
+}
+
+void AudioEngine::previewAudio (std::unique_ptr<juce::AudioBuffer<float>> audio, double audioRate, double delaySeconds)
+{
+    stopPreview();
+    if (audio == nullptr || audio->getNumSamples() < 2)
+        return;
+    if (audio->getNumChannels() < 2)
+    {
+        audio->setSize (2, audio->getNumSamples(), true);
+        audio->copyFrom (1, 0, *audio, 0, 0, audio->getNumSamples());
+    }
+    const auto rate = sampleRate.load() > 0.0 ? sampleRate.load() : 48000.0;
+    const juce::SpinLock::ScopedLockType lock (previewLock);
+    previewHold = std::move (audio);
+    previewBuffer = previewHold.get();
+    previewPosition = 0.0;
+    previewDelay = juce::jmax (0.0, delaySeconds) * rate;
+    previewStep = audioRate / rate;
+    previewProgressNow.store (0.0f);
+    previewPlaying.store (true);
 }
 
 void AudioEngine::stopPreview()
@@ -249,6 +271,7 @@ void AudioEngine::previewThrough (std::unique_ptr<juce::AudioBuffer<float>> audi
     previewBuffer = previewHold.get();
     previewPosition = 0.0;
     previewStep = audioRate / rate;
+    previewDelay = 0.0;
     previewEffect = std::move (effect);
     previewLoops = true;
     previewPlaying.store (true);
@@ -287,8 +310,14 @@ void AudioEngine::renderPreview (float* left, float* right, int n) noexcept
         juce::FloatVectorOperations::add (right, sr, n);
         return;
     }
+    const auto gain = previewGain.load (std::memory_order_relaxed);
     for (int i = 0; i < n; ++i)
     {
+        if (previewDelay >= 1.0)
+        {
+            previewDelay -= 1.0;   // (waiting for the song's next beat)
+            continue;
+        }
         const auto index = (int) previewPosition;
         if (index + 1 >= length)
         {
@@ -296,10 +325,11 @@ void AudioEngine::renderPreview (float* left, float* right, int n) noexcept
             return;
         }
         const auto frac = (float) (previewPosition - index);
-        left[i]  += (l[index] + (l[index + 1] - l[index]) * frac) * 0.8f;
-        right[i] += (r[index] + (r[index + 1] - r[index]) * frac) * 0.8f;
+        left[i]  += (l[index] + (l[index + 1] - l[index]) * frac) * gain;
+        right[i] += (r[index] + (r[index + 1] - r[index]) * frac) * gain;
         previewPosition += previewStep;
     }
+    previewProgressNow.store ((float) (previewPosition / juce::jmax (1, length)), std::memory_order_relaxed);
 }
 
 std::vector<juce::MidiMessage> AudioEngine::takeIncomingMidi()

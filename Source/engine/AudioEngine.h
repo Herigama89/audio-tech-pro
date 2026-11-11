@@ -319,6 +319,13 @@ public:
     void previewThrough (std::unique_ptr<juce::AudioBuffer<float>> audio, double audioRate, std::shared_ptr<Effect> effect);
     void stopPreview();
     bool isPreviewing() const noexcept { return previewPlaying.load(); }
+    /** The Loop Browser's preview: `audio` (fitted to the song already) played once, after `delaySeconds` (to come
+        in on the song's next beat). */
+    void previewAudio (std::unique_ptr<juce::AudioBuffer<float>> audio, double audioRate, double delaySeconds = 0.0);
+    /** The Loop Browser's preview volume (as gain). */
+    void setPreviewGain (float gain) noexcept { previewGain.store (gain); }
+    /** How far the preview has played, 0..1 (-1: none playing). */
+    float previewProgress() const noexcept { return previewPlaying.load() ? previewProgressNow.load (std::memory_order_relaxed) : -1.0f; }
 
     /** The MIDI that arrived from your devices since the last call (message thread). */
     std::vector<juce::MidiMessage> takeIncomingMidi();
@@ -705,6 +712,8 @@ private:
     double previewPosition = 0.0, previewStep = 1.0;
     std::shared_ptr<Effect> previewEffect;                   // (under previewLock) the live preview's effect
     bool previewLoops = false;
+    double previewDelay = 0.0;   // samples (engine rate) before it starts
+    std::atomic<float> previewGain { 0.8f }, previewProgressNow { 0.0f };
     juce::AudioBuffer<float> previewScratch;                 // its audio before the effect (sized in prepare)
     std::atomic<bool> previewPlaying { false };
 
