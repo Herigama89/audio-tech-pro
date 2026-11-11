@@ -1308,7 +1308,8 @@ void MainComponent::updatePerformance()
         const auto rate = device->getCurrentSampleRate();
         const auto buffer = device->getCurrentBufferSizeSamples();
         r.device = device->getName() + ", " + juce::String (rate / 1000.0, 1) + " kHz, " + juce::String (buffer) + " samples ("
-                 + juce::String (rate > 0.0 ? buffer * 1000.0 / rate : 0.0, 1) + " ms)";
+                 + juce::String (rate > 0.0 ? buffer * 1000.0 / rate : 0.0, 1) + " ms)"
+                 + (engine.isResting() ? "  -  resting (stopped and silent)" : "");
     }
     else
         r.device = "No audio device open";
@@ -1437,7 +1438,7 @@ void MainComponent::showAudioSuite()
             }
         });
     };
-    editorWindows[id] = std::make_unique<EditorWindow> ("AudioSuite", panel, false, closer);
+    editorWindows[id] = std::make_unique<EditorWindow> ("Audio Process", panel, false, closer);
 }
 
 void MainComponent::chooseAudioSuiteEffect (juce::Component& target)
@@ -1568,9 +1569,9 @@ void MainComponent::renderAudioSuite()
     audioSuitePanel->prepareForUse();
     auto& effect = *audioSuitePanel->getEffect();
     const auto options = audioSuitePanel->getOptions();
-    const auto folder = recordingFolder().getChildFile ("AudioSuite");
+    const auto folder = recordingFolder().getChildFile ("Audio Process");
 
-    undoManager.beginNewTransaction ("AudioSuite: " + effect.getName());
+    undoManager.beginNewTransaction ("Audio Process: " + effect.getName());
     int done = 0;
     juce::String lastError;
     for (auto region : regions)

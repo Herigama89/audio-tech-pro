@@ -449,7 +449,7 @@ bool MainComponent::perform (const InvocationInfo& info)
 //==============================================================================
 juce::StringArray MainComponent::getMenuBarNames()
 {
-    return { "File", "Edit", "Track", "Navigate", "Record", "Mix", "View", "AudioSuite", "Window", "Help" };
+    return { "File", "Edit", "Track", "Navigate", "Record", "Mix", "View", "Audio Process", "Window", "Help" };
 }
 
 juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)

@@ -3119,3 +3119,33 @@ TEST_CASE ("Render ahead: a track's meter moves when its sound is heard, not whe
     CHECK (meterAt >= heardAt - 1024);
     CHECK (meterAt <= heardAt + 128);
 }
+
+TEST_CASE ("Stopped and silent for two seconds, the engine rests; a note played in wakes it at once", "[engine][rest]")
+{
+    Fixture f;
+    auto a = model::addTrack (f.project, "A", nullptr, -1, model::instrumentKind);
+    f.player.setProject (f.project);
+    f.player.setLiveMidiTrack (a[ids::id].toString());
+    f.player.rebuildNow();
+
+    renderLeft (f.engine, 48000);
+    CHECK_FALSE (f.engine.isResting());           // (one second: not yet)
+    renderLeft (f.engine, 2 * 48000);
+    CHECK (f.engine.isResting());
+
+    f.engine.sendLiveMidi (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100));
+    CHECK (peakIn (renderLeft (f.engine, 2048), 0, 2048) > 0.005f);   // heard in the same block
+    CHECK_FALSE (f.engine.isResting());
+    f.engine.sendLiveMidi (juce::MidiMessage::allNotesOff (1));
+}
+
+TEST_CASE ("An armed track (its input heard) keeps the engine from resting", "[engine][rest]")
+{
+    Fixture f;
+    auto a = model::addTrack (f.project, "A", nullptr, -1, model::audioKind);
+    a.setProperty (ids::armed, true, nullptr);
+    f.player.setProject (f.project);
+    f.player.rebuildNow();
+    renderLeft (f.engine, 3 * 48000);
+    CHECK_FALSE (f.engine.isResting());
+}

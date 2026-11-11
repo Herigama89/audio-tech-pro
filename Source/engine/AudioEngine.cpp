@@ -1240,6 +1240,32 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
         }
     }
 
+    // Resting, as Logic does when stopped: nothing playing or recording, nothing heard from an input, no notes
+    // played in, no preview - and all that came out has been silent for two seconds (every tail rung out). Then the
+    // tracks and their plugins aren't processed at all: the audio thread does next to nothing until something changes.
+    if (graph != restGraphSeen)
+    {
+        restGraphSeen = graph;
+        quietSamples = 0;   // (a change in the song: processed again until it's silent once more)
+        restHearsInput = false;
+        if (graph != nullptr)
+            for (const auto& t : graph->tracks)
+                restHearsInput = restHearsInput || t.monitorInput || t.armed || t.inputTrackSlot >= 0 || t.busHardwareInput;
+    }
+    {
+        const bool rest = graph != nullptr && ! isPlayingNow && ! isRecordingNow && ! restHearsInput && liveMidi.isEmpty()
+                          && ! previewPlaying.load (std::memory_order_relaxed) && ! bouncing.load (std::memory_order_relaxed)
+                          && screenTap.load (std::memory_order_acquire) == nullptr
+                          && quietSamples >= (juce::int64) (2.0 * rateNow);
+        resting.store (rest, std::memory_order_relaxed);
+        if (rest)
+        {
+            suspendedNow.store (0, std::memory_order_relaxed);
+            callbackCounter.fetch_add (1, std::memory_order_release);
+            return;
+        }
+    }
+
     // Keep what you play for MIDI recording, at the timeline position it was heard.
     if (isRecordingNow && isPlayingNow && midiTakeActive.load() && ! liveMidi.isEmpty()
         && playheadSample.load() >= recordStart)
@@ -1482,8 +1508,10 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
             }
         }
 
-        storeMax (peakOutL, mixBuffer.getMagnitude (0, 0, n));
-        storeMax (peakOutR, mixBuffer.getMagnitude (1, 0, n));
+        const auto outL = mixBuffer.getMagnitude (0, 0, n), outR = mixBuffer.getMagnitude (1, 0, n);
+        storeMax (peakOutL, outL);
+        storeMax (peakOutR, outR);
+        quietSamples = juce::jmax (outL, outR) < 1.0e-5f ? quietSamples + n : 0;   // (-100 dB: silent, for resting)
 
         if (chunk != nullptr)
         {
@@ -2600,7 +2628,7 @@ void AudioEngine::runAhead (AheadThread& self)
         const auto lookahead = (juce::int64) aheadLookahead.load() + 2 * (juce::int64) deviceBlock.load();
         if (written - read >= (juce::uint64) aheadSlots - 1 || queued >= lookahead)
         {
-            self.rest (1);
+            self.rest (playingNow ? 1 : 10);   // (stopped: nothing's in a hurry - it doesn't wake 1000 times a second)
             continue;
         }
 

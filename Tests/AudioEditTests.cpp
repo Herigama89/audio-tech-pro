@@ -753,3 +753,73 @@ TEST_CASE ("Drum parts: a kit split into kick, snare, toms, hi-hat and cymbals, 
         CHECK (own > 0.5);
     }
 }
+
+TEST_CASE ("Drum parts, scored: a realistic kit (clicks, wires, overlapping metal), each part's SDR", "[.drumbench]")
+{
+    constexpr double rate = 48000.0;
+    const int n = (int) (12.0 * rate);
+    juce::Random random (5);
+    std::vector<juce::AudioBuffer<float>> alone;
+    for (int i = 0; i < 5; ++i) { alone.emplace_back (2, n); alone.back().clear(); }
+    const auto beat = rate * 60.0 / 96.0;
+    juce::IIRFilter clickHp, wireBp, hatHp, hatHp2, cymHp, tomNoise;
+    clickHp.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, 2500.0));
+    wireBp.setCoefficients (juce::IIRCoefficients::makeBandPass (rate, 4000.0, 0.5));
+    hatHp.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, 6500.0));
+    hatHp2.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, 6500.0));
+    cymHp.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, 3000.0));
+    tomNoise.setCoefficients (juce::IIRCoefficients::makeBandPass (rate, 1500.0, 0.7));
+    double kp = 0.0, tp = 0.0;
+    // a groove: kick on 1, the "and" of 2, 3; snare on 2 and 4 (with ghost notes); hats on eighths (open on the
+    // last); toms in a fill every second bar; a crash every 4 bars, a ride on quarters in the last two bars
+    for (int s = 0; s < n; ++s)
+    {
+        const auto inBar = std::fmod ((double) s, beat * 4.0), bar = std::floor ((double) s / (beat * 4.0));
+        const auto noise = [&] { return random.nextFloat() * 2.0f - 1.0f; };
+        const auto since = [&] (std::initializer_list<double> at) { double best = 1e9; for (auto a : at) { const auto d = inBar - a * beat; if (d >= 0.0) best = std::min (best, d); } return best / rate; };
+        const auto kt = since ({ 0.0, 1.5, 2.0 });
+        kp += juce::MathConstants<double>::twoPi * (48.0 + 100.0 * std::exp (-kt * 35.0)) / rate;
+        alone[0].setSample (0, s, (float) (0.8 * std::sin (kp) * std::exp (-kt * 8.0)) + clickHp.processSingleSampleRaw (noise()) * 0.3f * (float) std::exp (-kt * 400.0));
+        const auto st = since ({ 1.0, 3.0 }), gt = since ({ 2.75 });
+        const auto sn = (0.45 * std::sin (juce::MathConstants<double>::twoPi * 185.0 * st) * std::exp (-st * 22.0))
+                      + wireBp.processSingleSampleRaw (noise()) * 0.9 * std::exp (-st * 14.0) + 0.15 * noise() * std::exp (-st * 30.0)
+                      + 0.25 * wireBp.processSingleSampleRaw (noise()) * std::exp (-gt * 25.0);
+        alone[1].setSample (0, s, (float) sn);
+        const bool fill = std::fmod (bar, 2.0) == 1.0;
+        const auto tt = fill ? since ({ 3.0, 3.5 }) : 1e9;
+        tp += juce::MathConstants<double>::twoPi * (tt < 1e8 && inBar >= 3.5 * beat ? 95.0 : 140.0) / rate;
+        alone[2].setSample (0, s, tt < 1e8 ? (float) ((0.55 * std::sin (tp) + tomNoise.processSingleSampleRaw (noise()) * 0.15 * std::exp (-tt * 60.0)) * std::exp (-tt * 6.0)) : 0.0f);
+        const auto ht = std::fmod (inBar, beat * 0.5) / rate;
+        const bool open = inBar >= 3.5 * beat;
+        alone[3].setSample (0, s, hatHp.processSingleSampleRaw (hatHp2.processSingleSampleRaw (noise())) * 0.35f * (float) std::exp (-ht * (open ? 9.0 : 55.0)));
+        const auto ct = std::fmod ((double) s, beat * 16.0) / rate;
+        const auto rt = std::fmod (bar, 4.0) >= 2.0 ? std::fmod (inBar, beat) / rate : 1e9;
+        alone[4].setSample (0, s, cymHp.processSingleSampleRaw (noise()) * (float) (0.22 * std::exp (-ct * 0.8) + (rt < 1e8 ? 0.12 * std::exp (-rt * 3.0) : 0.0)));
+    }
+    juce::AudioBuffer<float> kit (2, n);
+    kit.clear();
+    for (auto& a : alone)
+    {
+        a.copyFrom (1, 0, a, 0, 0, n);
+        for (int c = 0; c < 2; ++c)
+            kit.addFrom (c, 0, a, c, 0, n);
+    }
+    const auto t0 = juce::Time::getMillisecondCounterHiRes();
+    const auto parts = drumsplit::split (kit, rate);
+    std::cout << "split took " << juce::String ((juce::Time::getMillisecondCounterHiRes() - t0) / 1000.0, 2) << " s for 12 s" << std::endl;
+    REQUIRE (parts.size() == 5);
+    double meanSdr = 0.0;
+    for (int p = 0; p < 5; ++p)
+    {
+        double sig = 0.0, err = 0.0;
+        for (int s = 0; s < n; ++s)
+        {
+            sig += juce::square ((double) alone[(size_t) p].getSample (0, s));
+            err += juce::square ((double) alone[(size_t) p].getSample (0, s) - parts[(size_t) p].getSample (0, s));
+        }
+        const auto sdr = 10.0 * std::log10 (sig / juce::jmax (1.0e-12, err));
+        meanSdr += sdr / 5.0;
+        std::cout << drumsplit::partNames()[p] << " SDR " << juce::String (sdr, 1) << " dB" << std::endl;
+    }
+    std::cout << "mean SDR " << juce::String (meanSdr, 2) << " dB" << std::endl;
+}

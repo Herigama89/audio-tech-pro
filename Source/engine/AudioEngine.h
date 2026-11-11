@@ -707,6 +707,17 @@ private:
     bool previewLoops = false;
     juce::AudioBuffer<float> previewScratch;                 // its audio before the effect (sized in prepare)
     std::atomic<bool> previewPlaying { false };
+
+    // Resting (see render): the graph it last looked at, whether anything in it hears an input, and how long all
+    // that came out has been silent (audio thread only)
+    const PlaybackGraph* restGraphSeen = nullptr;
+    bool restHearsInput = false;
+    juce::int64 quietSamples = 0;
+public:
+    /** Stopped and silent, nothing heard live: the tracks aren't processed at all (the Performance window's "resting"). */
+    bool isResting() const noexcept { return resting.load (std::memory_order_relaxed); }
+private:
+    std::atomic<bool> resting { false };
     void renderPreview (float* left, float* right, int n) noexcept;                      // freezing: before the fader, pan and sends
     std::vector<LevelStats> measuredTracks;       // by slot
     LevelStats measuredMaster;
