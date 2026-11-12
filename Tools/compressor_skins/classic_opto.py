@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Vintage Opto (Classic Compressors): its face, drawn from scratch - a grey rack panel, its scales and labels, the
-amber backlit VU with the Nemix wordmark - and its moving parts, from the knob and switch art you gave
+amber backlit VU - and its moving parts, from the knob and switch art you gave
 (JKnobMan renders: knob_66_black, knob_vintage_black, switch_metal, LED_Red, rendered at 3x into KNOBS).
 
     python3 Tools/compressor_skins/classic_opto.py KNOBS_DIR
@@ -158,17 +158,6 @@ def vu (img):
     fd.text ((12, fh - 40), "-", font = font (FONT_BOLD, 20), fill = ink)
     fd.text ((fw - 24, fh - 62), "+", font = font (FONT_BOLD, 20), fill = red)
     fd.text ((fw - 46, fh - 34), "VU", font = font (FONT_MED, 22), fill = ink)
-    # the Nemix wordmark (the synth's logo), under the scale
-    logo = Image.open (os.path.join (ROOT, "Resources", "nemix", "logo.jpg")).convert ("RGB").crop ((20, 20, 360, 110))
-    arr = np.array (logo)
-    import colorsys
-    hsv = np.array (Image.fromarray (arr).convert ("HSV")).astype (np.float32) / 255.0
-    mask = (((hsv[..., 1] > 0.45) & (hsv[..., 2] > 0.35)) | ((hsv[..., 2] > 0.86) & (hsv[..., 1] < 0.25))).astype (np.uint8) * 255
-    mask[88:, :] = 0
-    word = Image.fromarray (np.dstack ([arr, mask]), "RGBA").filter (ImageFilter.SMOOTH)
-    ww = 104
-    word = word.resize ((ww, int (ww * word.size[1] / word.size[0])), Image.LANCZOS)
-    fimg.alpha_composite (word, (int (fw / 2 - ww / 2), int (fh - word.size[1] - 18)))
     # glass on the window
     sheen = Image.new ("RGBA", (fw, fh), (0, 0, 0, 0))
     ImageDraw.Draw (sheen).polygon (((0, 0), (fw * 0.55, 0), (fw * 0.3, fh), (0, fh)), fill = (255, 255, 255, 22))
