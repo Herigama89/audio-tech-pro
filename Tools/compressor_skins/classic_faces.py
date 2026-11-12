@@ -84,9 +84,10 @@ FACES = [
         ("small", "deEss", 335, 395, ("0", "", "10"), "DE-ESS"),
         ("sel", "deEssFreq", 475, 395, ("3k", "5k", "7k", "9k"), "S FREQ"),
         ("big", "drive", 690, 250, TEN, "TUBE DRIVE"),
-        ("big", "comp", 1320, 250, TEN, "COMPRESS"),
-        ("small", "limit", 1550, 230, ("OFF", "", "MAX"), "LIMIT"),
-        ("small", "output", 1550, 395, ("-12", "0", "+12"), "OUTPUT"),
+        ("big", "comp", 1300, 250, TEN, "COMPRESS"),
+        ("sel", "ratio", 1515, 230, ("2", "3", "4", "6", "10"), "RATIO"),
+        ("small", "limit", 1515, 395, ("OFF", "", "MAX"), "LIMIT"),
+        ("small", "output", 1640, 395, ("-12", "0", "+12"), "OUTPUT"),
     ]),
     dict (key = "tube", tint = ((242, 214, 92), (204, 162, 38)), type = "classicTube", title = "CLASS A TUBE STRIP", sub = "PREAMP  ·  OPTICAL COMPRESSOR  ·  EQUALIZER", w = 2150, mx = 1060, items = [
         ("sel", "lowFreq", 195, 230, ("15", "30", "60", "150"), "LOW Hz"),

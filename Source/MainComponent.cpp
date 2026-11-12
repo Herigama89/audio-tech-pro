@@ -2,6 +2,7 @@
 #include "ui/Eco.h"
 #include "ui/NemixPanel.h"
 #include "ui/InsertBar.h"
+#include "ui/EffectDesigns.h"
 #include "MainComponent.h"
 #include "ui/MultiMeter.h"
 #include "ui/PluginWindowKeys.h"
@@ -3234,7 +3235,7 @@ void MainComponent::showEffectMenu (const juce::String& owner, int slot, juce::V
     std::vector<PluginPicker::Entry> entries;
     for (const auto& info : builtInEffects())
     {
-        PluginPicker::Entry e { info.name, app::effectsName, {}, [this, place, type = info.type]
+        PluginPicker::Entry e { info.name, info.category == "Classic Compressors" ? juce::String ("Classic Compressors") : juce::String (app::effectsName), {}, [this, place, type = info.type]
         {
             place ([this, type] (juce::ValueTree chain, int index) { return model::addBuiltinInsert (chain, type, index, &undoManager); });
         } };
@@ -3496,16 +3497,45 @@ void MainComponent::openInsertWindow (const juce::ValueTree& insert)
     struct Host final : juce::Component
     {
         Host (juce::ValueTree i, juce::ValueTree p, juce::UndoManager& um, bool sidechainKey)
-            : bar (i, p, um, sidechainKey), panel (i, um)
+            : bar (i, p, um, sidechainKey), panel (i, um), insert (i), undo (um)
         {
             addAndMakeVisible (bar);
             addAndMakeVisible (panel);
-            setSize (juce::jmax (panel.getWidth(), InsertBar::preferredWidth + 12), panel.getHeight() + 32);
+            // A face that comes in several skins: the Skin menu, at the bar's right
+            const auto* design = effectdesign::designFor (i[ids::effect].toString());
+            if (design != nullptr && design->skins)
+            {
+                skinButton.onClick = [this] { showSkins(); };
+                addAndMakeVisible (skinButton);
+                updateSkinButton();
+            }
+            setSize (juce::jmax (panel.getWidth(), InsertBar::preferredWidth + 12 + (skinButton.isVisible() ? 190 : 0)), panel.getHeight() + 32);
+        }
+        void updateSkinButton()
+        {
+            const auto skin = (int) insert.getProperty ("skin", effectdesign::defaultClassicSkin);
+            skinButton.setButtonText ("Skin: " + effectdesign::classicSkinNames()[juce::jlimit (0, 5, skin)]);
+        }
+        void showSkins()
+        {
+            juce::PopupMenu menu;
+            const auto current = (int) insert.getProperty ("skin", effectdesign::defaultClassicSkin);
+            const auto& names = effectdesign::classicSkinNames();
+            for (int k = 0; k < names.size(); ++k)
+                menu.addItem (names[k] + (k == 0 ? " (follows the app)" : ""), true, k == current, [this, k]
+                {
+                    undo.beginNewTransaction ("Skin");
+                    insert.setProperty ("skin", k, &undo);
+                    updateSkinButton();
+                });
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (skinButton));
         }
         void paint (juce::Graphics& g) override { g.fillAll (theme::toolbarDark); }
         void resized() override
         {
             bar.setBounds (6, 4, InsertBar::preferredWidth, 24);
+            if (skinButton.isVisible())
+                skinButton.setBounds (getWidth() - 186, 4, 180, 24);
             if (! fitting)
                 panel.setBounds (0, 32, getWidth(), getHeight() - 32);
         }
@@ -3515,12 +3545,15 @@ void MainComponent::openInsertWindow (const juce::ValueTree& insert)
             if (child != &panel || fitting)
                 return;
             const juce::ScopedValueSetter<bool> guard (fitting, true);
-            setSize (juce::jmax (panel.getWidth(), InsertBar::preferredWidth + 12), panel.getHeight() + 32);
+            setSize (juce::jmax (panel.getWidth(), InsertBar::preferredWidth + 12 + (skinButton.isVisible() ? 190 : 0)), panel.getHeight() + 32);
             panel.setTopLeftPosition (0, 32);
         }
         bool fitting = false;
         InsertBar bar;
         EffectPanel panel;
+        juce::ValueTree insert;
+        juce::UndoManager& undo;
+        juce::TextButton skinButton;
     };
     auto* host = new Host (insert, project, undoManager, sidechain);
     host->panel.setLiveValue ([this, id]

@@ -1651,3 +1651,48 @@ TEST_CASE ("Automix reference: a dull, quiet, dynamic mix is planned towards a b
         }
     }
 }
+
+TEST_CASE ("Classic Compressors: each turns a loud tone down, roughly level at their defaults, power off passes", "[stockfx][classic]")
+{
+    const char* types[] { "classicOpto", "classicFet", "classicVca", "classicPunch", "classicVox", "classicTube", "classicDual" };
+    for (const auto* type : types)
+    {
+        INFO (type);
+        // A quiet tone: little changed in level at the defaults
+        {
+            auto e = make (type);
+            const auto in = sine (440.0, 1.0, 0.05f);
+            const auto [l, r] = run (*e, in, in);
+            const auto gainDb = juce::Decibels::gainToDecibels (peakOf (l, 24000) / 0.05f);
+            CHECK (gainDb > -14.0f);
+            CHECK (gainDb < 14.0f);
+        }
+        // A loud tone: pushed harder, it's turned down (the meter says so)
+        {
+            auto e = make (type);
+            const auto& params = e->getInfo().params;
+            for (const auto* id : { "peak", "input", "fetInput", "optoPeak", "comp" })
+                for (const auto& p : params)
+                    if (p.id == id)
+                        set (*e, id, 85.0f);
+            for (const auto* id : { "threshold" })
+                for (const auto& p : params)
+                    if (p.id == id)
+                        set (*e, id, p.min);
+            const auto loud = sine (440.0, 1.5, 0.7f);
+            run (*e, loud, loud);
+            float meters[8] {};
+            REQUIRE (e->readMeters (meters, 8) == 4);
+            CHECK (meters[1] > 3.0f);   // dB of reduction
+            CHECK (meters[0] > 0.1f);   // the needle moved
+        }
+        // Power off: untouched
+        {
+            auto e = make (type);
+            set (*e, "power", 0.0f);
+            const auto in = sine (440.0, 0.2, 0.5f);
+            const auto [l, r] = run (*e, in, in);
+            CHECK (l == in);
+        }
+    }
+}

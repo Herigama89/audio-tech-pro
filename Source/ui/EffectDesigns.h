@@ -113,6 +113,9 @@ namespace riff::effectdesign
         bool glassFace = false;                 // its face paints itself in Liquid Glass (else it keeps its own colours)
         bool analyzer = false;                  // a live spectrum of the output behind the curve (as Logic's EQs)
         bool meters = false;                    // the effect's own readings (meters, loudness), refreshed while open
+        juce::Rectangle<int> liveArea;          // (only this part moves with the readings: just it is redrawn; empty: the whole face)
+        bool sparks = false;                    // knobs throw sparks as they're turned (the Classic Compressors)
+        bool skins = false;                     // it can be worn in several skins (the window's Skin menu; the insert's "skin")
         /** Curve displays with points to drag: 20 Hz to 20 kHz across, each point's value over its parameter's range up the side. */
         struct Graph
         {
@@ -160,6 +163,12 @@ namespace riff::effectdesign
     bool writesInTheme (const Design&);
     juce::Colour labelColourOf (const Design&);
     juce::Colour valueColourOf (const Design&);
+
+    /** The Classic Compressors' skins, in their menu's order (the insert's "skin" property; none: Half & Half). */
+    const juce::StringArray& classicSkinNames();
+    inline constexpr int defaultClassicSkin = 1;
+    /** The skin of the face being painted (set by the window round its paint). */
+    void setPaintingSkin (int skin) noexcept;
 
     /** A picture compiled into the app, by its BinaryData resource name (cached). */
     juce::Image skinImage (const char* name);

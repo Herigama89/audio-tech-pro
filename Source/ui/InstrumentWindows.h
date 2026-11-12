@@ -246,8 +246,16 @@ private:
     std::vector<float> fftData, window;
     void updateSpectrum();
 
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { refresh(); }
+    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
     void refresh();
+
+    // Sparks: a knob turned on a Classic Compressor's face throws a few, which fly, fall and fade
+    struct Spark { juce::Point<float> at, velocity; float life, size; juce::Colour colour; };
+    std::vector<Spark> sparks;
+    juce::Random sparkRandom;
+    double lastSparkTime = 0.0;
+    void throwSparks (juce::Point<float> from);
+    void paintOverChildren (juce::Graphics&) override;
 
     juce::ValueTree insert;
     juce::UndoManager& undoManager;

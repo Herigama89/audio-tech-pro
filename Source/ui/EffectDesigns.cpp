@@ -7,6 +7,7 @@
 #include "Theme.h"
 #include "ConsoleLook.h"
 #include "Looks.h"
+#include "ClassicLayouts.h"
 #include <cstring>
 #include <map>
 
@@ -2710,6 +2711,122 @@ namespace
         g.setOpacity (1.0f);
     }
 
+    //==============================================================================
+    // The Classic Compressors: drawn panels (Tools/compressor_skins/classic_faces.py) in five skins, their knobs,
+    // selectors and switches from the knob art, the black compression meter with its needle, the power lamp
+    //==============================================================================
+    int paintingSkinValue = defaultClassicSkin;
+
+    /** The skin's panel picture, by the skin's index (Auto: the theme's light or dark glass). Half & Half is put
+        together once from the dark glass and the face's light (or coloured) glass, split on a diagonal. */
+    juce::Image classicPanel (const classicfaces::Face& f, int skin)
+    {
+        if (skin == 0)
+            skin = theme::glassSkin() && theme::glassLight() ? 3 : 2;
+        const juce::String key (f.key);
+        const auto named = [&key] (const char* skinKey) { return skinImage (("classic_" + key + "_" + skinKey + "_jpg").toRawUTF8()); };
+        switch (skin)
+        {
+            case 2: return named ("gd");
+            case 3: return named ("gs");
+            case 4: return named ("mg");
+            case 5: return named ("mb");
+            default: break;
+        }
+        static std::map<juce::String, juce::Image> halves;
+        auto& image = halves[key];
+        if (image.isNull())
+        {
+            const auto dark = named ("gd"), light = f.tinted ? named ("gc") : named ("gs");
+            if (dark.isNull() || light.isNull())
+                return dark;
+            image = juce::Image (juce::Image::RGB, dark.getWidth(), dark.getHeight(), false);
+            juce::Graphics g (image);
+            g.drawImageAt (light, 0, 0);
+            const auto w = (float) f.width, h = (float) classicfaces::height;
+            juce::Path right;
+            right.startNewSubPath (f.seamTop, 0.0f); right.lineTo (w, 0.0f); right.lineTo (w, h); right.lineTo (f.seamBottom, h); right.closeSubPath();
+            {
+                juce::Graphics::ScopedSaveState keep (g);
+                g.reduceClipRegion (right);
+                g.drawImageAt (dark, 0, 0);
+            }
+            g.setColour (juce::Colours::white.withAlpha (0.47f));
+            g.drawLine (f.seamTop, 0.0f, f.seamBottom, h, 2.0f);
+            // (the Colour section and the meter stay whole, the seam passing behind them)
+            juce::Path whole;
+            whole.addRoundedRectangle (f.meterX - 192.0f, 290.0f, 384.0f, 168.0f, 20.0f);
+            const auto mx0 = f.meterX - classicfaces::meterWidth * 0.5f;
+            whole.addRoundedRectangle (mx0 - 6.0f, classicfaces::meterTop - 6.0f, classicfaces::meterWidth + 16.0f, classicfaces::meterHeight + 20.0f, 18.0f);
+            g.reduceClipRegion (whole);
+            g.drawImageAt (dark, 0, 0);
+        }
+        return image;
+    }
+
+    void addClassicDesigns (std::map<juce::String, Design>& d)
+    {
+        using namespace classicfaces;
+        for (const auto& f : faces())
+        {
+            const auto s = std::min (0.8f, 1300.0f / (float) f.width);
+            Design c;
+            c.knobs = KnobStyle::black;
+            c.label = juce::Colours::white; c.value = juce::Colours::white; c.accent = juce::Colour (0xfff2a43a); c.track = juce::Colours::black;
+            c.valueAbove = false;
+            c.photoScale = s;
+            c.width = juce::roundToInt ((float) f.width * s);
+            c.height = juce::roundToInt ((float) height * s);
+            c.meters = true;
+            c.sparks = true;
+            c.skins = true;
+            const auto mx0 = f.meterX - meterWidth * 0.5f;
+            c.liveArea = RF (mx0, meterTop, meterWidth, meterHeight).transformedBy (juce::AffineTransform::scale (s)).getSmallestIntegerContainer().expanded (2);
+            for (const auto& it : f.items)
+            {
+                if (it.part == Part::toggle)
+                {
+                    Sprite sp;
+                    sp.image = "classic_switch_up_png";
+                    sp.offImage = "classic_switch_down_png";
+                    sp.rect = RF (it.x - toggleSize * 0.5f, it.y - toggleSize * 0.5f, toggleSize, toggleSize);
+                    sp.pivot = { it.x, it.y };
+                    c.controls.push_back (photoControl (it.id, Kind::hotspot, sp, s));
+                    continue;
+                }
+                const auto size = it.part == Part::big ? bigSize : it.part == Part::selector ? selectorSize : smallSize;
+                const auto* image = it.part == Part::small ? "classic_small_png" : "classic_big_png";
+                auto sp = turning (image, it.x, it.y, size * 0.5f, it.part == Part::small ? smallAngle : bigAngle, it.angles);
+                sp.hitRadius = size * 0.5f;
+                c.controls.push_back (photoControl (it.id, Kind::knob, sp, s));
+            }
+            c.paint = [&f, s] (juce::Graphics& g, R b, const EffectInfo& fx, const float* v, float)
+            {
+                g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+                g.setOpacity (1.0f);
+                g.drawImage (classicPanel (f, paintingSkinValue), b.toFloat());
+                // The power lamp
+                const auto on = valueOf (fx, v, "power", 1.0f) > 0.5f;
+                drawPart (g, on ? "classic_led_on_png" : "classic_led_off_png", RF ((float) f.width - 160.0f - 28.0f, 290.0f, 56.0f, 56.0f), s);
+                // The needle: 0..1 across the meter's 0..20 dB (or the output's VU), behind the window's edges
+                const auto k = meterWidth / meterPhotoWidth;
+                const auto x0 = f.meterX - meterWidth * 0.5f;
+                const juce::Point<float> pivot (x0 + needlePivotX * k, meterTop + needlePivotY * k);
+                const auto angle = juce::degreesToRadians (needleAt0 + needlePerDb * 20.0f * juce::jlimit (0.0f, 1.08f, meterAt (0, 0.0f)));
+                const auto tip = pivot + juce::Point<float> (std::sin (angle), -std::cos (angle)) * (needleReach * k);
+                juce::Graphics::ScopedSaveState keep (g);
+                g.addTransform (juce::AffineTransform::scale (s));
+                g.reduceClipRegion (RF (x0 + needleWindow[0] * k, meterTop + needleWindow[1] * k,
+                                        (needleWindow[2] - needleWindow[0]) * k, (needleWindow[3] - needleWindow[1]) * k).getSmallestIntegerContainer());
+                g.setColour (juce::Colours::black.withAlpha (0.35f));
+                g.drawLine ({ pivot.translated (1.5f, 2.0f), tip.translated (1.5f, 2.0f) }, 2.2f);
+                g.setColour (juce::Colour (0xfff5f5f0));
+                g.drawLine ({ pivot, tip }, 2.0f);
+            };
+            d[f.type] = c;
+        }
+    }
+
     void addPhotoDesigns (std::map<juce::String, Design>& d)
     {
         const auto setCommon = [] (Design& c)
@@ -5298,6 +5415,7 @@ namespace
         }
         addHardwareDesigns (d);
         addPhotoDesigns (d);
+        addClassicDesigns (d);
         addCompressorFaces (d);
         addGlassCompressorFaces (d);
 
@@ -5418,6 +5536,14 @@ bool writesInTheme (const Design& d)
 }
 juce::Colour labelColourOf (const Design& d) { return writesInTheme (d) ? theme::text : d.label; }
 juce::Colour valueColourOf (const Design& d) { return writesInTheme (d) ? theme::accent : d.value; }
+
+const juce::StringArray& classicSkinNames()
+{
+    static const juce::StringArray names { "Auto", "Half & Half", "Glass Dark", "Glass Silver", "Metal Grey", "Metal Black" };
+    return names;
+}
+
+void setPaintingSkin (int skin) noexcept { paintingSkinValue = juce::jlimit (0, 5, skin); }
 
 const Design* designFor (const juce::String& type)
 {
