@@ -174,9 +174,7 @@ def arc_meter (img, c, r0, r1, a0 = -40, a1 = 40, value = 0.5):
     for i in range (33):
         a = span (i / 32)
         d.line (polar (c, rs, a) + polar (c, rs + 7, a), fill = ink, width = 1)
-    ctext (d, c[0] - 70, c[1] - r0 - 22, "−", font (COND, 20), ink)
-    ctext (d, c[0] + 70, c[1] - r0 - 22, "+", font (COND, 20), red)
-    ctext (d, c[0] + 86, c[1] - r0 - 20, "VU", font (COND, 15), red)
+    ctext (d, c[0] + 92, c[1] - r0 - 16, "VU", font (COND, 15), red)
     # the needle (with a faint shadow), from below the window
     if value is not None:
         a = span (value)
@@ -223,7 +221,8 @@ def ring_labels (d, c, r, labels, a0, a1, f, ink, dots = True, tick = 0, id = No
     n = len (labels)
     for i, lab in enumerate (labels):
         a = a0 + (a1 - a0) * i / max (1, n - 1)
-        x, y = polar (c, r, a)
+        wide = max (0.0, d.textlength (lab, font = f) / 2 - 9)
+        x, y = polar (c, r + wide * abs (math.sin (math.radians (a))), a)
         ctext (d, x, y, lab, f, ink)
         if id is not None:
             lo, hi = angles[0], angles[-1]
@@ -377,29 +376,29 @@ def child():
     for k, (y, side, colour) in enumerate (((190, "LEFT", "LAT"), (490, "RIGHT", "VERT"))):
         ch = "LR"[k]
         # metering: in / gr / out
-        ctext (d, 650, y - 115, side + "–" + colour, lab, ink); ctext (d, 650, y - 92, "METERING", lab, ink)
+        ctext (d, 650, y - 127, side + "–" + colour, lab, ink); ctext (d, 650, y - 104, "METERING", lab, ink)
         for i, (a, s) in enumerate (zip ((-55, 0, 55), ("IN", "GR", "OUT"))):
-            x, yy2 = polar ((650, y + 10), 62, a); ctext (d, x, yy2, s, small, ink); spot ("meter" + ch, x, yy2, i / 2)
+            x, yy2 = polar ((650, y + 10), 84, a); ctext (d, x, yy2, s, small, ink); spot ("meter" + ch, x, yy2, i / 2)
         chick (img, "meter" + ch, (650, y + 10), 120, [-55, 0, 55])
         # input gain: 20 (left) down to 0 (right)
-        ctext (d, 880, y - 115, side + " CHANNEL", lab, ink); ctext (d, 880, y - 92, "INPUT GAIN", lab, ink)
+        ctext (d, 880, y - 127, side + " CHANNEL", lab, ink); ctext (d, 880, y - 104, "INPUT GAIN", lab, ink)
         ring_labels (d, (880, y + 20), 92, [str (v) for v in range (20, -1, -2)], -150, 150, nums, ink, dots = False, id = "input" + ch, angles = [150, -150])
         dial (img, "input" + ch, (880, y + 20), 170, [150, -150], "fluted", 0.3)
         # threshold 0..10
-        ctext (d, 1120, y - 115, side + "–" + colour, lab, ink); ctext (d, 1120, y - 92, "THRESHOLD", lab, ink)
+        ctext (d, 1120, y - 127, side + "–" + colour, lab, ink); ctext (d, 1120, y - 104, "THRESHOLD", lab, ink)
         ring_labels (d, (1120, y + 20), 92, [str (v) for v in range (0, 11)], -150, 150, nums, ink, dots = False, id = "thresh" + ch, angles = [-150, 150])
         dial (img, "thresh" + ch, (1120, y + 20), 170, [-150, 150], "fluted", 0.3)
         # time constant 1..6 over the top
-        ty = y - 10 if k == 0 else y + 50
-        ctext (d, 1325, ty - 95, side + "–" + colour, lab, ink); ctext (d, 1325, ty - 72, "TIME CONSTANT", lab, ink)
-        ring_labels (d, (1325, ty + 20), 62, [str (v) for v in range (1, 7)], -75, 75, nums, ink, dots = False, id = "time" + ch, angles = [-75, 75])
-        chick (img, "time" + ch, (1325, ty + 20), 110, even (-75, 75, 6), 0.2)
+        ty = y - 10 if k == 0 else y + 72
+        ctext (d, 1316, ty - 112, side + "–" + colour, lab, ink); ctext (d, 1316, ty - 89, "TIME CONSTANT", lab, ink)
+        ring_labels (d, (1316, ty + 20), 78, [str (v) for v in range (1, 7)], -72, 72, nums, ink, dots = False, id = "time" + ch, angles = [-72, 72])
+        chick (img, "time" + ch, (1316, ty + 20), 96, even (-72, 72, 6), 0.2)
     # AGC: left/right or lateral/vertical
-    ctext (d, 1325, 300, "AGC", lab, ink)
-    ctext (d, 1262, 330, "LEFT", small, ink); ctext (d, 1262, 350, "RIGHT", small, ink)
-    ctext (d, 1410, 330, "LAT", small, red); ctext (d, 1410, 350, "VERT", small, red)
-    spot ("agc", 1262, 340, 0.0); spot ("agc", 1410, 340, 1.0)
-    chick (img, "agc", (1325, 375), 100, [-40, 40], 0.0)
+    ctext (d, 1312, 304, "AGC", lab, ink)
+    ctext (d, 1240, 350, "LEFT", small, ink); ctext (d, 1240, 370, "RIGHT", small, ink)
+    ctext (d, 1378, 350, "LAT", small, red); ctext (d, 1378, 370, "VERT", small, red)
+    spot ("agc", 1240, 360, 0.0); spot ("agc", 1378, 360, 1.0)
+    chick (img, "agc", (1312, 362), 84, [-40, 40], 0.0)
     # our name, as the maker's would be
     d.text ((960, 652), "Mastering Child Comp", font = font (SERIF_IT, 34), fill = red, anchor = "lm")
     d.text ((1290, 656), "VARIABLE-MU", font = font (COND, 15), fill = ink, anchor = "lm")
@@ -435,7 +434,6 @@ def hill():
     lab = font (COND, 22); small = font (COND, 17); nums = font (COND_BOOK, 18); tiny = font (COND, 14)
     cx = W / 2
     ctext (d, cx, 40, "MASTERING HILL COMP", font (COND, 28), ink, spacing = 3)
-    ctext (d, cx, 932, "MASTERING COMPRESSOR", font (COND, 22), ink, spacing = 3)
     # the meters' black housing, its grilles under the meters
     d.rounded_rectangle ((cx - 460, 86, cx + 460, 500), 30, fill = (10, 10, 11, 255), outline = (46, 46, 50, 255), width = 3)
     for k, x0 in enumerate ((cx - 430, cx + 36)):
@@ -452,14 +450,14 @@ def hill():
         def ring (c, r, labels, id, angles, a0 = -140, a1 = 140, tick = 0):
             ring_labels (d, c, r, labels, a0, a1, nums, ink, dots = True, tick = tick, id = id, angles = angles)
         # outer column
-        ctext (d, X (136), 40, "OPTICAL THRESHOLD", lab, ink)
+        ctext (d, X (136), 26, "OPTICAL THRESHOLD", lab, ink)
         ring ((X (136), 150), 96, TT[::2], "optThresh" + ch, A, tick = 2)
         dial (img, "optThresh" + ch, (X (136), 150), 176, A, pos = 0.3)
         ratios = ["1.2", "2", "3", "4", "FLOOD"]
-        ctext (d, X (136), 454, "DISCRETE RATIO", lab, ink)
+        ctext (d, X (136), 440, "DISCRETE RATIO", lab, ink)
         ring ((X (136), 564), 96, ratios, "discRatio" + ch, even (-140, 140, 5))
         dial (img, "discRatio" + ch, (X (136), 564), 176, even (-140, 140, 5), pos = 0.25)
-        ctext (d, X (136), 700, "DISCRETE THRESHOLD", lab, ink)
+        ctext (d, X (136), 686, "DISCRETE THRESHOLD", lab, ink)
         ring ((X (136), 810), 96, TT[::2], "discThresh" + ch, A, tick = 2)
         dial (img, "discThresh" + ch, (X (136), 810), 176, A, pos = 0.3)
         # inner column: meter select (its three lights), optical gain, discrete attack and recovery
@@ -468,14 +466,14 @@ def hill():
             light (img, "meter" + ch, k, (lx, 96), on = k == 1)
         dial (img, "meter" + ch, (X (352), 186), 128, [-40, 0, 40] if side < 0 else [40, 0, -40])
         ctext (d, X (352), 262, "METER SELECT", small, ink)
-        ctext (d, X (352), 312, "OPTICAL GAIN", lab, ink)
+        ctext (d, X (352), 294, "OPTICAL GAIN", lab, ink)
         ring ((X (352), 404), 84, TT[::2], "optGain" + ch, A, tick = 2)
         dial (img, "optGain" + ch, (X (352), 404), 150, A, pos = 0.1)
         att = even (-120, 120, 6)
-        ctext (d, X (350), 540, "DISCRETE ATTACK", lab, ink)
+        ctext (d, X (350), 518, "DISCRETE ATTACK", lab, ink)
         ring ((X (350), 624), 78, ["1", "3", "5", "10", "15", "30"], "discAttack" + ch, att, -120, 120)
         dial (img, "discAttack" + ch, (X (350), 624), 150, att, pos = 0.4)
-        ctext (d, X (350), 770, "DISCRETE RECOVER", lab, ink)
+        ctext (d, X (350), 748, "DISCRETE RECOVER", lab, ink)
         ring ((X (350), 852), 78, [".1", ".25", ".5", ".8", "1.2", "DUAL"], "discRecover" + ch, att, -120, 120)
         dial (img, "discRecover" + ch, (X (350), 852), 150, att, pos = 0.4)
         # optical in / bypass and its light
@@ -485,13 +483,13 @@ def hill():
         spot ("optIn" + ch, X (164), 322, 1.0); spot ("optIn" + ch, X (164), 408, 0.0)
         # the big discrete gain
         ctext (d, X (622), 646, "DISCRETE GAIN", lab, ink)
-        ring ((X (622), 800), 138, TT[::2], "discGain" + ch, A, tick = 2)
+        ring ((X (622), 800), 128, TT[::2], "discGain" + ch, A, tick = 2)
         dial (img, "discGain" + ch, (X (622), 800), 250, A, pos = 0.1)
         # side-chain filter and discrete in / bypass (its light)
-        switch (img, "scFilter" + ch, (X (550), 570), 58, on = False); ctext (d, X (550), 532, "SIDECHAIN", tiny, ink); ctext (d, X (550), 610, "FILTER", tiny, ink)
-        light (img, "discIn" + ch, 1, (X (656), 540), on = True)
-        switch (img, "discIn" + ch, (X (740), 570), 58); ctext (d, X (740), 530, "DISCRETE", tiny, ink); ctext (d, X (740), 608, "BYPASS", tiny, ink)
-        spot ("discIn" + ch, X (740), 530, 1.0); spot ("discIn" + ch, X (740), 608, 0.0)
+        switch (img, "scFilter" + ch, (X (550), 562), 58, on = False); ctext (d, X (550), 524, "SIDECHAIN", tiny, ink); ctext (d, X (550), 600, "FILTER", tiny, ink)
+        light (img, "discIn" + ch, 1, (X (656), 532), on = True)
+        switch (img, "discIn" + ch, (X (740), 562), 58); ctext (d, X (740), 524, "DISCRETE", tiny, ink); ctext (d, X (740), 600, "BYPASS", tiny, ink)
+        spot ("discIn" + ch, X (740), 524, 1.0); spot ("discIn" + ch, X (740), 600, 0.0)
         # the transformer: nickel, iron, steel
         for k, s in enumerate (("NICKEL", "IRON", "STEEL")):
             light (img, "xfmr" + ch, k, (X (850), 716 + k * 46), on = k == 1)
@@ -499,15 +497,15 @@ def hill():
             ctext (d, tx, 716 + k * 46, s, tiny, ink); spot ("xfmr" + ch, tx, 716 + k * 46, k / 2)
         switch (img, "xfmr" + ch, (X (960), 762), 58, cycle = True)
     # the middle: dual mono / stereo, hardwire bypass and its light, mix
-    ctext (d, cx - 96, 560, "DUAL MONO", small, ink); ctext (d, cx + 96, 560, "STEREO", small, ink)
-    spot ("stereo", cx - 96, 560, 0.0); spot ("stereo", cx + 96, 560, 1.0)
+    ctext (d, cx - 126, 566, "DUAL MONO", small, ink); ctext (d, cx + 112, 566, "STEREO", small, ink)
+    spot ("stereo", cx - 126, 566, 0.0); spot ("stereo", cx + 112, 566, 1.0)
     dial (img, "stereo", (cx, 566), 128, [-40, 40], pos = 1.0)
     light (img, "stereo", 0, (cx - 60, 650)); light (img, "stereo", 1, (cx + 60, 650), on = True)
-    switch (img, "power", (cx, 752), 60); ctext (d, cx, 712, "HARDWIRE", small, ink); ctext (d, cx, 792, "BYPASS", small, ink)
+    switch (img, "power", (cx, 752), 60); ctext (d, cx, 714, "HARDWIRE", tiny, ink); ctext (d, cx, 790, "BYPASS", tiny, ink)
     power_lamp (img, (cx, 420), 26, (80, 255, 140))
-    ctext (d, cx, 828, "MIX", small, ink)
-    ring_labels (d, (cx, 870), 62, ["DRY", "WET"], -120, 120, tiny, ink, dots = False, id = "mix", angles = [-135, 135])
-    dial (img, "mix", (cx, 870), 96, [-135, 135], pos = 1.0)
+    ctext (d, cx, 842, "MIX", small, ink)
+    ring_labels (d, (cx, 892), 60, ["DRY", "WET"], -118, 118, tiny, ink, dots = False, id = "mix", angles = [-135, 135])
+    dial (img, "mix", (cx, 892), 90, [-135, 135], pos = 1.0)
     return img
 
 # ---- Iron Master Comp: the valve mastering compressor ------------------------------------------------------------------
@@ -533,14 +531,16 @@ def iron():
         dial (img, "thresh" + ch, (c, 560), 250, [-150, 150])
         # attack, release, input, output
         steps = even (-120, 120, 6)
-        for (x, y, title, id, labels, angles) in ((c - 310, 190, "ATTACK", "attack", ["fast", "slow"], steps), (c - 420, 470, "RELEASE", "release", ["fast", "slow"], steps),
+        for (x, y, title, id, labels, angles) in ((c - 310, 190, "ATTACK", "attack", ["fast", "slow"], steps), (c - 420, 500, "RELEASE", "release", ["fast", "slow"], steps),
                                                   (c - 300, 770, "INPUT", "input", ["2", "4", "6", "8", "10", "12"], [-120, 120]),
                                                   (c + 300, 770, "OUTPUT", "output", ["2", "4", "6", "8", "10", "12"], [-120, 120])):
-            ctext (d, x, y - 92, title, lab, ink)
-            ring_labels (d, (x, y), 84, labels, -120, 120, nums if len (labels) > 2 else small, ink, dots = len (labels) > 2, id = id + ch, angles = [-120, 120])
+            ctext (d, x, y - 116, title, lab, ink)
             if len (labels) == 2:
+                ring_labels (d, (x, y), 92, labels, -128, 128, small, ink, dots = False, id = id + ch, angles = [-128, 128])
                 for a in steps:
-                    x2, y2 = polar ((x, y), 66, a); d.ellipse ((x2 - 2.2, y2 - 2.2, x2 + 2.2, y2 + 2.2), fill = ink)
+                    x2, y2 = polar ((x, y), 76, a); d.ellipse ((x2 - 2.6, y2 - 2.6, x2 + 2.6, y2 + 2.6), fill = ink)
+            else:
+                ring_labels (d, (x, y), 88, labels, -120, 120, nums, ink, dots = True, id = id + ch, angles = [-120, 120])
             dial (img, id + ch, (x, y), 150, angles, pos = 0.4)
             if title in ("INPUT", "OUTPUT"):
                 ctext (d, x + 30, y + 86, "dB", small, ink)
@@ -548,15 +548,15 @@ def iron():
         ctext (d, c + 380, 286, "RECTIFIER", lab, ink)
         ring_labels (d, (c + 380, 186), 112, ["GERMANIUM", "LED", "SILICON", "Ge/Si"], -95, 95, font (COND, 14), ink, dots = False, id = "rect" + ch, angles = [-95, 95])
         dial (img, "rect" + ch, (c + 380, 186), 140, even (-95, 95, 4), pos = 0.0)
-        ctext (d, c + 430, 372, "SIDE CHAIN EQs", lab, ink)
-        ring_labels (d, (c + 430, 480), 86, ["OFF", "EQ1", "EQ2", "EQ3", "EQ4"], -100, 100, tiny, ink, dots = False, id = "scEq" + ch, angles = [-100, 100])
-        dial (img, "scEq" + ch, (c + 430, 480), 140, even (-100, 100, 5), pos = 0.0)
+        ctext (d, c + 430, 360, "SIDE CHAIN EQs", lab, ink)
+        ring_labels (d, (c + 430, 484), 86, ["OFF", "EQ1", "EQ2", "EQ3", "EQ4"], -100, 100, tiny, ink, dots = False, id = "scEq" + ch, angles = [-100, 100])
+        dial (img, "scEq" + ch, (c + 430, 484), 140, even (-100, 100, 5), pos = 0.0)
         switch (img, "bias" + ch, (c + 380, 650), 60, cycle = True); ctext (d, c + 380, 596, "TUBE BIAS", small, ink)
         for j, s in enumerate (("Low", "Mid", "High")):
             ctext (d, c + 452, 626 + j * 24, s, small, ink); spot ("bias" + ch, c + 452, 626 + j * 24, j / 2)
             light (img, "bias" + ch, j, (c + 420, 626 + j * 24), amber = True, size = 0.45, on = j == 1)
-        tx = c - 470 if k == 0 else c + 450
-        ty = 330 if k == 0 else 316
+        tx = c - 470
+        ty = 300 if k == 0 else 316
         sgn = -1 if k == 0 else 1
         switch (img, "meter" + ch, (tx, ty), 56, cycle = True)
         for j, s in enumerate (("GR", "VU 0", "VU +10")):
