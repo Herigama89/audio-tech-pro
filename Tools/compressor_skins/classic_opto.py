@@ -24,6 +24,7 @@ DARK = os.environ.get ("COPTO_DARK") == "1"   # (the black panel: a preview of h
 GLASS = os.environ.get ("COPTO_GLASS", "")    # "dark" / "light": the Liquid Glass faces (smoked black + amber, frosted white + blue)
 if GLASS == "dark": DARK = True
 BLACK_VU = os.environ.get ("COPTO_BLACK_VU") == "1"
+CREAM_VU = os.environ.get ("COPTO_CREAM_VU") == "1"   # (the bus compressor's meter: cream, the movement under a black cover)
 INK = (230, 231, 235, 255) if GLASS == "dark" else (28, 30, 36, 255) if GLASS == "light" else (214, 216, 220, 255) if DARK else (44, 46, 50, 255)
 ACCENT = (47, 124, 246, 255) if GLASS == "light" else (242, 164, 58, 255) if GLASS == "dark" else (226, 140, 38, 255)
 
@@ -191,6 +192,11 @@ def vu (img):
         face[..., 0] = 14 + 14 * glow
         face[..., 1] = 14 + 14 * glow
         face[..., 2] = 16 + 15 * glow
+    elif CREAM_VU:
+        edge = np.clip (1.0 - glow, 0, 1)
+        face[..., 0] = 240 - 26 * edge
+        face[..., 1] = 230 - 30 * edge
+        face[..., 2] = 196 - 38 * edge
     else:
         face[..., 0] = 215 + 40 * glow
         face[..., 1] = 140 + 70 * glow
@@ -229,9 +235,22 @@ def vu (img):
         fd.ellipse ((tx - 2, ty - 2, tx + 2, ty + 2), fill = ink)
         tw = fd.textlength (str (pc), font = fs)
         fd.text ((tx - tw / 2, ty + 3), str (pc), font = fs, fill = ink)
-    fd.text ((12, fh - 40), "-", font = font (FONT_BOLD, 20), fill = ink)
-    fd.text ((fw - 24, fh - 62), "+", font = font (FONT_BOLD, 20), fill = red)
-    fd.text ((fw - 46, fh - 34), "VU", font = font (FONT_MED, 22), fill = ink)
+    if CREAM_VU:
+        # "VU" under the scale, and the black cover over the movement along the bottom
+        ctext (fd, fw * 0.5, fh * 0.55, "VU", font (FONT_MED, 22), fill = ink)
+        top = int (fh * 0.77)
+        cover = np.zeros ((fh - top, fw, 4), np.float32)
+        cy_, cx_ = np.mgrid[0:fh - top, 0:fw].astype (np.float32)
+        cover[..., 0:3] = (16 + 26 * np.exp (-(((cx_ - fw * 0.5) / (fw * 0.45)) ** 2 + ((cy_ - (fh - top) * 0.75) / ((fh - top) * 0.7)) ** 2)))[..., None]
+        cover[..., 3] = 255
+        cimg = Image.fromarray (np.clip (cover, 0, 255).astype (np.uint8), "RGBA")
+        ImageDraw.Draw (cimg).line ((0, 0, fw, 0), fill = (0, 0, 0, 255), width = 2)
+        ImageDraw.Draw (cimg).line ((0, 3, fw, 3), fill = (70, 70, 72, 255), width = 1)
+        fimg.alpha_composite (cimg, (0, top))
+    else:
+        fd.text ((12, fh - 40), "-", font = font (FONT_BOLD, 20), fill = ink)
+        fd.text ((fw - 24, fh - 62), "+", font = font (FONT_BOLD, 20), fill = red)
+        fd.text ((fw - 46, fh - 34), "VU", font = font (FONT_MED, 22), fill = ink)
     # glass on the window
     sheen = Image.new ("RGBA", (fw, fh), (0, 0, 0, 0))
     ImageDraw.Draw (sheen).polygon (((0, 0), (fw * 0.55, 0), (fw * 0.3, fh), (0, fh)), fill = (255, 255, 255, 22))
