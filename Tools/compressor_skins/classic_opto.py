@@ -324,7 +324,7 @@ def main():
     os.makedirs (OUT, exist_ok = True)
     img = glass_panel() if GLASS else panel()
     labels (img)
-    vu (img)
+    if os.environ.get ("COPTO_NO_VU") != "1": vu (img)
     img.save (os.environ.get ("COPTO_PANEL_OUT", os.path.join (OUT, "copto_panel.png")))
     k = KNOBS
     frame (os.path.join (k, "knob_66_black_x3.png"), 4, 198).save (os.path.join (OUT, "copto_knob_big.png"))
