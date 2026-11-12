@@ -2330,6 +2330,8 @@ private:
 
     void save (juce::Component& c, const juce::String& name, float scale = 1.0f)
     {
+        if (const auto env = juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_SCALE", {}); env.isNotEmpty())
+            scale = env.getFloatValue();
         const auto image = c.createComponentSnapshot (c.getLocalBounds(), true, scale);
         auto file = out.getChildFile (name);
         file.deleteFile();

@@ -56,6 +56,8 @@ struct StockEffect
 };
 const std::vector<StockEffect>& stockEqEffects();
 const std::vector<StockEffect>& stockDynamicsEffects();
+/** Classic Compressors: hardware-style compressors with faces of their own (the Vintage Opto). */
+const std::vector<StockEffect>& stockClassicEffects();
 const std::vector<StockEffect>& stockDelayEffects();
 const std::vector<StockEffect>& stockReverbEffects();
 const std::vector<StockEffect>& stockModulationEffects();
