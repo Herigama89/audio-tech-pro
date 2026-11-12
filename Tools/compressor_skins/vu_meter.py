@@ -76,8 +76,8 @@ def vu (w, h, value = 0.5, face = "cream", caption = None, lamp = 1.0, seed = 7)
     wd = ImageDraw.Draw (win)
 
     # The scale: an arc round the pivot, below the window
-    pvx, pvy = fw / 2, fh * 1.30
-    R = fh * 1.02
+    R = min (fh * 1.02, fw * 0.58)            # (narrow meters: the scale stays inside the window)
+    pvx, pvy = fw / 2, fh * 0.29 + R * 0.99
     def at (v, r):
         a = math.radians (-SWING + 2 * SWING * v)
         return pvx + r * math.sin (a), pvy - r * math.cos (a)

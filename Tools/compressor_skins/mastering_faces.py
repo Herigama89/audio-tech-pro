@@ -115,11 +115,11 @@ def cream_vu (w, h, value = 0.55, caption = "GAIN REDUCTION"):
     d.rounded_rectangle ((w * 0.36, h * 0.80, w * 0.64, h + 10), 6, fill = (16, 16, 18, 255))
     return im
 
-def your_vu (w, h, value = 0.55):
-    """Your VU (vu3: a filmstrip of its needle, 48 frames of 240 x 160), scaled to fit."""
-    strip = Image.open ("/tmp/claude-0/knobs/new/vu3.png").convert ("RGBA")
-    k = int (round (value * 47))
-    return strip.crop ((0, k * 160, 240, (k + 1) * 160)).resize ((w, h), Image.LANCZOS)
+import vu_meter
+
+def our_vu (w, h, value = 0.55, face = "cream"):
+    """Our own VU meter (vu_meter.py)."""
+    return vu_meter.vu (w, h, value, face = face)
 
 def bezel (img, x0, y0, w, h, r = 18, depth = 14):
     """A black meter housing round a face."""
@@ -255,7 +255,7 @@ def child():
     # meters, left (left-lat) above right (right-vert)
     for k, y in enumerate ((90, 390)):
         bezel (img, 250, y, 250, 200)
-        place_meter (img, your_vu (250, 200, 0.45 + 0.1 * k), 250, y)
+        place_meter (img, our_vu (250, 200, 0.45 + 0.1 * k, face = "amber"), 250, y)
     toggle (img, (175, 200)); ctext (d, 175, 150, "ON", small, ink)
     lamp (img, (175, 360), 16)
     d.ellipse ((150, 510, 200, 560), fill = (12, 12, 12, 255), outline = (70, 70, 72, 255), width = 3); ctext (d, 175, 585, "FUSE", small, ink)
@@ -325,7 +325,7 @@ def hill():
     d.rounded_rectangle ((cx - 460, 86, cx + 460, 500), 30, fill = (10, 10, 11, 255), outline = (46, 46, 50, 255), width = 3)
     for x0 in (cx - 430, cx + 36):
         bezel (img, x0, 116, 394, 214, r = 18, depth = 12)
-        place_meter (img, your_vu (394, 214, 0.55), x0, 116, r = 16)
+        place_meter (img, our_vu (394, 214, 0.55, face = "cream"), x0, 116, r = 16)
         d.rounded_rectangle ((x0 + 50, 360, x0 + 344, 480), 10, fill = (16, 16, 18, 255))
         for k in range (6):
             d.line ((x0 + 80 + k * 46, 372, x0 + 80 + k * 46, 470), fill = (32, 32, 36, 255), width = 6)
