@@ -826,23 +826,6 @@ void EffectPanel::timerCallback()
     if (spectrum.valid)
         for (const auto db : spectrum.db)
             signature += db * 0.001;
-    if (! sparks.empty())
-    {
-        // (the sparks fly on: a little gravity and drag, and they fade)
-        const auto dt = 1.0f / 60.0f;
-        juce::Rectangle<float> dirty;
-        for (auto& sp : sparks)
-        {
-            dirty = dirty.isEmpty() ? juce::Rectangle<float> (sp.at, sp.at) : dirty.getUnion (juce::Rectangle<float> (sp.at, sp.at));
-            sp.velocity.y += 420.0f * dt;
-            sp.velocity *= 0.985f;
-            sp.at += sp.velocity * dt;
-            sp.life -= dt * 1.6f;
-            dirty = dirty.getUnion (juce::Rectangle<float> (sp.at, sp.at));
-        }
-        sparks.erase (std::remove_if (sparks.begin(), sparks.end(), [] (const Spark& sp) { return sp.life <= 0.0f; }), sparks.end());
-        repaint (dirty.expanded (14.0f).getSmallestIntegerContainer());
-    }
     const bool animated = theme::glassSkin() && insert[ids::effect].toString() == "studioReverb" && std::abs (liveShown) > 0.002f;
     if (! animated && std::abs (signature - lastSignature) < 1.0e-4)
         return;
@@ -853,64 +836,46 @@ void EffectPanel::timerCallback()
         repaint();
 }
 
-void EffectPanel::valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier& property)
-{
-    // (a knob turned by hand on a face with sparks: they fly from it)
-    if (design != nullptr && design->sparks && juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown())
-        for (const auto& placed : placedControls)
-            if (placed.component != nullptr && placed.control.id == property.toString() && placed.control.kind == effectdesign::Kind::knob)
-            {
-                throwSparks (placed.component->getBounds().toFloat().getCentre());
-                break;
-            }
-    refresh();
-}
+void EffectPanel::valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) { refresh(); }
 
-void EffectPanel::throwSparks (juce::Point<float> from)
+void EffectPanel::mouseDown (const juce::MouseEvent& e)
 {
-    const auto now = juce::Time::getMillisecondCounterHiRes();
-    if (now - lastSparkTime < 30.0 || sparks.size() > 220)
+    const auto* info = design != nullptr && ! design->spots.empty() ? findBuiltInEffect (insert[ids::effect].toString()) : nullptr;
+    if (info == nullptr)
         return;
-    lastSparkTime = now;
-    const auto scale = design != nullptr && design->photoScale > 0.0f ? design->photoScale : 1.0f;
-    const auto count = 5 + sparkRandom.nextInt (5);
-    for (int i = 0; i < count; ++i)
+    const auto scale = design->photoScale > 0.0f ? design->photoScale : 1.0f;
+    const auto at = e.position / scale;
+    const effectdesign::Design::Spot* best = nullptr;
+    auto bestDistance = 22.0f;   // (picture pixels: about the size of the printed number)
+    for (const auto& spot : design->spots)
     {
-        // (from round the knob's rim, outwards and mostly up)
-        const auto a = sparkRandom.nextFloat() * juce::MathConstants<float>::twoPi;
-        const juce::Point<float> out (std::cos (a), std::sin (a));
-        const auto speed = (140.0f + sparkRandom.nextFloat() * 260.0f) * scale;
-        Spark sp;
-        sp.at = from + out * (34.0f * scale);
-        sp.velocity = { out.x * speed, out.y * speed - 160.0f * scale };
-        sp.life = 0.55f + sparkRandom.nextFloat() * 0.45f;
-        sp.size = (1.6f + sparkRandom.nextFloat() * 2.2f) * std::max (0.7f, scale);
-        const juce::Colour hot[] { juce::Colour (0xffffe9b0), juce::Colour (0xffffc35a), juce::Colour (0xffff9a2e), juce::Colours::white };
-        sp.colour = hot[sparkRandom.nextInt (4)];
-        sparks.push_back (sp);
+        const auto distance = spot.at.getDistanceFrom (at);
+        if (distance < bestDistance)
+        {
+            bestDistance = distance;
+            best = &spot;
+        }
     }
-    if (! isTimerRunning())
-        startTimerHz (60);
-    else if (getTimerInterval() > 17)
-        startTimerHz (60);
-}
-
-void EffectPanel::paintOverChildren (juce::Graphics& g)
-{
-    for (const auto& sp : sparks)
-    {
-        const auto alpha = juce::jlimit (0.0f, 1.0f, sp.life * 1.4f);
-        // a glow, a streak along its flight, and the hot core
-        const auto glow = sp.size * 4.0f;
-        g.setGradientFill (juce::ColourGradient (sp.colour.withAlpha (0.45f * alpha), sp.at.x, sp.at.y,
-                                                 sp.colour.withAlpha (0.0f), sp.at.x + glow, sp.at.y, true));
-        g.fillEllipse (juce::Rectangle<float> (glow * 2.0f, glow * 2.0f).withCentre (sp.at));
-        const auto tail = sp.at - sp.velocity * 0.018f;
-        g.setColour (sp.colour.withAlpha (0.7f * alpha));
-        g.drawLine ({ tail, sp.at }, sp.size * 0.8f);
-        g.setColour (juce::Colours::white.withAlpha (alpha));
-        g.fillEllipse (juce::Rectangle<float> (sp.size, sp.size).withCentre (sp.at));
-    }
+    if (best == nullptr)
+        return;
+    for (const auto& p : info->params)
+        if (p.id == best->id)
+        {
+            // where the knob's travel puts that setting: a stepped one's step, a turning one along its (skewed) range
+            float value;
+            if (! p.choices.empty())
+                value = p.min + std::round (best->position * (p.max - p.min));
+            else
+            {
+                juce::NormalisableRange<float> range (p.min, p.max);
+                if (p.midPoint > p.min && p.midPoint < p.max)
+                    range.setSkewForCentre (p.midPoint);
+                value = range.convertFrom0to1 (best->position);
+            }
+            undoManager.beginNewTransaction (p.name);
+            insert.setProperty (juce::Identifier (p.id), value, &undoManager);
+            return;
+        }
 }
 
 EffectPanel::~EffectPanel()

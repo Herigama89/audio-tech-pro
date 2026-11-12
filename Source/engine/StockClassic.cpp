@@ -187,7 +187,7 @@ namespace
                     a = bumpDip.process (bumpLow.process (a, 0), 0);
                     b = bumpDip.process (bumpLow.process (b, 1), 1);
                 }
-                if (texture == 1)
+                if (texture == 0)
                 {
                     a = warmHigh.process (warmLow.process (a, 0), 0);
                     b = warmHigh.process (warmLow.process (b, 1), 1);
@@ -210,11 +210,11 @@ namespace
             // 10 dB less on +10), with the needle's own swing
             const auto mode = choice (iMeter);
             float target;
-            if (mode == 0)
+            if (mode == 1)
                 target = gr / 20.0f;
             else
             {
-                const auto vu = 10.0f * std::log10 (std::max (outRms, 1.0e-10f)) + 18.0f - (mode == 1 ? 10.0f : 0.0f);
+                const auto vu = 10.0f * std::log10 (std::max (outRms, 1.0e-10f)) + 18.0f - (mode == 0 ? 10.0f : 0.0f);
                 target = (vu + 20.0f) / 23.0f;
             }
             moveNeedle (juce::jlimit (0.0f, 1.08f, target), blockSeconds);
@@ -680,14 +680,15 @@ namespace
     template <typename T>
     std::unique_ptr<BuiltInEffect> make (const EffectInfo& info) { return std::make_unique<T> (info); }
 
-    /** Every face's shared controls, after its own. */
+    /** Every face's shared controls, after its own (the meter's and texture's settings in the knob's order, left to
+        right: so dragging turns it one way all along). */
     std::vector<ParamInfo> withCommon (std::vector<ParamInfo> own, float voice)
     {
-        own.push_back ({ "meterMode", "Meter", "", 0.0f, 2.0f, 0.0f, 1.0f, { "Gain Reduction", "Output +10", "Output +4" } });
+        own.push_back ({ "meterMode", "Meter", "", 0.0f, 2.0f, 1.0f, 1.0f, { "Output +10", "Gain Reduction", "Output +4" } });
         own.push_back ({ "power", "Power", "", 0.0f, 1.0f, 1.0f, 0.5f, { "Off", "On" } });
         own.push_back ({ "voice", "Tube Voice", "", 0.0f, 3.0f, voice, 1.5f, { "Off", "Clean", "Opto", "Vari-Mu" } });
         own.push_back ({ "lowBump", "Low Bump", " dB", 0.0f, 6.0f, 0.0f, 3.0f });
-        own.push_back ({ "texture", "Texture", "", 0.0f, 2.0f, 0.0f, 1.0f, { "Off", "Warm", "Bright" } });
+        own.push_back ({ "texture", "Texture", "", 0.0f, 2.0f, 1.0f, 1.0f, { "Warm", "Off", "Bright" } });
         return own;
     }
 

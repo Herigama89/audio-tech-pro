@@ -2779,7 +2779,8 @@ namespace
             c.width = juce::roundToInt ((float) f.width * s);
             c.height = juce::roundToInt ((float) height * s);
             c.meters = true;
-            c.sparks = true;
+            for (const auto& spot : f.spots)
+                c.spots.push_back ({ spot.id, { spot.x, spot.y }, spot.position });
             c.skins = true;
             const auto mx0 = f.meterX - meterWidth * 0.5f;
             c.liveArea = RF (mx0, meterTop, meterWidth, meterHeight).transformedBy (juce::AffineTransform::scale (s)).getSmallestIntegerContainer().expanded (2);

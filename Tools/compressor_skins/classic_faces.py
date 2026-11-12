@@ -121,11 +121,11 @@ def common (face):
     """Every face's: the meter selector, power and its lamp (right), the Colour section under the meter."""
     w, mx = face["w"], face["mx"]
     return [
-        ("sel", "meterMode", w - 240, 150, ("GR", "+10", "+4"), "METER", [0.0, -45.0, 45.0]),
+        ("sel", "meterMode", w - 240, 150, ("+10", "GR", "+4"), "METER"),
         ("switch", "power", w - 240, 318, ("ON", "POWER"), ""),
         ("sel", "voice", mx - 115, 375, ("OFF", "CLEAN", "OPTO", "VARI-MU"), "TUBE VOICE"),
         ("small", "lowBump", mx + 5, 375, ("0", "+3", "+6"), "LOW BUMP"),
-        ("small", "texture", mx + 120, 375, ("OFF", "WARM", "BRIGHT"), "TEXTURE", [0.0, -60.0, 60.0]),
+        ("small", "texture", mx + 120, 375, ("WARM", "OFF", "BRIGHT"), "TEXTURE", [-60.0, 0.0, 60.0]),
     ]
 
 def items_of (face):
@@ -287,6 +287,35 @@ def draw_items (img, face, sk):
             ctext (d, x, y - 64, labels[0], fsm, sk.ink, spacing = 1)
             ctext (d, x, y + 52, labels[1], fsm, sk.ink, spacing = 1)
 
+def spots_of (face):
+    """Where each printed setting sits, and the knob's position (0..1) it stands for: a click on it turns the
+    knob there."""
+    out = []
+    for it in items_of (face):
+        kind, pid, x, y, labels = it[:5]
+        if kind == "big":
+            n = len (labels)
+            for i in range (n):
+                px, py = polar ((x, y), 104, -135.0 + 270.0 * i / (n - 1))
+                out.append ((pid, px, py, i / (n - 1)))
+        elif kind == "sel":
+            r = 58 if pid != "meterMode" else 72
+            n = len (labels)
+            for i, a in enumerate (angles_of (it)):
+                px, py = polar ((x, y), r, a)
+                out.append ((pid, px, py, i / (n - 1)))
+        elif kind == "small":
+            angs = angles_of (it)
+            places = [(-135, 0.0), (0, 0.5), (135, 1.0)] if len (angs) == 2 else [(a, i / (len (angs) - 1)) for i, a in enumerate (angs)]
+            for (a, prop), lab in zip (places, labels):
+                if lab:
+                    px, py = polar ((x, y), 54, a)
+                    out.append ((pid, px, py, prop))
+        elif kind == "switch":
+            out.append ((pid, x, y - 58, 1.0))
+            out.append ((pid, x, y + 58, 0.0))
+    return out
+
 def well (img, face, sk):
     mx = face["mx"]
     x0, y0, x1, y1 = mx - 190, 292, mx + 190, 456
@@ -412,7 +441,8 @@ def header():
              "namespace riff::classicfaces", "{",
              "    enum class Part { big, selector, small, toggle };",
              "    struct Item { const char* id; Part part; float x, y; std::vector<float> angles; };",
-             "    struct Face { const char* type; const char* key; int width; float meterX; float seamTop, seamBottom; bool tinted; std::vector<Item> items; };",
+             "    struct Spot { const char* id; float x, y, position; };   // (a printed setting: a click there turns the knob to it)",
+             "    struct Face { const char* type; const char* key; int width; float meterX; float seamTop, seamBottom; bool tinted; std::vector<Item> items; std::vector<Spot> spots; };",
              "    inline constexpr int height = %d;" % H,
              "    inline constexpr float bigSize = %d, selectorSize = %d, smallSize = %d, toggleSize = %d;" % (BIG, SEL, SMALL, SWITCH),
              "    inline constexpr float bigAngle = %.1ff, smallAngle = %.1ff;" % (BIG_ANGLE, SMALL_ANGLE),
@@ -427,6 +457,9 @@ def header():
         for it in items_of (f):
             angs = ", ".join ("%.1ff" % a for a in angles_of (it))
             lines.append ('                { "%s", Part::%s, %.1ff, %.1ff, { %s } },' % (it[1], kinds[it[0]], it[2], it[3], angs))
+        lines.append ("            }, {")
+        for (pid, x, y, prop) in spots_of (f):
+            lines.append ('                { "%s", %.1ff, %.1ff, %.4ff },' % (pid, x, y, prop))
         lines.append ("            } },")
     lines += ["        };", "        return all;", "    }", "}", ""]
     open (os.path.join (ROOT, "Source", "ui", "ClassicLayouts.h"), "w").write ("\n".join (lines))

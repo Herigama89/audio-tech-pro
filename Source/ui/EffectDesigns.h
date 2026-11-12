@@ -114,7 +114,9 @@ namespace riff::effectdesign
         bool analyzer = false;                  // a live spectrum of the output behind the curve (as Logic's EQs)
         bool meters = false;                    // the effect's own readings (meters, loudness), refreshed while open
         juce::Rectangle<int> liveArea;          // (only this part moves with the readings: just it is redrawn; empty: the whole face)
-        bool sparks = false;                    // knobs throw sparks as they're turned (the Classic Compressors)
+        /** Printed settings on the face (in its picture's pixels): a click on one turns its knob there (0..1 along it). */
+        struct Spot { juce::String id; juce::Point<float> at; float position = 0.0f; };
+        std::vector<Spot> spots;
         bool skins = false;                     // it can be worn in several skins (the window's Skin menu; the insert's "skin")
         /** Curve displays with points to drag: 20 Hz to 20 kHz across, each point's value over its parameter's range up the side. */
         struct Graph
