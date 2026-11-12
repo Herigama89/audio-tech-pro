@@ -100,6 +100,32 @@ def glass_panel():
     d.arc ((2, 2, 70, 70), 180, 270, fill = (255, 255, 255, 70 if dark else 255), width = 2)
     d.line ((36, 3, W - 36, 3), fill = (255, 255, 255, 70 if dark else 255), width = 2)
     d.line ((36, H - 4, W - 36, H - 4), fill = (0, 0, 0, 120 if dark else 40), width = 2)
+    # rack ears: a slightly deeper pane of the same glass at each end, a seam of light between, two slots in each
+    ear = Image.new ("RGBA", (W, H), (0, 0, 0, 0))
+    ed = ImageDraw.Draw (ear)
+    for x0, x1 in ((0, 70), (W - 70, W)):
+        ed.rectangle ((x0, 0, x1, H), fill = (0, 0, 0, 60) if dark else (120, 132, 150, 26))
+    emask = Image.new ("L", (W, H), 0)
+    ImageDraw.Draw (emask).rounded_rectangle ((2, 2, W - 3, H - 3), 34, fill = 255)
+    ear.putalpha (Image.fromarray (np.minimum (np.array (ear.getchannel ("A")), np.array (emask))))
+    img.alpha_composite (ear)
+    d = ImageDraw.Draw (img)
+    for x in (70, W - 70):
+        d.line ((x, 4, x, H - 5), fill = (0, 0, 0, 150) if dark else (150, 160, 176, 120), width = 2)
+        d.line ((x + 2, 4, x + 2, H - 5), fill = (255, 255, 255, 40) if dark else (255, 255, 255, 255), width = 1)
+    for x0, x1 in ((14, 62), (W - 62, W - 14)):
+        for y in (96, 360):
+            slot = (x0, y, x1, y + 24)
+            d.rounded_rectangle (slot, 12, fill = (0, 0, 0, 0))   # (punched through: the rack shows)
+            rim = Image.new ("RGBA", (W, H), (0, 0, 0, 0))
+            rd = ImageDraw.Draw (rim)
+            rd.rounded_rectangle ((x0 - 2, y - 2, x1 + 2, y + 26), 14, outline = (255, 255, 255, 60) if dark else (255, 255, 255, 255), width = 2)
+            rd.arc ((x0 - 2, y - 2, x0 + 26, y + 26), 90, 270, fill = (0, 0, 0, 160) if dark else (90, 100, 116, 120), width = 2)
+            rd.line ((x0 + 12, y - 1, x1 - 12, y - 1), fill = (0, 0, 0, 160) if dark else (90, 100, 116, 120), width = 2)
+            img.alpha_composite (rim)
+    d = ImageDraw.Draw (img)
+    for (x, y) in ((110, 28), (W - 110, 28), (110, 420), (W - 110, 420)):
+        screw (img, x, y)
     return img
 
 def screw (img, x, y):
