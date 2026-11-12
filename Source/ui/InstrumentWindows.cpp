@@ -441,9 +441,10 @@ void EffectPanel::buildDesign (const EffectInfo& info)
                 }
                 if (c.kind != effectdesign::Kind::field && ! c.colour.isTransparent())
                     k->slider.getProperties().set ("cap", c.colour.toString());   // (the knob's or fader cap's own colour)
-                if (c.sprite.image != nullptr)
+                if (c.sprite.image != nullptr || c.sprite.drawn != effectdesign::Sprite::Drawn::none)
                 {
                     // A photographed face: the part cut from the photo turns (or slides) to the value, shown while dragged
+                    // (or a drawn face's pointer, its knob in the picture)
                     k->slider.getProperties().set ("sprite", (int) (&c - design->controls.data()));
                     if (c.sprite.slides)
                         k->slider.setSliderStyle (juce::Slider::LinearHorizontal);
