@@ -1696,3 +1696,56 @@ TEST_CASE ("Classic Compressors: each turns a loud tone down, roughly level at t
         }
     }
 }
+
+TEST_CASE ("Mastering Compressors: level at their defaults on a quiet tone, compress a loud one, power off and mix", "[stockfx][mastering]")
+{
+    struct Push { const char* type; std::vector<std::pair<const char*, float>> settings; };
+    const Push pushes[] {
+        { "masterHill",  { { "optThreshL", 18.0f }, { "discThreshL", 18.0f }, { "discRatioL", 3.0f } } },
+        { "masterChild", { { "inputL", 0.0f }, { "inputR", 0.0f }, { "threshL", 9.0f }, { "threshR", 9.0f } } },
+        { "masterIron",  { { "threshL", 38.0f }, { "threshR", 38.0f }, { "inputL", 12.0f }, { "inputR", 12.0f } } },
+    };
+    for (const auto& push : pushes)
+    {
+        INFO (push.type);
+        {
+            auto e = make (push.type);
+            const auto in = sine (440.0, 1.0, 0.05f);
+            const auto [l, r] = run (*e, in, in);
+            const auto gainDb = juce::Decibels::gainToDecibels (peakOf (l, 24000) / 0.05f);
+            CHECK (gainDb > -8.0f);
+            CHECK (gainDb < 8.0f);
+        }
+        {
+            auto e = make (push.type);
+            for (const auto& [id, v] : push.settings)
+                set (*e, id, v);
+            const auto loud = sine (440.0, 1.5, 0.7f);
+            const auto [l, r] = run (*e, loud, loud);
+            float meters[8] {};
+            REQUIRE (e->readMeters (meters, 8) == 6);
+            CHECK (meters[2] > 3.0f);   // left: dB of reduction
+            CHECK (meters[3] > 3.0f);   // right
+            CHECK (std::isfinite (peakOf (l, 0)));
+            CHECK (peakOf (l, 24000) < 2.0f);
+        }
+        {
+            auto e = make (push.type);
+            set (*e, "power", 0.0f);
+            const auto in = sine (440.0, 0.2, 0.5f);
+            const auto [l, r] = run (*e, in, in);
+            CHECK (l == in);
+        }
+        {
+            // Mix at 0: only the dry signal
+            auto e = make (push.type);
+            for (const auto& [id, v] : push.settings)
+                set (*e, id, v);
+            set (*e, "mix", 0.0f);
+            const auto in = sine (440.0, 0.5, 0.5f);
+            const auto [l, r] = run (*e, in, in);
+            for (size_t i = 0; i < l.size(); i += 97)
+                CHECK (l[i] == Catch::Approx (in[i]).margin (1.0e-5));
+        }
+    }
+}

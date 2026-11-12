@@ -3235,7 +3235,7 @@ void MainComponent::showEffectMenu (const juce::String& owner, int slot, juce::V
     std::vector<PluginPicker::Entry> entries;
     for (const auto& info : builtInEffects())
     {
-        PluginPicker::Entry e { info.name, info.category == "Classic Compressors" ? juce::String ("Classic Compressors") : juce::String (app::effectsName), {}, [this, place, type = info.type]
+        PluginPicker::Entry e { info.name, (info.category == "Classic Compressors" || info.category == "Mastering Compressors") ? info.category : juce::String (app::effectsName), {}, [this, place, type = info.type]
         {
             place ([this, type] (juce::ValueTree chain, int index) { return model::addBuiltinInsert (chain, type, index, &undoManager); });
         } };

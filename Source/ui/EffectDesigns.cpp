@@ -8,6 +8,7 @@
 #include "ConsoleLook.h"
 #include "Looks.h"
 #include "ClassicLayouts.h"
+#include "MasteringLayouts.h"
 #include <cstring>
 #include <map>
 
@@ -2809,7 +2810,7 @@ namespace
                 g.drawImage (classicPanel (f, paintingSkinValue), b.toFloat());
                 // The power lamp
                 const auto on = valueOf (fx, v, "power", 1.0f) > 0.5f;
-                drawPart (g, on ? "classic_led_on_png" : "classic_led_off_png", RF ((float) f.width - 160.0f - 28.0f, 290.0f, 56.0f, 56.0f), s);
+                drawPart (g, on ? "classic_led_on_png" : "classic_led_off_png", RF ((float) f.width - 215.0f - 28.0f, 290.0f, 56.0f, 56.0f), s);
                 // The needle: 0..1 across the meter's 0..20 dB (or the output's VU), behind the window's edges
                 const auto k = meterWidth / meterPhotoWidth;
                 const auto x0 = f.meterX - meterWidth * 0.5f;
@@ -2824,6 +2825,146 @@ namespace
                 g.drawLine ({ pivot.translated (1.5f, 2.0f), tip.translated (1.5f, 2.0f) }, 2.2f);
                 g.setColour (juce::Colour (0xfff5f5f0));
                 g.drawLine ({ pivot, tip }, 2.0f);
+            };
+            d[f.type] = c;
+        }
+    }
+
+    //==============================================================================
+    // The Mastering Compressors: drawn panels (Tools/compressor_skins/mastering_faces.py) with everything that moves
+    // left out - the knobs' pointers, the chicken heads and switches, the lights, the needles - drawn here
+    //==============================================================================
+    /** Where a VU needle points (degrees) for a reading: it follows the voltage, -20 .. +3 VU across. */
+    float vuAngle (float db, float swing)
+    {
+        const auto v = juce::jlimit (0.0f, 1.0f, std::pow (10.0f, db / 20.0f) / std::pow (10.0f, 3.0f / 20.0f));
+        return -swing + 2.0f * swing * v;
+    }
+
+    /** The arc meter's scale: its marks evenly spaced, -20 .. +3. */
+    float arcPosition (float db)
+    {
+        static constexpr float marks[] { -20.0f, -10.0f, -7.0f, -5.0f, -4.0f, -3.0f, -2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f };
+        if (db <= marks[0]) return 0.0f;
+        for (int i = 1; i < 12; ++i)
+            if (db <= marks[i])
+                return ((float) (i - 1) + (db - marks[i - 1]) / (marks[i] - marks[i - 1])) / 11.0f;
+        return 1.0f;
+    }
+
+    void addMasteringDesigns (std::map<juce::String, Design>& d)
+    {
+        using namespace masteringfaces;
+        for (const auto& f : faces())
+        {
+            const auto s = std::min (0.8f, 1300.0f / (float) f.width);
+            Design c;
+            c.knobs = KnobStyle::black;
+            c.label = juce::Colours::white; c.value = juce::Colours::white; c.accent = juce::Colour (0xfff2a43a); c.track = juce::Colours::black;
+            c.valueAbove = false;
+            c.photoScale = s;
+            c.width = juce::roundToInt ((float) f.width * s);
+            c.height = juce::roundToInt ((float) f.height * s);
+            c.meters = true;
+            for (const auto& spot : f.spots)
+                c.spots.push_back ({ spot.id, { spot.x, spot.y }, spot.position });
+            RF live;
+            for (const auto& m : f.meters)
+            {
+                const auto area = m.arc ? RF (m.px - m.r1, m.py - m.r1, m.r1 * 2.0f, m.r1 - m.r0 * 0.8f)
+                                        : RF (m.window[0], m.window[1], m.window[2], m.window[3]);
+                live = live.isEmpty() ? area : live.getUnion (area);
+            }
+            c.liveArea = live.transformedBy (juce::AffineTransform::scale (s)).getSmallestIntegerContainer().expanded (2);
+            for (const auto& it : f.items)
+            {
+                Sprite sp;
+                sp.pivot = { it.x, it.y };
+                sp.rect = RF (it.x - it.r, it.y - it.r, it.r * 2.0f, it.r * 2.0f);
+                sp.angles = it.angles;
+                switch (it.part)
+                {
+                    case Part::line:
+                    case Part::dot:
+                    {
+                        // the knob's body is in the panel, lit as drawn: only its pointer turns
+                        sp.drawn = it.part == Part::line ? Sprite::Drawn::line : Sprite::Drawn::spot;
+                        sp.ink = juce::Colour (0xfff6f6f0);
+                        sp.radius = it.r;
+                        if (it.part == Part::line) { sp.inner = 0.12f; sp.outer = 0.66f; sp.thickness = 0.07f; }
+                        else                       { sp.outer = 0.80f; sp.thickness = 0.14f; }
+                        sp.hitRadius = it.r * 1.1f;
+                        c.controls.push_back (photoControl (it.id, Kind::knob, sp, s));
+                        break;
+                    }
+                    case Part::chicken:
+                    {
+                        auto t = turning ("classic_big_png", it.x, it.y, it.r, classicfaces::bigAngle, it.angles);
+                        t.hitRadius = it.r;
+                        c.controls.push_back (photoControl (it.id, Kind::knob, t, s));
+                        break;
+                    }
+                    case Part::toggle:
+                        sp.image = "classic_switch_up_png";
+                        sp.offImage = "classic_switch_down_png";
+                        sp.angles.clear();
+                        c.controls.push_back (photoControl (it.id, Kind::hotspot, sp, s));
+                        break;
+                    case Part::cycle:
+                        sp.cycle = true;
+                        sp.angles.clear();
+                        c.controls.push_back (photoControl (it.id, Kind::hotspot, sp, s));
+                        break;
+                }
+            }
+            c.paint = [&f, s] (juce::Graphics& g, R b, const EffectInfo& fx, const float* v, float)
+            {
+                g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+                g.setOpacity (1.0f);
+                g.drawImage (skinImage (("mf_" + juce::String (f.key) + "_panel_jpg").toRawUTF8()), b.toFloat());
+                // The lights: each lit at its setting (the pilot lamps while the power's on)
+                for (const auto& l : f.lights)
+                {
+                    if (juce::roundToInt (valueOf (fx, v, l.id, l.lamp ? 1.0f : -1.0f)) != l.value)
+                        continue;
+                    const auto size = l.lamp ? l.size * 4.0f : 64.0f * l.size;
+                    drawPart (g, l.image, RF (size, size).withCentre ({ l.x, l.y }), s);
+                }
+                // The needles
+                juce::Graphics::ScopedSaveState keep (g);
+                g.addTransform (juce::AffineTransform::scale (s));
+                for (const auto& m : f.meters)
+                {
+                    const auto db = meterAt (m.reading, -40.0f);
+                    juce::Graphics::ScopedSaveState one (g);
+                    if (m.arc)
+                    {
+                        juce::Path sector;
+                        sector.addCentredArc (m.px, m.py, m.r1, m.r1, 0.0f, juce::degreesToRadians (m.a0), juce::degreesToRadians (m.a1), true);
+                        sector.addCentredArc (m.px, m.py, m.r0, m.r0, 0.0f, juce::degreesToRadians (m.a1), juce::degreesToRadians (m.a0), false);
+                        sector.closeSubPath();
+                        g.reduceClipRegion (sector);
+                        const auto a = juce::degreesToRadians (m.a0 + 5.0f + (m.a1 - m.a0 - 10.0f) * arcPosition (db));
+                        const juce::Point<float> dir (std::sin (a), -std::cos (a)), pivot (m.px, m.py);
+                        g.setColour (juce::Colours::black.withAlpha (0.63f));
+                        g.drawLine ({ pivot + dir * (m.r0 + 2.0f) + juce::Point<float> (m.sx, m.sy), pivot + dir * (m.r1 - 8.0f) + juce::Point<float> (m.sx, m.sy) }, m.thin);
+                        g.setColour (juce::Colour (m.ink));
+                        g.drawLine ({ pivot + dir * (m.r0 + 2.0f), pivot + dir * (m.r1 - 8.0f) }, m.thin);
+                        continue;
+                    }
+                    g.reduceClipRegion (RF (m.window[0], m.window[1], m.window[2], m.window[3]).getSmallestIntegerContainer());
+                    const auto a = juce::degreesToRadians (vuAngle (db, m.swing));
+                    const juce::Point<float> dir (std::sin (a), -std::cos (a)), pivot (m.px, m.py);
+                    const auto tip = pivot + dir * m.reach, mid = pivot + dir * m.thickTo;
+                    // its shadow (lit from above and behind: down and to the right), then the needle, then the hood over it
+                    g.setColour (juce::Colours::black.withAlpha (0.22f));
+                    g.drawLine ({ pivot.translated (m.sx, 0.0f), tip.translated (m.sx, m.sy) }, m.thick * 1.4f);
+                    g.setColour (juce::Colour (m.ink));
+                    g.drawLine ({ pivot, tip }, m.thin);
+                    g.drawLine ({ pivot, mid }, m.thick);
+                    g.setOpacity (1.0f);
+                    g.drawImage (skinImage (m.hood), RF (m.hoodRect[0], m.hoodRect[1], m.hoodRect[2], m.hoodRect[3]));
+                }
             };
             d[f.type] = c;
         }
@@ -5418,6 +5559,7 @@ namespace
         addHardwareDesigns (d);
         addPhotoDesigns (d);
         addClassicDesigns (d);
+        addMasteringDesigns (d);
         addCompressorFaces (d);
         addGlassCompressorFaces (d);
 
@@ -5703,6 +5845,12 @@ void DesignLook::drawSprite (juce::Graphics& g, juce::Component& c, const Sprite
             const auto p0 = centre + dir * (r * sp.inner), p1 = centre + dir * (r * sp.outer);
             g.setColour (sp.ink);
             g.drawLine ({ p0, p1 }, std::max (1.2f, r * sp.thickness));
+        }
+        else if (sp.drawn == Sprite::Drawn::spot)
+        {
+            const auto d = std::max (2.5f, r * sp.thickness);
+            g.setColour (sp.ink);
+            g.fillEllipse (RF (d, d).withCentre (centre + dir * (r * sp.outer)));
         }
         else if (sp.drawn == Sprite::Drawn::dot)
         {

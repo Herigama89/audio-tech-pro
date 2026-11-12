@@ -8,7 +8,7 @@ namespace riff
 //==============================================================================
 const juce::StringArray& effectCategories()
 {
-    static const juce::StringArray categories { "EQ", "Dynamics", "Classic Compressors", "Delay", "Reverb", "Modulation", "Distortion", "Filter",
+    static const juce::StringArray categories { "EQ", "Dynamics", "Classic Compressors", "Mastering Compressors", "Delay", "Reverb", "Modulation", "Distortion", "Filter",
                                                 "Amps and Pedals", "Pitch", "Imaging", "Metering", "Multi Effects", "Specialized", "Utility", "Legacy" };
     return categories;
 }
@@ -65,7 +65,7 @@ const std::vector<EffectInfo>& originalEffects()
 /** Every stock family, in menu order. */
 std::vector<const std::vector<StockEffect>*> stockFamilies()
 {
-    return { &stockEqEffects(), &stockDynamicsEffects(), &stockClassicEffects(), &stockDelayEffects(), &stockReverbEffects(),
+    return { &stockEqEffects(), &stockDynamicsEffects(), &stockClassicEffects(), &stockMasteringEffects(), &stockDelayEffects(), &stockReverbEffects(),
              &stockModulationEffects(), &stockDistortionEffects(), &stockFilterEffects(), &stockAmpEffects(),
              &stockPitchEffects(), &stockUtilityEffects(), &stockExtraEffects(), &stockPedalboardEffects(), &stockMeteringEffects(), &stockMultiEffects(), &stockRoomSimEffects(), &stockLegacyEffects() };
 }

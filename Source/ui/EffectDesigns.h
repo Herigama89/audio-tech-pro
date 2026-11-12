@@ -76,7 +76,7 @@ namespace riff::effectdesign
 
         // (drawn, not cut from the photo: the photo's knob stays still, lit as photographed, and only what turns is
         //  drawn at the setting - a pointer line, a dot, or a whole bar knob - so nothing's light turns with it)
-        enum class Drawn { none, line, dot, bar };
+        enum class Drawn { none, line, dot, bar, spot };   // (spot: a filled dot)
         Drawn drawn = Drawn::none;
         juce::Colour ink {};
         float radius = 0.0f;                 // the knob's radius (photo pixels)

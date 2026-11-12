@@ -74,6 +74,7 @@ set(RIFF_CORE_SOURCES
     Source/engine/DrumSplitter.cpp
     Source/engine/SampleInfo.cpp
     Source/engine/StockClassic.cpp
+    Source/engine/StockMastering.cpp
     Source/engine/StockPedalboard.cpp
     Source/engine/StockMetering.cpp
     Source/engine/StockMulti.cpp

@@ -36,7 +36,8 @@ def font (path, size):
 def mix (a, b, t):
     return tuple (int (a[i] + (b[i] - a[i]) * t) for i in range (len (a)))
 
-def vu (w, h, value = 0.5, face = "cream", caption = None, lamp = 1.0, seed = 7):
+def vu (w, h, value = 0.5, face = "cream", caption = None, lamp = 1.0, seed = 7, needle = True, info = None):
+    """(needle False: the face without its needle; info: a dict given the needle's geometry and the hood's mask, in w x h pixels)"""
     W, H = w * SS, h * SS
     paper, edge, ink, red, glow = FACES[face]
     img = Image.new ("RGBA", (W, H), (0, 0, 0, 0))
@@ -119,14 +120,21 @@ def vu (w, h, value = 0.5, face = "cream", caption = None, lamp = 1.0, seed = 7)
     # The needle and its shadow (the light comes from above and behind, so the shadow falls down and right)
     tip = at (value, R * 0.97)
     base = (pvx, pvy)
-    shadow = Image.new ("RGBA", (fw, fh), (0, 0, 0, 0))
-    ImageDraw.Draw (shadow).line ([(base[0] + fh * .03, base[1]), (tip[0] + fh * .03, tip[1] + fh * .035)],
-                                  fill = (0, 0, 0, 110), width = int (fh * 0.016))
-    win.alpha_composite (shadow.filter (ImageFilter.GaussianBlur (fh * 0.012)))
-    nd = ImageDraw.Draw (win)
-    nd.line ([base, tip], fill = (14, 12, 10, 255) if face != "night" else (250, 120, 60, 255), width = int (fh * 0.011))
-    mid = at (value, R * 0.55)
-    nd.line ([base, mid], fill = (14, 12, 10, 255) if face != "night" else (250, 120, 60, 255), width = int (fh * 0.02))
+    if info is not None:
+        k = 1.0 / SS
+        info.update (pivot = ((b + pvx) * k, (b + pvy) * k), reach = R * 0.97 * k, thickTo = R * 0.55 * k,
+                     thin = fh * 0.011 * k, thick = fh * 0.02 * k, shadow = (fh * 0.03 * k, fh * 0.035 * k),
+                     window = (b * k, b * k, fw * k, fh * k), swing = SWING,
+                     ink = (14, 12, 10) if face != "night" else (250, 120, 60))
+    if needle:
+        shadow = Image.new ("RGBA", (fw, fh), (0, 0, 0, 0))
+        ImageDraw.Draw (shadow).line ([(base[0] + fh * .03, base[1]), (tip[0] + fh * .03, tip[1] + fh * .035)],
+                                      fill = (0, 0, 0, 110), width = int (fh * 0.016))
+        win.alpha_composite (shadow.filter (ImageFilter.GaussianBlur (fh * 0.012)))
+        nd = ImageDraw.Draw (win)
+        nd.line ([base, tip], fill = (14, 12, 10, 255) if face != "night" else (250, 120, 60, 255), width = int (fh * 0.011))
+        mid = at (value, R * 0.55)
+        nd.line ([base, mid], fill = (14, 12, 10, 255) if face != "night" else (250, 120, 60, 255), width = int (fh * 0.02))
 
     # The pivot's hood: a black dome over the bottom of the window
     hood = Image.new ("RGBA", (fw, fh), (0, 0, 0, 0))
@@ -135,8 +143,14 @@ def vu (w, h, value = 0.5, face = "cream", caption = None, lamp = 1.0, seed = 7)
     for i in range (int (hr), 0, -1):
         t = i / hr
         hd.ellipse ([pvx - i * 1.3, fh * 1.04 - i, pvx + i * 1.3, fh * 1.04 + i], fill = mix ((70, 68, 66), (8, 8, 9), t ** 0.6) + (255,))
-    win.alpha_composite (hood.filter (ImageFilter.GaussianBlur (1)))
+    hood = hood.filter (ImageFilter.GaussianBlur (1))
+    win.alpha_composite (hood)
+    if info is not None:
+        full = Image.new ("L", (W, H), 0)
+        full.paste (hood.getchannel ("A"), (x0, y0))
+        info["hood"] = full.resize ((w, h), Image.LANCZOS)
     # adjust screw
+    nd = ImageDraw.Draw (win)
     sx, sy, sr = fw * 0.9, fh * 0.86, fh * 0.045
     nd.ellipse ([sx - sr, sy - sr, sx + sr, sy + sr], fill = (20, 20, 22, 255), outline = (90, 90, 96, 255), width = SS)
     nd.line ([sx - sr * .7, sy, sx + sr * .7, sy], fill = (120, 120, 126, 255), width = SS)

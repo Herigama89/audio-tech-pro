@@ -1491,7 +1491,7 @@ void MainComponent::chooseAudioSuiteEffect (juce::Component& target)
     std::vector<PluginPicker::Entry> entries;
     for (const auto& info : builtInEffects())
     {
-        PluginPicker::Entry e { info.name, info.category == "Classic Compressors" ? juce::String ("Classic Compressors") : juce::String (app::effectsName), {}, [this, type = info.type] { setAudioSuiteBuiltIn (type); } };
+        PluginPicker::Entry e { info.name, (info.category == "Classic Compressors" || info.category == "Mastering Compressors") ? info.category : juce::String (app::effectsName), {}, [this, type = info.type] { setAudioSuiteBuiltIn (type); } };
         e.category = info.category.isNotEmpty() ? info.category : PluginPicker::categoryOf ({}, info.name);
         e.key = "builtin:" + info.type;
         entries.push_back (std::move (e));
