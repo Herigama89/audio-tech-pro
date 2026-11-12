@@ -8,7 +8,7 @@
       Vintage FET 76      a FET limiting amplifier: very fast, input into a fixed threshold, the all-ratios mode
       Bus VCA             a VCA bus compressor: stepped ratio, attack and release (with auto), side-chain high pass, mix
       Punch Bus 2500      a bus compressor with feed-forward or feedback detection, knee and the side chain's thrust
-      Vox Tube Strip      a vocal strip: tube preamp, opto compressor, de-esser, EQ and a limiter
+      Vox Tube Strip VB   a vocal strip: tube preamp, opto compressor, de-esser, EQ and a limiter
       Class A Tube Strip 737  a tube preamp, an optical compressor (ratio, attack, release) and a four-band EQ
       Dual Comp 6176      a tube preamp and EQ into a FET and an opto compressor: either one, or both in series
 
@@ -763,7 +763,7 @@ const std::vector<StockEffect>& stockClassicEffects()
               { "type", "Type", "", 0.0f, 1.0f, 0.0f, 0.5f, { "New", "Old" } },
               { "makeup", "Output", " dB", 0.0f, 20.0f, 0.0f, 10.0f } }, 0.0f), classic },
           make<PunchBus> },
-        { { "classicVox", "Vox Tube Strip", withCommon ({
+        { { "classicVox", "Vox Tube Strip VB", withCommon ({
               { "low", "Low 80", " dB", -10.0f, 10.0f, 0.0f, 0.0f },
               { "mid", "Mid", " dB", -10.0f, 10.0f, 0.0f, 0.0f },
               { "midFreq", "Mid Freq", "", 0.0f, 4.0f, 2.0f, 2.0f, { "500 Hz", "1 kHz", "2 kHz", "3 kHz", "5 kHz" } },

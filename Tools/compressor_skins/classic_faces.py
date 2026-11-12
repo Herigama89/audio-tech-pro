@@ -75,7 +75,7 @@ FACES = [
         ("sel", "thrust", 1495, 225, ("NORM", "MED", "LOUD"), "THRUST"),
         ("switch", "type", 1495, 400, ("OLD", "NEW"), ""),
     ]),
-    dict (key = "vox", tint = ((134, 84, 186), (70, 38, 112)), type = "classicVox", title = "VOX TUBE STRIP", sub = "TUBE PREAMP  ·  OPTO  ·  DE-ESSER  ·  EQ  ·  LIMITER", w = 2000, mx = 1000, items = [
+    dict (key = "vox", tint = ((134, 84, 186), (70, 38, 112)), type = "classicVox", title = "VOX TUBE STRIP VB", sub = "TUBE PREAMP  ·  OPTO  ·  DE-ESSER  ·  EQ  ·  LIMITER", w = 2000, mx = 1000, items = [
         ("small", "low", 195, 230, ("-10", "0", "+10"), "LOW 80"),
         ("small", "mid", 335, 230, ("-10", "0", "+10"), "MID"),
         ("sel", "midFreq", 475, 230, (".5k", "1k", "2k", "3k", "5k"), "MID FREQ"),
