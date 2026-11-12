@@ -5,3 +5,4 @@ cmake-build-*/
 .idea/
 *.xcodeproj/
 compile_commands.json
+__pycache__/
