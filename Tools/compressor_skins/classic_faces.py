@@ -44,7 +44,7 @@ def steps (n):
 TEN = [str (v) for v in range (0, 11)]
 HUNDRED = [str (v) for v in range (0, 101, 10)]
 FACES = [
-    dict (key = "opto", type = "classicOpto", title = "VINTAGE OPTO", sub = "OPTICAL LEVELLING AMPLIFIER", w = 1600, mx = 800, items = [
+    dict (key = "opto", type = "classicOpto", title = "VINTAGE OPTO 2A", sub = "OPTICAL LEVELLING AMPLIFIER", w = 1600, mx = 800, items = [
         ("switch", "limit", 165, 300, ("LIMIT", "COMPRESS"), ""),
         ("small", "emphasis", 290, 300, ("FLAT", "", "HF"), "HF EMPHASIS"),
         ("big", "gain", 500, 250, HUNDRED, "GAIN"),
@@ -64,7 +64,6 @@ FACES = [
         ("sel", "scHpf", 360, 395, ("OFF", "60", "90", "150"), "S/C HPF"),
         ("big", "threshold", 620, 250, ("-20", "-15", "-10", "-5", "0", "+5", "+10", "+15", "+20"), "THRESHOLD"),
         ("big", "makeup", 1280, 250, ("0", "2", "4", "6", "8", "10", "12", "14", "16", "18", "20"), "MAKE-UP"),
-        ("small", "mix", 1500, 250, ("DRY", "", "WET"), "MIX"),
     ]),
     dict (key = "punch", tint = ((182, 216, 242), (118, 164, 210)), type = "classicPunch", title = "PUNCH BUS 2500", sub = "FEED-FORWARD / FEEDBACK BUS COMPRESSOR", w = 1900, mx = 950, items = [
         ("sel", "attack", 205, 230, (".03", ".1", ".3", "1", "3", "10", "30"), "ATTACK ms"),
@@ -87,9 +86,9 @@ FACES = [
         ("big", "comp", 1300, 250, TEN, "COMPRESS"),
         ("sel", "ratio", 1515, 230, ("2", "3", "4", "6", "10"), "RATIO"),
         ("small", "limit", 1515, 395, ("OFF", "", "MAX"), "LIMIT"),
-        ("small", "output", 1640, 395, ("-12", "0", "+12"), "OUTPUT"),
+        ("small", "output", 1632, 395, ("-12", "0", "+12"), "OUTPUT"),
     ]),
-    dict (key = "tube", tint = ((242, 214, 92), (204, 162, 38)), type = "classicTube", title = "CLASS A TUBE STRIP", sub = "PREAMP  ·  OPTICAL COMPRESSOR  ·  EQUALIZER", w = 2150, mx = 1060, items = [
+    dict (key = "tube", tint = ((242, 214, 92), (204, 162, 38)), type = "classicTube", title = "CLASS A TUBE STRIP 737", sub = "PREAMP  ·  OPTICAL COMPRESSOR  ·  EQUALIZER", w = 2150, mx = 1060, items = [
         ("sel", "lowFreq", 195, 230, ("15", "30", "60", "150"), "LOW Hz"),
         ("sel", "midFreq", 335, 230, ("220", "500", "1.5k", "3k", "6k"), "MID Hz"),
         ("sel", "highFreq", 475, 230, ("5k", "10k", "20k", "32k"), "HIGH Hz"),
@@ -103,7 +102,7 @@ FACES = [
         ("sel", "release", 1600, 395, ("FAST", "MED", "SLOW", "AUTO"), "RELEASE"),
         ("small", "output", 1745, 395, ("-30", "0", "+10"), "OUTPUT"),
     ]),
-    dict (key = "dual", tint = ((196, 44, 44), (108, 16, 22)), type = "classicDual", title = "DUAL COMP CHANNEL", sub = "TUBE PREAMP  ·  FET  &  OPTO COMPRESSORS", w = 2250, mx = 1080, items = [
+    dict (key = "dual", tint = ((196, 44, 44), (108, 16, 22)), type = "classicDual", title = "DUAL COMP 6176", sub = "TUBE PREAMP  ·  FET  &  OPTO COMPRESSORS", w = 2250, mx = 1080, items = [
         ("small", "low", 195, 230, ("-12", "0", "+12"), "LOW 100"),
         ("small", "high", 195, 395, ("-12", "0", "+12"), "HIGH 10k"),
         ("big", "preamp", 445, 250, TEN, "TUBE GAIN"),
@@ -113,7 +112,7 @@ FACES = [
         ("sel", "ratio", 1735, 230, ("4", "8", "12", "20", "ALL"), "FET RATIO"),
         ("small", "attack", 1590, 395, ("1", "4", "7"), "ATTACK"),
         ("small", "release", 1735, 395, ("1", "4", "7"), "RELEASE"),
-        ("small", "output", 1880, 395, ("-20", "0", "+20"), "OUTPUT"),
+        ("small", "output", 1880, 230, ("-20", "0", "+20"), "OUTPUT"),
     ]),
 ]
 
@@ -121,8 +120,9 @@ def common (face):
     """Every face's: the meter selector, power and its lamp (right), the Colour section under the meter."""
     w, mx = face["w"], face["mx"]
     return [
-        ("sel", "meterMode", w - 240, 150, ("+10", "GR", "+4"), "METER"),
-        ("switch", "power", w - 240, 318, ("ON", "POWER"), ""),
+        ("sel", "meterMode", w - 290, 150, ("+10", "GR", "+4"), "METER"),
+        ("small", "mix", w - 155, 150, ("DRY", "", "WET"), "MIX"),
+        ("switch", "power", w - 290, 318, ("ON", "POWER"), ""),
         ("sel", "voice", mx - 115, 375, ("OFF", "CLEAN", "OPTO", "VARI-MU"), "TUBE VOICE"),
         ("small", "lowBump", mx + 5, 375, ("0", "+3", "+6"), "LOW BUMP"),
         ("small", "texture", mx + 120, 375, ("WARM", "OFF", "BRIGHT"), "TEXTURE", [-60.0, 0.0, 60.0]),
@@ -399,7 +399,7 @@ def place (img, face, sp, gr = 4.0):
         elif kind == "sel": put (sp["big"], (x, y), SEL, a - BIG_ANGLE)
         elif kind == "small": put (sp["small"], (x, y), SMALL, a - SMALL_ANGLE)
         elif kind == "switch": put (sp["switch_up"], (x, y), SWITCH)
-    put (sp["led_on"], (face["w"] - 160, 318), 56)
+    put (sp["led_on"], (face["w"] - 215, 318), 56)
     # the needle
     s = METER_W / (METER_SRC[2] - METER_SRC[0])
     x0 = face["mx"] - METER_W // 2

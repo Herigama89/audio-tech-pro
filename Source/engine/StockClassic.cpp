@@ -4,13 +4,13 @@
     Classic Compressors: hardware-style compressors and channel strips with faces of their own (a menu section of
     their own). Each is modelled on how a kind of classic circuit behaves - our own DSP, no one's code:
 
-      Vintage Opto        an optical levelling amplifier: a light cell's soft attack and two-stage, memory release
+      Vintage Opto 2A     an optical levelling amplifier: a light cell's soft attack and two-stage, memory release
       Vintage FET         a FET limiting amplifier: very fast, input into a fixed threshold, the all-ratios mode
       Bus VCA             a VCA bus compressor: stepped ratio, attack and release (with auto), side-chain high pass, mix
-      Punch Bus           a bus compressor with feed-forward or feedback detection, knee and the side chain's thrust
+      Punch Bus 2500      a bus compressor with feed-forward or feedback detection, knee and the side chain's thrust
       Vox Tube Strip      a vocal strip: tube preamp, opto compressor, de-esser, EQ and a limiter
-      Class A Tube Strip  a tube preamp, an optical compressor (ratio, attack, release) and a four-band EQ
-      Dual Comp Channel   a tube preamp and EQ into a FET and an opto compressor: either one, or both in series
+      Class A Tube Strip 737  a tube preamp, an optical compressor (ratio, attack, release) and a four-band EQ
+      Dual Comp 6176      a tube preamp and EQ into a FET and an opto compressor: either one, or both in series
 
     They share the end of their chain: the valve output stage's voice (Clean, Opto, Vari-Mu), a low bump and a
     texture (warm or bright), the meter (gain reduction or the output, with VU ballistics) and the power switch.
@@ -136,7 +136,7 @@ namespace
         explicit ClassicBase (const EffectInfo& i) : BuiltInEffect (i)
         {
             iMeter = indexOf ("meterMode"); iPower = indexOf ("power");
-            iVoice = indexOf ("voice"); iBump = indexOf ("lowBump"); iTexture = indexOf ("texture");
+            iVoice = indexOf ("voice"); iBump = indexOf ("lowBump"); iTexture = indexOf ("texture"); iMix = indexOf ("mix");
         }
 
         void prepare (double rate, int block) override
@@ -146,6 +146,8 @@ namespace
             bumpLow.reset(); bumpDip.reset(); warmLow.reset(); warmHigh.reset(); brightHigh.reset();
             lastKey = -1.0f;
             outRms = 0.0f;
+            dryL.assign ((size_t) std::max (block, 1), 0.0f);
+            dryR.assign ((size_t) std::max (block, 1), 0.0f);
             prepareCore (rate, block);
         }
 
@@ -178,6 +180,14 @@ namespace
             float inMax = 0.0f;
             for (int i = 0; i < n; ++i)
                 inMax = std::max (inMax, std::max (std::abs (l[i]), std::abs (r[i])));
+            // Mix: the dry signal kept, to blend back in at the end (parallel compression)
+            const auto mix = value (iMix) / 100.0f;
+            const bool blend = mix < 0.999f && (size_t) n <= dryL.size();
+            if (blend)
+            {
+                std::copy (l, l + n, dryL.begin());
+                std::copy (r, r + n, dryR.begin());
+            }
 
             const auto gr = processCore (l, r, n);
 
@@ -207,6 +217,11 @@ namespace
                     b = brightHigh.process (b, 1);
                     a += 0.03f * (std::tanh (a * 1.5f) / 1.5f - a);
                     b += 0.03f * (std::tanh (b * 1.5f) / 1.5f - b);
+                }
+                if (blend)
+                {
+                    a = dryL[(size_t) i] + (a - dryL[(size_t) i]) * mix;
+                    b = dryR[(size_t) i] + (b - dryR[(size_t) i]) * mix;
                 }
                 l[i] = a; r[i] = b;
                 outMax = std::max (outMax, std::max (std::abs (a), std::abs (b)));
@@ -269,7 +284,8 @@ namespace
             brightHigh.setHighShelf (sampleRate, 8000.0, 2.0, 0.7);
         }
 
-        int iMeter = 0, iPower = 0, iVoice = 0, iBump = 0, iTexture = 0;
+        int iMeter = 0, iPower = 0, iVoice = 0, iBump = 0, iTexture = 0, iMix = 0;
+        std::vector<float> dryL, dryR;
         float dcL = 0.0f, dcR = 0.0f, lastKey = -1.0f, outRms = 0.0f, needlePos = 0.0f;
         Biquad bumpLow, bumpDip, warmLow, warmHigh, brightHigh;
         std::atomic<float> reductionMeter { 0.0f }, grNow { 0.0f }, needle { 0.0f }, inPeak { -100.0f }, outPeak { -100.0f };
@@ -370,7 +386,7 @@ namespace
         explicit BusVca (const EffectInfo& i) : ClassicBase (i)
         {
             iThreshold = indexOf ("threshold"); iRatio = indexOf ("ratio"); iAttack = indexOf ("attack"); iRelease = indexOf ("release");
-            iMakeup = indexOf ("makeup"); iHpf = indexOf ("scHpf"); iMix = indexOf ("mix");
+            iMakeup = indexOf ("makeup"); iHpf = indexOf ("scHpf");
         }
     protected:
         void prepareCore (double, int) override { gr = 0.0f; slowGr = 0.0f; env = 0.0f; hpf.reset(); lastHpf = -1; }
@@ -394,7 +410,6 @@ namespace
             const auto release = coeffMs (autoRelease ? 100.0f : releases[juce::jlimit (0, 3, releaseIndex)], sampleRate);
             const auto slowRelease = coeffMs (1500.0, sampleRate);
             const auto makeup = dbToGain (value (iMakeup));
-            const auto mix = value (iMix) / 100.0f;
             const auto envCoeff = coeffMs (2.0, sampleRate);
             for (int i = 0; i < n; ++i)
             {
@@ -415,14 +430,14 @@ namespace
                     total = std::max (gr, slowGr * 0.6f);
                 }
                 const auto g = dbToGain (-total) * makeup;
-                l[i] = l[i] * (mix * g + (1.0f - mix)) ;
-                r[i] = r[i] * (mix * g + (1.0f - mix));
+                l[i] *= g;
+                r[i] *= g;
                 lastGr = total;
             }
             return lastGr;
         }
     private:
-        int iThreshold = 0, iRatio = 0, iAttack = 0, iRelease = 0, iMakeup = 0, iHpf = 0, iMix = 0, lastHpf = -1;
+        int iThreshold = 0, iRatio = 0, iAttack = 0, iRelease = 0, iMakeup = 0, iHpf = 0, lastHpf = -1;
         float gr = 0.0f, slowGr = 0.0f, env = 0.0f, lastGr = 0.0f;
         Biquad hpf;
     };
@@ -707,6 +722,7 @@ namespace
         own.push_back ({ "voice", "Tube Voice", "", 0.0f, 3.0f, voice, 1.5f, { "Off", "Clean", "Opto", "Vari-Mu" } });
         own.push_back ({ "lowBump", "Low Bump", " dB", 0.0f, 6.0f, 0.0f, 3.0f });
         own.push_back ({ "texture", "Texture", "", 0.0f, 2.0f, 1.0f, 1.0f, { "Warm", "Off", "Bright" } });
+        own.push_back ({ "mix", "Mix", "%", 0.0f, 100.0f, 100.0f, 50.0f });   // (dry / wet: parallel compression)
         return own;
     }
 
@@ -716,7 +732,7 @@ namespace
 const std::vector<StockEffect>& stockClassicEffects()
 {
     static const std::vector<StockEffect> effects {
-        { { "classicOpto", "Vintage Opto", withCommon ({
+        { { "classicOpto", "Vintage Opto 2A", withCommon ({
               { "gain", "Gain", "", 0.0f, 100.0f, 40.0f, 50.0f },
               { "peak", "Peak Reduction", "", 0.0f, 100.0f, 40.0f, 50.0f },
               { "limit", "Compress/Limit", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Compress", "Limit" } },
@@ -735,8 +751,7 @@ const std::vector<StockEffect>& stockClassicEffects()
               { "attack", "Attack", "", 0.0f, 5.0f, 3.0f, 2.5f, { "0.1 ms", "0.3 ms", "1 ms", "3 ms", "10 ms", "30 ms" } },
               { "release", "Release", "", 0.0f, 4.0f, 4.0f, 2.0f, { "0.1 s", "0.3 s", "0.6 s", "1.2 s", "Auto" } },
               { "scHpf", "S/C HPF", "", 0.0f, 3.0f, 0.0f, 1.5f, { "Off", "60 Hz", "90 Hz", "150 Hz" } },
-              { "makeup", "Make-Up", " dB", 0.0f, 20.0f, 0.0f, 10.0f },
-              { "mix", "Mix", "%", 0.0f, 100.0f, 100.0f, 50.0f } }, 0.0f), classic },
+              { "makeup", "Make-Up", " dB", 0.0f, 20.0f, 0.0f, 10.0f } }, 0.0f), classic },
           make<BusVca> },
         { { "classicPunch", "Punch Bus 2500", withCommon ({
               { "threshold", "Threshold", " dB", -20.0f, 10.0f, 0.0f, -5.0f },
@@ -761,7 +776,7 @@ const std::vector<StockEffect>& stockClassicEffects()
               { "limit", "Limit", "", 0.0f, 100.0f, 0.0f, 50.0f },
               { "output", "Output", " dB", -12.0f, 12.0f, 0.0f, 0.0f } }, 1.0f), classic },
           make<VoxStrip> },
-        { { "classicTube", "Class A Tube Strip", withCommon ({
+        { { "classicTube", "Class A Tube Strip 737", withCommon ({
               { "lowFreq", "Low Freq", "", 0.0f, 3.0f, 2.0f, 1.5f, { "15 Hz", "30 Hz", "60 Hz", "150 Hz" } },
               { "midFreq", "Mid Freq", "", 0.0f, 4.0f, 2.0f, 2.0f, { "220 Hz", "500 Hz", "1.5 kHz", "3 kHz", "6 kHz" } },
               { "highFreq", "High Freq", "", 0.0f, 3.0f, 1.0f, 1.5f, { "5 kHz", "10 kHz", "20 kHz", "32 kHz" } },
@@ -775,7 +790,7 @@ const std::vector<StockEffect>& stockClassicEffects()
               { "release", "Release", "", 0.0f, 3.0f, 1.0f, 1.5f, { "Fast", "Med", "Slow", "Auto" } },
               { "output", "Output", " dB", -30.0f, 10.0f, 0.0f, 0.0f } }, 1.0f), classic },
           make<TubeStrip> },
-        { { "classicDual", "Dual Comp Channel", withCommon ({
+        { { "classicDual", "Dual Comp 6176", withCommon ({
               { "low", "Low 100", " dB", -12.0f, 12.0f, 0.0f, 0.0f },
               { "high", "High 10k", " dB", -12.0f, 12.0f, 0.0f, 0.0f },
               { "preamp", "Tube Gain", "", 0.0f, 100.0f, 20.0f, 50.0f },
