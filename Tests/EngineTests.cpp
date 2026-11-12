@@ -3149,3 +3149,35 @@ TEST_CASE ("An armed track (its input heard) keeps the engine from resting", "[e
     renderLeft (f.engine, 3 * 48000);
     CHECK_FALSE (f.engine.isResting());
 }
+
+TEST_CASE ("A built-in effect bypassed and brought back still works: its knobs reach it", "[engine][routing][bypass]")
+{
+    for (const auto* type : { "gain", "classicFet", "classicOpto" })
+    {
+        INFO (type);
+        RoutingFixture f;
+        auto track = f.audioTrack ("A", f.loud);
+        auto insert = model::addBuiltinInsert (model::chainFor (f.project, track[ids::id]), type, 0, nullptr);
+        f.router.setProject (f.project);
+        f.engine.play();
+        renderLeft (f.engine, 4800);
+        const auto on = renderLeft (f.engine, 4800)[2000];
+
+        insert.setProperty (ids::bypass, true, nullptr);
+        f.router.rebuildNow();
+        renderLeft (f.engine, 4800);
+        insert.setProperty (ids::bypass, false, nullptr);
+        f.router.rebuildNow();
+        renderLeft (f.engine, 9600);
+        const auto back = renderLeft (f.engine, 4800)[2000];
+        CHECK_THAT (back, WithinAbs (on, 0.02));
+
+        // a knob turned now is heard
+        const juce::Identifier knob (juce::String (type) == "gain" ? "gain" : juce::String (type) == "classicFet" ? "output" : "gain");
+        insert.setProperty (knob, juce::String (type) == "gain" ? 6.0 : 90.0, nullptr);
+        f.router.rebuildNow();
+        renderLeft (f.engine, 9600);
+        const auto turned = renderLeft (f.engine, 4800)[2000];
+        CHECK (std::abs (turned) > std::abs (back) * 1.3f);
+    }
+}
