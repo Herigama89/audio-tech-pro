@@ -2759,6 +2759,7 @@ namespace
             const auto mx0 = f.meterX - classicfaces::meterWidth * 0.5f;
             whole.addRoundedRectangle (mx0 - 6.0f, classicfaces::meterTop - 6.0f, classicfaces::meterWidth + 16.0f, classicfaces::meterHeight + 20.0f, 18.0f);
             g.reduceClipRegion (whole);
+            g.setOpacity (1.0f);   // (drawImage takes the current colour's alpha: the seam's)
             g.drawImageAt (dark, 0, 0);
         }
         return image;
