@@ -3179,5 +3179,67 @@ TEST_CASE ("A built-in effect bypassed and brought back still works: its knobs r
         renderLeft (f.engine, 9600);
         const auto turned = renderLeft (f.engine, 4800)[2000];
         CHECK (std::abs (turned) > std::abs (back) * 1.3f);
+
+        // and its meters still move (the window reads them from the rack)
+        if (juce::String (type) != "gain")
+        {
+            insert.setProperty ("input", 95.0, nullptr);
+            insert.setProperty ("peak", 95.0, nullptr);
+            f.router.rebuildNow();
+            renderLeft (f.engine, 24000);
+            auto* effect = f.effects.getBuiltIn (insert[ids::id].toString());
+            REQUIRE (effect != nullptr);
+            float meters[8] {};
+            effect->readMeters (meters, 8);
+            CHECK (meters[1] > 3.0f);
+        }
     }
+}
+
+TEST_CASE ("Bypass on and off while the audio thread plays: the effect's meters keep moving", "[engine][routing][bypass][.slow]")
+{
+    RoutingFixture f;
+    auto wav = writeConstantWav (f.temp.dir.getChildFile ("long.wav"), 48000.0, 48000 * 30, 0.7f);
+    auto track = model::addTrack (f.project, "A", nullptr);
+    model::addRegion (track, wav, 0.0, 30.0, nullptr);
+    auto insert = model::addBuiltinInsert (model::chainFor (f.project, track[ids::id]), "classicFet", 0, nullptr);
+    insert.setProperty ("input", 95.0, nullptr);
+    f.router.setProject (f.project);
+    juce::BigInteger outs; outs.setRange (0, 2, true);
+    f.engine.setActiveOutputs (outs);   // (as a device: old graphs are kept until the audio thread has moved on)
+    f.engine.play();
+
+    std::atomic<bool> running { true };
+    std::thread audio ([&]
+    {
+        juce::AudioBuffer<float> out (2, 256);
+        while (running)
+        {
+            f.engine.render (nullptr, 0, out.getArrayOfWritePointers(), 2, 256);
+            std::this_thread::sleep_for (std::chrono::microseconds (2500));
+        }
+    });
+    const auto needle = [&]
+    {
+        float m[8] {};
+        if (auto* e = f.effects.getBuiltIn (insert[ids::id].toString()))
+            e->readMeters (m, 8);
+        return m[1];
+    };
+    int frozen = 0;
+    for (int round = 0; round < 40; ++round)
+    {
+        insert.setProperty (ids::bypass, true, nullptr);
+        f.router.rebuildNow();
+        std::this_thread::sleep_for (std::chrono::milliseconds (60));
+        insert.setProperty (ids::bypass, false, nullptr);
+        f.router.rebuildNow();
+        std::this_thread::sleep_for (std::chrono::milliseconds (250));
+        const auto gr = needle();
+        if (! (gr > 3.0f) || ! std::isfinite (gr))
+            ++frozen;
+    }
+    running = false;
+    audio.join();
+    CHECK (frozen == 0);
 }
