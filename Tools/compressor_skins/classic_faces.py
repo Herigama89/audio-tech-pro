@@ -50,7 +50,7 @@ FACES = [
         ("big", "gain", 500, 250, HUNDRED, "GAIN"),
         ("big", "peak", 1100, 250, HUNDRED, "PEAK REDUCTION"),
     ]),
-    dict (key = "fet", tint = ((240, 150, 70), (196, 98, 34)), type = "classicFet", title = "VINTAGE FET", sub = "FET LIMITING AMPLIFIER", w = 1800, mx = 850, items = [
+    dict (key = "fet", tint = ((240, 150, 70), (196, 98, 34)), type = "classicFet", title = "VINTAGE FET 76", sub = "FET LIMITING AMPLIFIER", w = 1800, mx = 850, items = [
         ("small", "attack", 195, 230, ("1", "4", "7"), "ATTACK"),
         ("small", "release", 195, 395, ("1", "4", "7"), "RELEASE"),
         ("big", "input", 450, 250, TEN, "INPUT"),

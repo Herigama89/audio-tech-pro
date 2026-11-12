@@ -5,7 +5,7 @@
     their own). Each is modelled on how a kind of classic circuit behaves - our own DSP, no one's code:
 
       Vintage Opto 2A     an optical levelling amplifier: a light cell's soft attack and two-stage, memory release
-      Vintage FET         a FET limiting amplifier: very fast, input into a fixed threshold, the all-ratios mode
+      Vintage FET 76      a FET limiting amplifier: very fast, input into a fixed threshold, the all-ratios mode
       Bus VCA             a VCA bus compressor: stepped ratio, attack and release (with auto), side-chain high pass, mix
       Punch Bus 2500      a bus compressor with feed-forward or feedback detection, knee and the side chain's thrust
       Vox Tube Strip      a vocal strip: tube preamp, opto compressor, de-esser, EQ and a limiter
@@ -738,7 +738,7 @@ const std::vector<StockEffect>& stockClassicEffects()
               { "limit", "Compress/Limit", "", 0.0f, 1.0f, 0.0f, 0.5f, { "Compress", "Limit" } },
               { "emphasis", "HF Emphasis", "", 0.0f, 1.0f, 0.0f, 0.5f } }, 2.0f), classic },
           make<VintageOpto> },
-        { { "classicFet", "Vintage FET", withCommon ({
+        { { "classicFet", "Vintage FET 76", withCommon ({
               { "input", "Input", "", 0.0f, 100.0f, 40.0f, 50.0f },
               { "output", "Output", "", 0.0f, 100.0f, 52.0f, 50.0f },
               { "attack", "Attack", "", 1.0f, 7.0f, 4.0f, 4.0f },
