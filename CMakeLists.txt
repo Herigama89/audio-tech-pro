@@ -536,6 +536,7 @@ if(RIFF_BUILD_PLUGINS)
 #if __has_include(<juce_opengl/juce_opengl.h>) && defined(JUCE_MODULE_AVAILABLE_juce_opengl)
  #include <juce_opengl/juce_opengl.h>
 #endif
+#include <BinaryData.h>
 #if ! DONT_SET_USING_JUCE_NAMESPACE
 using namespace juce;
 #endif

@@ -1745,7 +1745,7 @@ TEST_CASE ("Mastering Compressors: level at their defaults on a quiet tone, comp
             const auto in = sine (440.0, 0.5, 0.5f);
             const auto [l, r] = run (*e, in, in);
             for (size_t i = 0; i < l.size(); i += 97)
-                CHECK (l[i] == Catch::Approx (in[i]).margin (1.0e-5));
+                CHECK (std::abs (l[i] - in[i]) < 1.0e-5f);
         }
     }
 }
