@@ -484,3 +484,114 @@ if(RIFF_BUILD_STEMCHECK)
     target_compile_definitions(StemCheck PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_STANDALONE_APPLICATION=1)
     target_link_libraries(StemCheck PRIVATE juce::juce_audio_formats juce::juce_dsp juce::juce_recommended_config_flags)
 endif()
+
+# ---------------------------------------------------------------------------
+# The classic and mastering effects (and the classic EQs) as VST3 and Audio Unit plug-ins for other hosts:
+# the same engines and faces as in the app (Source/plugin/FxPlugin.cpp, one plug-in per effect).
+#   cmake -B build-plugins -DRIFF_BUILD_PLUGINS=ON -DRIFF_BUILD_TESTS=OFF && cmake --build build-plugins --target RiffPlugins
+# ---------------------------------------------------------------------------
+option(RIFF_BUILD_PLUGINS "Build the classic and mastering effects as VST3 / AU plug-ins" OFF)
+
+if(RIFF_BUILD_PLUGINS)
+    # effect type | plug-in name | its four-letter code
+    set(RIFF_PLUGINS
+        "classicOpto|Vintage Opto 2A|Ao2a"
+        "classicFet|Vintage FET 76|Af76"
+        "classicVca|Bus VCA|Abvc"
+        "classicPunch|Punch Bus 2500|Ap25"
+        "classicVox|Vox Tube Strip VB|Avxb"
+        "classicTube|Class A Tube Strip 737|At73"
+        "classicDual|Dual Comp 6176|Ad61"
+        "masterHill|Mastering Hill Comp|Amhl"
+        "masterChild|Mastering Child Comp|Amch"
+        "masterIron|Iron Master Comp|Amir"
+        "consoleEq|Console EQ|Aceq"
+        "tubeEq|Tube EQ|Ateq"
+        "graphicEq|Graphic EQ|Ageq")
+    set(RIFF_PLUGIN_FORMATS VST3)
+    if(APPLE)
+        list(APPEND RIFF_PLUGIN_FORMATS AU)
+    endif()
+    set(RIFF_PLUGIN_MODULES juce::juce_audio_utils juce::juce_audio_devices juce::juce_audio_formats juce::juce_audio_processors
+                            juce::juce_gui_extra juce::juce_dsp)
+    if(APPLE)
+        list(APPEND RIFF_PLUGIN_MODULES juce::juce_opengl)
+    endif()
+
+    # The app's code, compiled once for all of them (each plug-in links only what it uses from it)
+    add_library(RiffFxShared STATIC ${RIFF_CORE_SOURCES} ${RIFF_UI_SOURCES})
+    if(APPLE)
+        target_sources(RiffFxShared PRIVATE Source/ui/ScreenRecorder_mac.mm Source/ui/PluginWindowKeys_mac.mm Source/ui/NativeLayers_mac.mm)
+        set_source_files_properties(Source/ui/ScreenRecorder_mac.mm Source/ui/PluginWindowKeys_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    endif()
+    set(RIFF_FX_HEADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/RiffFxShared_JuceHeader)
+    file(WRITE ${RIFF_FX_HEADER_DIR}/JuceHeader.h
+"#pragma once
+#include <juce_audio_utils/juce_audio_utils.h>
+#include <juce_audio_devices/juce_audio_devices.h>
+#include <juce_audio_formats/juce_audio_formats.h>
+#include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_gui_extra/juce_gui_extra.h>
+#include <juce_dsp/juce_dsp.h>
+#if __has_include(<juce_opengl/juce_opengl.h>) && defined(JUCE_MODULE_AVAILABLE_juce_opengl)
+ #include <juce_opengl/juce_opengl.h>
+#endif
+#if ! DONT_SET_USING_JUCE_NAMESPACE
+using namespace juce;
+#endif
+namespace ProjectInfo
+{
+    const char* const  projectName    = \"Audio Tech Pro\";
+    const char* const  companyName    = \"Audio Tech Pro\";
+    const char* const  versionString  = \"${PROJECT_VERSION}\";
+    const int          versionNumber  = 0x10000;
+}
+")
+    target_include_directories(RiffFxShared PRIVATE Source ${RIFF_FX_HEADER_DIR})
+    target_compile_definitions(RiffFxShared PRIVATE ${RIFF_DEFINITIONS} JUCE_STANDALONE_APPLICATION=0)
+    set_target_properties(RiffFxShared PROPERTIES POSITION_INDEPENDENT_CODE TRUE VISIBILITY_INLINES_HIDDEN TRUE
+                                                  C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden)
+    target_link_libraries(RiffFxShared PRIVATE AudioTechProData ${RIFF_PLUGIN_MODULES}
+                                       PUBLIC juce::juce_recommended_config_flags)
+    if(APPLE)
+        target_compile_definitions(RiffFxShared PRIVATE RIFF_GPU_DRAWING=1 GL_SILENCE_DEPRECATION=1)
+    endif()
+
+    add_custom_target(RiffPlugins)
+    foreach(entry IN LISTS RIFF_PLUGINS)
+        string(REPLACE "|" ";" parts "${entry}")
+        list(GET parts 0 fxType)
+        list(GET parts 1 fxName)
+        list(GET parts 2 fxCode)
+        set(target "Fx_${fxType}")
+        juce_add_plugin(${target}
+            PRODUCT_NAME "${fxName}"
+            COMPANY_NAME "Audio Tech Pro"
+            BUNDLE_ID "com.audiotechpro.fx.${fxType}"
+            PLUGIN_MANUFACTURER_CODE Atpr
+            PLUGIN_CODE ${fxCode}
+            FORMATS ${RIFF_PLUGIN_FORMATS}
+            IS_SYNTH FALSE
+            NEEDS_MIDI_INPUT FALSE
+            EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+            COPY_PLUGIN_AFTER_BUILD FALSE
+            VST3_CATEGORIES Fx Dynamics
+            AU_MAIN_TYPE kAudioUnitType_Effect
+            DESCRIPTION "${fxName} by Audio Tech Pro")
+        juce_generate_juce_header(${target})
+        target_sources(${target} PRIVATE Source/plugin/FxPlugin.cpp)
+        target_include_directories(${target} PRIVATE Source)
+        target_compile_definitions(${target} PRIVATE ${RIFF_DEFINITIONS} RIFF_FX_TYPE="${fxType}"
+                                                     JUCE_VST3_CAN_REPLACE_VST2=0)
+        target_link_libraries(${target} PRIVATE RiffFxShared AudioTechProData ${RIFF_PLUGIN_MODULES}
+                                        PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags)
+        if(APPLE)
+            target_link_libraries(${target} PRIVATE "-framework CoreAudioKit" "-framework IOKit" "-framework QuartzCore" "-framework AVFoundation"
+                                                    "-framework CoreMedia" "-framework CoreVideo" "-weak_framework ScreenCaptureKit")
+        endif()
+        if(WIN32)
+            target_link_libraries(${target} PRIVATE mfplat mfreadwrite mfuuid ole32 gdi32 user32)
+        endif()
+        add_dependencies(RiffPlugins ${target}_All)
+    endforeach()
+endif()

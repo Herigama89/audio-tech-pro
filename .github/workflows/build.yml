@@ -117,9 +117,41 @@ jobs:
           name: AudioTechPro-windows
           path: out/
 
+  plugins:
+    # The classic and mastering compressors and the classic EQs as VST3 and Audio Unit plug-ins (one for Apple Silicon
+    # and Intel): "Audio Tech Pro Plugins <version>.pkg" (installs them) and a .zip of the same
+    runs-on: macos-15-intel
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile cache
+        run: brew install ccache && ccache --max-size=3G && ccache --zero-stats
+      - uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-plugins-${{ github.sha }}
+          restore-keys: ccache-plugins-
+      - name: Build the plug-ins
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+          CMAKE_OBJC_COMPILER_LAUNCHER: ccache
+          CMAKE_OBJCXX_COMPILER_LAUNCHER: ccache
+        run: |
+          cmake -B build-plugins -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+                -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DRIFF_BUILD_TESTS=OFF -DRIFF_BUILD_PLUGINS=ON
+          cmake --build build-plugins --config Release --target RiffPlugins -j "$(sysctl -n hw.ncpu)"
+          ccache --show-stats
+      - name: Package (.pkg and .zip)
+        run: sh scripts/make-mac-plugins.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AudioTechPro-plugins
+          path: out-plugins/
+
   release:
-    needs: [ mac ]
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    needs: [ mac, plugins ]
+    if: ${{ always() && needs.mac.result == 'success' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -138,5 +170,7 @@ jobs:
           name: Audio Tech Pro ${{ steps.version.outputs.number }}
           body: |
             Mac (Apple Silicon and Intel, macOS 11+): open the .dmg and drag Audio Tech Pro onto Applications, or use the .pkg installer. The first time, right-click the app and choose Open.
+
+            Plug-ins (VST3 and AU, for Logic, Ableton, Pro Tools via VST3 hosts, Studio One...): the Classic Compressors, the Mastering Compressors and the classic EQs. Run "Audio Tech Pro Plugins" .pkg (right-click > Open the first time), or unzip and copy the .vst3 files to /Library/Audio/Plug-Ins/VST3 and the .component files to /Library/Audio/Plug-Ins/Components.
           files: files/*
           overwrite_files: true
