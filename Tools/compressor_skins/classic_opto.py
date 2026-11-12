@@ -23,6 +23,7 @@ FONT_MED = "/usr/share/fonts/opentype/inter/Inter-Medium.otf"
 DARK = os.environ.get ("COPTO_DARK") == "1"   # (the black panel: a preview of how it would look)
 GLASS = os.environ.get ("COPTO_GLASS", "")    # "dark" / "light": the Liquid Glass faces (smoked black + amber, frosted white + blue)
 if GLASS == "dark": DARK = True
+BLACK_VU = os.environ.get ("COPTO_BLACK_VU") == "1"
 INK = (230, 231, 235, 255) if GLASS == "dark" else (28, 30, 36, 255) if GLASS == "light" else (214, 216, 220, 255) if DARK else (44, 46, 50, 255)
 ACCENT = (47, 124, 246, 255) if GLASS == "light" else (242, 164, 58, 255) if GLASS == "dark" else (226, 140, 38, 255)
 
@@ -186,15 +187,21 @@ def vu (img):
     yy, xx = np.mgrid[0:fh, 0:fw].astype (np.float32)
     glow = np.exp (-(((xx - fw * 0.5) / (fw * 0.62)) ** 2 + ((yy - fh * 0.62) / (fh * 0.8)) ** 2))
     face = np.zeros ((fh, fw, 4), np.float32)
-    face[..., 0] = 215 + 40 * glow
-    face[..., 1] = 140 + 70 * glow
-    face[..., 2] = 50 + 60 * glow
+    if BLACK_VU:   # (the console meter: a black face, printed white)
+        face[..., 0] = 14 + 14 * glow
+        face[..., 1] = 14 + 14 * glow
+        face[..., 2] = 16 + 15 * glow
+    else:
+        face[..., 0] = 215 + 40 * glow
+        face[..., 1] = 140 + 70 * glow
+        face[..., 2] = 50 + 60 * glow
     face[..., 3] = 255
     fimg = Image.fromarray (np.clip (face, 0, 255).astype (np.uint8), "RGBA")
     fd = ImageDraw.Draw (fimg)
     R = 136
     pivot = (fw * 0.5, R + 44)   # (below the window: only the arc shows)
-    ink = (40, 32, 24, 255); red = (200, 34, 24, 255)
+    ink = (236, 236, 232, 255) if BLACK_VU else (40, 32, 24, 255)
+    red = (236, 70, 56, 255) if BLACK_VU else (200, 34, 24, 255)
     # the scale's arc: black to 0, red above
     def arc (db_from, db_to, colour, width, rr):
         pts = []
