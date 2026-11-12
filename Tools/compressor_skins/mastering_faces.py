@@ -139,32 +139,55 @@ def place_meter (img, face, x0, y0, r = 16):
     gl.putalpha (Image.fromarray (np.minimum (np.array (gl.getchannel ("A")), np.array (m))))
     img.alpha_composite (gl, (int (x0), int (y0)))
 
-def arc_meter (img, c, r0, r1, a0 = -44, a1 = 44, value = 0.5):
-    """The arc meter over the threshold: a curved window, its scale lit orange."""
+def arc_meter (img, c, r0, r1, a0 = -40, a1 = 40, value = 0.5):
+    """The arc meter over the threshold: a black fan-shaped window, its scale lit from inside (the glow stays in it)."""
     W, H = img.size
     yy, xx = np.mgrid[0:H, 0:W].astype (np.float32)
     rr = np.sqrt ((xx - c[0]) ** 2 + (yy - c[1]) ** 2); aa = np.degrees (np.arctan2 (xx - c[0], c[1] - yy))
-    band = (rr > r0) & (rr < r1) & (aa > a0) & (aa < a1)
-    glow = np.clip (1 - np.abs (rr - (r0 + r1) / 2) / ((r1 - r0) * 0.8), 0, 1)
-    lay = np.zeros ((H, W, 4), np.float32)
-    lay[..., 0] = 34 + 70 * glow; lay[..., 1] = 18 + 30 * glow; lay[..., 2] = 12 + 10 * glow; lay[..., 3] = band * 255
-    img.alpha_composite (Image.fromarray (lay.astype (np.uint8), "RGBA"))
+    def sector (ra, rb, pa, pb):
+        return ((rr > ra) & (rr < rb) & (aa > pa) & (aa < pb)).astype (np.float32)
+    # the frame (a moulded black rim), then the window inside it
+    rim = Image.fromarray ((sector (r0 - 12, r1 + 12, a0 - 3, a1 + 3) * 255).astype (np.uint8)).filter (ImageFilter.GaussianBlur (1.2))
+    lay = Image.new ("RGBA", (W, H), (46, 46, 50, 255)); lay.putalpha (rim)
+    img.alpha_composite (lay)
+    inside = sector (r0, r1, a0, a1)
+    mid = (r0 + r1) / 2
+    glow = np.clip (1 - np.abs (rr - mid * 1.02) / ((r1 - r0) * 0.75), 0, 1) ** 2 * np.clip (1 - np.abs (aa) / (a1 * 1.3), 0, 1)
+    win = np.zeros ((H, W, 4), np.float32)
+    win[..., 0] = 12 + 46 * glow; win[..., 1] = 9 + 20 * glow; win[..., 2] = 8 + 6 * glow
+    win[..., 3] = inside * 255
+    img.alpha_composite (Image.fromarray (win.astype (np.uint8), "RGBA"))
+    # the scale, printed in lit orange; red past 0
     d = ImageDraw.Draw (img)
-    ink = (255, 168, 80, 255); red = (255, 70, 40, 255)
+    ink = (255, 158, 72, 255); red = (255, 64, 36, 255)
     labels = ["20", "10", "7", "5", "4", "3", "2", "1", "0", "1", "2", "3"]
+    span = lambda t: a0 + 5 + (a1 - a0 - 10) * t
+    rs = r0 + (r1 - r0) * 0.42
+    d.arc ((c[0] - rs, c[1] - rs, c[0] + rs, c[1] + rs), 270 + span (0), 270 + span (8 / 11), fill = ink, width = 2)
+    d.arc ((c[0] - rs - 3, c[1] - rs - 3, c[0] + rs + 3, c[1] + rs + 3), 270 + span (8 / 11), 270 + span (1), fill = red, width = 7)
     for i, lab in enumerate (labels):
-        a = a0 + 4 + (a1 - a0 - 8) * i / (len (labels) - 1)
+        a = span (i / (len (labels) - 1))
         col = red if i > 8 else ink
-        d.line (polar (c, r0 + 6, a) + polar (c, r0 + 18, a), fill = col, width = 2)
-        x, y = polar (c, r1 - 16, a)
-        ctext (d, x, y, lab, font (COND, 15), col)
-    d.arc ((c[0] - r0 - 22, c[1] - r0 - 22, c[0] + r0 + 22, c[1] + r0 + 22), 270 + a0 + 4 + (a1 - a0 - 8) * 8 / 11, 270 + a1 - 4, fill = red, width = 4)
-    ctext (d, c[0] + (r1 - r0) * 0.9, c[1] - r0 - 14, "VU", font (COND, 14), red)
-    a = a0 + 4 + (a1 - a0 - 8) * value
-    d.line (polar (c, r0 - 6, a) + polar (c, r1 - 4, a), fill = (240, 236, 228, 255), width = 3)
-    # the window's frame
-    d.arc ((c[0] - r1, c[1] - r1, c[0] + r1, c[1] + r1), 270 + a0, 270 + a1, fill = (70, 70, 74, 255), width = 3)
-    d.arc ((c[0] - r0, c[1] - r0, c[0] + r0, c[1] + r0), 270 + a0, 270 + a1, fill = (70, 70, 74, 255), width = 3)
+        d.line (polar (c, rs, a) + polar (c, rs + 14, a), fill = col, width = 2)
+        x, y = polar (c, rs + 32, a)
+        ctext (d, x, y, lab, font (COND, 17), col)
+    for i in range (33):
+        a = span (i / 32)
+        d.line (polar (c, rs, a) + polar (c, rs + 7, a), fill = ink, width = 1)
+    ctext (d, c[0] - 70, c[1] - r0 - 22, "−", font (COND, 20), ink)
+    ctext (d, c[0] + 70, c[1] - r0 - 22, "+", font (COND, 20), red)
+    ctext (d, c[0] + 86, c[1] - r0 - 20, "VU", font (COND, 15), red)
+    # the needle (with a faint shadow), from below the window
+    a = span (value)
+    d.line (polar ((c[0] + 3, c[1] + 4), r0 + 2, a) + polar ((c[0] + 3, c[1] + 4), r1 - 8, a), fill = (0, 0, 0, 160), width = 3)
+    d.line (polar (c, r0 + 2, a) + polar (c, r1 - 8, a), fill = (255, 226, 190, 255), width = 3)
+    # the glass: a dark inner edge and a soft sheen across the top
+    edge = np.clip (np.minimum (np.minimum (rr - r0, r1 - rr), np.minimum (aa - a0, a1 - aa) * (math.pi / 180) * rr) / 14, 0, 1)
+    sh = np.zeros ((H, W, 4), np.float32); sh[..., 3] = inside * (1 - edge) * 150
+    img.alpha_composite (Image.fromarray (sh.astype (np.uint8), "RGBA"))
+    sheen = np.zeros ((H, W, 4), np.float32); sheen[..., :3] = 255
+    sheen[..., 3] = inside * np.clip ((rr - (r1 - (r1 - r0) * 0.3)) / ((r1 - r0) * 0.3), 0, 1) * 22
+    img.alpha_composite (Image.fromarray (sheen.astype (np.uint8), "RGBA"))
 
 # ---- panels ---------------------------------------------------------------------------------------------------------
 def enamel (W, H, base, grain = 2.4, seed = 3, vignette = 0.25):
@@ -398,9 +421,9 @@ def iron():
         # the channel's dish: the threshold in its well, the arc meter set into its top
         d.ellipse ((c - 300, 236, c + 300, 836), fill = (17, 17, 18, 255), outline = (50, 50, 54, 255), width = 5)
         d.ellipse ((c - 236, 300, c + 236, 772), fill = (21, 21, 22, 255), outline = (40, 40, 44, 255), width = 3)
-        arc_meter (img, (c, 560), 300, 400, -40, 40, value = 0.42 + 0.1 * k)
+        arc_meter (img, (c, 580), 262, 382, -33, 33, value = 0.42 + 0.1 * k)
         ctext (d, c, 116, str (k + 1), font (COND, 56), ink)
-        ctext (d, c, 378, "THRESHOLD", lab, ink)
+        ctext (d, c, 352, "THRESHOLD", lab, ink)
         ring_labels (d, (c, 560), 168, [str (v) for v in range (0, 41, 2)], -150, 150, nums, ink, dots = True)
         put (img, big, (c, 560), 140)
         # attack, release, input, output
@@ -412,18 +435,20 @@ def iron():
             if title in ("INPUT", "OUTPUT"):
                 ctext (d, x + 30, y + 86, "dB", small, ink)
         # rectifier, side-chain EQs, tube bias, the VU switch
-        ctext (d, c + 330, 276, "RECTIFIER", lab, ink)
-        ring_labels (d, (c + 330, 186), 92, ["GERMANIUM", "LED", "SILICON", "Ge/Si"], -110, 110, tiny, ink, dots = False)
-        put (img, sel, (c + 330, 186), -20)
-        ctext (d, c + 420, 390, "SIDE CHAIN EQs", lab, ink)
-        ring_labels (d, (c + 420, 480), 90, ["OFF", "EQ1", "EQ2", "EQ3", "EQ4", "EXT."], -110, 110, tiny, ink, dots = False)
-        put (img, sel, (c + 420, 480), -90)
+        ctext (d, c + 380, 286, "RECTIFIER", lab, ink)
+        ring_labels (d, (c + 380, 186), 100, ["GERMANIUM", "LED", "SILICON", "Ge/Si"], -95, 95, tiny, ink, dots = False)
+        put (img, sel, (c + 380, 186), -20)
+        ctext (d, c + 430, 372, "SIDE CHAIN EQs", lab, ink)
+        ring_labels (d, (c + 430, 480), 86, ["OFF", "EQ1", "EQ2", "EQ3", "EQ4", "EXT."], -100, 100, tiny, ink, dots = False)
+        put (img, sel, (c + 430, 480), -90)
         toggle (img, (c + 380, 640), True, 60); ctext (d, c + 380, 596, "TUBE BIAS", small, ink)
         for j, s in enumerate (("Low", "Mid", "High")):
             ctext (d, c + 446, 618 + j * 24, s, small, ink)
-        toggle (img, (c - 470, 330), True, 56)
+        tx = c - 470 if k == 0 else c + 540
+        ty = 330 if k == 0 else 290
+        toggle (img, (tx, ty), True, 56)
         for j, s in enumerate (("GR", "VU 0", "VU +10")):
-            ctext (d, c - 535, 306 + j * 24, s, small, ink)
+            ctext (d, tx - 65, ty - 24 + j * 24, s, small, ink)
     # the middle: our plates, airbass, tape roll-off, the valves' glow
     cx = W / 2
     d.rounded_rectangle ((cx - 90, 80, cx + 90, 196), 28, fill = (12, 12, 13, 255), outline = (64, 64, 68, 255), width = 4)
@@ -433,9 +458,9 @@ def iron():
     ctext (d, cx, 404, "AirBass", small, ink); toggle (img, (cx + 4, 440), True, 50); ctext (d, cx + 50, 440, "Byp", small, ink)
     ctext (d, cx, 492, "Tape Roll-Off", small, ink)
     put (img, knob (110), (cx, 556), -30)
-    for j, s in enumerate (("Auto Byp", "SC Link", "Host Sync")):
-        toggle (img, (cx - 58 + j * 58, 648), True, 42)
-        ctext (d, cx - 58 + j * 58, 618, s, font (COND, 13), ink)
+    for j, (s1, s2) in enumerate ((("Auto", "Byp"), ("SC", "Link"), ("Host", "Sync"))):
+        toggle (img, (cx - 60 + j * 60, 652), True, 42)
+        ctext (d, cx - 60 + j * 60, 598, s1, font (COND, 14), ink); ctext (d, cx - 60 + j * 60, 616, s2, font (COND, 14), ink)
     d.rounded_rectangle ((cx - 130, 720, cx + 130, 840), 50, fill = (12, 12, 13, 255), outline = (64, 64, 68, 255), width = 4)
     lamp (img, (cx - 54, 780), 36); lamp (img, (cx + 54, 780), 36)
     ctext (d, cx, 890, "VALVE MASTERING COMPRESSOR", small, ink)
