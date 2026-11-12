@@ -57,33 +57,41 @@ namespace
         return y / k * (1.0f + drive * 0.6f);
     }
 
-    /** The light cell of an optical compressor: lit in ~10 ms, it lets go in two stages - half its reduction in
-        ~60 ms, the rest over 0.5-5 s, slower the longer and harder it has worked (it "remembers"). */
+    /** The light cell of an optical compressor: lit in ~10 ms, it lets go in two stages - most of its reduction
+        (two thirds) in ~60 ms, the rest over 0.5-2 s, slower the longer and harder it has worked (it
+        "remembers"). Matched against the reference opto: between phrases it's back to within a dB or two, rather
+        than holding the reduction through the gaps. */
     struct LightCell
     {
         float cell = 0.0f, fast = 0.0f, slow = 0.0f, memory = 0.0f;
+        static constexpr float fastShare = 0.65f;
         void reset() noexcept { cell = fast = slow = memory = 0.0f; }
         float step (float target, double rate, float attackMs = 10.0f, float fastMs = 60.0f, float slowScale = 1.0f) noexcept
         {
             const auto perSample = (float) (48000.0 / rate);
-            memory = juce::jlimit (0.0f, 1.0f, memory + (cell > 1.0f ? cell * 1.5e-6f * perSample : -4.0e-7f * perSample));
+            memory = juce::jlimit (0.0f, 1.0f, memory + (cell > 3.0f ? (cell - 3.0f) * 4.0e-7f * perSample : -6.0e-7f * perSample));
             if (target > cell)
             {
                 const auto a = coeffMs (attackMs, rate);
                 cell = target + a * (cell - target);
-                fast = slow = cell * 0.5f;
+                fast = cell * fastShare;
+                slow = cell * (1.0f - fastShare);
             }
             else
             {
                 const auto fr = coeffMs (fastMs, rate);
-                const auto sr = coeffMs ((500.0 + 4500.0 * memory) * slowScale, rate);
-                fast = target * 0.5f + fr * (fast - target * 0.5f);
-                slow = target * 0.5f + sr * (slow - target * 0.5f);
+                const auto sr = coeffMs ((500.0 + 1500.0 * memory) * slowScale, rate);
+                fast = target * fastShare + fr * (fast - target * fastShare);
+                slow = target * (1.0f - fastShare) + sr * (slow - target * (1.0f - fastShare));
                 cell = fast + slow;
             }
             return cell;
         }
     };
+
+    /** Peak Reduction's law (0..100): the drive into the cell. Matched to the reference opto: about 45 starts working
+        round -33 dBFS (RMS) on a vocal, 3:1 above. */
+    inline float optoDriveDb (float peak) noexcept { return -12.0f + 60.0f * std::sqrt (juce::jlimit (0.0f, 1.0f, peak / 100.0f)); }
 
     /** Gain reduction (dB, positive) for a level over a threshold: a soft knee into the ratio. */
     inline float reductionFor (float overDb, float ratio, float knee) noexcept
@@ -276,7 +284,16 @@ namespace
             iGain = indexOf ("gain"); iPeak = indexOf ("peak"); iLimit = indexOf ("limit"); iEmphasis = indexOf ("emphasis");
         }
     protected:
-        void prepareCore (double, int) override { cell.reset(); detector = 0.0f; emphasisFilter.reset(); lastEmphasis = -1.0f; }
+        void prepareCore (double rate, int) override
+        {
+            cell.reset(); detector = 0.0f; emphasisFilter.reset(); lastEmphasis = -1.0f;
+            // its transformers' and amplifier's voice, as measured against the reference: a touch fuller in the low
+            // mids and airier on top, the very lows rolled away
+            lowCut.setHighPass (rate, 25.0, 0.7);
+            body.setPeak (rate, 130.0, 1.2, 0.7);
+            air.setHighShelf (rate, std::min (7000.0, rate * 0.4), 1.8, 0.6);
+            lowCut.reset(); body.reset(); air.reset();
+        }
         float processCore (float* l, float* r, int n) noexcept override
         {
             const auto emphasis = value (iEmphasis);
@@ -285,7 +302,7 @@ namespace
                 lastEmphasis = emphasis;
                 emphasisFilter.setHighShelf (sampleRate, 3000.0, emphasis * 12.0, 0.7);
             }
-            const auto driveDb = -10.0f + value (iPeak) / 100.0f * 50.0f;   // (Peak Reduction: the drive into the cell)
+            const auto driveDb = optoDriveDb (value (iPeak));   // (Peak Reduction: the drive into the cell)
             const auto limit = choice (iLimit) == 1;
             const auto ratio = limit ? 12.0f : 3.0f, knee = limit ? 4.0f : 10.0f;
             const auto makeup = dbToGain (value (iGain) * 0.4f - 16.0f);
@@ -299,7 +316,8 @@ namespace
                 detector = level + det * (detector - level);
                 const auto db = 10.0f * std::log10 (std::max (detector, 1.0e-12f)) + 3.0f + driveDb;
                 const auto g = dbToGain (-cell.step (reductionFor (db, ratio, knee), sampleRate)) * makeup;
-                l[i] *= g; r[i] *= g;
+                l[i] = air.process (body.process (lowCut.process (l[i] * g, 0), 0), 0);
+                r[i] = air.process (body.process (lowCut.process (r[i] * g, 1), 1), 1);
             }
             return cell.cell;
         }
@@ -307,7 +325,7 @@ namespace
         int iGain = 0, iPeak = 0, iLimit = 0, iEmphasis = 0;
         LightCell cell;
         float detector = 0.0f, lastEmphasis = -1.0f;
-        Biquad emphasisFilter;
+        Biquad emphasisFilter, lowCut, body, air;
     };
 
     //==============================================================================
@@ -638,7 +656,7 @@ namespace
             const auto drive = value (iPre) / 100.0f;
             const auto fetInDb = -12.0f + value (iFetIn) * 0.45f;
             const auto fetIn = dbToGain (fetInDb), fetBack = dbToGain (-fetInDb * 0.85f);
-            const auto optoDrive = -10.0f + value (iPeak) / 100.0f * 50.0f;
+            const auto optoDrive = optoDriveDb (value (iPeak));
             const auto ratio = choice (iRatio);
             const auto out = dbToGain (value (iOut));
             const auto detC = coeffMs (5.0, sampleRate);

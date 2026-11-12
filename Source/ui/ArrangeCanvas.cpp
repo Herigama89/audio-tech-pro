@@ -2976,15 +2976,75 @@ void ArrangeCanvas::filesDropped (const juce::StringArray& files, int x, int y)
 {
     dropHighlightTrack = -2;
 
-    // Another program's project (an .als, .flp, .ptx...): opened as a project.
+    // A MIDI file (a groove or pattern dragged out of a plugin, or from the Finder): its notes as regions where it's
+    // dropped - never a new project
+    juce::StringArray midiFiles, others;
     for (const auto& f : files)
+        (juce::File (f).hasFileExtension ("mid;midi;smf") ? midiFiles : others).add (f);
+    if (! midiFiles.isEmpty())
+    {
+        importMidiFiles (midiFiles, timeline.trackIndexAt (y), snap (timeline.xToTime ((float) x)));
+        if (others.isEmpty())
+            return;
+    }
+
+    // Another program's project (an .als, .flp, .ptx...): opened as a project.
+    for (const auto& f : others)
         if (onOpenProject && projectimport::canImport (juce::File (f)))
         {
             repaint();
             onOpenProject (juce::File (f));
             return;
         }
-    importFiles (files, timeline.trackIndexAt (y), snap (timeline.xToTime ((float) x)));
+    importFiles (others, timeline.trackIndexAt (y), snap (timeline.xToTime ((float) x)));
+}
+
+void ArrangeCanvas::importMidiFiles (const juce::StringArray& files, int trackIndex, double time)
+{
+    undoManager.beginNewTransaction ("Import MIDI");
+    const auto secondsPerBeat = model::secondsPerBeat (project);
+    juce::ValueTree lastRegion;
+    bool usedTrack = false;
+    for (const auto& path : files)
+    {
+        const juce::File file (path);
+        interchange::Project read;
+        juce::String error;
+        if (! interchange::readMidiFile (file, read, error))
+            continue;
+        for (const auto& t : read.tracks)
+            for (const auto& r : t.regions)
+            {
+                if (! r.midi || r.notes.empty())
+                    continue;
+                // the instrument track under the drop takes the first part; the rest get tracks of their own
+                juce::ValueTree track;
+                if (! usedTrack && trackIndex >= 0 && trackIndex < model::numTracks (project)
+                    && model::isInstrumentTrack (project.getChild (trackIndex)))
+                    track = project.getChild (trackIndex);
+                else
+                    track = model::addTrack (project, t.name.isNotEmpty() ? t.name : file.getFileNameWithoutExtension(),
+                                             &undoManager, -1, model::instrumentKind);
+                usedTrack = true;
+                double last = 0.0;
+                for (const auto& n : r.notes)
+                    last = std::max (last, n.start + n.length);
+                const auto bars = std::max (1.0, std::ceil (last / 4.0 - 1.0e-9));
+                auto region = model::addMidiRegion (track, time, bars * 4.0 * secondsPerBeat, &undoManager);
+                region.setProperty (ids::name, file.getFileNameWithoutExtension(), &undoManager);
+                for (const auto& n : r.notes)
+                    model::addNote (region, n.pitch, n.start * secondsPerBeat, n.length * secondsPerBeat, n.velocity, &undoManager);
+                lastRegion = region;
+            }
+    }
+    lastImported = lastRegion;
+    if (lastRegion.isValid())
+    {
+        timeline.selectedRegionId = lastRegion[ids::id].toString();
+        timeline.selectedTrackId = lastRegion.getParent()[ids::id].toString();
+        timeline.changed();
+    }
+    repaint();
 }
 
 void ArrangeCanvas::importFiles (const juce::StringArray& files, int trackIndex, double time)

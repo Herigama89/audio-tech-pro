@@ -30,6 +30,8 @@ public:
 
     /** Imports files as regions: onto `trackIndex` (or new tracks if out of range) at `time`. */
     void importFiles (const juce::StringArray& files, int trackIndex, double time);
+    /** MIDI files dropped: their notes as MIDI regions at the drop (on the instrument track under it, or new ones). */
+    void importMidiFiles (const juce::StringArray& files, int trackIndex, double time);
 
     /** Grid size in seconds at the current zoom: a beat, or a bar when zoomed out. */
     double gridSeconds() const;
