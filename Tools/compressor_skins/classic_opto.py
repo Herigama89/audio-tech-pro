@@ -21,8 +21,10 @@ FONT = "/usr/share/fonts/opentype/inter/Inter-SemiBold.otf"
 FONT_BOLD = "/usr/share/fonts/opentype/inter/Inter-Bold.otf"
 FONT_MED = "/usr/share/fonts/opentype/inter/Inter-Medium.otf"
 DARK = os.environ.get ("COPTO_DARK") == "1"   # (the black panel: a preview of how it would look)
-INK = (214, 216, 220, 255) if DARK else (44, 46, 50, 255)
-ACCENT = (226, 140, 38, 255)
+GLASS = os.environ.get ("COPTO_GLASS", "")    # "dark" / "light": the Liquid Glass faces (smoked black + amber, frosted white + blue)
+if GLASS == "dark": DARK = True
+INK = (230, 231, 235, 255) if GLASS == "dark" else (28, 30, 36, 255) if GLASS == "light" else (214, 216, 220, 255) if DARK else (44, 46, 50, 255)
+ACCENT = (47, 124, 246, 255) if GLASS == "light" else (242, 164, 58, 255) if GLASS == "dark" else (226, 140, 38, 255)
 
 def font (path, size): return ImageFont.truetype (path, size)
 
@@ -70,6 +72,36 @@ def panel():
         screw (img, x, y)
     return img
 
+def glass_panel():
+    """Liquid Glass: a rounded slab of smoked black (or frosted white) glass, its edge catching the light."""
+    dark = GLASS == "dark"
+    img = Image.new ("RGBA", (W, H), (0, 0, 0, 0))
+    yy, xx = np.mgrid[0:H, 0:W].astype (np.float32)
+    t = (xx / W * 0.35 + yy / H * 0.65)
+    if dark:
+        top, bottom = np.array ([44, 44, 48], np.float32), np.array ([14, 14, 16], np.float32)
+    else:
+        top, bottom = np.array ([250, 251, 253], np.float32), np.array ([218, 223, 231], np.float32)
+    body = top[None, None, :] * (1 - t[..., None]) + bottom[None, None, :] * t[..., None]
+    # the glass's sheen: a soft diagonal band of light, and a glow of the accent from below the meter
+    band = np.clip (1.0 - np.abs ((xx / W - yy / H * 0.55) - 0.12) / 0.18, 0, 1) ** 2
+    body += band[..., None] * (14 if dark else 10)
+    acc = np.array (ACCENT[:3], np.float32)
+    glow = np.exp (-(((xx - 800) / 520) ** 2 + ((yy - 470) / 260) ** 2))
+    body = body * (1 - glow[..., None] * 0.10) + acc[None, None, :] * glow[..., None] * 0.10
+    alpha = np.full ((H, W), 255, np.uint8)
+    slab = Image.fromarray (np.dstack ([np.clip (body, 0, 255).astype (np.uint8), alpha]), "RGBA")
+    mask = Image.new ("L", (W, H), 0)
+    ImageDraw.Draw (mask).rounded_rectangle ((2, 2, W - 3, H - 3), 34, fill = 255)
+    img.paste (slab, (0, 0), mask)
+    d = ImageDraw.Draw (img)
+    # the edge: light on top, dark underneath
+    d.rounded_rectangle ((2, 2, W - 3, H - 3), 34, outline = (255, 255, 255, 46 if dark else 230), width = 2)
+    d.arc ((2, 2, 70, 70), 180, 270, fill = (255, 255, 255, 70 if dark else 255), width = 2)
+    d.line ((36, 3, W - 36, 3), fill = (255, 255, 255, 70 if dark else 255), width = 2)
+    d.line ((36, H - 4, W - 36, H - 4), fill = (0, 0, 0, 120 if dark else 40), width = 2)
+    return img
+
 def screw (img, x, y):
     d = ImageDraw.Draw (img)
     d.ellipse ((x - 11, y - 11, x + 11, y + 11), fill = (150, 152, 152, 255))
@@ -107,12 +139,21 @@ def scale_ring (d, c, r, labels, a0 = -135.0, a1 = 135.0, size = 15):
 def vu (img):
     d = ImageDraw.Draw (img)
     x0, y0, x1, y1 = VU
-    # the bezel: dark, bevelled
+    # the bezel: dark, bevelled (Liquid Glass: a glass well)
     shadow = Image.new ("RGBA", img.size, (0, 0, 0, 0))
-    ImageDraw.Draw (shadow).rounded_rectangle ((x0 + 4, y0 + 8, x1 + 4, y1 + 10), 10, fill = (0, 0, 0, 110))
-    img.alpha_composite (shadow.filter (ImageFilter.GaussianBlur (8)))
-    d.rounded_rectangle ((x0, y0, x1, y1), 10, fill = (40, 41, 43, 255))
-    d.rounded_rectangle ((x0 + 3, y0 + 3, x1 - 3, y1 - 3), 8, outline = (70, 72, 75, 255), width = 2)
+    ImageDraw.Draw (shadow).rounded_rectangle ((x0 + 4, y0 + 8, x1 + 4, y1 + 10), 10, fill = (0, 0, 0, 110 if not GLASS else 70 if GLASS == "dark" else 28))
+    img.alpha_composite (shadow.filter (ImageFilter.GaussianBlur (8 if not GLASS else 14)))
+    if GLASS:
+        well = Image.new ("RGBA", img.size, (0, 0, 0, 0))
+        wd = ImageDraw.Draw (well)
+        wd.rounded_rectangle ((x0, y0, x1, y1), 18, fill = (0, 0, 0, 110) if GLASS == "dark" else (255, 255, 255, 200),
+                              outline = (255, 255, 255, 46) if GLASS == "dark" else (255, 255, 255, 255), width = 2)
+        wd.line ((x0 + 18, y1 - 1, x1 - 18, y1 - 1), fill = (0, 0, 0, 90) if GLASS == "dark" else (0, 0, 0, 22), width = 2)
+        img.alpha_composite (well)
+        d = ImageDraw.Draw (img)
+    else:
+        d.rounded_rectangle ((x0, y0, x1, y1), 10, fill = (40, 41, 43, 255))
+        d.rounded_rectangle ((x0 + 3, y0 + 3, x1 - 3, y1 - 3), 8, outline = (70, 72, 75, 255), width = 2)
     fx0, fy0, fx1, fy1 = x0 + 24, y0 + 22, x1 - 24, y1 - 22
     # the face: amber, lit from behind (brighter in the middle)
     fw, fh = fx1 - fx0, fy1 - fy0
@@ -162,8 +203,13 @@ def vu (img):
     sheen = Image.new ("RGBA", (fw, fh), (0, 0, 0, 0))
     ImageDraw.Draw (sheen).polygon (((0, 0), (fw * 0.55, 0), (fw * 0.3, fh), (0, fh)), fill = (255, 255, 255, 22))
     fimg.alpha_composite (sheen)
+    if GLASS:
+        m = Image.new ("L", fimg.size, 0)
+        ImageDraw.Draw (m).rounded_rectangle ((0, 0, fimg.size[0] - 1, fimg.size[1] - 1), 10, fill = 255)
+        fimg.putalpha (Image.fromarray (np.minimum (np.array (fimg.getchannel ("A")), np.array (m))))
     img.alpha_composite (fimg, (fx0, fy0))
-    d.rectangle ((fx0, fy0, fx1, fy1), outline = (25, 25, 27, 255), width = 2)
+    if not GLASS:
+        d.rectangle ((fx0, fy0, fx1, fy1), outline = (25, 25, 27, 255), width = 2)
     return (fx0, fy0, fx1, fy1, pivot, R)
 
 def labels (img):
@@ -171,7 +217,7 @@ def labels (img):
     # the title: our own, with the accent rule
     d.text ((110, 54), "VINTAGE OPTO", font = font (FONT_BOLD, 36), fill = INK)
     d.rectangle ((112, 102, 116, 124), fill = ACCENT)
-    d.text ((126, 104), "OPTICAL LEVELLING AMPLIFIER", font = font (FONT_MED, 14), fill = (150, 152, 158, 255) if DARK else (70, 72, 76, 255))
+    d.text ((126, 104), "OPTICAL LEVELLING AMPLIFIER", font = font (FONT_MED, 14), fill = (150, 152, 158, 255) if DARK else (90, 94, 104, 255) if GLASS else (70, 72, 76, 255))
     f = font (FONT, 14); fsm = font (FONT, 12)
     scale_ring (d, GAIN, 104, [str (v) for v in range (0, 101, 10)])
     scale_ring (d, PEAK, 104, [str (v) for v in range (0, 101, 10)])
@@ -190,9 +236,17 @@ def labels (img):
     ctext (d, POWER_SW[0], 370, "POWER", fsm, spacing = 1)
     # the colour section: a recessed strip under the meter
     x0, y0, x1, y1 = 626, 296, 974, 440
-    d.rounded_rectangle ((x0, y0, x1, y1), 12, fill = (24, 25, 27, 255) if DARK else (190, 192, 189, 255), outline = (60, 62, 66, 255) if DARK else (160, 162, 160, 255), width = 2)
-    d.line ((x0 + 10, y0 + 2, x1 - 10, y0 + 2), fill = (14, 14, 16, 255) if DARK else (172, 174, 172, 255), width = 2)
-    ctext (d, 800, 304, "COLOUR", font (FONT, 11), fill = (140, 142, 148, 255) if DARK else (96, 98, 102, 255), spacing = 3)
+    if GLASS:
+        well = Image.new ("RGBA", img.size, (0, 0, 0, 0))
+        ImageDraw.Draw (well).rounded_rectangle ((x0, y0, x1, y1), 18, fill = (0, 0, 0, 80) if GLASS == "dark" else (255, 255, 255, 150),
+                                                 outline = (255, 255, 255, 36) if GLASS == "dark" else (0, 0, 0, 26), width = 2)
+        img.alpha_composite (well)
+        d = ImageDraw.Draw (img)
+        ctext (d, 800, 304, "COLOUR", font (FONT, 11), fill = ACCENT, spacing = 3)
+    else:
+        d.rounded_rectangle ((x0, y0, x1, y1), 12, fill = (24, 25, 27, 255) if DARK else (190, 192, 189, 255), outline = (60, 62, 66, 255) if DARK else (160, 162, 160, 255), width = 2)
+        d.line ((x0 + 10, y0 + 2, x1 - 10, y0 + 2), fill = (14, 14, 16, 255) if DARK else (172, 174, 172, 255), width = 2)
+        ctext (d, 800, 304, "COLOUR", font (FONT, 11), fill = (140, 142, 148, 255) if DARK else (96, 98, 102, 255), spacing = 3)
     ft = font (FONT_MED, 10)
     for a, s in ((-120, "OFF"), (-60, "CLEAN"), (0, "OPTO"), (60, "VARI-MU")):
         r = 54
@@ -216,7 +270,7 @@ def frame (path, index, size):
 
 def main():
     os.makedirs (OUT, exist_ok = True)
-    img = panel()
+    img = glass_panel() if GLASS else panel()
     labels (img)
     vu (img)
     img.save (os.environ.get ("COPTO_PANEL_OUT", os.path.join (OUT, "copto_panel.png")))
