@@ -66,7 +66,7 @@ FACES = [
         ("big", "makeup", 1280, 250, ("0", "2", "4", "6", "8", "10", "12", "14", "16", "18", "20"), "MAKE-UP"),
         ("small", "mix", 1500, 250, ("DRY", "", "WET"), "MIX"),
     ]),
-    dict (key = "punch", tint = ((182, 216, 242), (118, 164, 210)), type = "classicPunch", title = "PUNCH BUS", sub = "FEED-FORWARD / FEEDBACK BUS COMPRESSOR", w = 1900, mx = 950, items = [
+    dict (key = "punch", tint = ((182, 216, 242), (118, 164, 210)), type = "classicPunch", title = "PUNCH BUS 2500", sub = "FEED-FORWARD / FEEDBACK BUS COMPRESSOR", w = 1900, mx = 950, items = [
         ("sel", "attack", 205, 230, (".03", ".1", ".3", "1", "3", "10", "30"), "ATTACK ms"),
         ("sel", "ratio", 360, 230, ("1.5", "2", "3", "4", "6", "10", "INF"), "RATIO"),
         ("sel", "release", 205, 395, (".05", ".1", ".2", ".5", "1", "2"), "RELEASE s"),

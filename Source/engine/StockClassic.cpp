@@ -738,7 +738,7 @@ const std::vector<StockEffect>& stockClassicEffects()
               { "makeup", "Make-Up", " dB", 0.0f, 20.0f, 0.0f, 10.0f },
               { "mix", "Mix", "%", 0.0f, 100.0f, 100.0f, 50.0f } }, 0.0f), classic },
           make<BusVca> },
-        { { "classicPunch", "Punch Bus", withCommon ({
+        { { "classicPunch", "Punch Bus 2500", withCommon ({
               { "threshold", "Threshold", " dB", -20.0f, 10.0f, 0.0f, -5.0f },
               { "attack", "Attack", "", 0.0f, 6.0f, 3.0f, 3.0f, { "0.03 ms", "0.1 ms", "0.3 ms", "1 ms", "3 ms", "10 ms", "30 ms" } },
               { "ratio", "Ratio", "", 0.0f, 6.0f, 2.0f, 3.0f, { "1.5:1", "2:1", "3:1", "4:1", "6:1", "10:1", "Inf:1" } },
