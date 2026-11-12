@@ -20,7 +20,8 @@ W, H = 1600, 480
 FONT = "/usr/share/fonts/opentype/inter/Inter-SemiBold.otf"
 FONT_BOLD = "/usr/share/fonts/opentype/inter/Inter-Bold.otf"
 FONT_MED = "/usr/share/fonts/opentype/inter/Inter-Medium.otf"
-INK = (44, 46, 50, 255)
+DARK = os.environ.get ("COPTO_DARK") == "1"   # (the black panel: a preview of how it would look)
+INK = (214, 216, 220, 255) if DARK else (44, 46, 50, 255)
 ACCENT = (226, 140, 38, 255)
 
 def font (path, size): return ImageFont.truetype (path, size)
@@ -41,28 +42,29 @@ def panel():
     rng = np.random.default_rng (7)
     # brushed grey: fine horizontal grain, a soft top light
     base = np.zeros ((H, W, 3), np.float32)
-    base[...] = (201, 203, 200)
+    base[...] = (34, 35, 38) if DARK else (201, 203, 200)
     grain = rng.normal (0, 2.4, (H, W)).astype (np.float32)
     grain = np.array (Image.fromarray (((grain - grain.min()) / (np.ptp (grain) + 1e-6) * 255).astype (np.uint8)).filter (ImageFilter.BoxBlur (0)).resize ((W, H))).astype (np.float32) / 255.0 * 6 - 3
     streak = rng.normal (0, 1.0, (H, 1)).astype (np.float32) * 1.4
-    shade = np.linspace (8, -10, H, dtype = np.float32)[:, None]
+    shade = np.linspace (8, -10, H, dtype = np.float32)[:, None] * (0.6 if DARK else 1.0)
     base += (grain + streak + shade)[..., None]
     img = Image.fromarray (np.clip (base, 0, 255).astype (np.uint8)).convert ("RGBA")
     d = ImageDraw.Draw (img)
     # rack ears: a little darker, two slots each
     for x0, x1 in ((0, 70), (W - 70, W)):
-        d.rectangle ((x0, 0, x1, H), fill = (186, 188, 186, 255))
+        d.rectangle ((x0, 0, x1, H), fill = (24, 25, 27, 255) if DARK else (186, 188, 186, 255))
         for y in (96, 360):
             d.rounded_rectangle ((x0 + 14 if x0 == 0 else x0 + 8, y, x0 + 62 if x0 == 0 else x1 - 14, y + 24), 12, fill = (0, 0, 0, 0))
     # the plate's edges
-    d.line ((70, 0, 70, H), fill = (150, 152, 150, 255), width = 2)
-    d.line ((W - 70, 0, W - 70, H), fill = (150, 152, 150, 255), width = 2)
-    d.line ((70, 1, W - 70, 1), fill = (232, 233, 231, 255), width = 2)
+    edge = (12, 12, 14, 255) if DARK else (150, 152, 150, 255)
+    d.line ((70, 0, 70, H), fill = edge, width = 2)
+    d.line ((W - 70, 0, W - 70, H), fill = edge, width = 2)
+    d.line ((70, 1, W - 70, 1), fill = (70, 72, 76, 255) if DARK else (232, 233, 231, 255), width = 2)
     # the hinge along the bottom
-    d.rectangle ((70, 446, W - 70, 480), fill = (176, 178, 176, 255))
+    d.rectangle ((70, 446, W - 70, 480), fill = (22, 23, 25, 255) if DARK else (176, 178, 176, 255))
     for x in range (90, W - 90, 92):
-        d.rectangle ((x, 452, x + 84, 474), fill = (196, 198, 196, 255), outline = (150, 152, 150, 255))
-    d.line ((70, 446, W - 70, 446), fill = (140, 142, 140, 255), width = 2)
+        d.rectangle ((x, 452, x + 84, 474), fill = (40, 41, 44, 255) if DARK else (196, 198, 196, 255), outline = (14, 14, 16, 255) if DARK else (150, 152, 150, 255))
+    d.line ((70, 446, W - 70, 446), fill = (10, 10, 12, 255) if DARK else (140, 142, 140, 255), width = 2)
     # screws
     for (x, y) in ((110, 28), (W - 110, 28), (110, 420), (W - 110, 420), (590, 420), (1010, 420)):
         screw (img, x, y)
@@ -180,7 +182,7 @@ def labels (img):
     # the title: our own, with the accent rule
     d.text ((110, 54), "VINTAGE OPTO", font = font (FONT_BOLD, 36), fill = INK)
     d.rectangle ((112, 102, 116, 124), fill = ACCENT)
-    d.text ((126, 104), "OPTICAL LEVELLING AMPLIFIER", font = font (FONT_MED, 14), fill = (70, 72, 76, 255))
+    d.text ((126, 104), "OPTICAL LEVELLING AMPLIFIER", font = font (FONT_MED, 14), fill = (150, 152, 158, 255) if DARK else (70, 72, 76, 255))
     f = font (FONT, 14); fsm = font (FONT, 12)
     scale_ring (d, GAIN, 104, [str (v) for v in range (0, 101, 10)])
     scale_ring (d, PEAK, 104, [str (v) for v in range (0, 101, 10)])
@@ -199,9 +201,9 @@ def labels (img):
     ctext (d, POWER_SW[0], 370, "POWER", fsm, spacing = 1)
     # the colour section: a recessed strip under the meter
     x0, y0, x1, y1 = 626, 296, 974, 440
-    d.rounded_rectangle ((x0, y0, x1, y1), 12, fill = (190, 192, 189, 255), outline = (160, 162, 160, 255), width = 2)
-    d.line ((x0 + 10, y0 + 2, x1 - 10, y0 + 2), fill = (172, 174, 172, 255), width = 2)
-    ctext (d, 800, 304, "COLOUR", font (FONT, 11), fill = (96, 98, 102, 255), spacing = 3)
+    d.rounded_rectangle ((x0, y0, x1, y1), 12, fill = (24, 25, 27, 255) if DARK else (190, 192, 189, 255), outline = (60, 62, 66, 255) if DARK else (160, 162, 160, 255), width = 2)
+    d.line ((x0 + 10, y0 + 2, x1 - 10, y0 + 2), fill = (14, 14, 16, 255) if DARK else (172, 174, 172, 255), width = 2)
+    ctext (d, 800, 304, "COLOUR", font (FONT, 11), fill = (140, 142, 148, 255) if DARK else (96, 98, 102, 255), spacing = 3)
     ft = font (FONT_MED, 10)
     for a, s in ((-120, "OFF"), (-60, "CLEAN"), (0, "OPTO"), (60, "VARI-MU")):
         r = 54
@@ -228,7 +230,7 @@ def main():
     img = panel()
     labels (img)
     vu (img)
-    img.save (os.path.join (OUT, "copto_panel.png"))
+    img.save (os.environ.get ("COPTO_PANEL_OUT", os.path.join (OUT, "copto_panel.png")))
     k = KNOBS
     frame (os.path.join (k, "knob_66_black_x3.png"), 4, 198).save (os.path.join (OUT, "copto_knob_big.png"))
     frame (os.path.join (k, "knob_vintage_black_x3.png"), 2, 288).save (os.path.join (OUT, "copto_knob_small.png"))
