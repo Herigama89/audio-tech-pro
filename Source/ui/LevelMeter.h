@@ -26,8 +26,10 @@ namespace repaintbatch
             return;
         }
         juce::Component* root = c.getParentComponent();
-        while (root != nullptr && ! root->getProperties().contains ("repaintBatchRoot") && root->getParentComponent() != nullptr)
+        while (root != nullptr && ! root->getProperties().contains ("repaintBatchRoot"))
             root = root->getParentComponent();
+        // (no holder marked as a batch's root - the Inspector's strips, the editor's meters: each redraws itself.
+        //  Batched up to the window instead, the Inspector's meter stuck on one reading while the mixer's moved.)
         if (root == nullptr)
         {
             c.repaint (area);
