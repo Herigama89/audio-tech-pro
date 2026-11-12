@@ -83,7 +83,7 @@ def glass_panel():
     if dark:
         top, bottom = np.array ([44, 44, 48], np.float32), np.array ([14, 14, 16], np.float32)
     else:
-        top, bottom = np.array ([250, 251, 253], np.float32), np.array ([218, 223, 231], np.float32)
+        top, bottom = np.array ([222, 224, 226], np.float32), np.array ([184, 187, 191], np.float32)
     body = top[None, None, :] * (1 - t[..., None]) + bottom[None, None, :] * t[..., None]
     # the glass's sheen: a soft diagonal band of light, and a glow of the accent from below the meter
     band = np.clip (1.0 - np.abs ((xx / W - yy / H * 0.55) - 0.12) / 0.18, 0, 1) ** 2
@@ -290,7 +290,7 @@ def labels (img):
     x0, y0, x1, y1 = 626, 296, 974, 440
     if GLASS:
         well = Image.new ("RGBA", img.size, (0, 0, 0, 0))
-        ImageDraw.Draw (well).rounded_rectangle ((x0, y0, x1, y1), 18, fill = (0, 0, 0, 80) if GLASS == "dark" else (255, 255, 255, 150),
+        ImageDraw.Draw (well).rounded_rectangle ((x0, y0, x1, y1), 18, fill = (0, 0, 0, 80) if GLASS == "dark" else (255, 255, 255, 55),
                                                  outline = (255, 255, 255, 36) if GLASS == "dark" else (0, 0, 0, 26), width = 2)
         img.alpha_composite (well)
         d = ImageDraw.Draw (img)
