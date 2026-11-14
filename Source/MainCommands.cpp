@@ -310,6 +310,8 @@ bool MainComponent::perform (const InvocationInfo& info)
             break;
         case commands::toggleTrackHeaders:     setPanelShown ("viewTrackHeaders", showTrackHeaders, ! showTrackHeaders); break;
         case commands::showMultiMeter:         showMultiMeter(); break;
+        case commands::showConsoleView:        openConsoleView(); break;
+        case commands::showAnalogConsole:      openAnalogConsole(); break;
         case commands::automix:                showAutomix(); break;
         case commands::toggleMixerComments:
             mixer.setShowComments (! mixer.getShowComments());
@@ -537,6 +539,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             menu.addSeparator();
             add ({ commands::compareBypass, commands::resetChannels });
             menu.addSeparator();
+            add ({ commands::showConsoleView, commands::showAnalogConsole });
             add ({ commands::toggleExclusiveSolo, commands::showMultiMeter, commands::automix, commands::toggleMixerComments });
             add ({ commands::toggleSuspendPlugins });
             menu.addSeparator();

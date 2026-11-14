@@ -1239,7 +1239,7 @@ void ChannelStrip::showSendMenu (int index)
         });
     }
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (sendButtons[index]));
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (menuTarget != nullptr ? menuTarget : sendButtons[index]));
 }
 
 void ChannelStrip::refresh()
@@ -1645,7 +1645,20 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
             owner.onChooseEffect (ownerId, index, {}, *button);
         return;
     }
+    showInsertMenu (index, *button);
+}
 
+void ChannelStrip::showInsertMenu (int index, juce::Component& target)
+{
+    auto insert = insertAt (index);
+    const auto ownerId = getOwnerId();
+    auto* button = &target;
+    if (! insert.isValid())
+    {
+        if (owner.onChooseEffect)
+            owner.onChooseEffect (ownerId, index, {}, target);
+        return;
+    }
     auto& um = owner.getUndoManager();
     juce::PopupMenu menu;
     menu.addItem ("Open", [this, insert] { if (owner.onOpenInsert) owner.onOpenInsert (insert); });
@@ -1680,6 +1693,38 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
         InsertBar::addSidechainItems (side, insert, project, um);
         const auto source = model::findById (project, insert[ids::sidechain].toString());
         menu.addSubMenu ("Side Chain" + (source.isValid() ? ": " + source[ids::name].toString() : juce::String()), side);
+    }
+    menu.addSeparator();
+    {
+        // up and down a slot (as dragging it there), copy and paste its settings
+        auto proj = project;
+        const auto chainOwner = ownerId;
+        menu.addItem ("Move Up", index > 0, false, [proj, insert, chainOwner, index, &um]
+        {
+            um.beginNewTransaction ("Move effect");
+            model::moveInsert (proj, insert, chainOwner, index - 1, false, &um);
+        });
+        menu.addItem ("Move Down", true, false, [proj, insert, chainOwner, index, &um]
+        {
+            um.beginNewTransaction ("Move effect");
+            model::moveInsert (proj, insert, chainOwner, index + 1, false, &um);
+        });
+        menu.addItem ("Copy", [insert] { insertClipboard() = insert.createCopy(); });
+        menu.addItem ("Paste", insertClipboard().isValid(), false, [proj, chainOwner, index, &um]
+        {
+            const auto copied = insertClipboard();
+            if (! copied.isValid())
+                return;
+            um.beginNewTransaction ("Paste effect");
+            auto chain = model::chainFor (proj, chainOwner);
+            model::placeInsert (chain, index, [copied] (juce::ValueTree c, int at)
+            {
+                auto fresh = copied.createCopy();
+                fresh.setProperty (ids::id, juce::Uuid().toString(), nullptr);
+                c.addChild (fresh, at, nullptr);
+                return fresh;
+            }, &um);
+        });
     }
     menu.addSeparator();
     menu.addItem (same.size() > 1 ? "Remove (" + juce::String (same.size()) + " channels)" : juce::String ("Remove"), [same, &um]
@@ -2122,7 +2167,7 @@ void ChannelStrip::showInputMenu()
             }
         if (! any)
             menu.addItem ("None yet", false, false, [] {});
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&inputSlot));
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (menuTarget != nullptr ? menuTarget : &inputSlot));
         return;
     }
 
@@ -2154,7 +2199,7 @@ void ChannelStrip::showInputMenu()
     menu.addSubMenu ("Stereo", both, names.size() >= 2);
     menu.addSeparator();
     routing::addTrackInputItems (menu, project, track, acting());
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&inputSlot));
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (menuTarget != nullptr ? menuTarget : &inputSlot));
 }
 
 void ChannelStrip::showOutputMenu()
@@ -2196,7 +2241,7 @@ void ChannelStrip::showOutputMenu()
         const auto bus = model::addTrack (proj, "Bus " + juce::String (buses + 1), &um, -1, model::busKind);
         setOutput (bus[ids::id].toString());
     });
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&outputSlot));
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (menuTarget != nullptr ? menuTarget : &outputSlot));
 }
 
 int ChannelStrip::topSection() const
@@ -2574,7 +2619,7 @@ void ChannelStrip::showAutomationModeMenu()
                     t.setProperty (ids::automationMode, m, nullptr);
         });
     }
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&automationButton));
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (menuTarget != nullptr ? menuTarget : &automationButton));
 }
 
 void ChannelStrip::followAutomation (double time)
@@ -3817,3 +3862,24 @@ void MixerPanel::layOutComments (int stripW, int top)
 }
 
 } // namespace riff
+
+namespace riff
+{
+juce::ValueTree& ChannelStrip::insertClipboard()
+{
+    static juce::ValueTree copied;
+    return copied;
+}
+
+void ChannelStrip::showMenuAt (const juce::String& which, juce::Component& target, int index)
+{
+    menuTarget = &target;
+    if (which == "input") showInputMenu();
+    else if (which == "output") showOutputMenu();
+    else if (which == "automation") showAutomationModeMenu();
+    else if (which == "send") showSendMenu (index);
+    else if (which == "insert") showInsertMenu (index, target);
+    else if (which == "setting" && owner.onSettingMenu) owner.onSettingMenu (track, target);
+    menuTarget = nullptr;
+}
+}

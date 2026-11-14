@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
 endif()
 
-project(AudioTechPro VERSION 1.19.0 LANGUAGES C CXX)
+project(AudioTechPro VERSION 1.20.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -239,6 +239,7 @@ juce_add_binary_data(AudioTechProData
                 Resources/skin/looks/look_cap_ssl_grey.png
                 Resources/skin/looks/look_cap_ssl_black.png
                 Resources/skin/looks/look_knob_pan.png
+                Resources/skin/looks/look_knob_silver.png
                 Resources/skin/white/white_fader_cap.png
                 Resources/skin/white/white_fader_cap_black.png
                 Resources/skin/white/white_fader_rail.png

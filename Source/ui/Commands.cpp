@@ -23,6 +23,8 @@ const std::vector<Info>& all()
         { toggleHeaderIO,         "Show I/O in Edit Window",    "View",      "Each track's input and output beside its header, to choose them there (as on the mixer strips)" },
         { toggleExclusiveSolo,    "Exclusive Solo",             "Mix",       "Soloing a track unsolos the others (as in LUNA)" },
         { showMultiMeter,         "MultiMeter",                 "Mix",       "The master's meters: levels, loudness (LUFS), spectrum, goniometer and phase correlation" },
+        { showConsoleView,        "Console",                    "Mix",       "Every channel with its plug-ins' live faces above its strip (as LUNA's mixer)" },
+        { showAnalogConsole,      "Analog Console",             "Mix",       "The whole mixer as a desk: every channel's knobs, keys and fader" },
         { automix,                "Automix...",                 "Mix",       "A balanced starting mix for a genre: each track measured and its fader set (one undo step)" },
         { toggleMixerComments,    "Show Comments in Mixer",     "View",      "A notes field under each mixer channel (as in Pro Tools)" },
         { importProject,          "Open Project from Another Program...", "File", "Open an Ableton Live, FL Studio, Studio One, Pro Tools, Logic, Cubase, DAWproject or MIDI file project" },
@@ -263,6 +265,8 @@ namespace
             case eventList:              return { key ('d', opt | cmd) };
 
             case showMixer:              return { key ('x') };
+            case showConsoleView:        return { key ('x', shift) };
+            case showAnalogConsole:      return { key ('x', opt) };
             case showPianoRoll:          return { key ('p'), key ('e') };
             case openMixerWindow:        return { key ('2', cmd) };
             case openEditorWindow:       return { key ('4', cmd) };

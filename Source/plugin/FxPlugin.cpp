@@ -278,14 +278,19 @@ public:
 private:
     void updateSkinButton()
     {
-        const auto skin = (int) processor.insert.getProperty ("skin", effectdesign::defaultClassicSkin);
-        skinButton.setButtonText ("Skin: " + effectdesign::classicSkinNames()[juce::jlimit (0, 5, skin)]);
+        const auto* d = effectdesign::designFor (RIFF_FX_TYPE);
+        if (d == nullptr) return;
+        const auto names = effectdesign::skinNamesOf (*d);
+        const auto skin = (int) processor.insert.getProperty ("skin", d->defaultSkin);
+        skinButton.setButtonText ("Skin: " + names[juce::jlimit (0, names.size() - 1, skin)]);
     }
     void showSkins()
     {
         juce::PopupMenu menu;
-        const auto current = (int) processor.insert.getProperty ("skin", effectdesign::defaultClassicSkin);
-        const auto& names = effectdesign::classicSkinNames();
+        const auto* d = effectdesign::designFor (RIFF_FX_TYPE);
+        if (d == nullptr) return;
+        const auto current = (int) processor.insert.getProperty ("skin", d->defaultSkin);
+        const auto names = effectdesign::skinNamesOf (*d);
         for (int k = 0; k < names.size(); ++k)
             menu.addItem (names[k], true, k == current, [this, k]
             {

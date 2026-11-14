@@ -2,6 +2,7 @@
 #include "ConsoleLook.h"
 #include "EffectDesigns.h"
 #include "Mixer.h"
+#include "../engine/AutomationWriter.h"
 #include "Theme.h"
 #include "../engine/AudioEngine.h"
 #include "../engine/ProjectPlayer.h"
@@ -814,6 +815,32 @@ juce::String AnalogKnob::captionNow() const
     return isMouseButtonDown() ? const_cast<AnalogKnob*> (this)->getTextFromValue (getValue()) : caption;
 }
 
+void AnalogKnob::mouseDown (const juce::MouseEvent& e)
+{
+    if (onMenu != nullptr && (addSend || e.mods.isPopupMenu()))
+    {
+        onMenu();
+        return;
+    }
+    juce::Slider::mouseDown (e);
+}
+
+void IoKey::paintButton (juce::Graphics& g, bool over, bool)
+{
+    const auto& d = desk();
+    auto r = getLocalBounds().toFloat().reduced (0.5f);
+    g.setColour (d.slot.brighter (over ? 0.1f : 0.0f));
+    g.fillRoundedRectangle (r, 3.0f);
+    g.setColour (juce::Colours::black.withAlpha (theme::glassLight() ? 0.12f : 0.45f));
+    g.drawRoundedRectangle (r, 3.0f, 1.0f);
+    g.setFont (juce::FontOptions (9.0f, juce::Font::bold).withKerningFactor (0.08f));
+    g.setColour (d.title);
+    g.drawText (label, getLocalBounds().reduced (6, 0), juce::Justification::centredLeft, false);
+    g.setColour (juce::Colour (0xfff2a43a));
+    g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
+    g.drawFittedText (value + juce::String::fromUTF8 (" \xe2\x96\xbe"), getLocalBounds().reduced (6, 0).withTrimmedLeft (34), juce::Justification::centredRight, 1, 0.7f);
+}
+
 void AnalogKnob::valueChanged()
 {
     if (isMouseButtonDown())
@@ -831,6 +858,18 @@ void AnalogKnob::mouseUp (const juce::MouseEvent& e)
 void AnalogKnob::paint (juce::Graphics& g)
 {
     const auto area = knobArea();
+    if (addSend)
+    {
+        juce::Path circle, dashed;
+        circle.addEllipse (area.reduced (1.0f));
+        const float dash[] { 3.0f, 2.5f };
+        juce::PathStrokeType (1.4f).createDashedStroke (dashed, circle, dash, 2);
+        g.setColour (desk().caption.withAlpha (isMouseOver() ? 0.9f : 0.55f));
+        g.fillPath (dashed);
+        g.setFont (juce::FontOptions (area.getHeight() * 0.6f, juce::Font::bold));
+        g.drawText ("+", area, juce::Justification::centred, false);
+        return;
+    }
     const auto c = area.getCentre();
     const auto params = getRotaryParameters();
     // its printed scale: ticks, and the numbers at the values they mark
@@ -1194,12 +1233,115 @@ AnalogConsole::AnalogConsole (ConsoleHost& h, juce::ValueTree p) : host (h), pro
         k->onClick = [this, i] { filter = i; for (int j = 0; j < filterKeys.size(); ++j) filterKeys[j]->setToggleState (j == i, juce::dontSendNotification); rebuild(); };
         addAndMakeVisible (k);
     }
+    // the sections' tabs (as LUNA's): each opens or closes that section on every channel; and quick views
+    closedSections = juce::StringArray::fromTokens (project.getProperty ("analogClosed").toString(), ",", "");
+    closedSections.removeEmptyStrings();
+    for (const auto* name : { "I/O", "INPUT", "INPUT FX", "DYNAMICS", "FILTERS", "EQ", "INSERTS", "SENDS", "PAN" })
+    {
+        auto* k = sectionKeys.add (new ConsoleKey (juce::String (name) == "INPUT FX" ? "Input FX" : juce::String (name) == "I/O" ? "I/O"
+                                                   : juce::String (name) == "EQ" ? "EQ" : juce::String (name).substring (0, 1) + juce::String (name).substring (1).toLowerCase(),
+                                                   keyAmber));
+        k->setTooltip ("Show or hide " + juce::String (name).toLowerCase() + " on every channel");
+        k->onClick = [this, title = juce::String (name)]
+        {
+            auto closed = closedSections;
+            if (closed.contains (title)) closed.removeString (title); else closed.add (title);
+            setClosed (closed);
+        };
+        addAndMakeVisible (k);
+    }
+    for (const auto* name : { "All", "EQ", "Dyn", "Faders" })
+    {
+        auto* k = viewKeys.add (new ConsoleKey (name, juce::Colours::white));
+        k->setClickingTogglesState (false);
+        k->onClick = [this, view = juce::String (name)]
+        {
+            const juce::StringArray all { "I/O", "INPUT", "INPUT FX", "DYNAMICS", "FILTERS", "EQ", "INSERTS", "SENDS", "PAN" };
+            auto closed = all;
+            if (view == "All") closed.clear();
+            else if (view == "EQ") closed.removeString ("EQ");
+            else if (view == "Dyn") { closed.removeString ("DYNAMICS"); closed.removeString ("INSERTS"); }
+            setClosed (closed);
+        };
+        addAndMakeVisible (k);
+    }
     view.setViewedComponent (&holder, false);
     addAndMakeVisible (view);
     project.addListener (this);
     setSize (1500, 980);
-    rebuild();
+    setClosed (closedSections);
     startTimerHz (30);
+}
+
+void AnalogConsole::setClosed (const juce::StringArray& closed)
+{
+    closedSections = closed;
+    project.setProperty ("analogClosed", closed.joinIntoString (","), nullptr);
+    static const juce::StringArray all { "I/O", "INPUT", "INPUT FX", "DYNAMICS", "FILTERS", "EQ", "INSERTS", "SENDS", "PAN" };
+    for (int i = 0; i < sectionKeys.size(); ++i)
+        sectionKeys[i]->setToggleState (! closed.contains (all[i]), juce::dontSendNotification);
+    rebuild();
+}
+
+void AnalogConsole::showChannelMenu (juce::ValueTree track, juce::Component& target)
+{
+    auto& um = *host.undo;
+    auto proj = project;
+    juce::PopupMenu menu;
+    menu.addSectionHeader (track[ids::name].toString());
+    menu.addItem ("Rename...", [track, &um]() mutable
+    {
+        auto* box = new juce::AlertWindow ("Rename", "The channel's name:", juce::MessageBoxIconType::NoIcon);
+        box->addTextEditor ("name", track[ids::name].toString());
+        box->addButton ("Rename", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        box->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        box->enterModalState (true, juce::ModalCallbackFunction::create ([box, track, &um] (int result) mutable
+        {
+            if (result == 1)
+            {
+                um.beginNewTransaction ("Rename Track");
+                track.setProperty (ids::name, box->getTextEditorContents ("name").trim(), &um);
+            }
+        }), true);
+    });
+    juce::PopupMenu colours;
+    const auto& palette = model::trackPalette();
+    for (int i = 0; i < juce::jmin (48, palette.size()); ++i)
+        colours.addColouredItem (1000 + i, "        ", palette[i], true, false, nullptr);
+    menu.addSubMenu ("Colour", colours);
+    menu.addItem ("Duplicate Channel", [proj, track, &um]
+    {
+        um.beginNewTransaction ("Duplicate Track");
+        model::duplicateTrackSettings (proj, track, &um);
+    });
+    menu.addSeparator();
+    menu.addItem ("Delete Channel", [track, &um]
+    {
+        um.beginNewTransaction ("Delete Track");
+        model::deleteTrack (track, &um);
+    });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target), [track, &um] (int chosen) mutable
+    {
+        if (chosen >= 1000)
+        {
+            um.beginNewTransaction ("Track Colour");
+            track.setProperty (ids::colour, model::trackPalette()[chosen - 1000].toString(), &um);
+        }
+    });
+}
+
+void AnalogConsole::Strip::mouseUp (const juce::MouseEvent& e)
+{
+    if (! e.mouseWasClicked())
+        return;
+    for (const auto& [title, area] : sectionTitles)
+        if (area.contains (e.getPosition()) && ! isMaster)
+        {
+            if (onTitle) onTitle (title);
+            return;
+        }
+    if (e.getPosition().y < 30 && ! isMaster && onName)
+        onName (*this);
 }
 
 AnalogConsole::~AnalogConsole()
@@ -1209,7 +1351,11 @@ AnalogConsole::~AnalogConsole()
 
 void AnalogConsole::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if (tree.hasType (ids::TRACK) && (property == ids::name || property == ids::colour || property == ids::inputFxOn))
+    if (tree.hasType (ids::TRACK) && (property == ids::name || property == ids::colour || property == ids::inputFxOn || property == ids::input
+                                      || property == ids::inputStereo || property == ids::output || property == ids::automationMode
+                                      || property == ids::inputTrack))
+        rebuildWanted = true;
+    if (property == ids::target || property == ids::slot)
         rebuildWanted = true;
     if (tree.hasType (ids::INSERT) && (property == ids::bypass || property == ids::effect))
         rebuildWanted = true;
@@ -1317,35 +1463,72 @@ void AnalogConsole::buildStrip (Strip& s)
     };
     const auto keys = [&] (int row) { return std::make_pair (juce::Rectangle<int> (7, row, w / 2 - 10, 17), juce::Rectangle<int> (w / 2 + 3, row, w / 2 - 10, 17)); };
     const auto wideKey = [&] (int row) { return juce::Rectangle<int> (12, row, w - 24, 17); };
-    const auto section = [&] (const juce::String& title) { s.sectionTitles.push_back ({ title, juce::Rectangle<int> (0, y, w, 14) }); y += 15; };
+    // A section's title: click it to close or open that section on every channel (as LUNA's); closed, just its title
+    const auto section = [&] (const juce::String& title) -> bool
+    {
+        const bool open = ! closedSections.contains (title);
+        s.sectionTitles.push_back ({ title, juce::Rectangle<int> (0, y, w, 14) });
+        y += open ? 15 : 18;
+        return open;
+    };
     const auto db1 = [] (const juce::String& unit) { return [unit] (double v) { return juce::String (v, std::abs (v) < 10.0 ? 1 : 0) + unit; }; };
     const auto signedDb = [] (double v) { return (v > 0.05 ? "+" : "") + juce::String (v, 1) + " dB"; };
     const auto hz = [] (double v) { return v >= 1000.0 ? juce::String (v / 1000.0, 2) + " kHz" : juce::String (juce::roundToInt (v)) + " Hz"; };
     const auto slots = [&] (const juce::String& owner, int minimum, bool inputFx)
     {
-        const auto inserts = ordered (model::findChain (project, owner));
-        int next = 0;
-        for (const auto& insert : inserts)
-            next = juce::jmax (next, model::insertSlot (insert) + 1);
-        const auto count = juce::jmax (minimum, inserts.size() + 1);
+        const auto chain = model::findChain (project, owner);
+        int last = -1;
+        for (const auto& insert : ordered (chain))
+            last = juce::jmax (last, model::insertSlot (insert));
+        const auto count = juce::jmax (minimum, last + 2);
+        auto* helper = s.helper.get();
+        juce::ignoreUnused (count);
         for (int i = 0; i < count; ++i)
         {
             InsertSlot* slot;
-            if (i < inserts.size())
+            auto insert = model::insertAtSlot (chain, i);
+            if (insert.isValid())
             {
-                auto insert = inserts[i];
                 const auto plugin = isPlugin (insert);
                 slot = new InsertSlot (nameOf (insert), plugin ? 2 : (inputFx ? 3 : 1), ! (bool) insert.getProperty (ids::bypass, false),
                                        [this, insert] { if (host.openInsert) host.openInsert (insert); });
-                slot->setTooltip ("Open " + nameOf (insert));
+                slot->setTooltip ("Open " + nameOf (insert) + " (right-click: bypass, replace, move, copy, remove)");
             }
             else
             {
                 slot = new InsertSlot ({}, 0, false, {});
                 auto* raw = slot;
-                slot->click = [this, owner, next, raw] { if (host.chooseEffect) host.chooseEffect (owner, next, {}, *raw); };
+                slot->click = [this, owner, i, raw] { if (host.chooseEffect) host.chooseEffect (owner, i, {}, *raw); };
                 slot->setTooltip (inputFx ? "Add a plug-in to the input (before the recorder)" : "Add an insert");
             }
+            auto* raw = slot;
+            if (inputFx)
+                slot->rightClick = [this, owner, insert, i, raw]
+                {
+                    if (! insert.isValid())
+                    {
+                        if (host.chooseEffect) host.chooseEffect (owner, i, {}, *raw);
+                        return;
+                    }
+                    auto& um = *host.undo;
+                    juce::PopupMenu menu;
+                    menu.addItem ("Open", [this, insert] { if (host.openInsert) host.openInsert (insert); });
+                    menu.addItem ("Bypass", true, (bool) insert[ids::bypass], [insert, &um]() mutable
+                    {
+                        um.beginNewTransaction ("Bypass");
+                        insert.setProperty (ids::bypass, ! (bool) insert[ids::bypass], &um);
+                    });
+                    menu.addItem ("Replace...", [this, owner, i, insert, raw] { if (host.chooseEffect) host.chooseEffect (owner, i, insert, *raw); });
+                    menu.addSeparator();
+                    menu.addItem ("Remove", [insert, &um]
+                    {
+                        um.beginNewTransaction ("Remove effect");
+                        model::removeInsert (insert, &um);
+                    });
+                    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (raw));
+                };
+            else if (helper != nullptr)
+                slot->rightClick = [helper, i, raw] { helper->showMenuAt ("insert", *raw, i); };
             slot->setBounds (7, y, w - 14, 17);
             s.addAndMakeVisible (slot);
             s.parts.add (slot);
@@ -1355,8 +1538,45 @@ void AnalogConsole::buildStrip (Strip& s)
     };
     const auto audio = ! model::isInstrumentTrack (track) && ! model::isBusTrack (track);
 
+    // I/O: input, output, the channel strip's setting, automation (the mixer's own menus)
+    if (section ("I/O"))
+    {
+        const auto io = [&] (const juce::String& label, const juce::String& value, const juce::String& which, const juce::String& tip)
+        {
+            auto* b = new IoKey (label, value);
+            b->setTooltip (tip);
+            auto* helper = s.helper.get();
+            b->onClick = [helper, b, which] { if (helper != nullptr) helper->showMenuAt (which, *b); };
+            b->setBounds (7, y, w - 14, 17);
+            s.addAndMakeVisible (b);
+            s.parts.add (b);
+            y += 19;
+        };
+        juce::String in;
+        if (model::isInstrumentTrack (track)) in = "Inst";
+        else if (track[ids::inputTrack].toString().isNotEmpty())
+            in = model::findById (project, track[ids::inputTrack].toString())[ids::name].toString();
+        else if (model::isBusTrack (track)) in = (bool) track.getProperty ("busHardwareInput", false) ? "In " + juce::String ((int) track[ids::input] + 1) : juce::String ("Bus");
+        else
+        {
+            const int ch = (int) track.getProperty (ids::input, 0) + 1;
+            in = "In " + juce::String (ch) + ((bool) track.getProperty (ids::inputStereo, false) ? "-" + juce::String (ch + 1) : juce::String());
+        }
+        juce::String out ("St Out");
+        if (const auto o = track[ids::output].toString(); o.isNotEmpty())
+        {
+            const auto bus = model::findById (project, o);
+            out = bus.isValid() ? bus[ids::name].toString() : o.fromFirstOccurrenceOf (":", false, false).isNotEmpty() ? "Out " + o.fromFirstOccurrenceOf (":", false, false) : o;
+        }
+        const auto mode = AutomationWriter::modeOf (track);
+        io ("IN", in, "input", "Input");
+        io ("OUT", out, "output", "Output");
+        io ("SET", "Setting", "setting", "The channel strip's setting (save, load, the library)");
+        io ("AUTO", mode.substring (0, 1).toUpperCase() + mode.substring (1), "automation", "Automation mode");
+        y += 4;
+    }
     // Input
-    section ("INPUT");
+    if (section ("INPUT"))
     {
         knob (capRed, "Gain", ids::consoleMicGain, 20.0, 20.0, 70.0, 0.0, left (y), { { 20.0, "20" }, { 45.0, "" }, { 70.0, "70" } }, db1 (" dB"));
         knob (capGrey, "Trim", ids::consoleInput, 0.0, -20.0, 20.0, 0.0, right (y), { { -20.0, "-20" }, { 0.0, "0" }, { 20.0, "+20" } }, signedDb);
@@ -1373,14 +1593,17 @@ void AnalogConsole::buildStrip (Strip& s)
     // Input FX (audio channels): what's on the input, before the recorder, and its round trip
     if (audio)
     {
-        s.sectionTitles.push_back ({ "INPUT FX", juce::Rectangle<int> (0, y, w, 14) });
         const auto chain = ordered (model::findChain (project, model::inputOwner (id)));
         if (! chain.isEmpty() && (bool) track.getProperty (ids::inputFxOn, true))
             s.inputFxTime = juce::String (InputFxPanel::roundTripMs (host, project, track), 2) + " ms";
-        y += 15;
-        slots (model::inputOwner (id), 2, true);
+        if (section ("INPUT FX"))
+            slots (model::inputOwner (id), inputFxRows, true);
     }
-    section ("DYNAMICS");
+    else if (! closedSections.contains ("INPUT FX"))
+        y += 15 + inputFxRows * 19 + 4;   // (the room it takes on the audio channels: the sections below stay level)
+    else
+        y += 18;
+    if (section ("DYNAMICS"))
     {
         knob (capWhite, "Ratio", ids::consoleCompRatio, 0.0, 0.0, 20.0, 4.0, left (y), { { 0.0, "A" }, { 4.0, "4" }, { 20.0, "20" } },
               [] (double v) { return v < 0.5 ? juce::String ("Auto") : juce::String (v, 1) + ":1"; });
@@ -1402,7 +1625,7 @@ void AnalogConsole::buildStrip (Strip& s)
         toggle ("DYN IN", ids::consoleDynIn, true, j1, keyGreen);
         y += 24;
     }
-    section ("FILTERS");
+    if (section ("FILTERS"))
     {
         knob (capGrey, "HPF", ids::consoleHPF, 0.0, 0.0, 500.0, 80.0, left (y), { { 0.0, "off" }, { 80.0, "80" }, { 500.0, "500" } },
               [hz] (double v) { return v < 1.0 ? juce::String ("Off") : hz (v); });
@@ -1410,7 +1633,7 @@ void AnalogConsole::buildStrip (Strip& s)
               [hz] (double v) { return v < 1.0 ? juce::String ("Off") : hz (v); });
         y += boxH + 14;
     }
-    section ("EQ");
+    if (section ("EQ"))
     {
         const auto g = (double) ConsoleChannel::maxGainDb;
         const auto gainScale = std::vector<std::pair<double, juce::String>> { { -g, "-" + shortNumber (g) }, { 0.0, "0" }, { g, "+" + shortNumber (g) } };
@@ -1440,12 +1663,13 @@ void AnalogConsole::buildStrip (Strip& s)
         toggle ("EQ IN", ids::consoleIn, true, d, keyGreen);
         y += 24;
     }
-    section ("INSERTS");
-    slots (id, 5, false);
-    section ("SENDS");
+    if (section ("INSERTS"))
+        slots (id, insertRows, false);
+    if (section ("SENDS"))
     {
         const auto sends = model::sendsOf (model::findChain (project, id));
-        const int count = juce::jmax (3, juce::jmin (6, (int) sends.size() + (sends.size() < 6 ? 0 : 0)));
+        const int count = juce::jmax (3, juce::jmin (6, (int) sends.size() + 1));
+        auto* helper = s.helper.get();
         const int cols = 3, cw = (w - 8) / cols;
         for (int n = 0; n < juce::jmax (count, 3); ++n)
         {
@@ -1465,12 +1689,21 @@ void AnalogConsole::buildStrip (Strip& s)
                 k->setValue (gainToDb ((double) send.getProperty (ids::level, 0.0)), juce::dontSendNotification);
                 k->onDragStart = [&um] { um.beginNewTransaction ("Send level"); };
                 k->onValueChange = [k, send, &um]() mutable { send.setProperty (ids::level, dbToGain (k->getValue()), &um); };
+                k->onMenu = [helper, k, n] { if (helper != nullptr) helper->showMenuAt ("send", *k, n); };
+            }
+            else if (n == sends.size())
+            {
+                // the next send: a click picks its bus (or a new aux)
+                k->caption = "Add";
+                k->addSend = true;
+                k->setTooltip ("Add a send: pick its bus, or a new aux bus");
+                k->onMenu = [helper, k, n] { if (helper != nullptr) helper->showMenuAt ("send", *k, n); };
             }
             else
             {
                 k->caption = juce::String (n + 1);
                 k->setEnabled (false);
-                k->setTooltip ("No send here (add one in the mixer)");
+                k->setTooltip ("Add the sends before it first");
             }
             s.addAndMakeVisible (k);
             s.parts.add (k);
@@ -1478,6 +1711,7 @@ void AnalogConsole::buildStrip (Strip& s)
         y += ((juce::jmax (count, 3) + cols - 1) / cols) * 40 + 4;
     }
     // Pan and the keys
+    if (section ("PAN"))
     {
         y += 4;
         knob (capGrey, "Pan", ids::pan, 0.0, -1.0, 1.0, 0.0, juce::Rectangle<int> (w / 2 - boxW / 2, y, boxW, boxH),
@@ -1639,6 +1873,21 @@ void AnalogConsole::rebuild()
     meter.reset();
     strips.clear();
     master.reset();
+    // every channel as many slots as the fullest (the sections stay level across the desk)
+    inputFxRows = 2;
+    insertRows = 5;
+    for (const auto& track : channels (project))
+    {
+        const auto rowsFor = [this] (const juce::String& owner)
+        {
+            int last = -1;
+            for (const auto& insert : ordered (model::findChain (project, owner)))
+                last = juce::jmax (last, model::insertSlot (insert));
+            return last + 2;
+        };
+        inputFxRows = juce::jmax (inputFxRows, rowsFor (model::inputOwner (track[ids::id].toString())));
+        insertRows = juce::jmax (insertRows, rowsFor (track[ids::id].toString()));
+    }
     int index = 0;
     for (const auto& track : channels (project))
     {
@@ -1651,6 +1900,19 @@ void AnalogConsole::rebuild()
         s->number = juce::String (index);
         s->name = track[ids::name].toString();
         s->colour = model::trackColour (track);
+        s->closed = closedSections;
+        if (host.mixer != nullptr)
+            s->helper = std::make_unique<ChannelStrip> (*host.mixer, project, track);
+        s->onTitle = [this] (const juce::String& title)
+        {
+            auto closed = closedSections;
+            if (closed.contains (title)) closed.removeString (title); else closed.add (title);
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<AnalogConsole> (this), closed]
+            {
+                if (safe != nullptr) safe->setClosed (closed);
+            });
+        };
+        s->onName = [this, track] (juce::Component& c) { showChannelMenu (track, c); };
         buildStrip (*s);
         holder.addAndMakeVisible (s);
     }
@@ -1747,15 +2009,17 @@ void AnalogConsole::Strip::paint (juce::Graphics& g)
         g.setColour (d.lineLight);
         g.fillRect (area.getX() + 3, area.getY() - 3, area.getWidth() - 6, 1);
         const bool inputFx = title == "INPUT FX";
-        g.setColour (inputFx ? juce::Colour (0xff34c759) : d.title);
+        const bool shut = closed.contains (title) && ! isMaster;
+        g.setColour ((inputFx ? juce::Colour (0xff34c759) : d.title).withMultipliedAlpha (shut ? 0.6f : 1.0f));
         g.setFont (juce::FontOptions (8.5f, juce::Font::bold).withKerningFactor (0.14f));
+        const auto shown = isMaster ? title : juce::String::fromUTF8 (shut ? "\xe2\x96\xb8 " : "\xe2\x96\xbe ") + title;
         if (inputFx)
         {
-            g.drawText (title, area.reduced (8, 0), juce::Justification::centredLeft, false);
+            g.drawText (shown, area.reduced (8, 0), juce::Justification::centredLeft, false);
             g.drawText (inputFxTime, area.reduced (8, 0), juce::Justification::centredRight, false);
         }
         else
-            g.drawText (title, area, juce::Justification::centred, false);
+            g.drawText (shown, area, juce::Justification::centred, false);
     }
     // the captions under the knobs (while one's turned: its value)
     for (auto* part : parts)
@@ -1893,7 +2157,9 @@ void AnalogConsole::paint (juce::Graphics& g)
     g.drawText ("Analog Console", 16, 0, 200, 44, juce::Justification::centredLeft, false);
     g.setColour (light ? juce::Colour (0xff1c1d22).withAlpha (0.55f) : theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("input, Input FX, dynamics, filters, EQ, inserts, sends, pan and fader on every channel", 160, 0, 620, 44, juce::Justification::centredLeft, false);
+    g.drawText ("click a section's title to close or open it on every channel", 160, 0, 620, 44, juce::Justification::centredLeft, false);
+    g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+    g.drawText ("Sections", 16, 44, 70, 30, juce::Justification::centredLeft, false);
 }
 
 void AnalogConsole::resized()
@@ -1904,7 +2170,19 @@ void AnalogConsole::resized()
         filterKeys[i]->setBounds (top.removeFromRight (64));
         top.removeFromRight (4);
     }
-    auto area = getLocalBounds().withTrimmedTop (44).reduced (6, 0).withTrimmedBottom (6);
+    auto tabs = getLocalBounds().withTrimmedTop (44).removeFromTop (30).reduced (12, 4).withTrimmedLeft (78);
+    for (auto* k : sectionKeys)
+    {
+        k->setBounds (tabs.removeFromLeft (k->getButtonText().length() > 6 ? 76 : 62));
+        tabs.removeFromLeft (4);
+    }
+    tabs.removeFromLeft (16);
+    for (auto* k : viewKeys)
+    {
+        k->setBounds (tabs.removeFromLeft (58));
+        tabs.removeFromLeft (4);
+    }
+    auto area = getLocalBounds().withTrimmedTop (74).reduced (6, 0).withTrimmedBottom (6);
     view.setBounds (area);
     // every fader starts at the same height (as on a desk), below the tallest channel's sections
     int faderTop = 0;

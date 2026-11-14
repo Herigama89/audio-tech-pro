@@ -42,7 +42,8 @@ namespace riff::commands
         showNotepad = 0x2f01, showBrowser, toggleQuickHelp, waveformZoom, zoomToFitAll, showPerformance, audioSuite, toggleStopOnClip,
         toggleHeaderInserts = 0x3001, toggleExclusiveSolo, showMultiMeter, toggleMixerComments, automix,
         toggleSnap = 0x3101, toggleCatch, toggleSuspendPlugins, consolidateRegions, alignAudio, toggleHeaderIO, splitStems, detectKey, toggleGpuDrawing, saveCopy, closeProject, findMissingFiles, compareBypass, resetChannels, toggleEco, toggleLayerMeters,
-        showManual = 0x3201, openManualPdf
+        showManual = 0x3201, openManualPdf,
+        showConsoleView = 0x3301, showAnalogConsole
     };
 
     struct Info

@@ -242,6 +242,12 @@ private:
     std::unique_ptr<juce::FileChooser> fileChooser;
     std::vector<int> graphPages;
     effectdesign::Spectrum spectrum;
+    /** A clear skin's backdrop: the part of the app's window behind this one, blurred (made again when it moves, or
+        every couple of seconds). */
+    juce::Image backdrop;
+    juce::Rectangle<int> backdropFrom;
+    juce::uint32 backdropMadeAt = 0;
+    void refreshBackdrop();
     std::unique_ptr<juce::dsp::FFT> fft;
     std::vector<float> fftData, window;
     void updateSpectrum();

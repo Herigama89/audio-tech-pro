@@ -959,9 +959,17 @@ void EffectPanel::paint (juce::Graphics& g)
             v[i] = (float) (double) insert.getProperty (juce::Identifier (info->params[i].id), info->params[i].defaultValue);
         effectdesign::setPaintingSpectrum (design->analyzer ? &spectrum : nullptr);
         effectdesign::setPaintingMeters (meterValues.empty() ? nullptr : meterValues.data(), meterCount);
+        const auto skin = design->skins ? (int) insert.getProperty ("skin", design->defaultSkin) : -1;
         if (design->skins)
-            effectdesign::setPaintingSkin ((int) insert.getProperty ("skin", effectdesign::defaultClassicSkin));
+            effectdesign::setPaintingSkin (skin);
+        // a clear skin: what's behind this window, blurred (the app's main window, caught now and then)
+        if (design->clearSkin >= 0 && skin == design->clearSkin)
+        {
+            refreshBackdrop();
+            effectdesign::setPaintingBackdrop (&backdrop);
+        }
         design->paint (g, getLocalBounds(), *info, v.data(), liveShown);
+        effectdesign::setPaintingBackdrop (nullptr);
         effectdesign::setPaintingSpectrum (nullptr);
         effectdesign::setPaintingMeters (nullptr, 0);
         return;
@@ -1121,3 +1129,49 @@ void EffectPanel::resized()
 }
 
 } // namespace riff
+
+namespace riff
+{
+void EffectPanel::refreshBackdrop()
+{
+    const auto onScreen = getScreenBounds();
+    const auto now = juce::Time::getMillisecondCounter();
+    if (backdrop.isValid() && onScreen == backdropFrom && now - backdropMadeAt < 2000)
+        return;
+    backdropFrom = onScreen;
+    backdropMadeAt = now;
+    // the biggest other window on screen under this one: the app's main window
+    juce::Component* under = nullptr;
+    auto& desktop = juce::Desktop::getInstance();
+    for (int i = 0; i < desktop.getNumComponents(); ++i)
+        if (auto* c = desktop.getComponent (i); c != nullptr && c != getTopLevelComponent() && c->isShowing()
+                                                  && c->getScreenBounds().intersects (onScreen)
+                                                  && (under == nullptr || c->getWidth() * c->getHeight() > under->getWidth() * under->getHeight()))
+            under = c;
+    if (under == nullptr)
+    {
+        backdrop = {};
+        return;
+    }
+    const auto area = (onScreen - under->getScreenPosition()).getIntersection (under->getLocalBounds());
+    if (area.isEmpty())
+    {
+        backdrop = {};
+        return;
+    }
+    // small, then up again smoothly: a soft blur, cheap
+    auto small = under->createComponentSnapshot (area, true, 0.08f);
+    juce::Image tiny (juce::Image::ARGB, juce::jmax (1, small.getWidth() / 2), juce::jmax (1, small.getHeight() / 2), true);
+    {
+        juce::Graphics tg (tiny);
+        tg.setImageResamplingQuality (juce::Graphics::mediumResamplingQuality);
+        tg.drawImage (small, tiny.getBounds().toFloat(), juce::RectanglePlacement::stretchToFit);
+    }
+    backdrop = juce::Image (juce::Image::ARGB, juce::jmax (1, getWidth() / 4), juce::jmax (1, getHeight() / 4), true);
+    juce::Graphics bg (backdrop);
+    bg.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+    bg.drawImage (tiny, backdrop.getBounds().toFloat(), juce::RectanglePlacement::stretchToFit);
+    // (the face moves a little off the window's edge: keep the offset where this panel sits in its window)
+    juce::ignoreUnused (area);
+}
+}

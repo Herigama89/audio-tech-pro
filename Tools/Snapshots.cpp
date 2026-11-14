@@ -270,6 +270,8 @@ public:
                     }
                 }
             }
+            if (const auto skin = juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_SKIN", {}); skin.isNotEmpty())
+                insert.setProperty ("skin", skin.getIntValue(), nullptr);
             EffectPanel panel (insert, um);
             panel.setMeterSource ([running] (float* dest, int capacity) { return running != nullptr ? running->readMeters (dest, capacity) : 0; });
             panel.setLiveValue ([type]

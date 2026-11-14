@@ -34,6 +34,12 @@ namespace riff::looks
 
     /** Console caps (knobStyle 8): the cap knob painted in its section's colour (the nearest of its colours), or the
         pan knob for a pan. */
+    /** The silver knob (the brushed cap in a wavy skirt): the skirt painted in `skirt` (none: black), a ring round it
+        glowing in `ring` up to the setting, a pointer line on the skirt; only the pointer and the ring move. */
+    bool drawSilverKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
+                         juce::Colour skirt, juce::Colour ring, bool fromCentre, bool enabled);
+    juce::Image silverKnobIn (juce::Colour skirt);
+
     bool drawCapKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
                       bool fromCentre, bool enabled, juce::Colour section = {}, bool pan = false);
 

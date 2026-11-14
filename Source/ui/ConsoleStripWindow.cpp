@@ -1,5 +1,6 @@
 #include "Profile.h"
 #include "ConsoleStripWindow.h"
+#include "Looks.h"
 #include "Eco.h"
 #include "Theme.h"
 #include "EffectDesigns.h"
@@ -16,7 +17,7 @@ namespace
     juce::String db (float v)  { return (v > 0.05f ? "+" : "") + juce::String (v, 1) + " dB"; }
     juce::String sec (float v) { return v < 1.0f ? juce::String (juce::roundToInt (v * 1000.0f)) + " ms" : juce::String (v, 2) + " s"; }
 
-    constexpr int margin = 8, optionsHeight = 26, curveHeight = 190;
+    constexpr int margin = 8, optionsHeight = 26, curveHeight = 0;   // (no analyzer under the strip any more: just the strip)
 
     // Options shared by every strip window this session
     SpectrumAnalyzer::Options& analyzerOptions() { static SpectrumAnalyzer::Options o; return o; }
@@ -158,8 +159,11 @@ public:
     {
         if (theme::glassSkin())
         {
-            // Liquid Glass: the LED-ring knob in its section's colour
+            // Liquid Glass: the Analog Console's knobs - the cap knob in its section's colour, its scale round it
             const auto area = getLocalBounds().toFloat().reduced (1.0f);
+            if (looks::drawCapKnob (g, area, (float) getValue(), juce::degreesToRadians (-135.0f), juce::degreesToRadians (135.0f), fromCentre,
+                                    isEnabled(), ring, false))
+                return;
             look::drawGlassKnob (g, area, (float) getValue(), juce::degreesToRadians (-135.0f), juce::degreesToRadians (135.0f), ring, fromCentre, isEnabled());
             return;
         }
@@ -593,6 +597,9 @@ void ConsoleStripWindow::applyAnalyzerOptions()
 
 void ConsoleStripWindow::setMeter (std::unique_ptr<juce::Component> multiMeter)
 {
+    // (the strip window shows just the strip now: no MultiMeter under it)
+    juce::ignoreUnused (multiMeter);
+    return;
     meter = std::move (multiMeter);
     if (meter != nullptr)
     {
@@ -617,6 +624,10 @@ juce::Rectangle<int> ConsoleStripWindow::meterArea() const
 
 void ConsoleStripWindow::resized()
 {
+    analyzer.setVisible (false);
+    for (auto* box : { &modeBox, &fftBox, &rangeBox, &releaseBox, &holdBox })
+        box->setVisible (false);
+    meterButton.setVisible (false);
     analyzer.setBounds (curveArea().reduced (2));
     if (meter != nullptr)
         meter->setBounds (meterArea());
@@ -732,6 +743,8 @@ void ConsoleStripWindow::paint (juce::Graphics& g)
 
 void ConsoleStripWindow::paintCurveGround (juce::Graphics& g)
 {
+    if (curveArea().getHeight() <= 0)
+        return;
     // The screen under the panel: the EQ curve over the spectrum, 20 Hz to 20 kHz, +-18 dB
     const auto area = curveArea().toFloat();
     g.setColour (theme::lcd);
@@ -754,6 +767,8 @@ void ConsoleStripWindow::paintCurveGround (juce::Graphics& g)
 
 void ConsoleStripWindow::paintOverChildren (juce::Graphics& g)
 {
+    if (curveArea().getHeight() <= 0)
+        return;
     // The EQ curve over the analyzer
     const auto area = curveArea().toFloat();
     const auto xOf = [&area] (double f) { return area.getX() + (float) (std::log (f / 20.0) / std::log (1000.0)) * area.getWidth(); };

@@ -76,12 +76,13 @@ namespace riff::effectdesign
 
         // (drawn, not cut from the photo: the photo's knob stays still, lit as photographed, and only what turns is
         //  drawn at the setting - a pointer line, a dot, or a whole bar knob - so nothing's light turns with it)
-        enum class Drawn { none, line, dot, bar, spot };   // (spot: a filled dot)
+        enum class Drawn { none, line, dot, bar, spot, silver };   // (spot: a filled dot; silver: the whole silver knob, its skirt in ink)
         Drawn drawn = Drawn::none;
         juce::Colour ink {};
         float radius = 0.0f;                 // the knob's radius (photo pixels)
         float inner = 0.0f, outer = 1.0f;    // a line: from and to, as fractions of the radius; a dot: where (outer)
         float thickness = 0.1f;              // a line's width, a dot's size or a bar's width, as a fraction of the radius
+        juce::Colour ring {};                // (silver: its ring's glow)
     };
 
     struct Control
@@ -118,6 +119,9 @@ namespace riff::effectdesign
         struct Spot { juce::String id; juce::Point<float> at; float position = 0.0f; };
         std::vector<Spot> spots;
         bool skins = false;                     // it can be worn in several skins (the window's Skin menu; the insert's "skin")
+        juce::StringArray skinNames;            // (its skins' names, in the menu's order; none: the Classic Compressors')
+        int defaultSkin = 1;                    // (the skin when the insert has none)
+        int clearSkin = -1;                     // (the skin that shows what's behind the window, blurred: setPaintingBackdrop)
         /** Curve displays with points to drag: 20 Hz to 20 kHz across, each point's value over its parameter's range up the side. */
         struct Graph
         {
@@ -171,6 +175,10 @@ namespace riff::effectdesign
     inline constexpr int defaultClassicSkin = 1;
     /** The skin of the face being painted (set by the window round its paint). */
     void setPaintingSkin (int skin) noexcept;
+    /** What's behind the window being painted (blurred), for a clear skin; nullptr: none. */
+    void setPaintingBackdrop (const juce::Image*) noexcept;
+    /** A design's skins' names (the Classic Compressors' when it names none). */
+    juce::StringArray skinNamesOf (const Design&);
 
     /** A picture compiled into the app, by its BinaryData resource name (cached). */
     juce::Image skinImage (const char* name);

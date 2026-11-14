@@ -39,6 +39,7 @@ namespace
     RIFF_LOOK_IMAGE (cap_grey, look_cap_ssl_grey_png)
     RIFF_LOOK_IMAGE (cap_black, look_cap_ssl_black_png)
     RIFF_LOOK_IMAGE (panKnob, look_knob_pan_png)
+    RIFF_LOOK_IMAGE (silverKnob, look_knob_silver_png)
     #undef RIFF_LOOK_IMAGE
 
     juce::Image capFor (int style)
@@ -303,6 +304,117 @@ bool drawKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion,
                                        .scaled (scale)
                                        .rotated (to)
                                        .translated (centre.x, centre.y));
+    return true;
+}
+
+juce::Image silverKnobIn (juce::Colour skirt)
+{
+    static std::map<juce::uint32, juce::Image> made;
+    const auto plain = skirt.isTransparent() || skirt.getPerceivedBrightness() < 0.06f;
+    const auto key = plain ? 0u : skirt.getARGB();
+    if (auto it = made.find (key); it != made.end())
+        return it->second;
+    auto source = silverKnob();
+    if (! source.isValid())
+        return {};
+    if (plain)
+        return made[key] = source;
+    // Only the skirt (outside the silver cap) painted: its own light and shade kept, a little of its shine on top
+    auto image = source.convertedToFormat (juce::Image::ARGB).createCopy();
+    const int w = image.getWidth(), h = image.getHeight();
+    const auto half = (float) w * 0.5f, capR = 58.6f / 88.0f;
+    juce::Image::BitmapData data (image, juce::Image::BitmapData::readWrite);
+    std::vector<float> ring;
+    for (int y = 0; y < h; y += 2)
+        for (int x = 0; x < w; x += 2)
+        {
+            const auto r = std::hypot ((float) x - half + 0.5f, (float) y - half + 0.5f) / half;
+            if (r > 0.72f && r < 0.95f)
+            {
+                const auto c = data.getPixelColour (x, y);
+                ring.push_back ((c.getFloatRed() + c.getFloatGreen() + c.getFloatBlue()) / 3.0f);
+            }
+        }
+    std::nth_element (ring.begin(), ring.begin() + (long) ring.size() / 2, ring.end());
+    const auto base = ring.empty() ? 0.12f : juce::jmax (1.0e-3f, ring[ring.size() / 2]);
+    const float col[] { skirt.getFloatRed(), skirt.getFloatGreen(), skirt.getFloatBlue() };
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+        {
+            const auto r = std::hypot ((float) x - half + 0.5f, (float) y - half + 0.5f) / half;
+            const auto amount = juce::jlimit (0.0f, 1.0f, (r - capR) * half / 1.2f);
+            if (amount <= 0.0f)
+                continue;
+            const auto c = data.getPixelColour (x, y);
+            if (c.getAlpha() == 0)
+                continue;
+            const auto lum = (c.getFloatRed() + c.getFloatGreen() + c.getFloatBlue()) / 3.0f;
+            const auto shade = juce::jlimit (0.25f, 2.6f, lum / base) * 0.58f;
+            const auto spec = juce::jmax (0.0f, lum - base * 1.6f) * 0.7f;
+            const float was[] { c.getFloatRed(), c.getFloatGreen(), c.getFloatBlue() };
+            float out[3];
+            for (int k = 0; k < 3; ++k)
+                out[k] = was[k] * (1.0f - amount) + juce::jlimit (0.0f, 1.0f, col[k] * shade + spec) * amount;
+            data.setPixelColour (x, y, juce::Colour::fromFloatRGBA (out[0], out[1], out[2], c.getFloatAlpha()));
+        }
+    return made[key] = image;
+}
+
+bool drawSilverKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
+                     juce::Colour skirt, juce::Colour ring, bool fromCentre, bool enabled)
+{
+    const auto image = silverKnobIn (skirt);
+    if (! image.isValid())
+        return false;
+    const auto size = juce::jmin (area.getWidth(), area.getHeight());
+    const auto centre = area.getCentre();
+    proportion = juce::jlimit (0.0f, 1.0f, proportion);
+    const auto to = startAngle + proportion * (endAngle - startAngle);
+    const auto alpha = enabled ? 1.0f : 0.45f;
+    // its ring: a faint track, the setting's part glowing in the ring's colour
+    const auto ringR = size * 0.5f - juce::jmax (2.0f, size * 0.04f);
+    const auto width = juce::jmax (1.6f, size * 0.035f);
+    juce::Path track;
+    track.addCentredArc (centre.x, centre.y, ringR, ringR, 0.0f, startAngle, endAngle, true);
+    g.setColour (juce::Colours::white.withAlpha (0.13f * alpha));
+    g.strokePath (track, juce::PathStrokeType (width, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    if (! ring.isTransparent())
+    {
+        const auto from = fromCentre ? (startAngle + endAngle) * 0.5f : startAngle;
+        if (std::abs (to - from) > 0.01f)
+        {
+            juce::Path lit;
+            lit.addCentredArc (centre.x, centre.y, ringR, ringR, 0.0f, juce::jmin (from, to), juce::jmax (from, to), true);
+            g.setColour (ring.withAlpha (0.28f * alpha));
+            g.strokePath (lit, juce::PathStrokeType (width * 3.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setColour (ring.withAlpha (0.5f * alpha));
+            g.strokePath (lit, juce::PathStrokeType (width * 1.9f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setColour (ring.brighter (0.35f).withAlpha (alpha));
+            g.strokePath (lit, juce::PathStrokeType (width, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+    }
+    // the knob (it doesn't turn: its light stays where it is), its shadow under it
+    const auto body = juce::Rectangle<float> (size * 0.78f, size * 0.78f).withCentre (centre);
+    g.setColour (juce::Colours::black.withAlpha (0.4f * alpha));
+    g.fillEllipse (body.translated (size * 0.012f, size * 0.03f).expanded (size * 0.01f));
+    {
+        juce::Graphics::ScopedSaveState state (g);
+        g.setOpacity (alpha);
+        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+        g.drawImage (image, body, juce::RectanglePlacement::stretchToFit);
+    }
+    // the pointer: a line on the skirt, turned round the knob's centre (only it moves)
+    const auto bodyR = body.getWidth() * 0.5f;
+    const juce::Point<float> dir (std::sin (to), -std::cos (to));
+    const auto light = skirt.isTransparent() || skirt.getPerceivedBrightness() < 0.45f;
+    const auto lineW = juce::jmax (1.4f, bodyR * 0.09f);
+    if (! light)
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.28f * alpha));
+        g.drawLine ({ centre + dir * (bodyR * 0.70f) + juce::Point<float> (0.6f, 1.0f), centre + dir * (bodyR * 0.94f) + juce::Point<float> (0.6f, 1.0f) }, lineW);
+    }
+    g.setColour ((light ? juce::Colour (0xfff0f0ec) : juce::Colour (0xff111113)).withAlpha (alpha));
+    g.drawLine ({ centre + dir * (bodyR * 0.70f), centre + dir * (bodyR * 0.94f) }, lineW);
     return true;
 }
 

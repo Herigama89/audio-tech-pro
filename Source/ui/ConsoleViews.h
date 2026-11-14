@@ -183,9 +183,12 @@ public:
     /** The caption under it: its name, or (while turned) its value. */
     juce::String captionNow() const;
 
+    void mouseDown (const juce::MouseEvent&) override;
     juce::String caption;
     std::vector<std::pair<double, juce::String>> scale;   // value, its number (blank: a tick only)
     int knobSize = 24;
+    std::function<void()> onMenu;   // (a right-click; for "add", any click)
+    bool addSend = false;           // (the next send: drawn as a dashed "+")
 private:
     juce::Colour cap;
     bool pan = false;
@@ -207,11 +210,26 @@ public:
     InsertSlot (const juce::String& name, int kind, bool on, std::function<void()> click)
         : name (name), kind (kind), on (on), click (std::move (click)) {}
     void paint (juce::Graphics&) override;
-    void mouseUp (const juce::MouseEvent& e) override { if (click && getLocalBounds().contains (e.getPosition())) click(); }
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        if (! getLocalBounds().contains (e.getPosition())) return;
+        if (e.mods.isPopupMenu()) { if (rightClick) rightClick(); else if (click) click(); }
+        else if (click) click();
+    }
     juce::String name;
+    std::function<void()> rightClick;
     int kind = 0;   // 0 empty, 1 built-in, 2 plug-in, 3 input FX built-in
     bool on = true;
     std::function<void()> click;
+};
+
+/** An I/O row of the Analog Console: its label and what it's set to; a click opens the mixer's menu for it. */
+class IoKey final : public juce::Button
+{
+public:
+    IoKey (const juce::String& label, const juce::String& value) : juce::Button (label), label (label), value (value) {}
+    void paintButton (juce::Graphics&, bool over, bool down) override;
+    juce::String label, value;
 };
 
 /** The console's MultiMeter: the master's spectrum (a curve or bars), its stereo image and loudness. */
@@ -269,6 +287,12 @@ private:
     bool rebuildWanted = true;
     juce::OwnedArray<ConsoleKey> filterKeys;
     int filter = 0;   // all, audio, buses
+    /** The sections (as LUNA's tabs): closed ones show only their titles, on every channel; kept in the project. */
+    juce::StringArray closedSections;
+    int inputFxRows = 2, insertRows = 5;
+    juce::OwnedArray<ConsoleKey> sectionKeys, viewKeys;
+    void setClosed (const juce::StringArray& closed);
+    void showChannelMenu (juce::ValueTree track, juce::Component& target);
 
     /** A control bound to a property of the track (or the project): it follows it and writes it, undoably. */
     struct Binding { juce::Component* control; juce::ValueTree tree; juce::Identifier property; double fallback; bool toggle; };
@@ -288,7 +312,12 @@ private:
         int holdTicksL = 0, holdTicksR = 0;
         juce::Rectangle<int> grArea;
         bool isMaster = false;
+        std::unique_ptr<ChannelStrip> helper;   // (the mixer's strip for this channel, not shown: its menus)
+        std::function<void (const juce::String&)> onTitle;
+        std::function<void (juce::Component&)> onName;
+        juce::StringArray closed;
         void paint (juce::Graphics&) override;
+        void mouseUp (const juce::MouseEvent&) override;
         void paintMeter (juce::Graphics&, juce::Rectangle<float> area, float peak, float hold) const;
     };
     juce::OwnedArray<Strip> strips;

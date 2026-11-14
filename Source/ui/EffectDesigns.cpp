@@ -2831,14 +2831,23 @@ namespace
     }
 
     //==============================================================================
-    // The Mastering Compressors: drawn panels (Tools/compressor_skins/mastering_faces.py) with everything that moves
-    // left out - the knobs' pointers, the chicken heads and switches, the lights, the needles - drawn here
+    // The Mastering Compressors in neon Liquid Glass (Tools/compressor_skins/neon_faces.py): each face's picture in
+    // three skins - glass, glass with the brushed plate, clear glass (what's behind it shows through) - with
+    // everything that moves drawn here: the silver knobs' pointers and glowing rings, the chicken heads, the
+    // switches, the lights, the needles
     //==============================================================================
-    /** Where a VU needle points (degrees) for a reading: it follows the voltage, -20 .. +3 VU across. */
-    float vuAngle (float db, float swing)
+    /** The VU picture's scale (Resources/skin/looks/look_vu_cream.png): its needle's angle (degrees) for a reading. */
+    float pictureVuAngle (float db)
     {
-        const auto v = juce::jlimit (0.0f, 1.0f, std::pow (10.0f, db / 20.0f) / std::pow (10.0f, 3.0f / 20.0f));
-        return -swing + 2.0f * swing * v;
+        static constexpr std::pair<float, float> marks[] { { -20.0f, -32.6f }, { -10.0f, -24.3f }, { -7.0f, -18.85f }, { -5.0f, -9.96f },
+                                                           { -3.0f, 0.0f }, { -1.0f, 10.9f }, { 0.0f, 16.7f }, { 1.0f, 23.0f },
+                                                           { 2.0f, 29.0f }, { 3.0f, 35.0f } };
+        db = juce::jlimit (-22.0f, 3.6f, db);
+        if (db <= marks[0].first) return marks[0].second - (marks[0].first - db) * 0.8f;
+        for (size_t i = 1; i < std::size (marks); ++i)
+            if (db <= marks[i].first)
+                return marks[i - 1].second + (marks[i].second - marks[i - 1].second) * (db - marks[i - 1].first) / (marks[i].first - marks[i - 1].first);
+        return marks[std::size (marks) - 1].second + (db - 3.0f) * 6.0f;
     }
 
     /** The arc meter's scale: its marks evenly spaced, -20 .. +3. */
@@ -2852,27 +2861,32 @@ namespace
         return 1.0f;
     }
 
+    const juce::Image* paintingBackdropImage = nullptr;
+
     void addMasteringDesigns (std::map<juce::String, Design>& d)
     {
         using namespace masteringfaces;
         for (const auto& f : faces())
         {
-            const auto s = std::min (0.8f, 1300.0f / (float) f.width);
+            const auto s = std::min (0.68f, 1300.0f / (float) f.width);
             Design c;
             c.knobs = KnobStyle::black;
-            c.label = juce::Colours::white; c.value = juce::Colours::white; c.accent = juce::Colour (0xfff2a43a); c.track = juce::Colours::black;
+            c.label = juce::Colours::white; c.value = juce::Colours::white; c.accent = juce::Colour (f.neon); c.track = juce::Colours::black;
             c.valueAbove = false;
             c.photoScale = s;
             c.width = juce::roundToInt ((float) f.width * s);
             c.height = juce::roundToInt ((float) f.height * s);
             c.meters = true;
+            c.skins = true;
+            c.skinNames = { skinNames[0], skinNames[1], skinNames[2] };
+            c.defaultSkin = 0;
+            c.clearSkin = 2;
             for (const auto& spot : f.spots)
                 c.spots.push_back ({ spot.id, { spot.x, spot.y }, spot.position });
             RF live;
             for (const auto& m : f.meters)
             {
-                const auto area = m.arc ? RF (m.px - m.r1, m.py - m.r1, m.r1 * 2.0f, m.r1 - m.r0 * 0.8f)
-                                        : RF (m.window[0], m.window[1], m.window[2], m.window[3]);
+                const auto area = RF (m.window[0], m.window[1], m.window[2], m.window[3]);
                 live = live.isEmpty() ? area : live.getUnion (area);
             }
             c.liveArea = live.transformedBy (juce::AffineTransform::scale (s)).getSmallestIntegerContainer().expanded (2);
@@ -2884,16 +2898,16 @@ namespace
                 sp.angles = it.angles;
                 switch (it.part)
                 {
-                    case Part::line:
-                    case Part::dot:
+                    case Part::knob:
                     {
-                        // the knob's body is in the panel, lit as drawn: only its pointer turns
-                        sp.drawn = it.part == Part::line ? Sprite::Drawn::line : Sprite::Drawn::spot;
-                        sp.ink = juce::Colour (0xfff6f6f0);
-                        sp.radius = it.r;
-                        if (it.part == Part::line) { sp.inner = 0.12f; sp.outer = 0.66f; sp.thickness = 0.07f; }
-                        else                       { sp.outer = 0.80f; sp.thickness = 0.14f; }
-                        sp.hitRadius = it.r * 1.1f;
+                        // the silver knob: its skirt painted, only its pointer and its glowing ring move
+                        const auto outer = it.r / 0.78f;
+                        sp.drawn = Sprite::Drawn::silver;
+                        sp.ink = it.skirt == 0xff000000u ? juce::Colour() : juce::Colour (it.skirt);
+                        sp.ring = juce::Colour (it.neon);
+                        sp.radius = outer;
+                        sp.rect = RF (it.x - outer, it.y - outer, outer * 2.0f, outer * 2.0f);
+                        sp.hitRadius = it.r * 1.15f;
                         c.controls.push_back (photoControl (it.id, Kind::knob, sp, s));
                         break;
                     }
@@ -2910,25 +2924,33 @@ namespace
                         sp.angles.clear();
                         c.controls.push_back (photoControl (it.id, Kind::hotspot, sp, s));
                         break;
-                    case Part::cycle:
-                        sp.cycle = true;
-                        sp.angles.clear();
-                        c.controls.push_back (photoControl (it.id, Kind::hotspot, sp, s));
-                        break;
                 }
             }
             c.paint = [&f, s] (juce::Graphics& g, R b, const EffectInfo& fx, const float* v, float)
             {
+                const auto skin = juce::jlimit (0, 2, paintingSkinValue);
                 g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
                 g.setOpacity (1.0f);
-                g.drawImage (skinImage (("mf_" + juce::String (f.key) + "_panel_jpg").toRawUTF8()), b.toFloat());
-                // The lights: each lit at its setting (the pilot lamps while the power's on)
+                if (skin == 2)
+                {
+                    // clear glass: what's behind the window (blurred), or the dark glass when nothing's given
+                    if (paintingBackdropImage != nullptr && paintingBackdropImage->isValid())
+                        g.drawImage (*paintingBackdropImage, b.toFloat(), juce::RectanglePlacement::fillDestination);
+                    else
+                    {
+                        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1b1d24), 0.0f, 0.0f, juce::Colour (0xff0b0c10), 0.0f, (float) b.getHeight(), false));
+                        g.fillRect (b);
+                    }
+                }
+                const auto name = "mn_" + juce::String (f.key) + "_" + juce::String (skin) + (skin == 2 ? "_png" : "_jpg");
+                g.drawImage (skinImage (name.toRawUTF8()), b.toFloat());
+                // The lights: each lit at its setting
+                const auto lamp = ("mn_lamp_" + juce::String::toHexString ((int) (f.neon & 0xffffffu)).paddedLeft ('0', 6) + "_png");
                 for (const auto& l : f.lights)
                 {
-                    if (juce::roundToInt (valueOf (fx, v, l.id, l.lamp ? 1.0f : -1.0f)) != l.value)
+                    if (juce::roundToInt (valueOf (fx, v, l.id, -1.0f)) != l.value)
                         continue;
-                    const auto size = l.lamp ? l.size * 4.0f : 64.0f * l.size;
-                    drawPart (g, l.image, RF (size, size).withCentre ({ l.x, l.y }), s);
+                    drawPart (g, lamp.toRawUTF8(), RF (44.0f, 44.0f).withCentre ({ l.x, l.y }), s);
                 }
                 // The needles
                 juce::Graphics::ScopedSaveState keep (g);
@@ -2937,33 +2959,29 @@ namespace
                 {
                     const auto db = meterAt (m.reading, -40.0f);
                     juce::Graphics::ScopedSaveState one (g);
+                    const auto window = RF (m.window[0], m.window[1], m.window[2], m.window[3]);
+                    juce::Path clip;
+                    clip.addRoundedRectangle (window, 18.0f);
+                    g.reduceClipRegion (clip);
+                    const juce::Point<float> pivot (m.px, m.py);
                     if (m.arc)
                     {
-                        juce::Path sector;
-                        sector.addCentredArc (m.px, m.py, m.r1, m.r1, 0.0f, juce::degreesToRadians (m.a0), juce::degreesToRadians (m.a1), true);
-                        sector.addCentredArc (m.px, m.py, m.r0, m.r0, 0.0f, juce::degreesToRadians (m.a1), juce::degreesToRadians (m.a0), false);
-                        sector.closeSubPath();
-                        g.reduceClipRegion (sector);
-                        const auto a = juce::degreesToRadians (m.a0 + 5.0f + (m.a1 - m.a0 - 10.0f) * arcPosition (db));
-                        const juce::Point<float> dir (std::sin (a), -std::cos (a)), pivot (m.px, m.py);
-                        g.setColour (juce::Colours::black.withAlpha (0.63f));
-                        g.drawLine ({ pivot + dir * (m.r0 + 2.0f) + juce::Point<float> (m.sx, m.sy), pivot + dir * (m.r1 - 8.0f) + juce::Point<float> (m.sx, m.sy) }, m.thin);
-                        g.setColour (juce::Colour (m.ink));
-                        g.drawLine ({ pivot + dir * (m.r0 + 2.0f), pivot + dir * (m.r1 - 8.0f) }, m.thin);
+                        const auto a = juce::degreesToRadians (-33.0f + 5.0f + 56.0f * arcPosition (db));
+                        const juce::Point<float> dir (std::sin (a), -std::cos (a));
+                        g.setColour (juce::Colours::black.withAlpha (0.6f));
+                        g.drawLine ({ pivot + dir * (m.r0 + 2.0f) + juce::Point<float> (2.0f, 3.0f), pivot + dir * (m.r1 - 8.0f) + juce::Point<float> (2.0f, 3.0f) }, 3.0f);
+                        g.setColour (juce::Colour (0xfffff2dc));
+                        g.drawLine ({ pivot + dir * (m.r0 + 2.0f), pivot + dir * (m.r1 - 8.0f) }, 3.0f);
                         continue;
                     }
-                    g.reduceClipRegion (RF (m.window[0], m.window[1], m.window[2], m.window[3]).getSmallestIntegerContainer());
-                    const auto a = juce::degreesToRadians (vuAngle (db, m.swing));
-                    const juce::Point<float> dir (std::sin (a), -std::cos (a)), pivot (m.px, m.py);
-                    const auto tip = pivot + dir * m.reach, mid = pivot + dir * m.thickTo;
-                    // its shadow (lit from above and behind: down and to the right), then the needle, then the hood over it
-                    g.setColour (juce::Colours::black.withAlpha (0.22f));
-                    g.drawLine ({ pivot.translated (m.sx, 0.0f), tip.translated (m.sx, m.sy) }, m.thick * 1.4f);
-                    g.setColour (juce::Colour (m.ink));
-                    g.drawLine ({ pivot, tip }, m.thin);
-                    g.drawLine ({ pivot, mid }, m.thick);
-                    g.setOpacity (1.0f);
-                    g.drawImage (skinImage (m.hood), RF (m.hoodRect[0], m.hoodRect[1], m.hoodRect[2], m.hoodRect[3]));
+                    const auto a = juce::degreesToRadians (pictureVuAngle (db));
+                    const juce::Point<float> dir (std::sin (a), -std::cos (a));
+                    const auto k = m.reach / 212.0f;
+                    const auto width = juce::jmax (1.2f, 2.2f * k);
+                    g.setColour (juce::Colours::black.withAlpha (0.25f));
+                    g.drawLine ({ pivot + juce::Point<float> (3.0f * k, 2.0f * k), pivot + dir * m.reach + juce::Point<float> (3.0f * k, 2.0f * k) }, width);
+                    g.setColour (juce::Colour (0xff1b1a18));
+                    g.drawLine ({ pivot, pivot + dir * m.reach }, width);
                 }
             };
             d[f.type] = c;
@@ -4051,14 +4069,47 @@ namespace
             const auto circuit = juce::jlimit (0, 6, juce::roundToInt (valueOf (fx, v, "model", 1.0f)));
             const auto& f = faces()[(size_t) circuit];
             const auto light = theme::glassLight();
-            g.fillAll (theme::console);
-            g.setColour (theme::toolbarDark);
-            g.fillRect (b.withHeight (46));
+            const bool clear = paintingSkinValue == 1;
+            const auto neon = f.tint.getSaturation() < 0.2f ? juce::Colour (0xffe6e8ec) : f.tint;
+            if (clear)
+            {
+                // clear glass: what's behind the window, blurred and dimmed a little
+                if (paintingBackdropImage != nullptr && paintingBackdropImage->isValid())
+                    g.drawImage (*paintingBackdropImage, b.toFloat(), juce::RectanglePlacement::fillDestination);
+                else
+                {
+                    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1b1d24), 0.0f, 0.0f, juce::Colour (0xff0b0c10), 0.0f, (float) b.getHeight(), false));
+                    g.fillRect (b);
+                }
+                g.fillAll (juce::Colour (0xff0a0c10).withAlpha (light ? 0.25f : 0.42f));
+                g.setColour (juce::Colours::black.withAlpha (0.25f));
+                g.fillRect (b.withHeight (46));
+            }
+            else
+            {
+                g.fillAll (theme::console);
+                g.setColour (theme::toolbarDark);
+                g.fillRect (b.withHeight (46));
+            }
 
-            // the face: glass tinted in the unit's colour, or dark brushed metal
+            // the face: glass tinted in the unit's colour, or dark brushed metal (clear: see-through, its rim in neon)
             const auto face = RF (8.0f, (float) faceTop, (float) b.getWidth() - 16.0f, (float) faceHeight);
-            look::drawGlassPanel (g, face, 16.0f);
-            if (f.metal)
+            if (clear)
+            {
+                g.setColour (neon.withAlpha (0.06f));
+                g.fillRoundedRectangle (face, 16.0f);
+                for (const auto [width, alpha] : { std::pair { 9.0f, 0.12f }, std::pair { 5.0f, 0.25f }, std::pair { 2.0f, 1.0f } })
+                {
+                    g.setColour ((width < 3.0f ? neon.interpolatedWith (juce::Colours::white, 0.45f) : neon).withAlpha (alpha));
+                    g.drawRoundedRectangle (face.reduced (1.0f), 16.0f, width);
+                }
+            }
+            else
+                look::drawGlassPanel (g, face, 16.0f);
+            if (clear)
+            {
+            }
+            else if (f.metal)
             {
                 juce::Graphics::ScopedSaveState keep (g);
                 juce::Path clip;
@@ -4116,8 +4167,12 @@ namespace
                 const auto proportion = juce::jlimit (0.0f, 1.0f, (angle - a0) / (a1 - a0));
                 const auto c = at (k.cx, k.cy);
                 const auto area = RF (k.d, k.d).withCentre (c);
-                look::drawGlassKnob (g, area.expanded (k.d * 0.18f), proportion, juce::degreesToRadians (-135.0f), juce::degreesToRadians (135.0f),
-                                     k.ring, k.fromCentre, true);
+                // the silver knob, its skirt in the circuit's colour (black on the plain faces), its ring in the knob's
+                const auto skirt = f.tint.getSaturation() < 0.2f ? juce::Colour() : f.tint.withMultipliedBrightness (0.72f).withMultipliedSaturation (0.85f);
+                if (! looks::drawSilverKnob (g, area.expanded (k.d * 0.18f), proportion, juce::degreesToRadians (-135.0f), juce::degreesToRadians (135.0f),
+                                             skirt, k.ring, k.fromCentre, true))
+                    look::drawGlassKnob (g, area.expanded (k.d * 0.18f), proportion, juce::degreesToRadians (-135.0f), juce::degreesToRadians (135.0f),
+                                         k.ring, k.fromCentre, true);
                 g.setColour (ink);
                 g.setFont (juce::FontOptions (k.d >= 60.0f ? 11.5f : 10.0f, juce::Font::bold));
                 g.drawText (k.label, RF (140.0f, 14.0f).withCentre ({ c.x, area.getBottom() + k.d * 0.18f + 9.0f }), juce::Justification::centred, false);
@@ -4341,6 +4396,11 @@ namespace
         }
         c.paint = glasscomp::paint;
         c.glassFace = true;
+        // its skins: Liquid Glass, or Clear (see-through glass, each circuit's tab its neon colour)
+        c.skins = true;
+        c.skinNames = { "Liquid Glass", "Clear" };
+        c.defaultSkin = 0;
+        c.clearSkin = 1;
         d["studioCompGlass"] = c;
     }
 
@@ -5688,6 +5748,8 @@ const juce::StringArray& classicSkinNames()
 }
 
 void setPaintingSkin (int skin) noexcept { paintingSkinValue = juce::jlimit (0, 5, skin); }
+void setPaintingBackdrop (const juce::Image* image) noexcept { paintingBackdropImage = image; }
+juce::StringArray skinNamesOf (const Design& d) { return d.skinNames.isEmpty() ? classicSkinNames() : d.skinNames; }
 
 const Design* designFor (const juce::String& type)
 {
@@ -5840,6 +5902,14 @@ void DesignLook::drawSprite (juce::Graphics& g, juce::Component& c, const Sprite
         const auto a = juce::degreesToRadians (absolute);
         const juce::Point<float> dir (std::sin (a), -std::cos (a));
         juce::Graphics::ScopedSaveState keep (g);
+        if (sp.drawn == Sprite::Drawn::silver)
+        {
+            const auto a0 = sp.angles.empty() ? -130.0f : sp.angles.front(), a1 = sp.angles.empty() ? 130.0f : sp.angles.back();
+            const auto proportion = (absolute - a0) / (std::abs (a1 - a0) < 1.0e-3f ? 1.0f : a1 - a0);
+            looks::drawSilverKnob (g, RF (r * 2.0f, r * 2.0f).withCentre (centre), proportion, juce::degreesToRadians (a0), juce::degreesToRadians (a1),
+                                   sp.ink, sp.ring, false, c.isEnabled());
+            return;
+        }
         if (sp.drawn == Sprite::Drawn::line)
         {
             const auto p0 = centre + dir * (r * sp.inner), p1 = centre + dir * (r * sp.outer);

@@ -34,6 +34,14 @@ public:
     /** `track` is invalid for the master strip. */
     ChannelStrip (MixerPanel& owner, juce::ValueTree project, juce::ValueTree track);
 
+    /** One of its menus (input, output, automation, send index, insert slot index, setting) shown at another
+        component: the Analog Console's keys open the mixer's own menus. */
+    void showMenuAt (const juce::String& which, juce::Component& target, int index = 0);
+    /** The insert slot's right-click menu (Open, Bypass, Replace, Move, Copy, Paste, Remove...). */
+    void showInsertMenu (int index, juce::Component& target);
+    /** The insert copied with Copy (Paste puts a copy of it in a slot). */
+    static juce::ValueTree& insertClipboard();
+
     void refresh();
     void pushLevels (float left, float right)
     {
@@ -141,6 +149,7 @@ private:
     juce::ValueTree insertAt (int slot) const;
     juce::ValueTree sendAt (int index) const;
     void showSendMenu (int index);
+    juce::Component* menuTarget = nullptr;   // (a menu shown for another component: showMenuAt)
     void setupConsoleKnob (juce::Slider& knob, const juce::Identifier& property, console::StripControl control,
                            double min, double max, const juce::String& name, const juce::String& suffix);
 

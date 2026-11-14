@@ -3577,16 +3577,22 @@ void MainComponent::openInsertWindow (const juce::ValueTree& insert)
         }
         void updateSkinButton()
         {
-            const auto skin = (int) insert.getProperty ("skin", effectdesign::defaultClassicSkin);
-            skinButton.setButtonText ("Skin: " + effectdesign::classicSkinNames()[juce::jlimit (0, 5, skin)]);
+            const auto* d = effectdesign::designFor (insert[ids::effect].toString());
+            if (d == nullptr) return;
+            const auto names = effectdesign::skinNamesOf (*d);
+            const auto skin = (int) insert.getProperty ("skin", d->defaultSkin);
+            skinButton.setButtonText ("Skin: " + names[juce::jlimit (0, names.size() - 1, skin)]);
         }
         void showSkins()
         {
             juce::PopupMenu menu;
-            const auto current = (int) insert.getProperty ("skin", effectdesign::defaultClassicSkin);
-            const auto& names = effectdesign::classicSkinNames();
+            const auto* d = effectdesign::designFor (insert[ids::effect].toString());
+            if (d == nullptr) return;
+            const auto current = (int) insert.getProperty ("skin", d->defaultSkin);
+            const auto names = effectdesign::skinNamesOf (*d);
+            const bool classic = d->skinNames.isEmpty();
             for (int k = 0; k < names.size(); ++k)
-                menu.addItem (names[k] + (k == 0 ? " (follows the app)" : ""), true, k == current, [this, k]
+                menu.addItem (names[k] + (classic && k == 0 ? " (follows the app)" : ""), true, k == current, [this, k]
                 {
                     undo.beginNewTransaction ("Skin");
                     insert.setProperty ("skin", k, &undo);
