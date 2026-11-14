@@ -1311,6 +1311,7 @@ void ChannelStrip::refresh()
     const auto gain = isMaster() ? (double) project.getProperty (ids::masterGain, 0.8)
                                  : (double) track.getProperty (ids::volume, 1.0);
     fader.setValue (gainToDb (gain), juce::dontSendNotification);
+    fader.setTint (isMaster() ? juce::Colour() : model::trackColour (track));   // (the cap in the track's colour)
     const auto db = gainToDb (gain);
     dbLabel.setText (db <= minDb + 0.01 ? juce::String ("-inf") : juce::String (db, 1), juce::dontSendNotification);
 

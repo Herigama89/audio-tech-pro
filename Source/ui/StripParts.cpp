@@ -380,6 +380,55 @@ float Fader::yForValue (double value)
 
 void Fader::paint (juce::Graphics& g)
 {
+    if (tint.isTransparent() || getWidth() <= 0 || getHeight() <= 0)
+    {
+        paintFader (g);
+        return;
+    }
+    // Drawn as the theme draws it, then the cap (the light, grey parts round it) painted in the track's colour,
+    // keeping its shine and shading; the dark slot and scale stay as they are.
+    const auto scale = juce::jmax (1.0f, pictures::scaleOf (g));
+    juce::Image image (juce::Image::ARGB, juce::roundToInt ((float) getWidth() * scale), juce::roundToInt ((float) getHeight() * scale), true);
+    {
+        juce::Graphics ig (image);
+        ig.addTransform (juce::AffineTransform::scale (scale));
+        paintFader (ig);
+    }
+    const auto cy = yForValue (getValue());
+    const auto half = capHeight() * 0.85f;
+    const auto top = juce::jlimit (0, image.getHeight(), juce::roundToInt ((cy - half) * scale));
+    const auto bottom = juce::jlimit (0, image.getHeight(), juce::roundToInt ((cy + half) * scale));
+    if (bottom > top)
+    {
+        juce::Image::BitmapData data (image, 0, top, image.getWidth(), bottom - top, juce::Image::BitmapData::readWrite);
+        const auto amount = isEnabled() ? 1.0f : 0.5f;
+        const float tr = tint.getFloatRed(), tg = tint.getFloatGreen(), tb = tint.getFloatBlue();
+        for (int y = 0; y < data.height; ++y)
+            for (int x = 0; x < data.width; ++x)
+            {
+                const auto c = data.getPixelColour (x, y);
+                if (c.getAlpha() < 8)
+                    continue;
+                const auto r = c.getFloatRed(), gr = c.getFloatGreen(), b = c.getFloatBlue();
+                const auto hi = juce::jmax (r, gr, b), lo = juce::jmin (r, gr, b);
+                const auto lum = (r + gr + b) / 3.0f;
+                if (hi - lo > 0.16f || lum < 0.2f)
+                    continue;   // (the slot, the scale, anything already coloured)
+                const auto k = juce::jlimit (0.0f, 1.0f, (lum - 0.2f) / 0.15f) * amount;
+                const auto shade = lum * 1.75f;
+                const auto mixTo = [k] (float from, float to) { return from + (juce::jlimit (0.0f, 1.0f, to) - from) * k; };
+                data.setPixelColour (x, y, juce::Colour::fromFloatRGBA (mixTo (r, tr * shade + 0.25f * juce::jmax (0.0f, lum - 0.75f) * 4.0f),
+                                                                        mixTo (gr, tg * shade + 0.25f * juce::jmax (0.0f, lum - 0.75f) * 4.0f),
+                                                                        mixTo (b, tb * shade + 0.25f * juce::jmax (0.0f, lum - 0.75f) * 4.0f),
+                                                                        c.getFloatAlpha()));
+            }
+    }
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+    g.drawImage (image, getLocalBounds().toFloat());
+}
+
+void Fader::paintFader (juce::Graphics& g)
+{
     const auto bounds = getLocalBounds().toFloat();
     const auto cx = bounds.getCentreX();
 

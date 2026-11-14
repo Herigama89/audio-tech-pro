@@ -204,7 +204,7 @@ public:
 private:
     int indexAt (juce::Point<int> p) const;
     juce::Rectangle<int> cell (int index) const;
-    static constexpr int columns = 8, cellSize = 24, gap = 4;
+    static constexpr int columns = 16, cellSize = 22, gap = 4;
     std::function<void (juce::Colour)> pick;
     int hover = -1;
 };

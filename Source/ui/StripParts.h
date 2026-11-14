@@ -136,6 +136,8 @@ namespace riff::strip
     public:
         Fader();
         void paint (juce::Graphics&) override;
+        /** The cap painted in a colour (the track's), its light and shade kept; transparent: as the theme draws it. */
+        void setTint (juce::Colour c) { if (c != tint) { tint = c; repaint(); } }
 
     protected:
         float dragTravel() const override { return (float) getHeight() - capHeight(); }
@@ -146,5 +148,9 @@ namespace riff::strip
         /** Where the cap's centre sits for a value, in this component. */
         float yForValue (double value);
         float capHeight() const;
+
+    private:
+        void paintFader (juce::Graphics&);
+        juce::Colour tint;
     };
 }

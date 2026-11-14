@@ -1347,18 +1347,21 @@ void moveTracks (juce::ValueTree project, const juce::Array<juce::ValueTree>& tr
 
 const juce::Array<juce::Colour>& trackPalette()
 {
-    // Logic-like colours: the console ones first, then lighter and deeper versions.
+    // Rows of 16: the console colours and eight more, then sixteen hues round the wheel in five shades
+    // (pastel, light, full, deep, dark), then greys from white to black.
     static const juce::Array<juce::Colour> colours = []
     {
         juce::Array<juce::Colour> c;
         for (const auto& p : palette)
             c.add (p);
-        for (const auto& p : palette)
-            c.add (p.brighter (0.45f));
-        for (const auto& p : palette)
-            c.add (p.darker (0.45f));
-        c.add (juce::Colour (0xff8c8c8c));
-        c.add (juce::Colour (0xff5a5f73));
+        for (const auto argb : { 0xffe6d33cu, 0xff9ccc3au, 0xff2bb8d6u, 0xff5aa7ffu, 0xff5b4fd6u, 0xffd447c4u, 0xff8a5a32u, 0xff5f7a8cu })
+            c.add (juce::Colour (argb));
+        const float shades[][2] { { 0.35f, 1.0f }, { 0.55f, 0.95f }, { 0.78f, 0.86f }, { 0.85f, 0.66f }, { 0.85f, 0.46f } };
+        for (const auto& shade : shades)
+            for (int h = 0; h < 16; ++h)
+                c.add (juce::Colour::fromHSV ((float) h / 16.0f, shade[0], shade[1], 1.0f));
+        for (int k = 0; k < 16; ++k)
+            c.add (juce::Colour::greyLevel (0.95f - 0.85f * (float) k / 15.0f));
         return c;
     }();
     return colours;
