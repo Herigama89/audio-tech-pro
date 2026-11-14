@@ -998,6 +998,63 @@ public:
         return 0;
     }
 
+    /** Input FX on a strip, its window, Console mode and the Analog Console (Liquid Glass). */
+    int consolesOnly()
+    {
+        out.createDirectory();
+        audioFolder = out.getChildFile ("demo-audio");
+        audioFolder.createDirectory();
+        MainComponent main (false);
+        main.setSize (1440, 920);
+        buildDemoProject (main);
+        theme::Settings t;
+        t.skin = theme::Skin::glassDark;
+        main.applyTheme (t);
+        // Input FX on the first track (the 737, then the 76), inserts on a few others
+        juce::Array<juce::ValueTree> tracks;
+        for (const auto& c : main.project)
+            if (c.hasType (ids::TRACK))
+                tracks.add (c);
+        if (tracks.size() > 2)
+        {
+            auto input = model::chainFor (main.project, model::inputOwner (tracks[0][ids::id].toString()));
+            model::addBuiltinInsert (input, "classicTube", 0, nullptr);
+            model::addBuiltinInsert (input, "classicFet", 1, nullptr);
+            tracks[0].setProperty (ids::inputFxUltra, true, nullptr);
+            model::addBuiltinInsert (model::chainFor (main.project, tracks[0][ids::id].toString()), "classicOpto", 0, nullptr);
+            model::addBuiltinInsert (model::chainFor (main.project, tracks[1][ids::id].toString()), "consoleEq", 0, nullptr);
+            model::addBuiltinInsert (model::chainFor (main.project, tracks[1][ids::id].toString()), "classicPunch", 1, nullptr);
+            tracks[1].setProperty (ids::consoleHF, 4.0, nullptr);
+            tracks[1].setProperty (ids::consoleDynamics, 5.0, nullptr);
+        }
+        main.player.rebuildNow();
+        main.showMixer();
+        main.mixer.relayoutStrips();
+        pump (main, 400);
+        save (main, "consoles-mixer.png");
+        if (tracks.isEmpty())
+            return 1;
+        {
+            InputFxPanel panel (main.consoleHost, main.project, tracks[0]);
+            panel.setSize (1000, 560);
+            pump (main, 300);
+            save (panel, "consoles-inputfx.png");
+        }
+        {
+            ConsoleView view (main.consoleHost, main.project);
+            view.setSize (1600, 1100);
+            pump (main, 400);
+            save (view, "consoles-console.png");
+        }
+        {
+            AnalogConsole analog (main.consoleHost, main.project);
+            analog.setSize (1600, 1180);
+            pump (main, 400);
+            save (analog, "consoles-analog.png");
+        }
+        return 0;
+    }
+
     int mixerOnly()
     {
         out.createDirectory();
@@ -2926,6 +2983,12 @@ int main (int argc, char* argv[])
     if (argc > 2 && juce::String (argv[1]) == "automix")
     {
         const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).automixOnly();
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        return r;
+    }
+    if (argc > 2 && juce::String (argv[1]) == "consoles")
+    {
+        const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).consolesOnly();
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         return r;
     }

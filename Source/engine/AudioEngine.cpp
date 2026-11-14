@@ -518,6 +518,13 @@ std::pair<float, float> AudioEngine::takeTrackLevel (int slot) noexcept
     return { trackPeaks[(size_t) slot * 2].exchange (0.0f), trackPeaks[(size_t) slot * 2 + 1].exchange (0.0f) };
 }
 
+std::pair<float, float> AudioEngine::takeTrackLevelForConsole (int slot) noexcept
+{
+    if (! juce::isPositiveAndBelow (slot, PlaybackGraph::maxTracks))
+        return { 0.0f, 0.0f };
+    return { otherPeaks[(size_t) slot * 2].exchange (0.0f), otherPeaks[(size_t) slot * 2 + 1].exchange (0.0f) };
+}
+
 juce::String AudioEngine::bounce (const juce::File& file, double startSeconds, double endSeconds, int bitDepth,
                                   std::function<bool (double)> progress)
 {
@@ -846,6 +853,7 @@ bool AudioEngine::startRecording (const std::vector<RecordRequest>& requests, ju
             recordSourceSlot[(size_t) request.sourceSlot].store (true);   // (played live, so the take hears it as it is)
         take->printSlot = request.printSlot;
         take->printLatency = juce::jmax (0, request.printLatency);
+        take->dry = request.dry;
 
         // Four seconds of FIFO between the audio thread and the disk thread.
         take->writer = std::make_unique<juce::AudioFormatWriter::ThreadedWriter> (writer.release(), diskThread,
@@ -901,7 +909,7 @@ std::vector<AudioEngine::FinishedTake> AudioEngine::stopRecording()
         }
 
         if (written > 0 && start >= 0)
-            finished.push_back ({ take->trackId, take->file, start, written, false, {} });
+            finished.push_back ({ take->trackId, take->file, start, written, false, {}, take->dry });
         else
             take->file.deleteFile(); // nothing was captured
     }
@@ -1347,7 +1355,7 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
             {
                 for (size_t k = 0; k < chunk->peaks.size(); ++k)   // (its tracks' levels, now that it's heard)
                     if (chunk->peaks[k] > 0.0f)
-                        storeMax (trackPeaks[k], chunk->peaks[k]);
+                        storeMax (trackPeaks[k], chunk->peaks[k]), storeMax (otherPeaks[k], chunk->peaks[k]);
                 // (which tracks came from it, and how far ahead its thread is: their plugins' meters wait that long)
                 for (size_t t = 0; t < slotRenderedAhead.size(); ++t)
                     slotRenderedAhead[t].store (chunk->peaks[2 * t] > 0.0f || chunk->peaks[2 * t + 1] > 0.0f, std::memory_order_relaxed);
@@ -1638,7 +1646,10 @@ void AudioEngine::printInputs (const PlaybackGraph& graph, Pass& pass, const flo
         return;
     for (const auto& track : graph.tracks)
     {
-        if (! track.armed || track.printInserts.empty() || ! juce::isPositiveAndBelow (track.slot, PlaybackGraph::maxTracks)
+        // Input FX (armed or heard: on the way in, as a preamp would be), then printed inserts (armed)
+        const bool inputFx = ! track.inputFx.empty() && (track.armed || track.monitorInput);
+        const bool printing = track.armed && ! track.printInserts.empty();
+        if (! (inputFx || printing) || ! juce::isPositiveAndBelow (track.slot, PlaybackGraph::maxTracks)
             || track.inputTrackSlot >= 0 || track.isInstrument || track.isBus)
             continue;
         auto* l = slotInputs.getWritePointer (track.slot * 2);
@@ -1653,12 +1664,23 @@ void AudioEngine::printInputs (const PlaybackGraph& graph, Pass& pass, const flo
             juce::FloatVectorOperations::copy (r, inputs[second] + inputOffset, n);
         else
             juce::FloatVectorOperations::copy (r, l, n);
-        for (const auto& effect : track.printInserts)
-        {
-            effect->setPosition (pass.position, pass.playing, pass.bpm);
-            effect->process (l, r, n);
-            effect->tapOutput (l, r, n);
-        }
+        if (inputFx)
+            for (size_t k = 0; k < track.inputFx.size(); ++k)
+            {
+                if (track.inputFxUltra && k < track.inputFxLatency.size() && track.inputFxLatency[k] > track.inputFxSkip)
+                    continue;   // (Ultra Low: too slow to monitor through; left out while tracking)
+                const auto& effect = track.inputFx[k];
+                effect->setPosition (pass.position, pass.playing, pass.bpm);
+                effect->process (l, r, n);
+                effect->tapOutput (l, r, n);
+            }
+        if (printing)
+            for (const auto& effect : track.printInserts)
+            {
+                effect->setPosition (pass.position, pass.playing, pass.bpm);
+                effect->process (l, r, n);
+                effect->tapOutput (l, r, n);
+            }
         slotInputReady[(size_t) track.slot] = true;
     }
 }
@@ -2321,6 +2343,8 @@ bool AudioEngine::processTrack (const PlaybackGraph::Track& track, Pass& pass, c
     {
         storeMax (trackPeaks[(size_t) track.slot * 2], peakL);
         storeMax (trackPeaks[(size_t) track.slot * 2 + 1], peakR);
+        storeMax (otherPeaks[(size_t) track.slot * 2], peakL);
+        storeMax (otherPeaks[(size_t) track.slot * 2 + 1], peakR);
     }
     return true;
 }

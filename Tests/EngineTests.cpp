@@ -2551,6 +2551,71 @@ TEST_CASE ("Printed inserts: the input is recorded through them, and playback le
     CHECK_THAT (heard[40000], WithinAbs (0.9f, 2e-3));
 }
 
+TEST_CASE ("Input FX: the input recorded through it (Wet), the dry kept beside it (Both), and swapped in on the region", "[engine][record]")
+{
+    Fixture f;
+    EffectRack effects (f.rack.getFormatManager());
+    ProjectPlayer player (f.engine, f.cache, &f.rack, &effects);
+    f.project.setProperty (ids::masterGain, 1.0, nullptr);
+
+    auto track = model::addTrack (f.project, "Vox", nullptr);
+    track.setProperty (ids::armed, true, nullptr);
+    auto limiter = model::addBuiltinInsert (model::chainFor (f.project, model::inputOwner (track[ids::id].toString())), "limiter", 0, nullptr);
+    limiter.setProperty ("ceiling", -12.0, nullptr);
+    player.setProject (f.project);
+
+    // Wet, with the dry beside it (as MainComponent asks for Both)
+    const auto wetFile = f.temp.dir.getChildFile ("wet.wav"), dryFile = f.temp.dir.getChildFile ("dry.wav");
+    AudioEngine::RecordRequest wet { track[ids::id].toString(), wetFile, 0, 1, false };
+    wet.printSlot = player.slotOf (track[ids::id].toString());
+    auto dry = wet;
+    dry.file = dryFile;
+    dry.printSlot = -1;
+    dry.dry = true;
+    juce::String error;
+    REQUIRE (f.engine.startRecording ({ wet, dry }, error));
+    f.engine.play();
+    renderWithInput (f.engine, 48000, 0.8f, 2, nullptr);
+    const auto takes = f.engine.stopRecording();
+    REQUIRE (takes.size() == 2);
+    CHECK (takes[0].dry != takes[1].dry);
+
+    juce::AudioBuffer<float> data (1, 1000);
+    auto wetReader = openReader (f.engine, wetFile);
+    REQUIRE (wetReader != nullptr);
+    wetReader->read (&data, 0, 1000, 30000, true, false);
+    CHECK_THAT (data.getSample (0, 500), WithinAbs (juce::Decibels::decibelsToGain (-12.0f), 2e-3));   // through the limiter
+    auto dryReader = openReader (f.engine, dryFile);
+    REQUIRE (dryReader != nullptr);
+    dryReader->read (&data, 0, 1000, 30000, true, false);
+    CHECK_THAT (data.getSample (0, 500), WithinAbs (0.8f, 2e-3));   // as it came in
+
+    // The dry recording swapped in on a region, and back
+    auto region = model::addRegion (track, wetFile, 0.0, 1.0, nullptr);
+    region.setProperty (ids::dryFile, dryFile.getFullPathName(), nullptr);
+    region.setProperty (ids::dryShift, -0.01, nullptr);
+    region.setProperty (ids::offset, 0.5, nullptr);
+    model::useDryRecording (region, true, nullptr);
+    CHECK (region[ids::file].toString() == dryFile.getFullPathName());
+    CHECK_THAT ((double) region[ids::offset], WithinAbs (0.49, 1e-9));
+    model::useDryRecording (region, false, nullptr);
+    CHECK (region[ids::file].toString() == wetFile.getFullPathName());
+    CHECK_THAT ((double) region[ids::offset], WithinAbs (0.5, 1e-9));
+
+    // Bypassed (Input FX off): nothing on the input
+    track.setProperty (ids::inputFxOn, false, nullptr);
+    player.setProject (f.project);
+    const auto offFile = f.temp.dir.getChildFile ("off.wav");
+    AudioEngine::RecordRequest off { track[ids::id].toString(), offFile, 0, 1, false };
+    REQUIRE (f.engine.startRecording ({ off }, error));
+    renderWithInput (f.engine, 48000, 0.8f, 2, nullptr);
+    f.engine.stopRecording();
+    auto offReader = openReader (f.engine, offFile);
+    REQUIRE (offReader != nullptr);
+    offReader->read (&data, 0, 1000, 30000, true, false);
+    CHECK_THAT (data.getSample (0, 500), WithinAbs (0.8f, 2e-3));
+}
+
 TEST_CASE ("A channel can play straight to the interface's other outputs", "[engine]")
 {
     Fixture f;

@@ -104,9 +104,13 @@ public:
     static constexpr int preampRowHeight = 18;   // the interface's preamp (48V, gain), under the Input slot, when it's connected
     static inline bool preampRows = false;
     static int preampRow() { return preampRows ? preampRowHeight : 0; }
+    /** Input FX (under the Input slot): a heading and its plug-ins, or one empty slot; as many rows as the fullest strip needs. */
+    static constexpr int maxInputFxRows = 5;
+    static inline int inputFxRows = 1;
+    static int inputFxHeight() { return inputFxRows * insertRowHeight + 2; }
     static int minimumHeightFor (bool console, int inserts, int sends)
     {
-        return (console ? topHeight : compactTopHeight) + 6 + 2 * ioRow + preampRow() + inserts * insertRowHeight + 6 + sends * sendRowHeight
+        return (console ? topHeight : compactTopHeight) + 6 + 2 * ioRow + preampRow() + inputFxHeight() + inserts * insertRowHeight + 6 + sends * sendRowHeight
              + ioRow + tapeRow + automationRow + 100 + 20 + nameHeight + (theme::stripVu() ? vuBand : 0);
     }
 
@@ -231,6 +235,10 @@ private:
     void updateConsoleTag();
     juce::Label dynLabel;
 
+    juce::OwnedArray<juce::TextButton> inputFxKeys;   // Input FX: its heading (opens its window), its plug-ins, an empty slot
+    void refreshInputFx();
+    void inputFxClicked (int row, bool menu);
+    bool hasInputFx() const;
     juce::OwnedArray<juce::TextButton> slots;
     int dropSlot = -1;   // where a dragged insert would land (drawn while dragging)
     int slotAt (juce::Point<int> position) const;
@@ -339,6 +347,13 @@ public:
 
     /** Open the window of an insert. */
     std::function<void (juce::ValueTree insert)> onOpenInsert;
+
+    /** Input FX: a track's input chain window, and its round trip now (ms). */
+    std::function<void (juce::ValueTree track)> onOpenInputFx;
+    std::function<double (juce::ValueTree track)> inputFxRoundTrip;
+
+    /** The header's Console and Analog keys: every channel's full strip, and the whole mixer as a large-format desk. */
+    std::function<void()> onOpenConsoleView, onOpenAnalogConsole;
 
     /** Show the "choose an effect" menu for a slot (owner is a track id or "master"). */
     std::function<void (const juce::String& owner, int slot, juce::ValueTree existing, juce::Component& target)> onChooseEffect;
@@ -481,7 +496,8 @@ private:
     juce::TextButton busCompButton { "Bus Comp" };
     juce::TextButton automixButton { "Automix" }; // show the Master Bus Compressor beside the master
     juce::TextButton commentsButton { "Comments" };   // the notes boxes under the strips, on or off
-    juce::TextButton zonesButton { "Zones" };   // where the buses (and any channel you pin) sit: left, right or with the tracks
+    juce::TextButton zonesButton { "Zones" };
+    juce::TextButton consoleViewButton { "Console" }, analogButton { "Analog" };   // where the buses (and any channel you pin) sit: left, right or with the tracks
     void showZonesMenu();
     float stripScale() const;
     juce::Array<juce::PluginDescription> stripCandidates;

@@ -2622,6 +2622,16 @@ void ArrangeCanvas::showRegionMenu (juce::ValueTree region)
         if (! midi)
         {
             menu.addItem ("Audio File Editor (normalize, reverse, time stretch, transpose)...", [this, region] { if (onOpenAudioEditor) onOpenAudioEditor (region); });
+            // Input FX recorded with Both: the dry recording beside it, to swap in (and back)
+            if (region[ids::dryFile].toString().isNotEmpty())
+            {
+                const bool usingDry = region[ids::wetFile].toString().isNotEmpty();
+                menu.addItem (usingDry ? "Input FX: Use the Recording Through Input FX" : "Input FX: Use the Dry Recording", [this, region]
+                {
+                    undoManager.beginNewTransaction ("Input FX recording");
+                    model::useDryRecording (region, region[ids::wetFile].toString().isEmpty(), &undoManager);
+                });
+            }
             juce::PopupMenu fades;
             const auto setFades = [this, region] (double in, double out)
             {

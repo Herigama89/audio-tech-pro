@@ -12,6 +12,7 @@
 #include "ui/TimelineState.h"
 #include "ui/WaveformCache.h"
 #include "ui/TrackHeaders.h"
+#include "ui/ConsoleViews.h"
 #include "ui/ArrangeCanvas.h"
 #include "ui/LevelMeter.h"
 #include "ui/PianoRoll.h"
@@ -537,6 +538,20 @@ private:
     // the instruments they show are destroyed.
     std::map<juce::String, std::unique_ptr<EditorWindow>> editorWindows;
     juce::Component::SafePointer<juce::Component> lastInsertWindow;   // new plugin windows open cascaded from it
+
+    // Input FX, Console and the Analog Console: their windows, and what they need from here
+    ConsoleHost consoleHost;
+    void setUpConsoleHost();
+    std::unique_ptr<juce::Component> makeLiveFace (const juce::ValueTree& insert);
+    void openInputFx (juce::ValueTree track);
+    void openConsoleView();
+    void openAnalogConsole();
+    void closeConsoleWindows();
+    void setUltraLowBuffer (bool ultra);
+    std::map<juce::String, std::unique_ptr<EditorWindow>> inputFxWindows;
+    std::unique_ptr<EditorWindow> consoleWindow, analogWindow;
+    float consoleMasterL = 0.0f, consoleMasterR = 0.0f;
+    int bufferBeforeUltra = 0;
 
     // The Performance meter (CPU and disk) and its window
     PerformanceMeter performanceMeter;

@@ -455,6 +455,11 @@ MainComponent::MainComponent (bool openAudioDevice)
     InsertBar::applyState = [this] (const juce::ValueTree& insert, const juce::String& state) { effectRack.applyState (insert[ids::id].toString(), state); };
     effectRack.onEffectReplaced = [this] (const juce::String& insertId) { editorWindows.erase (insertId); };
     mixer.onOpenInsert = [this] (juce::ValueTree insert) { openInsertWindow (insert); };
+    setUpConsoleHost();
+    mixer.onOpenInputFx = [this] (juce::ValueTree track) { openInputFx (track); };
+    mixer.inputFxRoundTrip = [this] (juce::ValueTree track) { return InputFxPanel::roundTripMs (consoleHost, project, track); };
+    mixer.onOpenConsoleView = [this] { openConsoleView(); };
+    mixer.onOpenAnalogConsole = [this] { openAnalogConsole(); };
     mixer.onCopyInsertToSelected = [this] (juce::ValueTree insert) { copyInsertToSelected (insert); };
     mixer.onStorePluginStates = [this] { effectRack.storePluginStates (model::mixerOf (project)); };
     mixer.onMoveInsert = [this] (juce::ValueTree insert, const juce::String& toOwner, int slot, bool copy)
@@ -936,6 +941,7 @@ MainComponent::~MainComponent()
     commandManager.getKeyMappings()->removeChangeListener (this);
     removeKeyListener (commandManager.getKeyMappings());
 
+    closeConsoleWindows();
     editorWindows.clear();
     scannerWindow.reset();
 
@@ -1400,6 +1406,7 @@ void MainComponent::setProject (juce::ValueTree newProject, const juce::File& fi
 
     closePianoRoll();
     closeAudioEditor();
+    closeConsoleWindows();
     editorWindows.clear();
     if (notepadPanel != nullptr)
         notepadPanel->setProject (newProject);
@@ -2307,6 +2314,29 @@ void MainComponent::beginRecording()
                 if (auto* plugin = effectRack.getPlugin (insert[ids::id].toString()))
                     request.printLatency += plugin->getLatencySamples();
             }
+        // Input FX: recorded through (Wet), or the input as it comes (Dry), or both (the dry kept beside the take)
+        const auto inputFx = model::insertsOf (model::findChain (project, model::inputOwner (track[ids::id].toString())));
+        const auto record = track.getProperty (ids::inputFxRecord, "wet").toString();
+        if ((bool) track.getProperty (ids::inputFxOn, true) && ! inputFx.isEmpty() && record != "dry")
+        {
+            request.printSlot = player.slotOf (track[ids::id].toString());
+            const auto ultra = (bool) track.getProperty (ids::inputFxUltra, false);
+            const auto skip = (double) track.getProperty (ids::inputFxSkipMs, 1.0) * engine.getSampleRate() / 1000.0;
+            for (const auto& insert : inputFx)
+                if (! (bool) insert[ids::bypass])
+                    if (auto* plugin = effectRack.getPlugin (insert[ids::id].toString()))
+                        if (const auto latency = plugin->getLatencySamples(); ! ultra || latency <= skip)
+                            request.printLatency += latency;
+            if (record == "both")
+            {
+                auto dry = request;
+                dry.file = request.file.getSiblingFile (request.file.getFileNameWithoutExtension() + " (dry)" + request.file.getFileExtension());
+                dry.printSlot = -1;
+                dry.printLatency = 0;
+                dry.dry = true;
+                requests.push_back (dry);
+            }
+        }
         requests.push_back (request);
     }
 
@@ -2380,11 +2410,25 @@ void MainComponent::finishRecording()
     const auto totalLatency = latency + recordingOffsetMs / 1000.0 + engine.getPlaybackLatencySamples() / rate;
     const auto cycleLength = recordCycleEnd - recordCycleStart;
 
+    std::map<juce::String, const AudioEngine::FinishedTake*> dryTakes;   // (Input FX's Both: the dry recordings, by track)
+    for (const auto& take : takes)
+        if (take.dry)
+            dryTakes[take.trackId] = &take;
+
     for (const auto& take : takes)
     {
         auto track = model::findById (project, take.trackId);
-        if (! track.isValid())
-            continue; // the track was deleted while recording; the file stays on disk
+        if (! track.isValid() || take.dry)
+            continue; // the track was deleted while recording (the file stays on disk), or the dry one beside a take
+        // (the dry recording beside this take, and how much earlier it is)
+        const auto markDry = [&] (juce::ValueTree region)
+        {
+            if (const auto it = dryTakes.find (take.trackId); it != dryTakes.end() && region.isValid())
+            {
+                region.setProperty (ids::dryFile, it->second->file.getFullPathName(), &undoManager);
+                region.setProperty (ids::dryShift, (double) (take.startSample - it->second->startSample) / rate, &undoManager);
+            }
+        };
 
         if (take.isMidi)
         {
@@ -2408,6 +2452,7 @@ void MainComponent::finishRecording()
                 continue;
             auto region = model::addRegion (track, take.file, p.timelineStart, length, &undoManager);
             region.setProperty (ids::offset, p.fileOffset, &undoManager);
+            markDry (region);
             replaceUnder (region);
             last = region;
             continue;
@@ -2497,6 +2542,22 @@ void MainComponent::returnToStart()
 //==============================================================================
 void MainComponent::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
+    // Input FX's gain link: the chosen knob of the input chain turns the interface's own preamp
+    if (tree.hasType (ids::INSERT) && interfaceControl.isConnected())
+        if (const auto owner = tree.getParent()[ids::owner].toString(); owner.startsWith ("input:"))
+            if (const auto track = project.getChildWithProperty (ids::id, owner.fromFirstOccurrenceOf (":", false, false)); track.hasType (ids::TRACK)
+                && track[ids::inputFxLink].toString() == tree[ids::id].toString() + "|" + property.toString())
+                if (const auto* info = findBuiltInEffect (tree[ids::effect].toString()))
+                    for (const auto& param : info->params)
+                        if (param.id == property.toString() && param.max > param.min)
+                        {
+                            const auto t = juce::jlimit (0.0f, 1.0f, ((float) tree[property] - param.min) / (param.max - param.min));
+                            const int first = (int) track.getProperty (ids::input, 0) + 1;
+                            for (int c = first; c <= first + ((bool) track.getProperty (ids::inputStereo, false) ? 1 : 0); ++c)
+                                if (const auto p = interfaceControl.preamp (c); p.present)
+                                    interfaceControl.setGain (c, p.minDb + t * (p.maxDb - p.minDb));
+                        }
+
     if (tree == project && (property == ids::tempo || property == ids::masterGain || property == ids::timeSigNumerator
                             || property == ids::keyRoot || property == ids::keyMinor))
         refreshProjectControls();
@@ -2648,6 +2709,8 @@ void MainComponent::timerCallback()
     inputMeter.push (levels.inL, levels.inR);
     outputMeter.push (levels.outL, levels.outR);
     mixer.setMasterLevels (levels.outL, levels.outR);
+    consoleMasterL = juce::jmax (consoleMasterL, levels.outL);
+    consoleMasterR = juce::jmax (consoleMasterR, levels.outR);
     }
     mixerButton.setToggleState (mixer.isVisible(), juce::dontSendNotification);
     editorButton.setToggleState (pianoRoll.isVisible(), juce::dontSendNotification);
@@ -4048,6 +4111,163 @@ void MainComponent::showAudioMenu()
     menu.addSeparator();
     menu.addCommandItem (&commandManager, commands::keyCommands);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&settingsButton));
+}
+
+//==============================================================================
+// Input FX, Console and the Analog Console
+//==============================================================================
+void MainComponent::setUpConsoleHost()
+{
+    consoleHost.undo = &undoManager;
+    consoleHost.engine = &engine;
+    consoleHost.player = &player;
+    consoleHost.mixer = &mixer;
+    consoleHost.makeFace = [this] (juce::ValueTree insert) { return makeLiveFace (insert); };
+    consoleHost.openInsert = [this] (juce::ValueTree insert) { openInsertWindow (insert); };
+    consoleHost.chooseEffect = [this] (const juce::String& owner, int slot, juce::ValueTree existing, juce::Component& target)
+    {
+        if (mixer.onChooseEffect)
+            mixer.onChooseEffect (owner, slot, existing, target);
+    };
+    consoleHost.openLatencyCalibration = [this] { showLatencyCalibration(); };
+    consoleHost.setUltraLowBuffer = [this] (bool ultra) { setUltraLowBuffer (ultra); };
+    consoleHost.deviceRoundTripMs = [this]
+    {
+        const auto rate = engine.getSampleRate();
+        return rate > 0.0 ? engine.getRoundTripLatencySamples() * 1000.0 / rate : 0.0;
+    };
+    consoleHost.latencyOf = [this] (const juce::String& insertId)
+    {
+        if (auto* plugin = effectRack.getPlugin (insertId))
+            return plugin->getLatencySamples();
+        if (auto* effect = effectRack.getBuiltIn (insertId))
+            return effect->getLatencySamples();
+        return 0;
+    };
+    consoleHost.sampleRate = [this] { return engine.getSampleRate() > 0.0 ? engine.getSampleRate() : 48000.0; };
+    consoleHost.masterLevels = [this]
+    {
+        const std::pair<float, float> levels { consoleMasterL, consoleMasterR };
+        consoleMasterL = consoleMasterR = 0.0f;
+        return levels;
+    };
+}
+
+std::unique_ptr<juce::Component> MainComponent::makeLiveFace (const juce::ValueTree& insert)
+{
+    // A built-in effect's face, live: its meters move, its knobs are the insert's (a plug-in draws its own window)
+    if (insert[ids::kind].toString() == model::pluginKind)
+        return nullptr;
+    auto panel = std::make_unique<EffectPanel> (insert, undoManager);
+    const auto id = insert[ids::id].toString();
+    panel->setLiveValue ([this, id]
+    {
+        auto* effect = effectRack.getBuiltIn (id);
+        return effect != nullptr ? effect->displayValue() : 0.0f;
+    });
+    panel->setMeterSource ([this, id] (float* dest, int capacity)
+    {
+        auto* effect = effectRack.getBuiltIn (id);
+        return effect != nullptr ? effect->readMeters (dest, capacity) : 0;
+    });
+    return panel;
+}
+
+void MainComponent::openInputFx (juce::ValueTree track)
+{
+    const auto id = track[ids::id].toString();
+    if (auto it = inputFxWindows.find (id); it != inputFxWindows.end())
+    {
+        it->second->toFront (true);
+        return;
+    }
+    auto closer = [this, id]
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this), id]
+        {
+            if (safe != nullptr)
+                safe->inputFxWindows.erase (id);
+        });
+    };
+    inputFxWindows[id] = std::make_unique<EditorWindow> ("Input FX: " + track[ids::name].toString(),
+                                                         new InputFxPanel (consoleHost, project, track), true, closer);
+}
+
+void MainComponent::openConsoleView()
+{
+    if (consoleWindow != nullptr)
+    {
+        consoleWindow->toFront (true);
+        return;
+    }
+    auto closer = [this]
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this)]
+        {
+            if (safe != nullptr)
+                safe->consoleWindow.reset();
+        });
+    };
+    consoleWindow = std::make_unique<EditorWindow> ("Console", new ConsoleView (consoleHost, project), true, closer);
+}
+
+void MainComponent::openAnalogConsole()
+{
+    if (analogWindow != nullptr)
+    {
+        analogWindow->toFront (true);
+        return;
+    }
+    auto closer = [this]
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this)]
+        {
+            if (safe != nullptr)
+                safe->analogWindow.reset();
+        });
+    };
+    analogWindow = std::make_unique<EditorWindow> ("Analog Console", new AnalogConsole (consoleHost, project), true, closer);
+}
+
+void MainComponent::closeConsoleWindows()
+{
+    inputFxWindows.clear();
+    consoleWindow.reset();
+    analogWindow.reset();
+}
+
+void MainComponent::setUltraLowBuffer (bool ultra)
+{
+    // Ultra Low: the interface's smallest buffer for playing live (the rest of the session rendered ahead, as
+    // with Logic's Process Buffer Range), and back to what it was when it's switched off
+    auto& dm = engine.getDeviceManager();
+    auto* device = dm.getCurrentAudioDevice();
+    if (device == nullptr)
+        return;
+    auto setup = dm.getAudioDeviceSetup();
+    if (ultra)
+    {
+        auto sizes = device->getAvailableBufferSizes();
+        if (sizes.isEmpty())
+            return;
+        int smallest = sizes[0];
+        for (const auto s : sizes)
+            smallest = juce::jmin (smallest, s);
+        smallest = juce::jmax (16, smallest);
+        if (setup.bufferSize == smallest)
+            return;
+        bufferBeforeUltra = setup.bufferSize;
+        setup.bufferSize = smallest;
+    }
+    else
+    {
+        if (bufferBeforeUltra <= 0)
+            return;
+        setup.bufferSize = bufferBeforeUltra;
+        bufferBeforeUltra = 0;
+    }
+    if (dm.setAudioDeviceSetup (setup, true).isEmpty())
+        saveDeviceState();
 }
 
 void MainComponent::showLatencyCalibration()

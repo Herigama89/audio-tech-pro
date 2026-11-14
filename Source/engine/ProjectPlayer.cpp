@@ -280,6 +280,15 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         const auto trackId = track[ids::id].toString();
         t.inserts = buildChain (trackId, sampleRate, insertIds, effectsById);
         t.armed = (bool) track[ids::armed];
+        // Input FX: on the input (armed or monitoring), recorded through unless it's set to Dry
+        if (! model::isInstrumentTrack (track) && ! model::isBusTrack (track) && (bool) track.getProperty (ids::inputFxOn, true))
+        {
+            t.inputFx = buildChain (model::inputOwner (trackId), sampleRate, insertIds, effectsById);
+            for (const auto& effect : t.inputFx)
+                t.inputFxLatency.push_back (effect != nullptr ? effect->getLatencySamples() : 0);
+            t.inputFxUltra = (bool) track.getProperty (ids::inputFxUltra, false);
+            t.inputFxSkip = juce::roundToInt ((double) track.getProperty (ids::inputFxSkipMs, 1.0) * sampleRate / 1000.0);
+        }
         // Printed inserts (LUNA style): on the input while armed, not on playback (the recording has them).
         if (! model::isInstrumentTrack (track) && ! model::isBusTrack (track))
             for (const auto& insert : model::insertsOf (model::findChain (project, trackId)))

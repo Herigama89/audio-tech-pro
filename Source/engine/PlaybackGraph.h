@@ -151,6 +151,13 @@ struct PlaybackGraph
         std::vector<std::shared_ptr<Effect>> printInserts;
         bool armed = false;
 
+        /** Input FX (as Unison / LUNA's preamp slot): the track's input chain, before it's recorded and heard
+            (while armed or monitoring). Ultra Low leaves out the ones whose latency is over inputFxSkip samples. */
+        std::vector<std::shared_ptr<Effect>> inputFx;
+        std::vector<int> inputFxLatency;
+        bool inputFxUltra = false;
+        int inputFxSkip = 0;
+
         bool monitorInput = false;  // armed + monitor: pass the input through this track
         int inputChannel = 0;       // index among the device's active inputs
         bool inputStereo = false;

@@ -372,6 +372,16 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     addAndMakeVisible (tapeDrive);
     tapeDrive.setVisible (! isVca());
 
+    for (int i = 0; i < maxInputFxRows; ++i)
+    {
+        auto* b = inputFxKeys.add (new juce::TextButton());
+        look::key (*b, look::Key::slot);
+        b->getProperties().set ("atpSkin", "slot");
+        b->setWantsKeyboardFocus (false);
+        b->addMouseListener (this, false);
+        addChildComponent (b);
+    }
+
     for (int i = 0; i < maxInserts; ++i)
     {
         auto* b = slots.add (new juce::TextButton());
@@ -1378,6 +1388,8 @@ void ChannelStrip::refresh()
         }
     }
 
+    refreshInputFx();
+
     // Input and Output slots follow the skin too.
     for (auto* b : { &inputSlot, &outputSlot })
     {
@@ -1468,8 +1480,131 @@ void ChannelStrip::paintOverChildren (juce::Graphics& g)
     g.fillRect (r.withHeight (2.0f).translated (0.0f, -2.0f));   // it goes in above what's there
 }
 
+bool ChannelStrip::hasInputFx() const
+{
+    return ! isMaster() && ! isVca() && track.isValid() && ! model::isInstrumentTrack (track) && ! model::isBusTrack (track);
+}
+
+void ChannelStrip::refreshInputFx()
+{
+    const auto shown = hasInputFx();
+    const auto inserts = [this]
+    {
+        auto list = model::insertsOf (model::findChain (project, model::inputOwner (track[ids::id].toString())));
+        std::stable_sort (list.begin(), list.end(), [] (const auto& a, const auto& b) { return model::insertSlot (a) < model::insertSlot (b); });
+        return list;
+    }();
+    const auto on = (bool) track.getProperty (ids::inputFxOn, true);
+    const juce::Colour blue (0xff6e7cff);
+    for (int i = 0; i < inputFxKeys.size(); ++i)
+    {
+        auto* b = inputFxKeys[i];
+        b->setVisible (shown && i < inputFxRows && (inserts.isEmpty() ? i == 0 : i <= inserts.size() + 1));
+        if (! b->isVisible())
+            continue;
+        if (inserts.isEmpty())
+        {
+            // one empty slot: click to put a plug-in on the input
+            b->setButtonText ("Input FX");
+            b->setTooltip ("Input FX: plug-ins on the input, before it's recorded (as a preamp). Click to add one.");
+            b->setColour (juce::TextButton::buttonColourId, theme::stripSlot);
+            b->setColour (juce::TextButton::textColourOffId, slotInk (false).withAlpha (0.8f));
+        }
+        else if (i == 0)
+        {
+            const auto ms = owner.inputFxRoundTrip ? owner.inputFxRoundTrip (track) : 0.0;
+            b->setButtonText ((on ? "IN " : "IN off ") + juce::String (ms, ms < 10.0 ? 2 : 1) + "ms");
+            b->setTooltip ("Input FX: open its window (monitoring, what's recorded, the round trip). Right-click to switch it off or on.");
+            b->setColour (juce::TextButton::buttonColourId, on ? theme::stripSlotOn : theme::stripSlot);
+            b->setColour (juce::TextButton::textColourOffId, on ? juce::Colour (0xff3ddc84) : slotInk (false));
+        }
+        else if (i - 1 < inserts.size())
+        {
+            const auto insert = inserts[i - 1];
+            const auto plugin = insert[ids::kind].toString() == model::pluginKind;
+            const auto off = ! on || (bool) insert[ids::bypass];
+            b->setButtonText (insertName (insert));
+            b->setTooltip (insertName (insert) + " on the input. Click to open; right-click for bypass and remove.");
+            b->setColour (juce::TextButton::buttonColourId, off ? theme::stripSlot : theme::stripSlotOn);
+            b->setColour (juce::TextButton::textColourOffId, off ? juce::Colour (0xff8d9196) : plugin ? blue.brighter (0.4f) : slotInk (true));
+        }
+        else
+        {
+            b->setButtonText ({});
+            b->setTooltip ("Add another plug-in to the input");
+            b->setColour (juce::TextButton::buttonColourId, theme::stripSlot);
+            b->setColour (juce::TextButton::textColourOffId, slotInk (false));
+        }
+    }
+}
+
+void ChannelStrip::inputFxClicked (int row, bool menu)
+{
+    const auto owner_ = model::inputOwner (track[ids::id].toString());
+    auto list = model::insertsOf (model::findChain (project, owner_));
+    std::stable_sort (list.begin(), list.end(), [] (const auto& a, const auto& b) { return model::insertSlot (a) < model::insertSlot (b); });
+    auto* button = inputFxKeys[row];
+    int next = 0;
+    for (const auto& insert : list)
+        next = juce::jmax (next, model::insertSlot (insert) + 1);
+    auto& um = owner.getUndoManager();
+    if (list.isEmpty() || row > list.size())
+    {
+        if (owner.onChooseEffect)
+            owner.onChooseEffect (owner_, next, {}, *button);
+        return;
+    }
+    if (row == 0)
+    {
+        if (! menu)
+        {
+            if (owner.onOpenInputFx)
+                owner.onOpenInputFx (track);
+            return;
+        }
+        juce::PopupMenu m;
+        m.addItem ("Open Input FX...", [this] { if (owner.onOpenInputFx) owner.onOpenInputFx (track); });
+        m.addItem ("Input FX On", true, (bool) track.getProperty (ids::inputFxOn, true), [this, &um]
+        {
+            um.beginNewTransaction ("Input FX on/off");
+            track.setProperty (ids::inputFxOn, ! (bool) track.getProperty (ids::inputFxOn, true), &um);
+        });
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (button));
+        return;
+    }
+    auto insert = list[row - 1];
+    if (! menu)
+    {
+        if (owner.onOpenInsert)
+            owner.onOpenInsert (insert);
+        return;
+    }
+    juce::PopupMenu m;
+    m.addItem ("Open", [this, insert] { if (owner.onOpenInsert) owner.onOpenInsert (insert); });
+    m.addItem ("Bypass", true, (bool) insert[ids::bypass], [insert, &um]() mutable
+    {
+        um.beginNewTransaction ("Bypass");
+        insert.setProperty (ids::bypass, ! (bool) insert[ids::bypass], &um);
+    });
+    m.addItem ("Replace...", [this, owner_, insert, button] { if (owner.onChooseEffect) owner.onChooseEffect (owner_, model::insertSlot (insert), insert, *button); });
+    m.addItem ("Remove", [insert, &um]
+    {
+        um.beginNewTransaction ("Remove input FX");
+        model::removeInsert (insert, &um);
+    });
+    m.addSeparator();
+    m.addItem ("Open Input FX...", [this] { if (owner.onOpenInputFx) owner.onOpenInputFx (track); });
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (button));
+}
+
 void ChannelStrip::mouseUp (const juce::MouseEvent& e)
 {
+    if (const auto row = inputFxKeys.indexOf (dynamic_cast<juce::TextButton*> (e.eventComponent)); row >= 0)
+    {
+        if (e.mouseWasClicked())
+            inputFxClicked (row, e.mods.isPopupMenu());
+        return;
+    }
     const auto index = slots.indexOf (dynamic_cast<juce::TextButton*> (e.eventComponent));
     if (index < 0 || ! e.mouseWasClicked())
         return;
@@ -1544,7 +1679,7 @@ void ChannelStrip::mouseUp (const juce::MouseEvent& e)
 juce::Rectangle<int> ChannelStrip::faderArea() const
 {
     // Below the sends, above the level display and the name plate.
-    const auto top = topSection() + 6 + 2 * ioRow + preampRow() + insertRows() * insertRowHeight + 6 + sendRows() * sendRowHeight + ioRow + tapeRow + 4 + automationRow
+    const auto top = topSection() + 6 + 2 * ioRow + preampRow() + inputFxHeight() + insertRows() * insertRowHeight + 6 + sendRows() * sendRowHeight + ioRow + tapeRow + 4 + automationRow
                    + (theme::stripVu() && ! isVca() ? vuBand : 0);
     return { 0, top, getWidth(), getHeight() - nameHeight - 22 - top };
 }
@@ -2149,6 +2284,12 @@ void ChannelStrip::resized()
         row.removeFromLeft (2);
         preampGain.setBounds (row);
         area.removeFromTop (3);
+    }
+    {
+        // Input FX: its rows (the same on every strip, so the inserts line up)
+        auto fx = area.removeFromTop (inputFxHeight());
+        for (int i = 0; i < inputFxKeys.size(); ++i)
+            inputFxKeys[i]->setBounds (i < inputFxRows ? fx.removeFromTop (insertRowHeight).withTrimmedBottom (2) : juce::Rectangle<int>());
     }
     for (int i = 0; i < slots.size(); ++i)
     {
@@ -2836,6 +2977,16 @@ MixerPanel::MixerPanel (juce::UndoManager& um, AudioEngine& e, ProjectPlayer& p,
     zonesButton.setWantsKeyboardFocus (false);
     zonesButton.onClick = [this] { showZonesMenu(); };
     addAndMakeVisible (zonesButton);
+    for (auto* b : { &consoleViewButton, &analogButton })
+    {
+        look::key (*b, look::Key::dark);
+        b->setWantsKeyboardFocus (false);
+        addAndMakeVisible (b);
+    }
+    consoleViewButton.setTooltip ("Console: every channel with its full strip - its Input FX, channel strip and inserts, live - above its fader (as LUNA's mixer)");
+    consoleViewButton.onClick = [this] { if (onOpenConsoleView) onOpenConsoleView(); };
+    analogButton.setTooltip ("Analog Console: the whole mixer as a large-format desk, every knob of every channel");
+    analogButton.onClick = [this] { if (onOpenAnalogConsole) onOpenAnalogConsole(); };
 
     title.setText ("Mixer", juce::dontSendNotification);
     title.setFont (juce::FontOptions (13.0f, juce::Font::bold));
@@ -2890,7 +3041,7 @@ std::pair<int, int> MixerPanel::rowsFor (const juce::ValueTree& project)
     for (const auto& chain : project.getChildWithName (ids::MIXER))
     {
         if (! chain.hasType (ids::CHAIN) || chain[ids::owner].toString().startsWith ("strip:")
-            || chain[ids::owner].toString() == model::busCompOwner)
+            || chain[ids::owner].toString().startsWith ("input:") || chain[ids::owner].toString() == model::busCompOwner)
             continue;
         for (const auto& insert : model::insertsOf (chain))
             inserts = juce::jmax (inserts, model::insertSlot (insert) + 2);
@@ -2901,8 +3052,18 @@ std::pair<int, int> MixerPanel::rowsFor (const juce::ValueTree& project)
 
 bool MixerPanel::updateRows()
 {
+    // Input FX: a heading, its plug-ins and one empty slot on the fullest strip (one empty slot when none has any)
+    int fx = 1;
+    for (const auto& chain : project.getChildWithName (ids::MIXER))
+        if (chain.hasType (ids::CHAIN) && chain[ids::owner].toString().startsWith ("input:"))
+            if (const auto n = model::insertsOf (chain).size(); n > 0)
+                fx = juce::jmax (fx, n + 2);
+    fx = juce::jmin (fx, ChannelStrip::maxInputFxRows);
+    const auto fxChanged = fx != ChannelStrip::inputFxRows;
+    ChannelStrip::inputFxRows = fx;
+
     const auto now = rowsFor (project);
-    if (now == rows)
+    if (now == rows && ! fxChanged)
         return false;
     rows = now;
     return true;
@@ -2971,8 +3132,8 @@ void MixerPanel::touched (const juce::ValueTree& tree, const juce::Identifier& p
         else
         {
             auto owner = chain[ids::owner].toString();
-            if (owner.startsWith ("strip:"))
-                owner = owner.fromFirstOccurrenceOf ("strip:", false, false);
+            if (owner.startsWith ("strip:") || owner.startsWith ("input:"))
+                owner = owner.fromFirstOccurrenceOf (":", false, false);
             if (owner == model::busCompOwner)
                 refreshAll = true;
             else
@@ -3370,6 +3531,10 @@ void MixerPanel::resized()
     commentsButton.setBounds (header.removeFromLeft (80));
     header.removeFromLeft (6);
     zonesButton.setBounds (header.removeFromLeft (64));
+    header.removeFromLeft (6);
+    consoleViewButton.setBounds (header.removeFromLeft (70));
+    header.removeFromLeft (6);
+    analogButton.setBounds (header.removeFromLeft (64));
 
     // Narrow strips are the same strips, drawn smaller.
     const auto scale = stripScale();

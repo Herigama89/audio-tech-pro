@@ -116,6 +116,7 @@ public:
         int sourceSlot = -1;    // record another track's output (its slot) instead of the device's input
         int printSlot = -1;     // its track's slot when it has printed inserts: record the input through them
         int printLatency = 0;   // how late they make it (the take is moved back by this)
+        bool dry = false;       // Input FX's Both: the dry input, kept beside the take recorded through it
     };
 
     struct MidiEventRecord
@@ -132,6 +133,7 @@ public:
         juce::int64 numSamples = 0;
         bool isMidi = false;
         std::vector<MidiEventRecord> midiEvents;
+        bool dry = false;       // (Input FX's Both: the dry recording beside the take)
     };
 
     struct LiveTake
@@ -208,6 +210,8 @@ public:
 
     /** Post-fader peak of a track since the last call (by the track's slot in the graph). */
     std::pair<float, float> takeTrackLevel (int slot) noexcept;
+    /** The same levels for a second reader (the Console and Analog Console windows), kept apart from the mixer's. */
+    std::pair<float, float> takeTrackLevelForConsole (int slot) noexcept;
 
     /** How long before it's heard a track's plugins worked on what they report now (its gain reduction): rendered
         ahead (Process Buffer Range), the lookahead; played live, 0. The mixer shows their meters that much later. */
@@ -439,6 +443,7 @@ private:
         juce::File file;
         int firstChannel = 0, numChannels = 1;
         int sourceSlot = -1, printSlot = -1, printLatency = 0;
+        bool dry = false;
         std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> writer;
         std::atomic<juce::int64> startSample { -1 };
         std::atomic<juce::int64> samplesWritten { 0 };
@@ -686,6 +691,7 @@ private:
     std::atomic<int> busPluginSamples { 0 };
     static float rmsOf (const float* left, const float* right, int n) noexcept;
     std::array<std::atomic<float>, PlaybackGraph::maxTracks * 2> trackPeaks {};
+    std::array<std::atomic<float>, PlaybackGraph::maxTracks * 2> otherPeaks {};   // (the same, for a second reader: the consoles' windows)
     std::array<std::atomic<bool>, PlaybackGraph::maxTracks> slotRenderedAhead {};   // (heard from the ring just now)
     std::atomic<double> aheadLeadSeconds { 0.0 };   // how far ahead of what's heard the ring's thread works
     std::array<std::atomic<float>, PlaybackGraph::maxTracks> stripInPeaks {}, stripOutPeaks {};   // the channel strip's LED meters

@@ -438,6 +438,7 @@ juce::ValueTree duplicateTrackSettings (juce::ValueTree project, const juce::Val
         existing.getParent().removeChild (existing, um);   // addTrack may have added the console plugin; take the original's instead
     copyChain (track[ids::id].toString(), newTrackId);
     copyChain (stripOwner (track[ids::id].toString()), stripOwner (newTrackId));
+    copyChain (inputOwner (track[ids::id].toString()), inputOwner (newTrackId));
     return copy;
 }
 
@@ -471,12 +472,12 @@ juce::Array<juce::ValueTree> importTracks (juce::ValueTree project, const juce::
 
     const auto mapOwner = [&newIds] (const juce::String& owner) -> juce::String
     {
-        const bool strip = owner.startsWith ("strip:");
-        const auto trackId = strip ? owner.fromFirstOccurrenceOf ("strip:", false, false) : owner;
+        const bool strip = owner.startsWith ("strip:"), input = owner.startsWith ("input:");
+        const auto trackId = strip || input ? owner.fromFirstOccurrenceOf (":", false, false) : owner;
         const auto it = newIds.find (trackId);
         if (it == newIds.end())
             return {};
-        return strip ? stripOwner (it->second) : it->second;
+        return strip ? stripOwner (it->second) : input ? inputOwner (it->second) : it->second;
     };
 
     auto mixer = mixerOf (project);
@@ -2328,6 +2329,27 @@ juce::Array<juce::ValueTree> resetChannels (juce::ValueTree project, const Reset
                 bus.setProperty (ids::bypass, true, um);
     }
     return pluginStrips;
+}
+
+void useDryRecording (juce::ValueTree region, bool dry, juce::UndoManager* um)
+{
+    const auto dryFile = region[ids::dryFile].toString();
+    if (dryFile.isEmpty())
+        return;
+    const auto shift = (double) region.getProperty (ids::dryShift, 0.0);
+    const double offset = region.getProperty (ids::offset, 0.0);
+    if (dry && region[ids::wetFile].toString().isEmpty())
+    {
+        region.setProperty (ids::wetFile, region[ids::file], um);
+        region.setProperty (ids::file, dryFile, um);
+        region.setProperty (ids::offset, juce::jmax (0.0, offset + shift), um);
+    }
+    else if (! dry && region[ids::wetFile].toString().isNotEmpty())
+    {
+        region.setProperty (ids::file, region[ids::wetFile], um);
+        region.removeProperty (ids::wetFile, um);
+        region.setProperty (ids::offset, juce::jmax (0.0, offset - shift), um);
+    }
 }
 
 juce::ValueTree stripPlugin (const juce::ValueTree& project, const juce::String& trackId)

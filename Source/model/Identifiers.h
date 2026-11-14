@@ -196,6 +196,14 @@ namespace riff::ids
     RIFF_DECLARE_ID (effect)          // built-in effect type: "eq", "compressor", "delay", "reverb", "limiter"
     RIFF_DECLARE_ID (bypass)
     RIFF_DECLARE_ID (parkedStrip)    // the channel strip plugin set aside for Built-in (its settings, to come back)
+    RIFF_DECLARE_ID (inputFxOn)      // Input FX (a track's input chain, before it's recorded): on (default) or bypassed
+    RIFF_DECLARE_ID (inputFxRecord)  //   what's recorded: "wet" (default: through it), "dry", or "both" (the dry kept beside)
+    RIFF_DECLARE_ID (inputFxUltra)   //   Ultra Low: while armed or monitoring, plug-ins slower than inputFxSkipMs are left out
+    RIFF_DECLARE_ID (inputFxSkipMs)  //   (ms, default 1)
+    RIFF_DECLARE_ID (inputFxLink)    //   "insertId|paramId": that knob sets the interface's preamp gain
+    RIFF_DECLARE_ID (dryFile)        // a region recorded through Input FX with Both: the dry recording beside it
+    RIFF_DECLARE_ID (dryShift)       //   (seconds the dry file is earlier than the wet one)
+    RIFF_DECLARE_ID (wetFile)        //   (after swapping to the dry one: the wet one, to swap back)
     RIFF_DECLARE_ID (print)          // an insert printed while recording (LUNA style): on the input, not on playback
     RIFF_DECLARE_ID (sidechain)      // an insert's side chain: the track (id) whose output keys it
     RIFF_DECLARE_ID (inputTrack)     // a track recording or hearing another track's output instead of an input

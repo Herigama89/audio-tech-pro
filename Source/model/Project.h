@@ -295,6 +295,12 @@ namespace riff::model
     /** Console mode: the chain holding a track's channel strip plugin (in place of the built-in EQ and Dynamics). */
     inline juce::String stripOwner (const juce::String& trackId) { return "strip:" + trackId; }
 
+    /** A region recorded through Input FX with Both: plays its dry recording (or, false, the one through Input FX again). */
+    void useDryRecording (juce::ValueTree region, bool dry, juce::UndoManager* um);
+
+    /** Input FX: the chain on a track's input (as Unison / LUNA's preamp slot), before it's recorded and monitored. */
+    inline juce::String inputOwner (const juce::String& trackId) { return "input:" + trackId; }
+
     /** A track's channel strip plugin, or an invalid tree. */
     juce::ValueTree stripPlugin (const juce::ValueTree& project, const juce::String& trackId);
 
