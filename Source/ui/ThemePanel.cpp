@@ -92,11 +92,11 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
     };
     addAndMakeVisible (faderBox);
 
-    knobBox.addItemList ({ "Liquid Glass (LED ring)", "Dark VU" }, 1);
+    knobBox.addItemList ({ "Liquid Glass (LED ring)", "Dark VU", "Console caps" }, 1);
     knobBox.setTooltip ("The knobs on the channel strips, track headers, plugins' strips and the bus compressor");
     knobBox.onChange = [this]
     {
-        settings.knobStyle = knobBox.getSelectedItemIndex() == 1 ? 7 : -1;
+        settings.knobStyle = knobBox.getSelectedItemIndex() == 1 ? 7 : knobBox.getSelectedItemIndex() == 2 ? 8 : -1;
         changed();
     };
     addAndMakeVisible (knobBox);
@@ -515,7 +515,7 @@ void ThemePanel::refreshControls()
 {
     skinBox.setSelectedItemIndex (settings.skin == theme::Skin::glassLight ? 1 : 0, juce::dontSendNotification);
     faderBox.setSelectedItemIndex (0, juce::dontSendNotification);
-    knobBox.setSelectedItemIndex (settings.knobStyle == 7 ? 1 : 0, juce::dontSendNotification);
+    knobBox.setSelectedItemIndex (settings.knobStyle == 7 ? 1 : settings.knobStyle == 8 ? 2 : 0, juce::dontSendNotification);
     buttonBox.setSelectedItemIndex (0, juce::dontSendNotification);
     meterBox.setSelectedItemIndex (0, juce::dontSendNotification);
     stripVuButton.setToggleState (settings.stripVu, juce::dontSendNotification);

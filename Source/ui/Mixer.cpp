@@ -58,6 +58,11 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         multiMeterKey.setWantsKeyboardFocus (false);
         multiMeterKey.onClick = [this] { if (owner.onOpenMultiMeter) owner.onOpenMultiMeter(); };
         addAndMakeVisible (multiMeterKey);
+        look::key (bounceKey, look::Key::console);
+        bounceKey.setTooltip ("Bounce: the song (or the cycle) to a file");
+        bounceKey.setWantsKeyboardFocus (false);
+        bounceKey.onClick = [this] { if (owner.onBounce) owner.onBounce(); };
+        addAndMakeVisible (bounceKey);
     }
     if (track.isValid())
         addMouseListener (&selectOnClick, true);
@@ -159,6 +164,13 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         for (auto* k : { &hfKnob, &hmfKnob, &lmfKnob, &lfKnob })
             k->useSkin (skin::knobBlack(), juce::Colours::white);
         dynKnob.useSkin (skin::knobWhite(), juce::Colour (0xff141516));
+        // (Console caps knobs: each section's cap colour, the pan knob for pan)
+        hfKnob.setCap (juce::Colour (0xffc8312a));
+        hmfKnob.setCap (juce::Colour (0xff3e9b3c));
+        lmfKnob.setCap (juce::Colour (0xff2c5fbf));
+        lfKnob.setCap (juce::Colour (0xff4a3020));
+        dynKnob.setCap (juce::Colour (0xffe8e8e6));
+        panKnob.getProperties().set ("atpPan", true);
         for (auto* k : { &muteButton, &soloButton, &stripInButton })
             k->onArt = true;
         consoleInButton.onArt = dynInButton.onArt = true;
@@ -315,6 +327,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     preKey.setVisible (hasAnalogPre());
     preGain.setRange (0.0, 30.0, 0.5);
     preGain.knobAndValue = true;
+    preGain.capColour = juce::Colour (0xffc8312a);
     preGain.textFromValueFunction = [] (double v) { return "+" + juce::String (juce::roundToInt (v)); };
     preGain.setDoubleClickReturnValue (true, 0.0);
     preGain.setTooltip ("Preamp gain, 0 to +30 dB: more gain, more saturation. Drag up or down; double-click for 0 dB.");
@@ -356,6 +369,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     tapeKey.setVisible (! isVca());
     tapeDrive.setRange (0.0, 100.0, 1.0);
     tapeDrive.knobAndValue = true;
+    tapeDrive.capColour = juce::Colour (0xffd9a51f);
     tapeDrive.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v)); };
     tapeDrive.setDoubleClickReturnValue (true, 35.0);
     tapeDrive.setTooltip ("Tape drive: how hard the channel hits the tape. Drag up or down; double-click for 35%.");
@@ -409,6 +423,7 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
         auto* s = sendLevels.add (new strip::PointerKnob (theme::neon));
         look::onLight (*s);
         s->useSkin (skin::knobBlack(), juce::Colours::white);
+        s->setCap (juce::Colour (0xffd9a51f));
         s->setRange (minDb, 6.0, 0.1);
         s->setSkewFactorFromMidPoint (-12.0);
         s->setDoubleClickReturnValue (true, -20.0);
@@ -1681,7 +1696,8 @@ juce::Rectangle<int> ChannelStrip::faderArea() const
     // Below the sends, above the level display and the name plate.
     const auto top = topSection() + 6 + 2 * ioRow + preampRow() + inputFxHeight() + insertRows() * insertRowHeight + 6 + sendRows() * sendRowHeight + ioRow + tapeRow + 4 + automationRow
                    + (theme::stripVu() && ! isVca() ? vuBand : 0);
-    return { 0, top, getWidth(), getHeight() - nameHeight - 22 - top };
+    // (the master: a row more under it, for Bnce)
+    return { 0, top, getWidth(), getHeight() - nameHeight - 22 - (isMaster() ? 22 : 0) - top };
 }
 
 void ChannelStrip::paint (juce::Graphics& g)
@@ -2339,6 +2355,8 @@ void ChannelStrip::resized()
     grRect = grArea().expanded (1);
     placeMeters();
     dbLabel.setBounds (juce::Rectangle<int> (getWidth() - 46, fa.getBottom() + 2, 42, 19));
+    if (isMaster())
+        bounceKey.setBounds (juce::Rectangle<int> (getWidth() - 50, fa.getBottom() + 23, 46, 19));
     if (! isMaster())
     {
         auto row = juce::Rectangle<int> (6, fa.getY() - automationRow + 1, getWidth() - 12, automationRow - 3);
@@ -2612,16 +2630,16 @@ MasterBusCompressorPanel::MasterBusCompressorPanel (juce::UndoManager& um, Audio
 
     setup (grit, "busCompGrit", look::Knob::red, 0.0, 1.0, 0.01,
            [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + "%"; }, "Grit");
-    grit.setDoubleClickReturnValue (true, 0.3);
-    grit.setTooltip ("Grit: how hard the colour circuit is driven - from warm weight to a gritty, pushed edge");
+    grit.setDoubleClickReturnValue (true, 0.0);
+    grit.setTooltip ("Grit: saturation - from warm weight to a gritty, pushed edge (COLOR is the low bump, not this)");
 
     look::key (colorButton, look::Key::cream);
     colorButton.getProperties().set ("channelKey", true);
     colorButton.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
     colorButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffc8452f));
     colorButton.setWantsKeyboardFocus (false);
-    colorButton.setTooltip ("Color: the console's saturation - its VCA and output transformers driven, for colour and grit "
-                            "(set how much with Grit)");
+    colorButton.setTooltip ("Color: a small bump in the lows (+3 dB round 60 Hz), as the console's bus compressor - "
+                            "weight, not saturation (Grit is the saturation)");
     colorButton.onClick = [this]
     {
         undoManager.beginNewTransaction ("Master Bus Compressor colour");

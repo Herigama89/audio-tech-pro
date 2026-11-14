@@ -28,6 +28,17 @@ namespace
     RIFF_LOOK_IMAGE (capDark,       look_cap_dark_png)
     RIFF_LOOK_IMAGE (knobDark,      look_knob_dark_png)
     RIFF_LOOK_IMAGE (buttonDark,    look_btn_dark_png)
+    RIFF_LOOK_IMAGE (cap_blue, look_cap_ssl_blue_png)
+    RIFF_LOOK_IMAGE (cap_red, look_cap_ssl_red_png)
+    RIFF_LOOK_IMAGE (cap_green, look_cap_ssl_green_png)
+    RIFF_LOOK_IMAGE (cap_dkgreen, look_cap_ssl_dkgreen_png)
+    RIFF_LOOK_IMAGE (cap_brown, look_cap_ssl_brown_png)
+    RIFF_LOOK_IMAGE (cap_gold, look_cap_ssl_gold_png)
+    RIFF_LOOK_IMAGE (cap_purple, look_cap_ssl_purple_png)
+    RIFF_LOOK_IMAGE (cap_white, look_cap_ssl_white_png)
+    RIFF_LOOK_IMAGE (cap_grey, look_cap_ssl_grey_png)
+    RIFF_LOOK_IMAGE (cap_black, look_cap_ssl_black_png)
+    RIFF_LOOK_IMAGE (panKnob, look_knob_pan_png)
     #undef RIFF_LOOK_IMAGE
 
     juce::Image capFor (int style)
@@ -55,6 +66,23 @@ namespace
             case 7: return knobDark();
             default: return {};
         }
+    }
+
+    /** Console caps: the cap knob in the colour nearest a section's (grey when none). */
+    juce::Image capIn (juce::Colour c)
+    {
+        if (c.isTransparent() || c.getSaturation() < 0.22f)
+        {
+            const auto b = c.isTransparent() ? 0.5f : c.getPerceivedBrightness();
+            return b > 0.78f ? cap_white() : b < 0.22f ? cap_black() : cap_grey();
+        }
+        const auto h = c.getHue(), b = c.getBrightness();
+        if (h < 0.04f || h > 0.94f) return cap_red();
+        if (h < 0.075f) return b < 0.62f ? cap_brown() : cap_red();
+        if (h < 0.18f)  return b < 0.5f ? cap_brown() : cap_gold();
+        if (h < 0.47f)  return b < 0.5f ? cap_dkgreen() : cap_green();
+        if (h < 0.72f)  return cap_blue();
+        return cap_purple();
     }
 
     /** A key's photo, lit in a colour or unlit (made once per colour: cached). Its bright parts take the colour; the bezel stays. */
@@ -177,7 +205,7 @@ juce::StringArray faderNames()
 juce::StringArray knobNames()
 {
     return { "Skin's own", "Classic", "Black, white line", "Black, yellow pointer", "Yellow cap", "Red",
-             "Studio White (LED ring)", "Xenon (glass)", "Dark VU (picture)" };
+             "Studio White (LED ring)", "Xenon (glass)", "Dark VU (picture)", "Console caps" };
 }
 
 juce::StringArray buttonNames()
@@ -223,9 +251,11 @@ bool drawFaderCap (juce::Graphics& g, juce::Rectangle<float> cap, bool vertical,
 }
 
 bool drawKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
-               bool fromCentre, bool enabled)
+               bool fromCentre, bool enabled, juce::Colour section, bool pan)
 {
     const auto style = theme::knobStyle();
+    if (style == 8)
+        return drawCapKnob (g, area, proportion, startAngle, endAngle, fromCentre, enabled, section, pan);
     if (style == 5)
     {
         skin::drawPhotoKnob (g, area, proportion, startAngle, endAngle, fromCentre, enabled);
@@ -265,6 +295,45 @@ bool drawKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion,
     const auto knob = juce::Rectangle<float> (knobSize, knobSize).withCentre (centre);
     g.setColour (juce::Colours::black.withAlpha (0.35f * alpha));
     g.fillEllipse (knob.translated (knobSize * 0.03f, knobSize * 0.06f));
+    juce::Graphics::ScopedSaveState state (g);
+    g.setOpacity (alpha);
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+    const auto scale = knobSize / (float) image.getWidth();
+    g.drawImageTransformed (image, juce::AffineTransform::translation (-(float) image.getWidth() * 0.5f, -(float) image.getHeight() * 0.5f)
+                                       .scaled (scale)
+                                       .rotated (to)
+                                       .translated (centre.x, centre.y));
+    return true;
+}
+
+bool drawCapKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
+                  bool fromCentre, bool enabled, juce::Colour section, bool pan)
+{
+    const auto image = pan ? panKnob() : capIn (section);
+    if (! image.isValid())
+        return false;
+    const auto size = juce::jmin (area.getWidth(), area.getHeight());
+    const auto centre = area.getCentre();
+    const auto alpha = enabled ? 1.0f : 0.45f;
+    proportion = juce::jlimit (0.0f, 1.0f, proportion);
+    const auto to = startAngle + proportion * (endAngle - startAngle);
+    // Its printed scale: short white ticks round it (big enough to print), longer at the ends and the middle
+    if (size > 30.0f)
+    {
+        const int ticks = size > 56.0f ? 21 : 11;
+        for (int i = 0; i < ticks; ++i)
+        {
+            const auto a = startAngle + (endAngle - startAngle) * (float) i / (float) (ticks - 1);
+            const bool major = i == 0 || i == ticks - 1 || i == ticks / 2;
+            const auto r0 = size * 0.43f, r1 = size * (major ? 0.5f : 0.47f);
+            g.setColour (juce::Colours::white.withAlpha ((major ? 0.75f : 0.45f) * alpha));
+            g.drawLine ({ centre.x + r0 * std::sin (a), centre.y - r0 * std::cos (a), centre.x + r1 * std::sin (a), centre.y - r1 * std::cos (a) },
+                        juce::jmax (0.8f, size * 0.018f));
+        }
+    }
+    juce::ignoreUnused (fromCentre);
+    // The knob (its shadow ring is in the picture), turned: its pointer is up in the picture
+    const auto knobSize = size * (size > 30.0f ? 0.84f : 0.98f);
     juce::Graphics::ScopedSaveState state (g);
     g.setOpacity (alpha);
     g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);

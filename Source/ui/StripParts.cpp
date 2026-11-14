@@ -130,7 +130,8 @@ void PointerKnob::paintUncached (juce::Graphics& g)
         const auto params = getRotaryParameters();
         const auto proportion = (float) valueToProportionOfLength (getValue());
         const bool fromCentre = getMinimum() < 0.0 && getMaximum() > 0.0;
-        if (! looks::drawKnob (g, getLocalBounds().toFloat(), proportion, params.startAngleRadians, params.endAngleRadians, fromCentre, isEnabled()))
+        if (! looks::drawKnob (g, getLocalBounds().toFloat(), proportion, params.startAngleRadians, params.endAngleRadians, fromCentre, isEnabled(),
+                               cap.isTransparent() ? pointer : cap, look::isPanKnob (*this)))
             look::drawNeonKnob (g, getLocalBounds().toFloat(), proportion, params.startAngleRadians, params.endAngleRadians,
                                 theme::knobBlack, fromCentre, isEnabled(), true);
         return;
@@ -310,7 +311,8 @@ void DisplaySlider::paintUncached (juce::Graphics& g)
         const auto knobArea = r.removeFromLeft (juce::jmin (r.getHeight(), r.getWidth()));
         const auto proportion = (float) valueToProportionOfLength (getValue());
         const bool live = isEnabled() && dimmed >= 0.99f;
-        if (theme::knobStyle() < 0 || ! looks::drawKnob (g, knobArea, proportion, juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f), true, live))
+        if (theme::knobStyle() < 0 || ! looks::drawKnob (g, knobArea, proportion, juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f), true, live,
+                                                         capColour, look::isPanKnob (*this)))
             look::drawNeonKnob (g, knobArea, proportion, juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f),
                                 theme::knobBlack, true, live, true);
         if (r.getWidth() >= 10.0f)
@@ -327,7 +329,8 @@ void DisplaySlider::paintUncached (juce::Graphics& g)
         const auto proportion = (float) valueToProportionOfLength (getValue());
         if (theme::knobStyle() >= 0)
         {
-            if (! looks::drawKnob (g, getLocalBounds().toFloat(), proportion, juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f), true, isEnabled()))
+            if (! looks::drawKnob (g, getLocalBounds().toFloat(), proportion, juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f), true, isEnabled(),
+                                   capColour, look::isPanKnob (*this)))
                 look::drawNeonKnob (g, getLocalBounds().toFloat(), proportion, juce::degreesToRadians (-140.0f), juce::degreesToRadians (140.0f),
                                     theme::knobBlack, true, isEnabled(), true);
             return;

@@ -184,9 +184,16 @@ TEST_CASE ("Faders, knobs, keys and the meter are chosen apart from the skin and
     CHECK (theme::knobStyle() == 2);
     CHECK (theme::meterStyle() == 1);
 
-    // The defaults: the glass skin's own knobs and keys, the black compression meter
+    // The defaults: the Console caps knobs, the glass skin's own keys, the black compression meter
     const auto plain = theme::Settings::fromString (theme::Settings().toString());
-    CHECK (plain.knobStyle == -1);
+    CHECK (plain.knobStyle == 8);
+    // (a theme saved before the Console caps, on the glass's own knobs, takes them; one saved after keeps its choice)
+    auto older = theme::Settings();
+    older.knobStyle = -1;
+    auto fields = juce::StringArray::fromTokens (older.toString(), ";", "");
+    CHECK (theme::Settings::fromString (older.toString()).knobStyle == -1);
+    fields.removeRange (37, fields.size());
+    CHECK (theme::Settings::fromString (fields.joinIntoString (";")).knobStyle == 8);
     CHECK (plain.buttonStyle == -1);
     CHECK (plain.meterStyle == 1);
     theme::set ({});

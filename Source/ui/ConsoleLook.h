@@ -90,6 +90,13 @@ namespace look
     /** A Liquid Glass panel: a rounded card lit along its top edge (`recessed`: a darker section inside a card). */
     void drawGlassPanel (juce::Graphics&, juce::Rectangle<float> area, float corner, bool recessed = false);
 
+    /** A pan knob (Console caps draws the pan knob for it): marked so, or named so. */
+    inline bool isPanKnob (const juce::Component& c)
+    {
+        return (bool) c.getProperties().getWithDefault ("atpPan", false) || c.getName().equalsIgnoreCase ("pan")
+               || c.getTitle().equalsIgnoreCase ("pan");
+    }
+
     void drawNeonKnob (juce::Graphics&, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
                        juce::Colour ring, bool fromCentre, bool enabled = true, bool onLightPanel = false);
 

@@ -53,6 +53,10 @@ void ConsoleLook::drawRotarySlider (juce::Graphics& g, int x, int y, int width, 
     const auto bounds = juce::Rectangle<float> ((float) x, (float) y, (float) width, (float) height).reduced (1.0f);
     const auto ring = capColour (slider.getProperties().getWithDefault (knobProperty, (int) look::Knob::black));
     const bool fromCentre = slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0;
+    // Console caps: the cap in the knob's colour, or the pan knob for a pan
+    if (theme::knobStyle() == 8
+        && looks::drawCapKnob (g, bounds, sliderPos, startAngle, endAngle, fromCentre, slider.isEnabled(), ring, look::isPanKnob (slider)))
+        return;
     look::drawNeonKnob (g, bounds, sliderPos, startAngle, endAngle, ring, fromCentre, slider.isEnabled(), isLight (slider));
 }
 
@@ -529,7 +533,7 @@ namespace look
                        juce::Colour ringColour, bool fromCentre, bool enabled, bool light)
     {
         // Themes > Knobs: a photo knob (or a skin's knob) on any skin.
-        if (looks::drawKnob (g, area, proportion, startAngle, endAngle, fromCentre, enabled))
+        if (looks::drawKnob (g, area, proportion, startAngle, endAngle, fromCentre, enabled, ringColour))
             return;
         const bool skinKnobs = theme::knobStyle() < 0;   // (Classic: the drawn knob, whatever the skin)
 

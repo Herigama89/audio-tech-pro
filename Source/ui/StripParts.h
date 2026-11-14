@@ -122,6 +122,9 @@ namespace riff::strip
         /** Drawn as a knob with its value beside it (the strip's PRE and TAPE). */
         bool knobAndValue = false;
 
+        /** Its cap's colour with Console caps knobs (none: grey). */
+        juce::Colour capColour { juce::Colours::transparentBlack };
+
         /** Shown faded (its section switched out). Drawn faded here rather than with setAlpha: a see-through
             component is drawn through an extra layer, and dozens of them made the mixer slow. */
         void setDimmed (float opacity) { if (! juce::approximatelyEqual (opacity, dimmed)) { dimmed = opacity; repaint(); } }

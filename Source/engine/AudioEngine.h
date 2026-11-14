@@ -250,7 +250,12 @@ public:
     }
 
     /** The MultiMeter listens to the master output (after the master fader) while this is on. */
-    void setMasterTap (bool on) noexcept { masterTapOn.store (on); }
+    void setMasterTap (bool on) noexcept
+    {
+        // (counted: the MultiMeter window and the console's MultiMeter can both be listening)
+        masterTapUsers = juce::jmax (0, masterTapUsers + (on ? 1 : -1));
+        masterTapOn.store (masterTapUsers > 0);
+    }
 
     /** Takes up to `maxSamples` of the master output (left and right) that arrived since the last call. Message thread. */
     int readMaster (float* left, float* right, int maxSamples) noexcept
@@ -292,6 +297,9 @@ public:
             return {};
         return { stripInPeaks[(size_t) slot].exchange (0.0f), stripOutPeaks[(size_t) slot].exchange (0.0f) };
     }
+
+    /** The bus compressor's gain reduction now (dB), without taking it from the mixer's meter. */
+    float peekBusCompGainReduction() const noexcept { return busComp.getGainReductionDb(); }
 
     float takeBusCompGainReduction() noexcept
     {
@@ -670,6 +678,7 @@ private:
     std::array<ConsoleChannel, PlaybackGraph::maxTracks> consoles;
     std::atomic<int> analyzerSlot { -1 };
     std::atomic<bool> masterTapOn { false };
+    int masterTapUsers = 0;   // (message thread)
     juce::AbstractFifo masterFifo { 65536 };
     std::vector<float> masterTapL = std::vector<float> (65536, 0.0f), masterTapR = std::vector<float> (65536, 0.0f);
     double shownPlayhead = 0.0, shownFromRaw = -1.0, shownRawAt = 0.0;

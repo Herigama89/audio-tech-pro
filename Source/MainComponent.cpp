@@ -460,6 +460,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     mixer.inputFxRoundTrip = [this] (juce::ValueTree track) { return InputFxPanel::roundTripMs (consoleHost, project, track); };
     mixer.onOpenConsoleView = [this] { openConsoleView(); };
     mixer.onOpenAnalogConsole = [this] { openAnalogConsole(); };
+    mixer.onBounce = [this] { exportSong(); };
     mixer.onCopyInsertToSelected = [this] (juce::ValueTree insert) { copyInsertToSelected (insert); };
     mixer.onStorePluginStates = [this] { effectRack.storePluginStates (model::mixerOf (project)); };
     mixer.onMoveInsert = [this] (juce::ValueTree insert, const juce::String& toOwner, int slot, bool copy)
@@ -4145,6 +4146,7 @@ void MainComponent::setUpConsoleHost()
         return 0;
     };
     consoleHost.sampleRate = [this] { return engine.getSampleRate() > 0.0 ? engine.getSampleRate() : 48000.0; };
+    consoleHost.bounce = [this] { exportSong(); };
     consoleHost.masterLevels = [this]
     {
         const std::pair<float, float> levels { consoleMasterL, consoleMasterR };

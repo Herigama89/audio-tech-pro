@@ -1008,7 +1008,9 @@ public:
         main.setSize (1440, 920);
         buildDemoProject (main);
         theme::Settings t;
-        t.skin = theme::Skin::glassDark;
+        t.skin = juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_LIGHT", {}).isNotEmpty() ? theme::Skin::glassLight : theme::Skin::glassDark;
+        if (const auto k = juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_KNOBS", {}); k.isNotEmpty())
+            t.knobStyle = k.getIntValue();
         main.applyTheme (t);
         // Input FX on the first track (the 737, then the 76), inserts on a few others
         juce::Array<juce::ValueTree> tracks;
@@ -1048,7 +1050,7 @@ public:
         }
         {
             AnalogConsole analog (main.consoleHost, main.project);
-            analog.setSize (1600, 1180);
+            analog.setSize (1600, 1560);
             pump (main, 400);
             save (analog, "consoles-analog.png");
         }

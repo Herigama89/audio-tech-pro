@@ -11,7 +11,7 @@
                                  6 black with a red line, 7 silver console cap, 8 Dark VU, 9 Studio Grey's cap
     Knobs (theme::knobStyle):    0 classic (drawn), 1 black with a white line, 2 black with a
                                  yellow pointer, 3 yellow cap, 4 red, 5 Studio White's photo knob,
-                                 6 Xenon's glass knob
+                                 6 Xenon's glass knob, 7 Dark VU, 8 Console caps (in their section's colour; the pan knob for pans)
     Buttons (theme::buttonStyle): 0 classic (drawn), 1 square backlit (white), 2 square grey, 3 round lamp
     Meter (theme::meterStyle):   0 classic (drawn), 1 black compression meter, 2 cream VU
 */
@@ -30,7 +30,12 @@ namespace riff::looks
 
     /** A knob of the chosen kind (knobStyle 1..6), turned to the value. False: draw the skin's (or classic) knob. */
     bool drawKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
-                   bool fromCentre, bool enabled);
+                   bool fromCentre, bool enabled, juce::Colour section = {}, bool pan = false);
+
+    /** Console caps (knobStyle 8): the cap knob painted in its section's colour (the nearest of its colours), or the
+        pan knob for a pan. */
+    bool drawCapKnob (juce::Graphics& g, juce::Rectangle<float> area, float proportion, float startAngle, float endAngle,
+                      bool fromCentre, bool enabled, juce::Colour section = {}, bool pan = false);
 
     /** A channel key (mute, solo, record, monitor, IN...) of the chosen kind (buttonStyle 1..3): lit in `onColour` when on.
         False: the skin's own key. */

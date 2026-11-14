@@ -28,8 +28,9 @@ void MasterBusCompressor::prepare (double newSampleRate)
 {
     sampleRate = newSampleRate > 0.0 ? newSampleRate : 48000.0;
     wetStep = (float) (1.0 / (0.02 * sampleRate));   // the IN switch fades over 20 ms
-    // (the output transformer: a little weight in the lows, the very top eased)
-    transformerLow.setPeak (sampleRate, 70.0, 0.8, 0.8);
+    // COLOR (as the console's bus compressor's): a small bump in the lows, 3 dB round 60 Hz - an EQ, not saturation
+    transformerLow.setPeak (sampleRate, 60.0, 3.0, 0.8);
+    // (Grit's stage: the very top eased)
     transformerTop.setLowPass (sampleRate, std::min (24000.0, sampleRate * 0.45), 0.6);
     reset();
 }
@@ -65,7 +66,7 @@ float MasterBusCompressor::colorStage (float x, int channel, float drive, float 
         const auto hard = y * (1.5f - 0.5f * y * y);   // (a cubic: firmer than tanh near the top)
         y += (juce::jlimit (-1.0f, 1.0f, hard) - y) * grit;
     }
-    y = transformerTop.process (transformerLow.process (y, channel), channel);
+    y = transformerTop.process (y, channel);
     return y / drive;
 }
 
@@ -89,7 +90,7 @@ void MasterBusCompressor::process (float* left, float* right, int numSamples) no
     const auto makeup = juce::Decibels::decibelsToGain (s.makeupDb);
     const auto wetTarget = s.enabled ? 1.0f : 0.0f;
     const auto colorTarget = s.enabled && s.color ? 1.0f : 0.0f;
-    // Colour alone: about 4 dB into the stage; Grit drives it up to 16 dB harder
+    // Grit: its own drive stage (4 to 16 dB in), blended in by how far it's turned; COLOR is the low bump alone
     const auto drive = juce::Decibels::decibelsToGain (4.0f + s.grit * 12.0f);
     const auto bias = 0.12f;
 
@@ -130,11 +131,23 @@ void MasterBusCompressor::process (float* left, float* right, int numSamples) no
 
         auto outL = l * g, outR = r * g;
         colorAmount = colorTarget > colorAmount ? juce::jmin (colorTarget, colorAmount + wetStep) : juce::jmax (colorTarget, colorAmount - wetStep);
-        if (colorAmount > 0.0f)
+        if (s.grit > 0.0f && wet > 0.0f)
         {
             const auto cl = colorStage (outL, 0, drive, bias, s.grit), cr = colorStage (outR, 1, drive, bias, s.grit);
+            const auto blend = juce::jmin (1.0f, s.grit * 2.0f) * wet;
+            outL += (cl - outL) * blend;
+            outR += (cr - outR) * blend;
+        }
+        if (colorAmount > 0.0f)
+        {
+            const auto cl = transformerLow.process (outL, 0), cr = transformerLow.process (outR, 1);
             outL += (cl - outL) * colorAmount;
             outR += (cr - outR) * colorAmount;
+        }
+        else
+        {
+            transformerLow.process (outL, 0);   // (kept running, so switching it in doesn't click)
+            transformerLow.process (outR, 1);
         }
         left[i] = outL;
         right[i] = outR;

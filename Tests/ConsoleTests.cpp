@@ -211,9 +211,9 @@ TEST_CASE ("Tape saturation: unity when quiet, rounds the peaks, harmonics, the 
     CHECK (TapeSaturator::responseDb (slow, 18000.0) < TapeSaturator::responseDb (fast, 18000.0));
 }
 
-TEST_CASE ("Master Bus Compressor's Color: harmonics and grit, level kept", "[console]")
+TEST_CASE ("Master Bus Compressor's Color: a 3 dB bump in the lows, no harmonics; Grit is the saturation", "[console]")
 {
-    const auto runWith = [] (bool color, float grit, float amp)
+    const auto runWith = [] (bool color, float grit, double freq, float amp)
     {
         MasterBusCompressor c;
         MasterBusCompressor::Settings s;
@@ -223,19 +223,22 @@ TEST_CASE ("Master Bus Compressor's Color: harmonics and grit, level kept", "[co
         s.grit = grit;
         c.setSettings (s);
         c.prepare (48000.0);
-        auto l = testSine (500.0, amp, 48000), r = l;
+        auto l = testSine (freq, amp, 48000), r = l;
         c.process (l.data(), r.data(), (int) l.size());
         return l;
     };
-    const auto clean = runWith (false, 0.0f, 0.5f);
-    const auto warm = runWith (true, 0.0f, 0.5f);
-    const auto gritty = runWith (true, 1.0f, 0.5f);
-    CHECK (toneLevel (clean, 1000.0, 48000.0, 4800) < 1.0e-4);
-    CHECK (toneLevel (warm, 1000.0, 48000.0, 4800) > 0.002);                                       // even harmonics
-    CHECK (toneLevel (gritty, 1500.0, 48000.0, 4800) > toneLevel (warm, 1500.0, 48000.0, 4800) * 2.0);   // grit: more odd ones
-    // the level stays about the same at low levels
-    const auto quiet = runWith (true, 0.3f, 0.02f);
-    CHECK_THAT (toneLevel (quiet, 500.0, 48000.0, 4800), Catch::Matchers::WithinRel (0.02, 0.15));
+    // COLOR: about +3 dB round 60 Hz, the mids left alone, and clean (no harmonics)
+    const auto lowDb = juce::Decibels::gainToDecibels ((float) toneLevel (runWith (true, 0.0f, 60.0, 0.1f), 60.0, 48000.0, 9600) / 0.1f);
+    CHECK (lowDb > 2.5f);
+    CHECK (lowDb < 3.5f);
+    const auto midDb = juce::Decibels::gainToDecibels ((float) toneLevel (runWith (true, 0.0f, 2000.0, 0.1f), 2000.0, 48000.0, 9600) / 0.1f);
+    CHECK (std::abs (midDb) < 0.3f);
+    CHECK (toneLevel (runWith (true, 0.0f, 500.0, 0.5f), 1000.0, 48000.0, 4800) < 1.0e-4);
+    CHECK (toneLevel (runWith (false, 0.0f, 500.0, 0.5f), 1000.0, 48000.0, 4800) < 1.0e-4);
+    // Grit: harmonics, more the further it's turned
+    CHECK (toneLevel (runWith (false, 1.0f, 500.0, 0.5f), 1500.0, 48000.0, 4800)
+           > toneLevel (runWith (false, 0.3f, 500.0, 0.5f), 1500.0, 48000.0, 4800));
+    CHECK (toneLevel (runWith (false, 0.3f, 500.0, 0.5f), 1000.0, 48000.0, 4800) > 0.002);
 }
 
 #include "engine/PreampSaturation.h"

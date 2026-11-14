@@ -175,6 +175,7 @@ private:
     // Record enable and input monitoring: the same switches as the track header's R and I (either one turns them on or off).
     strip::CreamKey armKey { "R", juce::Colour (0xffe2463f) }, monitorKey { "I", juce::Colour (0xffe8a33c) };
     juce::TextButton multiMeterKey { "MM" };   // the master: opens the MultiMeter
+    juce::TextButton bounceKey { "Bnce" };     // the master: Bounce (as Logic's)
     bool canRecord() const;
     strip::DisplaySlider panKnob;
     juce::TextButton inputSlot, outputSlot;   // Logic's Input and Output slots
@@ -369,6 +370,8 @@ public:
 
     /** The master strip's MM key: the MultiMeter. */
     std::function<void()> onOpenMultiMeter;
+    /** The master's Bnce key: the song (or the cycle) bounced to a file. */
+    std::function<void()> onBounce;
 
     std::function<void()> onClose;
 

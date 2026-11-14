@@ -138,6 +138,7 @@ TrackHeader::TrackHeader (juce::ValueTree t, juce::UndoManager& um, TimelineStat
 
     look::knob (panKnob, look::Knob::black, false);
     look::onLight (panKnob);
+    panKnob.getProperties().set ("atpPan", true);
     panKnob.setScrollWheelEnabled (false);
     panKnob.setRange (-1.0, 1.0, 0.01);
     panKnob.setDoubleClickReturnValue (true, 0.0);

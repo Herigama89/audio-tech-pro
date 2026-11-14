@@ -3,11 +3,14 @@
 #include "EffectDesigns.h"
 #include "Mixer.h"
 #include "Theme.h"
-#include "AnalogConsoleArt.h"
 #include "../engine/AudioEngine.h"
 #include "../engine/ProjectPlayer.h"
 #include "../engine/BuiltInEffects.h"
 #include "../engine/MasterBusCompressor.h"
+#include "../engine/BandAnalysis.h"
+#include "../engine/Loudness.h"
+#include "../engine/ConsoleChannel.h"
+#include "Looks.h"
 #include "../model/Identifiers.h"
 #include "../model/Project.h"
 
@@ -742,39 +745,451 @@ void ConsoleView::resized()
 //==============================================================================
 // The Analog Console
 //==============================================================================
-AnalogKnob::AnalogKnob (const juce::String& colour, const juce::String& c) : caption (c)
+namespace
+{
+    // Its colours: the console's mid-grey (dark glass) or a light frosted face (light glass)
+    struct Desk
+    {
+        juce::Colour top, bottom, edge, lineDark, lineLight, title, caption, scale, key, keyBottom, keyText, slot, slotText, plate;
+    };
+    const Desk& desk()
+    {
+        static const Desk dark { juce::Colour (0xff4e4f54), juce::Colour (0xff3a3b3f), juce::Colours::white.withAlpha (0.13f),
+                                 juce::Colours::black.withAlpha (0.45f), juce::Colours::white.withAlpha (0.06f),
+                                 juce::Colour (0xffc9cacd), juce::Colour (0xffd0d1d4), juce::Colour (0xffd6d7da).withAlpha (0.75f),
+                                 juce::Colour (0xff45464a), juce::Colour (0xff36373a), juce::Colour (0xffd6d7da),
+                                 juce::Colours::black.withAlpha (0.35f), juce::Colours::white.withAlpha (0.35f), juce::Colours::white.withAlpha (0.08f) };
+        static const Desk light { juce::Colour (0xffeceef2), juce::Colour (0xffd6d8de), juce::Colours::white.withAlpha (0.9f),
+                                  juce::Colours::black.withAlpha (0.1f), juce::Colours::white.withAlpha (0.7f),
+                                  juce::Colour (0xff4a4c55), juce::Colour (0xff3a3c44), juce::Colour (0xff3d3f48).withAlpha (0.85f),
+                                  juce::Colour (0xfffdfdfe), juce::Colour (0xffe4e5ea), juce::Colour (0xff2a2b31),
+                                  juce::Colours::black.withAlpha (0.06f), juce::Colour (0xff1e1e28).withAlpha (0.4f), juce::Colours::white.withAlpha (0.7f) };
+        return theme::glassLight() ? light : dark;
+    }
+
+    // The sections' cap colours
+    const juce::Colour capRed { 0xffc8312a }, capWhite { 0xffe8e8e6 }, capGate { 0xff2f6f2c }, capGrey { 0xff8d8f93 },
+                       capHmf { 0xff3e9b3c }, capBlue { 0xff2c5fbf }, capBrown { 0xff4a3020 }, capGold { 0xffd9a51f };
+    const juce::Colour keyAmber { 0xffffa21f }, keyGreen { 0xff3fbf3a }, keyRed { 0xffe5463b }, keyYellow { 0xffffd60a }, keyBlue { 0xff3a6df0 };
+
+    juce::String hzText (double hz)
+    {
+        if (hz >= 1000.0)
+            return juce::String (hz / 1000.0, hz >= 10000.0 || std::abs (hz / 1000.0 - std::round (hz / 1000.0)) < 0.05 ? 0 : 1) + "k";
+        return juce::String (juce::roundToInt (hz));
+    }
+    juce::String shortNumber (double v)
+    {
+        if (std::abs (v) >= 1000.0)
+            return hzText (v);
+        if (std::abs (v - std::round (v)) < 0.001)
+            return juce::String (juce::roundToInt (v));
+        auto t = juce::String (v, std::abs (v) < 0.1 ? 2 : 1);
+        if (t.startsWith ("0."))
+            t = t.substring (1);
+        if (t.startsWith ("-0."))
+            t = "-" + t.substring (2);
+        return t;
+    }
+}
+
+AnalogKnob::AnalogKnob (juce::Colour c, const juce::String& text, bool isPan) : caption (text), cap (c), pan (isPan)
 {
     setSliderStyle (juce::Slider::RotaryVerticalDrag);
     setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
     setPopupDisplayEnabled (true, true, nullptr);
     setWantsKeyboardFocus (false);
-    strip = effectdesign::skinImage (("ac_knob_" + colour + "_png").toRawUTF8());
+    setRotaryParameters (juce::degreesToRadians (-150.0f) + juce::MathConstants<float>::twoPi, juce::degreesToRadians (150.0f) + juce::MathConstants<float>::twoPi, true);
+}
+
+juce::Rectangle<float> AnalogKnob::knobArea() const
+{
+    const auto size = (float) knobSize + (pan ? 3.0f : 0.0f);
+    const auto top = scale.empty() ? ((float) getHeight() - size) * 0.5f : 11.0f;
+    return { ((float) getWidth() - size) * 0.5f, top, size, size };
+}
+
+juce::String AnalogKnob::captionNow() const
+{
+    return isMouseButtonDown() ? const_cast<AnalogKnob*> (this)->getTextFromValue (getValue()) : caption;
+}
+
+void AnalogKnob::valueChanged()
+{
+    if (isMouseButtonDown())
+        if (auto* parent = getParentComponent())
+            parent->repaint (getBounds().expanded (12, 14));
+}
+
+void AnalogKnob::mouseUp (const juce::MouseEvent& e)
+{
+    juce::Slider::mouseUp (e);
+    if (auto* parent = getParentComponent())
+        parent->repaint (getBounds().expanded (12, 14));
 }
 
 void AnalogKnob::paint (juce::Graphics& g)
 {
-    if (! strip.isValid())
-        return;
-    const auto frames = analogart::knobFrames;
-    const auto pos = (float) valueToProportionOfLength (getValue());
-    const auto k = juce::jlimit (0, frames - 1, juce::roundToInt (pos * (float) (frames - 1)));
-    const auto size = juce::jmin (getWidth(), getHeight());
-    const auto frame = strip.getWidth();
-    const auto dest = juce::Rectangle<int> (size, size).withCentre (getLocalBounds().getCentre());
-    g.setOpacity (isEnabled() ? 1.0f : 0.45f);
-    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-    g.drawImage (strip, dest.getX(), dest.getY(), dest.getWidth(), dest.getHeight(), 0, k * frame, frame, frame);
+    const auto area = knobArea();
+    const auto c = area.getCentre();
+    const auto params = getRotaryParameters();
+    // its printed scale: ticks, and the numbers at the values they mark
+    if (! scale.empty())
+    {
+        const auto& d = desk();
+        const auto r0 = area.getWidth() * 0.5f + 1.5f, r1 = r0 + 2.5f, rText = r0 + 6.5f;
+        g.setFont (juce::FontOptions (7.5f, juce::Font::bold));
+        for (int i = 0; i <= 10; ++i)
+        {
+            const auto a = params.startAngleRadians + (params.endAngleRadians - params.startAngleRadians) * (float) i / 10.0f;
+            g.setColour (d.scale.withMultipliedAlpha (0.6f));
+            g.drawLine (c.x + r0 * std::sin (a), c.y - r0 * std::cos (a), c.x + r1 * std::sin (a), c.y - r1 * std::cos (a), 0.8f);
+        }
+        for (const auto& [value, text] : scale)
+        {
+            if (text.isEmpty())
+                continue;
+            const auto prop = (float) valueToProportionOfLength (juce::jlimit (getMinimum(), getMaximum(), value));
+            const auto a = params.startAngleRadians + (params.endAngleRadians - params.startAngleRadians) * prop;
+            const juce::Point<float> at (c.x + rText * std::sin (a), c.y - rText * std::cos (a));
+            g.setColour (d.scale);
+            g.drawText (text, juce::Rectangle<float> (26.0f, 9.0f).withCentre (at), juce::Justification::centred, false);
+        }
+    }
+    looks::drawCapKnob (g, area, (float) valueToProportionOfLength (getValue()), params.startAngleRadians, params.endAngleRadians,
+                        false, isEnabled(), cap, pan);
 }
 
+void ConsoleKey::paintButton (juce::Graphics& g, bool over, bool down)
+{
+    const auto& d = desk();
+    auto r = getLocalBounds().toFloat().reduced (0.5f);
+    const bool on = getToggleState();
+    if (on)
+        g.setGradientFill (juce::ColourGradient (lit.brighter (0.15f), 0.0f, r.getY(), lit.darker (0.25f), 0.0f, r.getBottom(), false));
+    else
+        g.setGradientFill (juce::ColourGradient (d.key.brighter (over ? 0.08f : 0.0f), 0.0f, r.getY(), d.keyBottom, 0.0f, r.getBottom(), false));
+    g.fillRoundedRectangle (r, 3.0f);
+    g.setColour (juce::Colours::black.withAlpha (theme::glassLight() ? 0.18f : 0.6f));
+    g.drawRoundedRectangle (r, 3.0f, 1.0f);
+    g.setColour (juce::Colours::white.withAlpha (down ? 0.0f : 0.12f));
+    g.drawHorizontalLine ((int) r.getY() + 1, r.getX() + 2.0f, r.getRight() - 2.0f);
+    g.setColour (on ? (lit.getPerceivedBrightness() > 0.6f ? juce::Colour (0xff1b1206) : juce::Colours::white) : d.keyText);
+    g.setFont (juce::FontOptions (juce::jmin (10.0f, (float) getHeight() * 0.6f), juce::Font::bold));
+    g.drawFittedText (getButtonText(), getLocalBounds().reduced (2, 0), juce::Justification::centred, 1, 0.7f);
+}
+
+void InsertSlot::paint (juce::Graphics& g)
+{
+    const auto& d = desk();
+    auto r = getLocalBounds().toFloat().reduced (0.5f);
+    if (kind == 0)
+        g.setColour (d.slot);
+    else if (kind == 2)
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3f5fae), 0.0f, r.getY(), juce::Colour (0xff2f4a8e), 0.0f, r.getBottom(), false));
+    else if (kind == 3)
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2f7d47), 0.0f, r.getY(), juce::Colour (0xff235f36), 0.0f, r.getBottom(), false));
+    else
+        g.setGradientFill (juce::ColourGradient (d.key.brighter (0.12f), 0.0f, r.getY(), d.keyBottom.brighter (0.1f), 0.0f, r.getBottom(), false));
+    g.fillRoundedRectangle (r, 3.0f);
+    g.setColour (juce::Colours::black.withAlpha (theme::glassLight() ? 0.12f : 0.45f));
+    g.drawRoundedRectangle (r, 3.0f, 1.0f);
+    // its lamp
+    const auto lamp = juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ r.getX() + 7.0f, r.getCentreY() });
+    if (kind != 0 && on)
+    {
+        g.setColour (juce::Colour (0xff34c759).withAlpha (0.35f));
+        g.fillEllipse (lamp.expanded (2.0f));
+        g.setColour (juce::Colour (0xff34c759));
+    }
+    else
+        g.setColour (juce::Colours::white.withAlpha (0.14f));
+    g.fillEllipse (lamp);
+    g.setColour (kind == 0 ? d.slotText : (kind >= 2 || ! theme::glassLight() ? juce::Colour (0xfff2f2f4) : juce::Colour (0xff1c1d22)));
+    g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+    g.drawFittedText (kind == 0 ? juce::String ("+") : name, getLocalBounds().withTrimmedLeft (14).withTrimmedRight (3), juce::Justification::centredLeft, 1, 0.75f);
+}
+
+//==============================================================================
+struct ConsoleMeterState
+{
+    bands::FilterBank bank;
+    LoudnessMeter loudness;
+    double rate = 0.0;
+    std::array<float, ConsoleMeter::bandCount> level {}, held {};
+    std::array<int, ConsoleMeter::bandCount> heldFor {};
+    float correlation = 1.0f;
+    std::vector<juce::Point<float>> scope = std::vector<juce::Point<float>> (512);
+    int scopePos = 0;
+    float scopeGain = 4.0f;
+};
+
+ConsoleMeter::ConsoleMeter (AudioEngine& e, juce::ValueTree p) : engine (e), project (p), state (std::make_unique<ConsoleMeterState>())
+{
+    readL.resize (16384);
+    readR.resize (16384);
+    tab = juce::jlimit (0, 2, (int) project.getProperty ("consoleMeterTab", 0));
+    bars = (bool) project.getProperty ("consoleMeterBars", false);
+    int i = 0;
+    for (auto* k : { &spectrumKey, &stereoKey, &loudnessKey })
+    {
+        k->onClick = [this, i] { setTab (i); };
+        addAndMakeVisible (k);
+        ++i;
+    }
+    curveKey.onClick = [this] { bars = false; project.setProperty ("consoleMeterBars", false, nullptr); setTab (tab); };
+    barsKey.onClick = [this] { bars = true; project.setProperty ("consoleMeterBars", true, nullptr); setTab (tab); };
+    addAndMakeVisible (curveKey);
+    addAndMakeVisible (barsKey);
+    setTab (tab);
+    engine.setMasterTap (true);
+    startTimerHz (30);
+}
+
+ConsoleMeter::~ConsoleMeter()
+{
+    engine.setMasterTap (false);
+}
+
+void ConsoleMeter::setTab (int t)
+{
+    tab = t;
+    project.setProperty ("consoleMeterTab", t, nullptr);
+    spectrumKey.setToggleState (tab == 0, juce::dontSendNotification);
+    stereoKey.setToggleState (tab == 1, juce::dontSendNotification);
+    loudnessKey.setToggleState (tab == 2, juce::dontSendNotification);
+    curveKey.setToggleState (! bars, juce::dontSendNotification);
+    barsKey.setToggleState (bars, juce::dontSendNotification);
+    curveKey.setVisible (tab == 0);
+    barsKey.setVisible (tab == 0);
+    repaint();
+}
+
+void ConsoleMeter::resized()
+{
+    auto r = getLocalBounds();
+    auto tabs = r.removeFromTop (18);
+    const auto w = tabs.getWidth() / 3;
+    spectrumKey.setBounds (tabs.removeFromLeft (w).reduced (1, 0));
+    stereoKey.setBounds (tabs.removeFromLeft (w).reduced (1, 0));
+    loudnessKey.setBounds (tabs.reduced (1, 0));
+    r.removeFromTop (3);
+    auto sub = r.removeFromTop (14).withSizeKeepingCentre (96, 14);
+    curveKey.setBounds (sub.removeFromLeft (48).reduced (1, 0));
+    barsKey.setBounds (sub.reduced (1, 0));
+    r.removeFromTop (3);
+    readouts = r.removeFromBottom (13);
+    screen = r.withTrimmedBottom (2);
+}
+
+void ConsoleMeter::timerCallback()
+{
+    if (! isShowing())
+    {
+        engine.readMaster (readL.data(), readR.data(), (int) readL.size());   // (keep the tap from filling up)
+        return;
+    }
+    auto& st = *state;
+    const auto rate = engine.getSampleRate() > 0.0 ? engine.getSampleRate() : 48000.0;
+    if (std::abs (rate - st.rate) > 0.5)
+    {
+        st.bank.prepare (rate, bandCount);
+        st.loudness.prepare (rate);
+        st.rate = rate;
+    }
+    const auto n = engine.readMaster (readL.data(), readR.data(), (int) readL.size());
+    if (n > 0)
+    {
+        st.loudness.process (readL.data(), readR.data(), n);
+        std::vector<float> mono ((size_t) n);
+        double lr = 0.0, ll = 0.0, rr = 0.0;
+        float loudest = 0.0f;
+        for (int i = 0; i < n; ++i)
+        {
+            mono[(size_t) i] = 0.5f * (readL[(size_t) i] + readR[(size_t) i]);
+            lr += (double) readL[(size_t) i] * readR[(size_t) i];
+            ll += (double) readL[(size_t) i] * readL[(size_t) i];
+            rr += (double) readR[(size_t) i] * readR[(size_t) i];
+            loudest = juce::jmax (loudest, std::abs (readL[(size_t) i]), std::abs (readR[(size_t) i]));
+        }
+        st.bank.process (mono.data(), n);
+        if (ll > 1.0e-9 && rr > 1.0e-9)
+            st.correlation += ((float) (lr / std::sqrt (ll * rr)) - st.correlation) * 0.25f;
+        const auto step = juce::jmax (1, n / 256);
+        for (int i = 0; i < n; i += step)
+        {
+            st.scope[(size_t) st.scopePos] = { (readR[(size_t) i] - readL[(size_t) i]) * 0.7071f, (readL[(size_t) i] + readR[(size_t) i]) * 0.7071f };
+            st.scopePos = (st.scopePos + 1) % (int) st.scope.size();
+        }
+        const auto wanted = loudest > 1.0e-4f ? juce::jlimit (1.0f, 30.0f, 0.8f / loudest) : st.scopeGain;
+        st.scopeGain += (wanted - st.scopeGain) * (wanted < st.scopeGain ? 0.5f : 0.05f);
+    }
+    std::array<float, bandCount> peak {};
+    std::array<double, bandCount> ms {};
+    const auto got = st.bank.count() == bandCount && st.bank.take (peak.data(), ms.data());
+    for (int b = 0; b < bandCount; ++b)
+    {
+        const auto db = got ? juce::Decibels::gainToDecibels (peak[(size_t) b], -90.0f) : -90.0f;
+        st.level[(size_t) b] = db > st.level[(size_t) b] ? db : juce::jmax (db, st.level[(size_t) b] - 1.2f);   // (falls 36 dB a second)
+        if (st.level[(size_t) b] >= st.held[(size_t) b])
+        {
+            st.held[(size_t) b] = st.level[(size_t) b];
+            st.heldFor[(size_t) b] = 0;
+        }
+        else if (++st.heldFor[(size_t) b] > 45)
+            st.held[(size_t) b] = juce::jmax (st.level[(size_t) b], st.held[(size_t) b] - 0.8f);
+    }
+    repaint();
+}
+
+void ConsoleMeter::paint (juce::Graphics& g)
+{
+    const auto& d = desk();
+    auto& st = *state;
+    const auto r = screen.toFloat();
+    g.setColour (juce::Colour (0xff07080a));
+    g.fillRoundedRectangle (r, 5.0f);
+    g.setColour (juce::Colours::black.withAlpha (0.6f));
+    g.drawRoundedRectangle (r.reduced (0.5f), 5.0f, 1.0f);
+    const auto inner = r.reduced (3.0f);
+    const auto xOf = [inner] (double hz) { return inner.getX() + inner.getWidth() * (float) bands::position (hz); };
+    const auto yOf = [inner] (float db) { return inner.getY() + inner.getHeight() * juce::jlimit (0.0f, 1.0f, -db / 66.0f); };
+
+    if (tab == 0)
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.07f));
+        for (const auto hz : { 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0 })
+            g.drawVerticalLine ((int) xOf (hz), inner.getY(), inner.getBottom());
+        for (const auto db : { -12.0f, -24.0f, -36.0f, -48.0f })
+            g.drawHorizontalLine ((int) yOf (db), inner.getX(), inner.getRight());
+        if (bars)
+        {
+            const auto bw = inner.getWidth() / (float) bandCount;
+            const int segments = juce::jmax (8, (int) (inner.getHeight() / 4.0f));
+            for (int b = 0; b < bandCount; ++b)
+            {
+                const auto x = inner.getX() + (float) b * bw + 1.0f;
+                const auto top = yOf (st.level[(size_t) b]);
+                for (int q = 0; q < segments; ++q)
+                {
+                    const auto y = inner.getBottom() - (float) (q + 1) * inner.getHeight() / (float) segments;
+                    if (y + 3.0f < top)
+                        break;
+                    const auto frac = (float) q / (float) segments;
+                    g.setColour (frac > 0.85f ? juce::Colour (0xffff453a) : frac > 0.7f ? juce::Colour (0xffffd60a) : juce::Colour (0xff34c759));
+                    g.fillRoundedRectangle (x, y, bw - 2.0f, inner.getHeight() / (float) segments - 1.0f, 0.6f);
+                }
+                g.setColour (juce::Colours::white.withAlpha (0.75f));
+                g.fillRect (x, yOf (st.held[(size_t) b]) - 1.5f, bw - 2.0f, 1.5f);
+            }
+        }
+        else
+        {
+            juce::Path curve, area;
+            for (int b = 0; b < bandCount; ++b)
+            {
+                const auto x = xOf (bands::centre (b, bandCount));
+                const auto y = yOf (st.level[(size_t) b]);
+                if (b == 0) { curve.startNewSubPath (inner.getX(), y); area.startNewSubPath (inner.getX(), inner.getBottom()); area.lineTo (inner.getX(), y); }
+                curve.lineTo (x, y);
+                area.lineTo (x, y);
+            }
+            const auto lastY = yOf (st.level[(size_t) bandCount - 1]);
+            curve.lineTo (inner.getRight(), lastY);
+            area.lineTo (inner.getRight(), lastY);
+            area.lineTo (inner.getRight(), inner.getBottom());
+            area.closeSubPath();
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xbf5ac8fa), 0.0f, inner.getY(), juce::Colour (0x0d5ac8fa), 0.0f, inner.getBottom(), false));
+            g.fillPath (area);
+            g.setColour (juce::Colour (0xff9ee6ff));
+            g.strokePath (curve, juce::PathStrokeType (1.2f, juce::PathStrokeType::curved));
+            juce::Path held;
+            for (int b = 0; b < bandCount; ++b)
+            {
+                const juce::Point<float> p (xOf (bands::centre (b, bandCount)), yOf (st.held[(size_t) b]));
+                if (b == 0) held.startNewSubPath (p); else held.lineTo (p);
+            }
+            juce::Path dashed;
+            const float dash[] { 2.0f, 1.5f };
+            juce::PathStrokeType (0.8f).createDashedStroke (dashed, held, dash, 2);
+            g.setColour (juce::Colour (0xb3ffd60a));
+            g.fillPath (dashed);
+        }
+        // the frequencies, on a dark backing so the bars don't hide them
+        g.setFont (juce::FontOptions (7.5f));
+        for (const auto& [hz, text] : { std::pair { 100.0, "100" }, std::pair { 1000.0, "1k" }, std::pair { 10000.0, "10k" } })
+        {
+            const auto box = juce::Rectangle<float> (18.0f, 9.0f).withPosition (xOf (hz) + 1.0f, inner.getBottom() - 9.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.55f));
+            g.fillRoundedRectangle (box, 2.0f);
+            g.setColour (juce::Colours::white.withAlpha (0.6f));
+            g.drawText (text, box, juce::Justification::centred, false);
+        }
+    }
+    else if (tab == 1)
+    {
+        // the stereo image: mid up, sides across
+        const auto c = inner.getCentre();
+        const auto half = juce::jmin (inner.getWidth(), inner.getHeight()) * 0.5f;
+        g.setColour (juce::Colours::white.withAlpha (0.08f));
+        g.drawLine (c.x - half, c.y + half, c.x + half, c.y - half, 1.0f);
+        g.drawLine (c.x - half, c.y - half, c.x + half, c.y + half, 1.0f);
+        g.drawVerticalLine ((int) c.x, inner.getY(), inner.getBottom());
+        g.setColour (juce::Colour (0xff9ee6ff).withAlpha (0.7f));
+        for (const auto& p : st.scope)
+        {
+            const auto x = c.x + juce::jlimit (-1.0f, 1.0f, p.x * st.scopeGain) * half;
+            const auto y = c.y - juce::jlimit (-1.0f, 1.0f, p.y * st.scopeGain) * half;
+            g.fillRect (x, y, 1.2f, 1.2f);
+        }
+    }
+    else
+    {
+        // loudness: short-term big, integrated under it, a bar from -40 to 0 LUFS
+        const auto st_ = st.loudness.shortTerm(), in = st.loudness.integrated();
+        const auto text = [] (double v) { return v > -70.0 ? juce::String (v, 1) : juce::String ("--"); };
+        auto box = inner.reduced (6.0f);
+        auto barArea = box.removeFromRight (14.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.6f));
+        g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
+        g.drawText ("SHORT-TERM", box.removeFromTop (12.0f), juce::Justification::centredLeft, false);
+        g.setColour (juce::Colour (0xff34c759));
+        g.setFont (juce::FontOptions (24.0f, juce::Font::bold));
+        g.drawText (text (st_) + " LUFS", box.removeFromTop (30.0f), juce::Justification::centredLeft, false);
+        g.setColour (juce::Colours::white.withAlpha (0.6f));
+        g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
+        g.drawText ("INTEGRATED", box.removeFromTop (12.0f), juce::Justification::centredLeft, false);
+        g.setColour (juce::Colours::white);
+        g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        g.drawText (text (in) + " LUFS", box.removeFromTop (20.0f), juce::Justification::centredLeft, false);
+        g.setColour (juce::Colours::white.withAlpha (0.08f));
+        g.fillRoundedRectangle (barArea, 2.0f);
+        const auto frac = juce::jlimit (0.0f, 1.0f, (float) ((st_ + 40.0) / 40.0));
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff34c759), 0.0f, barArea.getBottom(), juce::Colour (0xffff453a), 0.0f, barArea.getY(), false));
+        g.fillRoundedRectangle (barArea.withTop (barArea.getBottom() - barArea.getHeight() * frac), 2.0f);
+    }
+
+    // the readouts under it
+    g.setFont (juce::FontOptions (9.0f));
+    const auto st2 = st.loudness.shortTerm();
+    juce::AttributedString left, right;
+    left.append ("Short-term ", juce::FontOptions (9.0f), d.caption.withAlpha (0.8f));
+    left.append (st2 > -70.0 ? juce::String (st2, 1) + " LUFS" : juce::String ("-- LUFS"), juce::FontOptions (9.0f, juce::Font::bold), juce::Colour (0xff34c759));
+    left.draw (g, readouts.toFloat().withTrimmedLeft (4.0f));
+    right.append ("Corr ", juce::FontOptions (9.0f), d.caption.withAlpha (0.8f));
+    right.append ((st.correlation >= 0.0f ? "+" : "") + juce::String (st.correlation, 2), juce::FontOptions (9.0f, juce::Font::bold),
+                  st.correlation < 0.0f ? juce::Colour (0xffff453a) : juce::Colour (0xff34c759));
+    right.setJustification (juce::Justification::centredRight);
+    right.draw (g, readouts.toFloat().withTrimmedRight (4.0f));
+}
+
+//==============================================================================
 AnalogConsole::AnalogConsole (ConsoleHost& h, juce::ValueTree p) : host (h), project (p)
 {
     const char* const names[] { "All", "Audio", "Buses" };
     for (int i = 0; i < 3; ++i)
     {
-        auto* k = filterKeys.add (new juce::TextButton (names[i]));
-        styleKey (*k);
-        k->setColour (juce::TextButton::buttonOnColourId, amber);
-        k->setColour (juce::TextButton::textColourOnId, juce::Colour (0xff1a1206));
+        auto* k = filterKeys.add (new ConsoleKey (names[i], keyAmber));
         k->setToggleState (i == 0, juce::dontSendNotification);
         k->onClick = [this, i] { filter = i; for (int j = 0; j < filterKeys.size(); ++j) filterKeys[j]->setToggleState (j == i, juce::dontSendNotification); rebuild(); };
         addAndMakeVisible (k);
@@ -794,8 +1209,12 @@ AnalogConsole::~AnalogConsole()
 
 void AnalogConsole::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if (tree.hasType (ids::TRACK) && (property == ids::name || property == ids::colour))
+    if (tree.hasType (ids::TRACK) && (property == ids::name || property == ids::colour || property == ids::inputFxOn))
         rebuildWanted = true;
+    if (tree.hasType (ids::INSERT) && (property == ids::bypass || property == ids::effect))
+        rebuildWanted = true;
+    if (property.toString().startsWith ("consoleMeter"))
+        return;
     triggerAsyncUpdate();
 }
 
@@ -850,19 +1269,26 @@ void AnalogConsole::buildStrip (Strip& s)
 {
     auto& um = *host.undo;
     const auto track = s.track;
+    const auto id = track[ids::id].toString();
     int y = 34;
     const int w = columnWidth;
-    const auto knob = [&] (const juce::String& colour, const juce::String& caption, const juce::Identifier& property, double fallback,
-                           double lo, double hi, double mid, juce::Rectangle<int> where, const juce::String& unit = {}) -> AnalogKnob&
+    const int boxW = 54, boxH = 44;
+    const auto left = [&] (int row) { return juce::Rectangle<int> (4, row, boxW, boxH); };
+    const auto right = [&] (int row) { return juce::Rectangle<int> (w - 4 - boxW, row, boxW, boxH); };
+
+    const auto knob = [&] (juce::Colour colour, const juce::String& caption, const juce::Identifier& property, double fallback,
+                           double lo, double hi, double mid, juce::Rectangle<int> where, std::vector<std::pair<double, juce::String>> scale,
+                           std::function<juce::String (double)> text, bool pan = false) -> AnalogKnob&
     {
-        auto* k = new AnalogKnob (colour, caption);
+        auto* k = new AnalogKnob (colour, caption, pan);
         k->setRange (lo, hi, 0.0);
         if (mid > lo && mid < hi)
             k->setSkewFactorFromMidPoint (mid);
         k->setDoubleClickReturnValue (true, fallback);
         k->setValue ((double) track.getProperty (property, fallback), juce::dontSendNotification);
         k->setTooltip (caption);
-        k->textFromValueFunction = [unit] (double v) { return juce::String (v, std::abs (v) < 10.0 ? 1 : 0) + unit; };
+        k->scale = std::move (scale);
+        k->textFromValueFunction = std::move (text);
         auto tree = track;
         k->onDragStart = [&um, caption] { um.beginNewTransaction ("Analog Console: " + caption); };
         k->onValueChange = [k, tree, property, &um]() mutable { tree.setProperty (property, k->getValue(), &um); };
@@ -873,12 +1299,9 @@ void AnalogConsole::buildStrip (Strip& s)
         return *k;
     };
     const auto toggle = [&] (const juce::String& text, const juce::Identifier& property, bool fallback, juce::Rectangle<int> where,
-                             juce::Colour on = amber, const juce::String& tip = {})
+                             juce::Colour on = keyAmber, const juce::String& tip = {})
     {
-        auto* b = new juce::TextButton (text);
-        styleKey (*b);
-        b->setColour (juce::TextButton::buttonOnColourId, on);
-        b->setColour (juce::TextButton::textColourOnId, on.getPerceivedBrightness() > 0.55f ? juce::Colour (0xff1a1206) : juce::Colours::white);
+        auto* b = new ConsoleKey (text, on);
         b->setToggleState ((bool) track.getProperty (property, fallback), juce::dontSendNotification);
         b->setTooltip (tip.isNotEmpty() ? tip : text);
         auto tree = track;
@@ -892,167 +1315,193 @@ void AnalogConsole::buildStrip (Strip& s)
         s.parts.add (b);
         s.bindings.push_back ({ b, track, property, fallback ? 1.0 : 0.0, true });
     };
-    const auto pair = [&] (int row) { return std::make_pair (juce::Rectangle<int> (11, row, 36, 36), juce::Rectangle<int> (w - 47, row, 36, 36)); };
-    const auto keys = [&] (int row) { return std::make_pair (juce::Rectangle<int> (6, row, w / 2 - 8, 17), juce::Rectangle<int> (w / 2 + 2, row, w / 2 - 8, 17)); };
+    const auto keys = [&] (int row) { return std::make_pair (juce::Rectangle<int> (7, row, w / 2 - 10, 17), juce::Rectangle<int> (w / 2 + 3, row, w / 2 - 10, 17)); };
+    const auto wideKey = [&] (int row) { return juce::Rectangle<int> (12, row, w - 24, 17); };
     const auto section = [&] (const juce::String& title) { s.sectionTitles.push_back ({ title, juce::Rectangle<int> (0, y, w, 14) }); y += 15; };
+    const auto db1 = [] (const juce::String& unit) { return [unit] (double v) { return juce::String (v, std::abs (v) < 10.0 ? 1 : 0) + unit; }; };
+    const auto signedDb = [] (double v) { return (v > 0.05 ? "+" : "") + juce::String (v, 1) + " dB"; };
+    const auto hz = [] (double v) { return v >= 1000.0 ? juce::String (v / 1000.0, 2) + " kHz" : juce::String (juce::roundToInt (v)) + " Hz"; };
+    const auto slots = [&] (const juce::String& owner, int minimum, bool inputFx)
+    {
+        const auto inserts = ordered (model::findChain (project, owner));
+        int next = 0;
+        for (const auto& insert : inserts)
+            next = juce::jmax (next, model::insertSlot (insert) + 1);
+        const auto count = juce::jmax (minimum, inserts.size() + 1);
+        for (int i = 0; i < count; ++i)
+        {
+            InsertSlot* slot;
+            if (i < inserts.size())
+            {
+                auto insert = inserts[i];
+                const auto plugin = isPlugin (insert);
+                slot = new InsertSlot (nameOf (insert), plugin ? 2 : (inputFx ? 3 : 1), ! (bool) insert.getProperty (ids::bypass, false),
+                                       [this, insert] { if (host.openInsert) host.openInsert (insert); });
+                slot->setTooltip ("Open " + nameOf (insert));
+            }
+            else
+            {
+                slot = new InsertSlot ({}, 0, false, {});
+                auto* raw = slot;
+                slot->click = [this, owner, next, raw] { if (host.chooseEffect) host.chooseEffect (owner, next, {}, *raw); };
+                slot->setTooltip (inputFx ? "Add a plug-in to the input (before the recorder)" : "Add an insert");
+            }
+            slot->setBounds (7, y, w - 14, 17);
+            s.addAndMakeVisible (slot);
+            s.parts.add (slot);
+            y += 19;
+        }
+        y += 4;
+    };
+    const auto audio = ! model::isInstrumentTrack (track) && ! model::isBusTrack (track);
 
     // Input
     section ("INPUT");
     {
-        auto [a, b] = pair (y);
-        knob ("grey", "Mic gain", ids::consoleMicGain, 20.0, 20.0, 70.0, 0.0, a, " dB");
-        knob ("grey", "Trim", ids::consoleInput, 0.0, -20.0, 20.0, 0.0, b, " dB");
-        y += 47;
-        auto [c, d] = keys (y);
-        toggle (juce::CharPointer_UTF8 ("\xc3\x98"), ids::consolePhase, false, c, amber, "Phase: the polarity turned over");
-        toggle ("LINE", ids::consoleLine, true, d, amber, "Line in (off: the mic preamp, its gain and colour)");
+        knob (capRed, "Gain", ids::consoleMicGain, 20.0, 20.0, 70.0, 0.0, left (y), { { 20.0, "20" }, { 45.0, "" }, { 70.0, "70" } }, db1 (" dB"));
+        knob (capGrey, "Trim", ids::consoleInput, 0.0, -20.0, 20.0, 0.0, right (y), { { -20.0, "-20" }, { 0.0, "0" }, { 20.0, "+20" } }, signedDb);
+        y += boxH + 12;
+        auto [a, b] = keys (y);
+        toggle (juce::CharPointer_UTF8 ("\xc3\x98"), ids::consolePhase, false, a, keyAmber, "Phase: the polarity turned over");
+        toggle ("LINE", ids::consoleLine, true, b, keyAmber, "Line in (off: the mic preamp, its gain and colour)");
         y += 20;
+        auto [c, d] = keys (y);
+        toggle ("PAD", ids::consolePad, false, c, keyAmber, "Pad: -20 dB in");
+        toggle ("IN", ids::stripIn, true, d, keyGreen, "The whole channel strip in");
+        y += 24;
+    }
+    // Input FX (audio channels): what's on the input, before the recorder, and its round trip
+    if (audio)
+    {
+        s.sectionTitles.push_back ({ "INPUT FX", juce::Rectangle<int> (0, y, w, 14) });
+        const auto chain = ordered (model::findChain (project, model::inputOwner (id)));
+        if (! chain.isEmpty() && (bool) track.getProperty (ids::inputFxOn, true))
+            s.inputFxTime = juce::String (InputFxPanel::roundTripMs (host, project, track), 2) + " ms";
+        y += 15;
+        slots (model::inputOwner (id), 2, true);
+    }
+    section ("DYNAMICS");
+    {
+        knob (capWhite, "Ratio", ids::consoleCompRatio, 0.0, 0.0, 20.0, 4.0, left (y), { { 0.0, "A" }, { 4.0, "4" }, { 20.0, "20" } },
+              [] (double v) { return v < 0.5 ? juce::String ("Auto") : juce::String (v, 1) + ":1"; });
+        knob (capWhite, "Comp", ids::consoleDynamics, 0.0, 0.0, 10.0, 0.0, right (y), { { 0.0, "0" }, { 5.0, "5" }, { 10.0, "10" } }, db1 (""));
+        y += boxH + 12;
+        knob (capWhite, "Release", ids::consoleCompRelease, 0.15, 0.05, 4.0, 0.4, left (y), { { 0.05, ".05" }, { 0.4, ".4" }, { 4.0, "4" } }, db1 (" s"));
+        s.grArea = right (y).reduced (14, 4).withTrimmedBottom (8);
+        y += boxH + 12;
         auto [e, f] = keys (y);
-        toggle ("PAD", ids::consolePad, false, e, amber, "Pad: -20 dB in");
-        toggle ("IN", ids::stripIn, true, f, green, "The whole channel strip in");
+        toggle ("FAST", ids::consoleCompFast, false, e);
+        toggle ("KNEE", ids::consoleCompKnee, false, f, keyAmber, "Soft knee");
+        y += 22;
+        knob (capGate, "Range", ids::consoleGateRange, 20.0, 0.0, 40.0, 0.0, left (y), { { 0.0, "0" }, { 20.0, "20" }, { 40.0, "40" } }, db1 (" dB"));
+        knob (capGate, "Gate", ids::consoleGateThreshold, -80.0, -80.0, 0.0, 0.0, right (y), { { -80.0, "off" }, { -40.0, "-40" }, { 0.0, "0" } },
+              [] (double v) { return v <= -79.9 ? juce::String ("Off") : juce::String (v, 1) + " dB"; });
+        y += boxH + 12;
+        auto [i1, j1] = keys (y);
+        toggle ("EXP", ids::consoleGateExpander, false, i1, keyAmber, "Expander instead of a gate");
+        toggle ("DYN IN", ids::consoleDynIn, true, j1, keyGreen);
         y += 24;
     }
     section ("FILTERS");
     {
-        auto [a, b] = pair (y);
-        knob ("grey", "High-pass", ids::consoleHPF, 0.0, 0.0, 500.0, 80.0, a, " Hz");
-        knob ("grey", "Low-pass", ids::consoleLPF, 0.0, 0.0, 22000.0, 6000.0, b, " Hz");
-        y += 52;
-    }
-    section ("DYNAMICS");
-    {
-        auto [a, b] = pair (y);
-        knob ("white", "Ratio (0: auto)", ids::consoleCompRatio, 0.0, 0.0, 20.0, 4.0, a, ":1");
-        knob ("white", "Compression", ids::consoleDynamics, 0.0, 0.0, 10.0, 0.0, b);
-        y += 47;
-        auto [c, d] = pair (y);
-        knob ("white", "Release", ids::consoleCompRelease, 0.15, 0.05, 4.0, 0.4, c, " s");
-        s.grArea = d.reduced (6, 4);
-        y += 47;
-        auto [e, f] = keys (y);
-        toggle ("FAST", ids::consoleCompFast, false, e);
-        toggle ("KNEE", ids::consoleCompKnee, false, f, amber, "Soft knee");
-        y += 21;
-        auto [g1, h1] = pair (y);
-        knob ("green", "Gate range", ids::consoleGateRange, 20.0, 0.0, 40.0, 0.0, g1, " dB");
-        knob ("green", "Gate threshold (-80: off)", ids::consoleGateThreshold, -80.0, -80.0, 0.0, 0.0, h1, " dB");
-        y += 47;
-        auto [i1, j1] = keys (y);
-        toggle ("EXP", ids::consoleGateExpander, false, i1, amber, "Expander instead of a gate");
-        toggle ("DYN IN", ids::consoleDynIn, true, j1, green);
-        y += 24;
+        knob (capGrey, "HPF", ids::consoleHPF, 0.0, 0.0, 500.0, 80.0, left (y), { { 0.0, "off" }, { 80.0, "80" }, { 500.0, "500" } },
+              [hz] (double v) { return v < 1.0 ? juce::String ("Off") : hz (v); });
+        knob (capGrey, "LPF", ids::consoleLPF, 0.0, 0.0, 22000.0, 6000.0, right (y), { { 0.0, "off" }, { 6000.0, "6k" }, { 22000.0, "22k" } },
+              [hz] (double v) { return v < 1.0 ? juce::String ("Off") : hz (v); });
+        y += boxH + 14;
     }
     section ("EQ");
     {
-        struct Band { const char* colour; const char* name; juce::Identifier gain, freq; double f0, f1, fmid, fdef; };
-        const Band bands[] { { "red", "HF", ids::consoleHF, ids::consoleHFFreq, 1500.0, 16000.0, 5000.0, 8000.0 },
-                             { "emerald", "HMF", ids::consoleHMF, ids::consoleHMFFreq, 600.0, 7000.0, 2000.0, 2500.0 },
-                             { "blue", "LMF", ids::consoleLMF, ids::consoleLMFFreq, 200.0, 2500.0, 700.0, 400.0 },
-                             { "brown", "LF", ids::consoleLF, ids::consoleLFFreq, 30.0, 450.0, 120.0, 100.0 } };
-        for (const auto& band : bands)
+        const auto g = (double) ConsoleChannel::maxGainDb;
+        const auto gainScale = std::vector<std::pair<double, juce::String>> { { -g, "-" + shortNumber (g) }, { 0.0, "0" }, { g, "+" + shortNumber (g) } };
+        struct Band { juce::Colour colour; const char* name; juce::Identifier gain, freq; double f0, f1, fmid, fdef; };
+        const Band bands_[] { { capRed, "HF", ids::consoleHF, ids::consoleHFFreq, 1500.0, 16000.0, 5000.0, 8000.0 },
+                              { capHmf, "HMF", ids::consoleHMF, ids::consoleHMFFreq, 600.0, 7000.0, 2000.0, 2500.0 },
+                              { capBlue, "LMF", ids::consoleLMF, ids::consoleLMFFreq, 200.0, 2500.0, 700.0, 400.0 },
+                              { capBrown, "LF", ids::consoleLF, ids::consoleLFFreq, 30.0, 450.0, 120.0, 100.0 } };
+        for (const auto& band : bands_)
         {
-            auto [a, b] = pair (y);
-            knob (band.colour, juce::String (band.name) + " gain", band.gain, 0.0, -20.0, 20.0, 0.0, a, " dB");
-            knob (band.colour, juce::String (band.name) + " frequency", band.freq, band.fdef, band.f0, band.f1, band.fmid, b, " Hz");
-            y += 47;
-            if (juce::String (band.name) == "HMF" || juce::String (band.name) == "LMF")
+            const juce::String name (band.name);
+            knob (band.colour, name, band.gain, 0.0, -g, g, 0.0, left (y), gainScale, signedDb);
+            knob (band.colour, band.f1 >= 1000.0 && name != "LMF" ? "kHz" : (name == "LMF" ? "kHz" : "Hz"), band.freq, band.fdef, band.f0, band.f1, band.fmid, right (y),
+                  { { band.f0, hzText (band.f0) }, { band.fmid, hzText (band.fmid) }, { band.f1, hzText (band.f1) } }, hz);
+            y += boxH + 12;
+            if (name == "HMF" || name == "LMF")
             {
-                knob (band.colour, juce::String (band.name) + " Q", juce::String (band.name) == "HMF" ? ids::consoleHMFQ : ids::consoleLMFQ,
-                      1.0, 0.1, 4.0, 1.0, juce::Rectangle<int> (w / 2 - 13, y - 2, 26, 26));
-                y += 37;
+                auto& q = knob (band.colour, "Q", name == "HMF" ? ids::consoleHMFQ : ids::consoleLMFQ, 1.0, 0.1, 4.0, 1.0,
+                                juce::Rectangle<int> (w / 2 - 22, y - 4, 44, 38), { { 0.1, ".1" }, { 1.0, "1" }, { 4.0, "4" } },
+                                [] (double v) { return "Q " + juce::String (v, 2); });
+                q.knobSize = 18;
+                y += 46;
             }
         }
         auto [c, d] = keys (y);
-        toggle ("BELL", ids::consoleHFBell, false, c, amber, "HF and LF as bells (else shelves)");
-        toggle ("EQ IN", ids::consoleIn, true, d, green);
+        toggle ("BELL", ids::consoleHFBell, false, c, keyAmber, "HF and LF as bells (else shelves)");
+        toggle ("EQ IN", ids::consoleIn, true, d, keyGreen);
         y += 24;
     }
     section ("INSERTS");
+    slots (id, 5, false);
+    section ("SENDS");
     {
-        const auto inserts = ordered (model::findChain (project, track[ids::id].toString()));
-        for (int i = 0; i < 2; ++i)
+        const auto sends = model::sendsOf (model::findChain (project, id));
+        const int count = juce::jmax (3, juce::jmin (6, (int) sends.size() + (sends.size() < 6 ? 0 : 0)));
+        const int cols = 3, cw = (w - 8) / cols;
+        for (int n = 0; n < juce::jmax (count, 3); ++n)
         {
-            auto* b = new juce::TextButton (i < inserts.size() ? nameOf (inserts[i]) : juce::String());
-            styleKey (*b, true);
-            if (i < inserts.size())
+            auto* k = new AnalogKnob (capGold, "Send " + juce::String (n + 1));
+            k->setRange (minDb, 6.0, 0.0);
+            k->setSkewFactorFromMidPoint (-12.0);
+            k->setDoubleClickReturnValue (true, -20.0);
+            k->textFromValueFunction = [] (double v) { return v <= minDb + 0.01 ? juce::String ("-inf dB") : juce::String (v, 1) + " dB"; };
+            k->knobSize = 22;
+            k->setBounds (4 + (n % cols) * cw, y + (n / cols) * 40, cw, 30);
+            if (n < sends.size())
             {
-                b->setColour (juce::TextButton::buttonColourId, isPlugin (inserts[i]) ? pluginBlue : amber);
-                b->setColour (juce::TextButton::textColourOffId, juce::Colour (0xff141006));
-                auto insert = inserts[i];
-                b->onClick = [this, insert] { if (host.openInsert) host.openInsert (insert); };
+                auto send = sends[n];
+                const auto bus = model::findById (project, send[ids::target].toString());
+                k->caption = bus.isValid() ? bus[ids::name].toString() : "Send " + juce::String (n + 1);
+                k->setTooltip ("Send to " + k->caption);
+                k->setValue (gainToDb ((double) send.getProperty (ids::level, 0.0)), juce::dontSendNotification);
+                k->onDragStart = [&um] { um.beginNewTransaction ("Send level"); };
+                k->onValueChange = [k, send, &um]() mutable { send.setProperty (ids::level, dbToGain (k->getValue()), &um); };
             }
             else
             {
-                const auto owner = track[ids::id].toString();
-                int next = 0;
-                for (const auto& insert : inserts)
-                    next = juce::jmax (next, model::insertSlot (insert) + 1);
-                b->onClick = [this, owner, next, b] { if (host.chooseEffect) host.chooseEffect (owner, next, {}, *b); };
-                b->setTooltip ("Add an insert");
+                k->caption = juce::String (n + 1);
+                k->setEnabled (false);
+                k->setTooltip ("No send here (add one in the mixer)");
             }
-            b->setBounds (6, y, w - 12, 17);
-            s.addAndMakeVisible (b);
-            s.parts.add (b);
-            y += 19;
+            s.addAndMakeVisible (k);
+            s.parts.add (k);
         }
-        y += 4;
-    }
-    section ("SENDS");
-    {
-        const auto sends = model::sendsOf (model::findChain (project, track[ids::id].toString()));
-        for (int row = 0; row < 2; ++row)
-        {
-            for (int c = 0; c < 2; ++c)
-            {
-                const auto n = row * 2 + c;
-                auto* k = new AnalogKnob ("gold", "Send " + juce::String (n + 1));
-                k->setRange (minDb, 6.0, 0.0);
-                k->setSkewFactorFromMidPoint (-12.0);
-                k->setDoubleClickReturnValue (true, -20.0);
-                k->textFromValueFunction = [] (double v) { return v <= minDb + 0.01 ? juce::String ("-inf dB") : juce::String (v, 1) + " dB"; };
-                k->setBounds (c == 0 ? 13 : w - 45, y, 32, 32);
-                if (n < sends.size())
-                {
-                    auto send = sends[n];
-                    const auto bus = model::findById (project, send[ids::target].toString());
-                    k->caption = bus.isValid() ? bus[ids::name].toString() : "Send " + juce::String (n + 1);
-                    k->setTooltip ("Send to " + k->caption);
-                    k->setValue (gainToDb ((double) send.getProperty (ids::level, 0.0)), juce::dontSendNotification);
-                    k->onDragStart = [&um] { um.beginNewTransaction ("Send level"); };
-                    k->onValueChange = [k, send, &um]() mutable { send.setProperty (ids::level, dbToGain (k->getValue()), &um); };
-                }
-                else
-                {
-                    k->setEnabled (false);
-                    k->setTooltip ("No send here (add one in the mixer)");
-                }
-                s.addAndMakeVisible (k);
-                s.parts.add (k);
-            }
-            y += 46;
-        }
+        y += ((juce::jmax (count, 3) + cols - 1) / cols) * 40 + 4;
     }
     // Pan and the keys
     {
-        auto& pan = knob ("grey", "Pan", ids::pan, 0.0, -1.0, 1.0, 0.0, juce::Rectangle<int> (w / 2 - 17, y, 34, 34));
-        pan.textFromValueFunction = [] (double v)
-        {
-            const auto n = juce::roundToInt (v * 63.0);
-            return n == 0 ? juce::String ("C") : n < 0 ? juce::String (-n) + " L" : juce::String (n) + " R";
-        };
-        y += 48;
+        y += 4;
+        knob (capGrey, "Pan", ids::pan, 0.0, -1.0, 1.0, 0.0, juce::Rectangle<int> (w / 2 - boxW / 2, y, boxW, boxH),
+              { { -1.0, "L" }, { 0.0, "C" }, { 1.0, "R" } },
+              [] (double v)
+              {
+                  const auto n = juce::roundToInt (v * 63.0);
+                  return n == 0 ? juce::String ("C") : n < 0 ? juce::String (-n) + " L" : juce::String (n) + " R";
+              }, true);
+        y += boxH + 14;
         auto [a, b] = keys (y);
-        toggle ("M", ids::mute, false, a, juce::Colour (0xff3a6df0), "Mute");
-        toggle ("S", ids::solo, false, b, amber, "Solo");
+        toggle ("M", ids::mute, false, a, keyRed, "Mute");
+        toggle ("S", ids::solo, false, b, keyYellow, "Solo");
         y += 20;
-        auto [c, d] = keys (y);
         if (! model::isBusTrack (track))
         {
-            toggle ("R", ids::armed, false, c, juce::Colour (0xffd9453b), "Record");
-            toggle ("I", ids::monitor, false, d, juce::Colour (0xff2fbf71), "Input monitoring");
+            auto [c, d] = keys (y);
+            toggle ("R", ids::armed, false, c, keyRed, "Record");
+            toggle ("I", ids::monitor, false, d, keyGreen, "Input monitoring");
+            y += 20;
         }
-        y += 24;
+        y += 6;
     }
+    juce::ignoreUnused (wideKey);
     s.faderArea = { 4, y, w - 8, 230 };
 }
 
@@ -1061,48 +1510,65 @@ void AnalogConsole::buildMaster (Strip& s)
     auto& um = *host.undo;
     const int w = masterWidth;
     int y = 34;
-    // the VU sits at the top (painted), then the bus compressor and monitor sections
-    y += 160 + 12;
+    // the bus compressor's black meter at the top (painted), then its knobs
+    s.compMeter = { 10, y, w - 20, juce::roundToInt ((w - 20) * 308.0 / 550.0) };
+    y = s.compMeter.getBottom() + 10;
     s.sectionTitles.push_back ({ "BUS COMPRESSOR", juce::Rectangle<int> (0, y, w, 14) });
     y += 16;
     using C = MasterBusCompressor;
-    struct K { const char* caption; juce::Identifier property; double fallback, lo, hi, mid; std::function<juce::String (double)> text; };
-    const K row1[] { { "Threshold", ids::busCompThreshold, -10.0, C::minThresholdDb, C::maxThresholdDb, -10.0, [] (double v) { return juce::String (v, 1) + " dB"; } },
-                     { "Ratio", ids::busCompRatio, 1.0, 0.0, (double) C::ratios.size() - 1, 0.0, [] (double v) { return C::ratioText (juce::roundToInt (v)) + ":1"; } },
-                     { "Make-up", ids::busCompMakeup, 0.0, 0.0, C::maxMakeupDb, 0.0, [] (double v) { return "+" + juce::String (v, 1) + " dB"; } } };
-    const K row2[] { { "Attack", ids::busCompAttack, 5.0, 0.0, (double) C::attacksMs.size() - 1, 0.0, [] (double v) { return C::attackText (juce::roundToInt (v)) + " ms"; } },
-                     { "Release", ids::busCompRelease, (double) C::autoRelease, 0.0, (double) C::releasesS.size() - 1, 0.0,
+    struct K { const char* caption; juce::Identifier property; double fallback, lo, hi; std::vector<std::pair<double, juce::String>> scale; std::function<juce::String (double)> text; };
+    const auto steps = [] (auto values, auto fmt)
+    {
+        std::vector<std::pair<double, juce::String>> out;
+        for (size_t i = 0; i < values.size(); ++i)
+            out.push_back ({ (double) i, fmt (i) });
+        return out;
+    };
+    const K row1[] { { "Thresh", ids::busCompThreshold, -10.0, C::minThresholdDb, C::maxThresholdDb, { { -30.0, "-30" }, { -15.0, "-15" }, { 0.0, "0" } },
+                       [] (double v) { return juce::String (v, 1) + " dB"; } },
+                     { "Ratio", ids::busCompRatio, 1.0, 0.0, (double) C::ratios.size() - 1,
+                       steps (C::ratios, [] (size_t i) { return shortNumber (C::ratios[i]); }), [] (double v) { return C::ratioText (juce::roundToInt (v)) + ":1"; } },
+                     { "Make-up", ids::busCompMakeup, 0.0, 0.0, C::maxMakeupDb, { { 0.0, "0" }, { C::maxMakeupDb * 0.5, shortNumber (C::maxMakeupDb * 0.5) }, { C::maxMakeupDb, shortNumber (C::maxMakeupDb) } },
+                       [] (double v) { return "+" + juce::String (v, 1) + " dB"; } } };
+    const K row2[] { { "Attack", ids::busCompAttack, 5.0, 0.0, (double) C::attacksMs.size() - 1,
+                       steps (C::attacksMs, [] (size_t i) { return shortNumber (C::attacksMs[i]); }), [] (double v) { return C::attackText (juce::roundToInt (v)) + " ms"; } },
+                     { "Release", ids::busCompRelease, (double) C::autoRelease, 0.0, (double) C::releasesS.size() - 1,
+                       steps (C::releasesS, [] (size_t i) { return (int) i == C::autoRelease ? juce::String ("A") : shortNumber (C::releasesS[i]); }),
                        [] (double v) { return juce::roundToInt (v) == C::autoRelease ? juce::String ("Auto") : C::releaseText (juce::roundToInt (v)) + " s"; } },
-                     { "Mix", ids::busCompMix, 1.0, 0.0, 1.0, 0.0, [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + "% wet"; } } };
+                     { "Mix", ids::busCompMix, 1.0, 0.0, 1.0, { { 0.0, "0" }, { 0.5, "50" }, { 1.0, "100" } },
+                       [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + "% wet"; } } };
+    const int cw = (w - 8) / 3;
     for (const auto* row : { row1, row2 })
     {
         for (int i = 0; i < 3; ++i)
         {
             const auto& def = row[i];
-            auto* k = new AnalogKnob ("white", def.caption);
+            auto* k = new AnalogKnob (capWhite, def.caption);
             const auto stepped = def.property == ids::busCompRatio || def.property == ids::busCompAttack || def.property == ids::busCompRelease;
             k->setRange (def.lo, def.hi, stepped ? 1.0 : 0.0);
             k->setDoubleClickReturnValue (true, def.fallback);
             k->textFromValueFunction = def.text;
+            k->scale = def.scale;
+            k->knobSize = 28;
             k->setValue ((double) project.getProperty (def.property, def.fallback), juce::dontSendNotification);
             k->setTooltip (def.caption);
             auto tree = project;
             const auto property = def.property;
             k->onDragStart = [&um] { um.beginNewTransaction ("Bus compressor"); };
             k->onValueChange = [k, tree, property, &um] { MasterBusCompressor::setInProject (tree, property, k->getValue(), &um); };
-            k->setBounds (18 + i * ((w - 36) / 3) + ((w - 36) / 3 - 56) / 2, y, 56, 56);
+            k->setBounds (4 + i * cw, y, cw, 52);
             s.addAndMakeVisible (k);
             s.parts.add (k);
             s.bindings.push_back ({ k, project, def.property, def.fallback, false });
         }
-        y += 76;
+        y += 52 + 13;
     }
-    const auto key = [&] (const juce::String& text, const juce::Identifier& property, bool fallback, juce::Rectangle<int> where)
+    s.grArea = { 14, y, w - 28, 6 };
+    y += 12;
+    const auto key = [&] (const juce::String& text, const juce::Identifier& property, bool fallback, juce::Rectangle<int> where, const juce::String& tip)
     {
-        auto* b = new juce::TextButton (text);
-        styleKey (*b);
-        b->setColour (juce::TextButton::buttonOnColourId, amber);
-        b->setColour (juce::TextButton::textColourOnId, juce::Colour (0xff1a1206));
+        auto* b = new ConsoleKey (text, keyAmber);
+        b->setTooltip (tip);
         auto tree = project;
         b->onClick = [tree, property, fallback, &um]
         {
@@ -1114,15 +1580,63 @@ void AnalogConsole::buildMaster (Strip& s)
         s.parts.add (b);
         s.bindings.push_back ({ b, project, property, fallback ? 1.0 : 0.0, true });
     };
-    key ("COMP IN", ids::busCompOn, false, { 30, y, 110, 22 });
-    key ("COLOR", "busCompColor", false, { w - 140, y, 110, 22 });
-    y += 34;
-    s.faderArea = { w / 2 - 60, y + 10, 120, 220 };
+    key ("COMP", ids::busCompOn, false, { 14, y, w / 2 - 18, 18 }, "The bus compressor in");
+    key ("COLOR", "busCompColor", false, { w / 2 + 4, y, w / 2 - 18, 18 }, "Color: a small bump in the lows (+3 dB round 60 Hz)");
+    y += 28;
+    // the MultiMeter, right here
+    s.sectionTitles.push_back ({ "MULTIMETER", juce::Rectangle<int> (0, y, w, 14) });
+    y += 16;
+    if (host.engine != nullptr)
+    {
+        meter = std::make_unique<ConsoleMeter> (*host.engine, project);
+        meter->setBounds (8, y, w - 16, 150);
+        s.addAndMakeVisible (*meter);
+        y += 156;
+    }
+    s.sectionTitles.push_back ({ "MASTER INSERTS", juce::Rectangle<int> (0, y, w, 14) });
+    y += 16;
+    {
+        const auto inserts = ordered (model::findChain (project, model::masterOwner));
+        int next = 0;
+        for (const auto& insert : inserts)
+            next = juce::jmax (next, model::insertSlot (insert) + 1);
+        for (int i = 0; i < juce::jmax (4, inserts.size() + 1); ++i)
+        {
+            InsertSlot* slot;
+            if (i < inserts.size())
+            {
+                auto insert = inserts[i];
+                slot = new InsertSlot (nameOf (insert), isPlugin (insert) ? 2 : 1, ! (bool) insert.getProperty (ids::bypass, false),
+                                       [this, insert] { if (host.openInsert) host.openInsert (insert); });
+            }
+            else
+            {
+                slot = new InsertSlot ({}, 0, false, {});
+                auto* raw = slot;
+                slot->click = [this, next, raw] { if (host.chooseEffect) host.chooseEffect (model::masterOwner, next, {}, *raw); };
+                slot->setTooltip ("Add a master insert");
+            }
+            slot->setBounds (7, y, w - 14, 17);
+            s.addAndMakeVisible (slot);
+            s.parts.add (slot);
+            y += 19;
+        }
+    }
+    y += 10;
+    // Bounce, beside the master's level (as Logic's Bnce)
+    auto* bounce = new ConsoleKey ("Bnce", juce::Colours::white);
+    bounce->setClickingTogglesState (false);
+    bounce->setTooltip ("Bounce: the song (or the cycle) to a file");
+    bounce->onClick = [this] { if (host.bounce) host.bounce(); };
+    s.addAndMakeVisible (bounce);
+    s.parts.add (bounce);
+    s.faderArea = { 4, y, w - 8, 230 };
 }
 
 void AnalogConsole::rebuild()
 {
     rebuildWanted = false;
+    meter.reset();
     strips.clear();
     master.reset();
     int index = 0;
@@ -1143,9 +1657,8 @@ void AnalogConsole::rebuild()
     master = std::make_unique<Strip>();
     master->isMaster = true;
     master->name = "Stereo Out";
-    master->number = "MASTER";
-    master->colour = juce::Colour (0xffb8bcc4);
-    master->vuLevel = &vuValue;
+    master->number = "M";
+    master->colour = juce::Colour (0xffc7c7cc);
     buildMaster (*master);
     holder.addAndMakeVisible (*master);
 
@@ -1169,11 +1682,10 @@ void AnalogConsole::rebuild()
             strip->level.setText (db <= minDb + 0.01 ? juce::String ("-inf") : juce::String (db, 1), juce::dontSendNotification);
         };
         s.addAndMakeVisible (s.fader);
-        s.addAndMakeVisible (s.meter);
         s.level.setJustificationType (juce::Justification::centred);
-        s.level.setColour (juce::Label::textColourId, theme::text);
-        s.level.setColour (juce::Label::backgroundColourId, juce::Colour (0xff0d0d0e));
-        s.level.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+        s.level.setColour (juce::Label::textColourId, juce::Colour (0xff34c759));
+        s.level.setColour (juce::Label::backgroundColourId, juce::Colours::black.withAlpha (0.3f));
+        s.level.setFont (juce::FontOptions (11.0f, juce::Font::bold));
         s.addAndMakeVisible (s.level);
         refreshBindings (s);
     };
@@ -1183,111 +1695,147 @@ void AnalogConsole::rebuild()
     resized();
 }
 
+void AnalogConsole::Strip::paintMeter (juce::Graphics& g, juce::Rectangle<float> area, float peak, float hold) const
+{
+    g.setColour (juce::Colours::black.withAlpha (0.55f));
+    g.fillRoundedRectangle (area, 2.0f);
+    const int segments = juce::jmax (10, (int) (area.getHeight() / 5.0f));
+    const auto inner = area.reduced (1.0f, 2.0f);
+    const auto segH = inner.getHeight() / (float) segments;
+    // (the scale: -60 at the bottom to +6 at the top, as the fader's)
+    const auto fracOf = [] (float db) { return juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 66.0f); };
+    const auto lit = fracOf (juce::Decibels::gainToDecibels (peak, -100.0f));
+    const auto held = fracOf (juce::Decibels::gainToDecibels (hold, -100.0f));
+    for (int q = 0; q < segments; ++q)
+    {
+        const auto frac = (float) (q + 1) / (float) segments;
+        const auto colour = frac > fracOf (0.0f) ? juce::Colour (0xffff3b30) : frac > fracOf (-6.0f) ? juce::Colour (0xffffcc00) : juce::Colour (0xff34c759);
+        const auto r = juce::Rectangle<float> (inner.getX(), inner.getBottom() - (float) (q + 1) * segH + 0.5f, inner.getWidth(), segH - 1.0f);
+        const bool on = frac <= lit + 0.5f / (float) segments;
+        const bool peakMark = std::abs (frac - held) < 0.5f / (float) segments && hold > 0.0001f;
+        g.setColour (on || peakMark ? colour : juce::Colours::white.withAlpha (0.07f));
+        g.fillRect (r);
+    }
+}
+
 void AnalogConsole::Strip::paint (juce::Graphics& g)
 {
+    const auto& d = desk();
     auto r = getLocalBounds().toFloat().reduced (2.0f, 0.0f);
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1c1d20), r.getX(), 0.0f, juce::Colour (0xff1c1d20), r.getRight(), 0.0f, false));
-    g.fillRoundedRectangle (r, 10.0f);
-    g.setColour (juce::Colours::white.withAlpha (isMaster ? 0.1f : 0.07f));
-    g.drawRoundedRectangle (r.reduced (0.5f), 10.0f, 1.0f);
-    // the number (and the master's title)
-    g.setColour (theme::text);
-    g.setFont (juce::FontOptions (isMaster ? 15.0f : 13.0f, juce::Font::bold));
-    g.drawText (number, getLocalBounds().reduced (9, 0).removeFromTop (30), juce::Justification::centredLeft, false);
-    if (! isMaster && (bool) track.getProperty (ids::inputFxOn, true)
-        && ! model::insertsOf (model::findChain (track.getParent(), model::inputOwner (track[ids::id].toString()))).isEmpty())
-    {
-        g.setColour (juce::Colour (0xff3ddc84));
-        g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
-        g.drawText ("IN FX", getLocalBounds().reduced (9, 0).removeFromTop (30), juce::Justification::centredRight, false);
-    }
-    // the section titles and a line between them
-    g.setFont (juce::FontOptions (9.0f));
+    g.setGradientFill (juce::ColourGradient (d.top.withAlpha (0.92f), 0.0f, r.getY(), d.bottom.withAlpha (0.92f), 0.0f, r.getBottom(), false));
+    g.fillRoundedRectangle (r, 12.0f);
+    g.setColour (d.edge);
+    g.drawRoundedRectangle (r.reduced (0.5f), 12.0f, 1.0f);
+    // the header: number, name, the track's colour under it
+    auto head = getLocalBounds().reduced (8, 0).removeFromTop (28);
+    g.setColour (juce::Colours::black.withAlpha (theme::glassLight() ? 0.08f : 0.3f));
+    const auto numberBox = head.removeFromLeft (isMaster ? 22 : (number.length() > 1 ? 24 : 18)).withSizeKeepingCentre (isMaster ? 22 : (number.length() > 1 ? 24 : 18), 16).toFloat();
+    g.fillRoundedRectangle (numberBox, 4.0f);
+    g.setColour (d.title.brighter (theme::glassLight() ? 0.0f : 0.4f));
+    g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+    g.drawText (number, numberBox, juce::Justification::centred, false);
+    head.removeFromLeft (6);
+    g.drawFittedText (isMaster ? juce::String ("Master") : name, head, juce::Justification::centredLeft, 1, 0.75f);
+    g.setColour (colour);
+    g.fillRect (r.getX() + 1.0f, 28.0f, r.getWidth() - 2.0f, 2.0f);
+
+    // the section titles and a line above each
     for (const auto& [title, area] : sectionTitles)
     {
-        g.setColour (juce::Colours::white.withAlpha (0.06f));
-        g.fillRect (area.getX() + 4, area.getY() - 3, area.getWidth() - 8, 1);
-        g.setColour (theme::dimText);
-        g.drawText (title, area, juce::Justification::centred, false);
+        g.setColour (d.lineDark);
+        g.fillRect (area.getX() + 3, area.getY() - 4, area.getWidth() - 6, 1);
+        g.setColour (d.lineLight);
+        g.fillRect (area.getX() + 3, area.getY() - 3, area.getWidth() - 6, 1);
+        const bool inputFx = title == "INPUT FX";
+        g.setColour (inputFx ? juce::Colour (0xff34c759) : d.title);
+        g.setFont (juce::FontOptions (8.5f, juce::Font::bold).withKerningFactor (0.14f));
+        if (inputFx)
+        {
+            g.drawText (title, area.reduced (8, 0), juce::Justification::centredLeft, false);
+            g.drawText (inputFxTime, area.reduced (8, 0), juce::Justification::centredRight, false);
+        }
+        else
+            g.drawText (title, area, juce::Justification::centred, false);
     }
-    // the captions under the knobs
-    g.setFont (juce::FontOptions (9.0f));
-    g.setColour (theme::dimText);
+    // the captions under the knobs (while one's turned: its value)
     for (auto* part : parts)
-        if (auto* k = dynamic_cast<AnalogKnob*> (part); k != nullptr && k->getHeight() >= 30)
+        if (auto* k = dynamic_cast<AnalogKnob*> (part))
         {
-            auto caption = k->caption.upToFirstOccurrenceOf (" (", false, false);
-            static const std::pair<const char*, const char*> shortNames[] {
-                { "Mic gain", "Gain" }, { "High-pass", "HPF" }, { "Low-pass", "LPF" }, { "Compression", "Comp" },
-                { "Gate range", "Range" }, { "Gate threshold", "Gate" }, { "HF frequency", "kHz" }, { "HMF frequency", "kHz" },
-                { "LMF frequency", "Hz" }, { "LF frequency", "Hz" }, { "HF gain", "HF" }, { "HMF gain", "HMF" }, { "LMF gain", "LMF" }, { "LF gain", "LF" } };
-            for (const auto& [from, to] : shortNames)
-                if (caption == from)
-                    caption = to;
-            g.drawFittedText (caption, juce::Rectangle<int> (k->getX() - 10, k->getBottom() + 1, k->getWidth() + 20, 11), juce::Justification::centred, 1, 0.7f);
+            const bool turning = k->isMouseButtonDown();
+            g.setColour (turning ? juce::Colour (0xffffb340) : d.caption.withMultipliedAlpha (k->isEnabled() ? 1.0f : 0.5f));
+            g.setFont (juce::FontOptions (9.0f, turning ? juce::Font::bold : juce::Font::plain));
+            g.drawFittedText (k->captionNow(), juce::Rectangle<int> (k->getX() - 4, k->getBottom() - 1, k->getWidth() + 8, 11), juce::Justification::centred, 1, 0.7f);
         }
-    // the fader's scale, beside it
-    if (fader.getHeight() > 60)
-    {
-        g.setFont (juce::FontOptions (9.0f));
-        g.setColour (theme::dimText);
-        for (const auto db : { 6.0, 0.0, -5.0, -10.0, -20.0, -30.0, -60.0 })
-        {
-            const auto y = (float) fader.getY() + const_cast<strip::Fader&> (fader).yForValue (db);
-            g.fillRect ((float) fader.getRight() - 2.0f, y - 0.5f, 5.0f, 1.0f);
-            g.drawText (db > 0.0 ? "+" + juce::String ((int) db) : juce::String ((int) db), juce::Rectangle<float> ((float) fader.getRight() + 4.0f, y - 6.0f, 22.0f, 12.0f),
-                        juce::Justification::centredLeft, false);
-        }
-    }
-    // the compressor's gain reduction: a column of amber lights
+    // the compressor's gain reduction: a column of amber lights (the master's: a row)
     if (! grArea.isEmpty())
     {
-        const auto lights = 8;
-        const auto lit = juce::jlimit (0, lights, juce::roundToInt (gr / 2.0f));
-        const auto cell = (float) grArea.getWidth() / (float) lights;
+        const bool row = isMaster;
+        const auto lights = row ? 16 : 10;
+        const auto lit = juce::jlimit (0, lights, juce::roundToInt (gr / (row ? 1.0f : 2.0f)));
         for (int i = 0; i < lights; ++i)
         {
-            const auto h = (float) grArea.getHeight() * (0.3f + 0.7f * (float) i / (float) (lights - 1));
-            g.setColour (i < lit ? juce::Colour (0xfff2a43a) : juce::Colour (0xff2a2b30));
-            g.fillRoundedRectangle (juce::Rectangle<float> ((float) grArea.getX() + (float) i * cell + 1.0f, (float) grArea.getBottom() - h, cell - 2.0f, h), 1.0f);
+            juce::Rectangle<float> cell;
+            if (row)
+            {
+                const auto cw = (float) grArea.getWidth() / (float) lights;
+                cell = { (float) grArea.getX() + (float) i * cw + 1.0f, (float) grArea.getY(), cw - 2.0f, (float) grArea.getHeight() };
+            }
+            else
+            {
+                const auto ch = (float) grArea.getHeight() / (float) lights;
+                cell = { (float) grArea.getCentreX() - 7.0f, (float) grArea.getY() + (float) i * ch + 0.5f, 14.0f, ch - 1.5f };
+            }
+            g.setColour (i < lit ? juce::Colour (0xffffb340) : juce::Colours::white.withAlpha (0.08f));
+            g.fillRoundedRectangle (cell, 1.0f);
         }
-        g.setColour (theme::dimText);
-        g.drawText ("GR", grArea.translated (0, grArea.getHeight() - 2).withHeight (11), juce::Justification::centred, false);
-    }
-    // the master's VU (our own cream meter): the needle drawn over its face, under its hood
-    if (isMaster && vuLevel != nullptr)
-    {
-        static const auto face = effectdesign::skinImage ("ac_vu_png"), hood = effectdesign::skinImage ("ac_vu_hood_png");
-        const auto area = juce::Rectangle<float> (12.0f, 32.0f, (float) getWidth() - 24.0f, ((float) getWidth() - 24.0f) * analogart::vuHeight / analogart::vuWidth);
-        const auto k = area.getWidth() / analogart::vuWidth;
-        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-        g.setOpacity (1.0f);
-        g.drawImage (face, area);
-        const auto db = juce::Decibels::gainToDecibels (*vuLevel, -60.0f) + 18.0f;   // (-18 dBFS reads 0 VU)
-        const auto v = juce::jlimit (0.0f, 1.0f, std::pow (10.0f, db / 20.0f) / std::pow (10.0f, 3.0f / 20.0f));
-        const auto a = juce::degreesToRadians (-analogart::vuSwing + 2.0f * analogart::vuSwing * v);
-        const juce::Point<float> pivot (area.getX() + analogart::vuPivotX * k, area.getY() + analogart::vuPivotY * k), dir (std::sin (a), -std::cos (a));
+        if (! row)
         {
-            juce::Graphics::ScopedSaveState keep (g);
-            g.reduceClipRegion (juce::Rectangle<float> (area.getX() + analogart::vuWindow[0] * k, area.getY() + analogart::vuWindow[1] * k,
-                                                        analogart::vuWindow[2] * k, analogart::vuWindow[3] * k).toNearestInt());
-            g.setColour (juce::Colours::black.withAlpha (0.2f));
-            g.drawLine ({ pivot.translated (3.0f, 0.0f), (pivot + dir * analogart::vuReach * k).translated (3.0f, 3.5f) }, analogart::vuThick * k * 1.4f);
-            g.setColour (juce::Colour (0xff0e0c0a));
-            g.drawLine ({ pivot, pivot + dir * analogart::vuReach * k }, analogart::vuThin * k);
-            g.drawLine ({ pivot, pivot + dir * analogart::vuThickTo * k }, analogart::vuThick * k);
+            g.setColour (d.caption);
+            g.setFont (juce::FontOptions (9.0f));
+            g.drawText ("GR", grArea.translated (0, grArea.getHeight()).withHeight (11), juce::Justification::centred, false);
         }
-        g.drawImage (hood, juce::Rectangle<float> (area.getX() + analogart::vuHood[0] * k, area.getY() + analogart::vuHood[1] * k,
-                                                   analogart::vuHood[2] * k, analogart::vuHood[3] * k));
     }
-
+    // the master's compression meter: the bus compressor's black meter
+    if (isMaster && ! compMeter.isEmpty())
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.5f));
+        g.fillRoundedRectangle (compMeter.toFloat().expanded (3.0f), 8.0f);
+        looks::drawStripCompMeter (g, compMeter.toFloat(), gr);
+    }
+    // the fader's printed scale: ticks both sides of the slot, the numbers to the left
+    if (fader.getHeight() > 60)
+    {
+        const auto cx = (float) fader.getBounds().getCentreX();
+        g.setFont (juce::FontOptions (8.0f, juce::Font::bold));
+        for (const auto& [db, text] : { std::pair { 6.0, "+6" }, std::pair { 0.0, "0" }, std::pair { -5.0, "5" }, std::pair { -10.0, "10" },
+                                        std::pair { -15.0, "15" }, std::pair { -20.0, "20" }, std::pair { -30.0, "30" }, std::pair { -40.0, "40" },
+                                        std::pair { minDb, "\xe2\x88\x9e" } })
+        {
+            const auto y = (float) fader.getY() + const_cast<strip::Fader&> (fader).yForValue (db);
+            const bool major = db == 6.0 || db == 0.0 || db == minDb;
+            g.setColour (d.scale.withMultipliedAlpha (major ? 1.0f : 0.6f));
+            g.fillRect (cx - 16.0f, y - 0.5f, 8.0f, major ? 1.4f : 1.0f);
+            g.fillRect (cx + 8.0f, y - 0.5f, 8.0f, major ? 1.4f : 1.0f);
+            g.setColour (d.scale);
+            g.drawText (juce::String (juce::CharPointer_UTF8 (text)), juce::Rectangle<float> (cx - 40.0f, y - 6.0f, 21.0f, 12.0f), juce::Justification::centredRight, false);
+        }
+    }
+    // its LED meter (left and right)
+    if (! meterArea.isEmpty())
+    {
+        auto m = meterArea.toFloat();
+        const auto half = (m.getWidth() - 2.0f) * 0.5f;
+        paintMeter (g, m.removeFromLeft (half), peakL, holdL);
+        m.removeFromLeft (2.0f);
+        paintMeter (g, m, peakR, holdR);
+    }
     // the name plate in the track's colour
     auto plate = getLocalBounds().reduced (6, 0).removeFromBottom (30).withTrimmedBottom (4).toFloat();
-    g.setColour (juce::Colour (0xff232427));
+    g.setColour (d.plate);
     g.fillRoundedRectangle (plate, 7.0f);
     g.setColour (colour);
     g.fillRoundedRectangle (plate.removeFromBottom (3.0f), 1.5f);
-    g.setColour (theme::text);
+    g.setColour (d.title.brighter (theme::glassLight() ? 0.0f : 0.5f));
     g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
     g.drawFittedText (name, getLocalBounds().reduced (8, 0).removeFromBottom (30).withTrimmedBottom (6), juce::Justification::centred, 1, 0.7f);
 }
@@ -1296,11 +1844,22 @@ void AnalogConsole::timerCallback()
 {
     if (! isShowing() || host.engine == nullptr || host.player == nullptr)
         return;
+    const auto ballistics = [] (Strip& s, float l, float r)
+    {
+        s.peakL = juce::jmax (l, s.peakL * 0.85f);
+        s.peakR = juce::jmax (r, s.peakR * 0.85f);
+        for (auto [peak, hold, ticks] : { std::tuple { s.peakL, &s.holdL, &s.holdTicksL }, std::tuple { s.peakR, &s.holdR, &s.holdTicksR } })
+        {
+            if (peak >= *hold) { *hold = peak; *ticks = 0; }
+            else if (++*ticks > 45) *hold = juce::jmax (peak, *hold * 0.9f);
+        }
+        s.repaint (s.meterArea.expanded (2));
+    };
     for (auto* s : strips)
     {
         const auto slot = host.player->slotOf (s->track[ids::id].toString());
         const auto [l, r] = host.engine->takeTrackLevelForConsole (slot);
-        s->meter.push (l, r);
+        ballistics (*s, l, r);
         const auto gr = host.engine->getConsoleGainReduction (slot);
         if (std::abs (gr - s->gr) > 0.25f)
         {
@@ -1308,52 +1867,67 @@ void AnalogConsole::timerCallback()
             s->repaint (s->grArea.expanded (2, 14));
         }
     }
-    if (master != nullptr && host.masterLevels)
+    if (master != nullptr)
     {
-        const auto [l, r] = host.masterLevels();
-        master->meter.push (l, r);
-        // the VU: an average with a VU's swing (about 300 ms to a reading)
-        const auto level = juce::jmax (l, r) * 0.7071f;
-        vuValue += (level - vuValue) * 0.12f;
-        master->repaint (juce::Rectangle<int> (10, 30, masterWidth - 20, 170));
+        if (host.masterLevels)
+        {
+            const auto [l, r] = host.masterLevels();
+            ballistics (*master, l, r);
+        }
+        // the compression meter: a meter's swing (about 300 ms to a reading), not every peak
+        const auto target = host.engine->peekBusCompGainReduction();
+        master->gr += (target - master->gr) * (target > master->gr ? 0.35f : 0.12f);
+        master->repaint (master->compMeter.expanded (4));
+        master->repaint (master->grArea.expanded (2));
     }
 }
 
 void AnalogConsole::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour (0xff101113));
-    g.setColour (theme::text);
+    const bool light = theme::glassLight();
+    g.setGradientFill (juce::ColourGradient (light ? juce::Colour (0xffe9ecf3) : juce::Colour (0xff15161b), 0.0f, 0.0f,
+                                             light ? juce::Colour (0xffdfe3ec) : juce::Colour (0xff0d0e12), 0.0f, (float) getHeight(), false));
+    g.fillAll();
+    g.setColour (light ? juce::Colour (0xff1c1d22) : theme::text);
     g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
     g.drawText ("Analog Console", 16, 0, 200, 44, juce::Justification::centredLeft, false);
-    g.setColour (theme::dimText);
+    g.setColour (light ? juce::Colour (0xff1c1d22).withAlpha (0.55f) : theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("every channel: input, filters, dynamics, EQ, inserts, sends, pan and fader", 170, 0, 600, 44, juce::Justification::centredLeft, false);
+    g.drawText ("input, Input FX, dynamics, filters, EQ, inserts, sends, pan and fader on every channel", 160, 0, 620, 44, juce::Justification::centredLeft, false);
 }
 
 void AnalogConsole::resized()
 {
-    auto top = getLocalBounds().removeFromTop (44).reduced (12, 8);
+    auto top = getLocalBounds().removeFromTop (44).reduced (12, 10);
     for (int i = filterKeys.size(); --i >= 0;)
     {
-        filterKeys[i]->setBounds (top.removeFromRight (70));
+        filterKeys[i]->setBounds (top.removeFromRight (64));
         top.removeFromRight (4);
     }
     auto area = getLocalBounds().withTrimmedTop (44).reduced (6, 0).withTrimmedBottom (6);
     view.setBounds (area);
-    int contentHeight = 0;
+    // every fader starts at the same height (as on a desk), below the tallest channel's sections
+    int faderTop = 0;
     for (auto* s : strips)
-        contentHeight = juce::jmax (contentHeight, s->faderArea.getY() + 200 + 64);
-    contentHeight = juce::jmax (contentHeight, area.getHeight() - view.getScrollBarThickness());
+        faderTop = juce::jmax (faderTop, s->faderArea.getY());
+    if (master != nullptr)
+        faderTop = juce::jmax (faderTop, master->faderArea.getY());
+    for (auto* s : strips)
+        s->faderArea.setY (faderTop);
+    if (master != nullptr)
+        master->faderArea.setY (faderTop);
+    const auto contentHeight = juce::jmax (faderTop + 250 + 64, area.getHeight() - view.getScrollBarThickness());
     const auto width = strips.size() * (columnWidth + 4) + masterWidth + 12;
     holder.setSize (juce::jmax (width, area.getWidth() - 2), contentHeight);
     auto placeFader = [] (Strip& s, int height)
     {
-        auto f = s.faderArea.withHeight (juce::jmax (120, height - s.faderArea.getY() - 64));
-        auto meter = f.removeFromRight (18);
-        s.meter.setBounds (meter.reduced (3, 6));
-        f.removeFromRight (26);   // (the scale)
-        s.fader.setBounds (f.withSizeKeepingCentre (juce::jmin (f.getWidth(), 44), f.getHeight()));
-        s.level.setBounds (s.faderArea.getCentreX() - 30, f.getBottom() + 4, 60, 20);
+        auto f = s.faderArea.withHeight (juce::jmax (140, height - s.faderArea.getY() - 64));
+        // scale numbers | slot and cap | LED meter
+        const auto meterWidth = 14;
+        s.meterArea = juce::Rectangle<int> (f.getRight() - meterWidth - 8, f.getY() + 4, meterWidth, f.getHeight() - 8);
+        const auto faderCentre = f.getX() + (f.getWidth() - meterWidth - 8) / 2 + 12;
+        s.fader.setBounds (juce::Rectangle<int> (44, f.getHeight()).withCentre ({ faderCentre, f.getCentreY() }));
+        s.level.setBounds (faderCentre - 24, f.getBottom() + 4, 48, 18);
     };
     for (int i = 0; i < strips.size(); ++i)
     {
@@ -1364,6 +1938,9 @@ void AnalogConsole::resized()
     {
         master->setBounds (holder.getWidth() - masterWidth - 2, 0, masterWidth, contentHeight);
         placeFader (*master, contentHeight);
+        for (auto* part : master->parts)
+            if (auto* key = dynamic_cast<ConsoleKey*> (part); key != nullptr && key->getButtonText() == "Bnce")
+                key->setBounds (masterWidth - 60, master->level.getY(), 50, 20);
     }
 }
 

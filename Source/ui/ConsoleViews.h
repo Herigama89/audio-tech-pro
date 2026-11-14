@@ -35,6 +35,8 @@ struct ConsoleHost
     std::function<double()> sampleRate;
     /** The master's level (the Analog Console's master meter). */
     std::function<std::pair<float, float>()> masterLevels;
+    /** Bounce (the master's Bnce key): the song, or the cycle, to a file. */
+    std::function<void()> bounce;
 };
 
 /** A component shown at a fraction of its size, to fit a width (a plug-in face in a console column). */
@@ -168,21 +170,77 @@ private:
 };
 
 //==============================================================================
-/** A knob of the Analog Console: the uploaded red-capped knob, painted in its section's colour. */
+/** A knob of the Analog Console: a Console caps knob (its section's colour, or the pan knob) with its scale
+    printed round it, numbers at the values they mark; while it's turned, its caption shows the value. */
 class AnalogKnob final : public juce::Slider
 {
 public:
-    AnalogKnob (const juce::String& colour, const juce::String& caption);
+    AnalogKnob (juce::Colour cap, const juce::String& caption, bool pan = false);
     void paint (juce::Graphics&) override;
+    void valueChanged() override;
+    void mouseUp (const juce::MouseEvent&) override;
+    juce::Rectangle<float> knobArea() const;
+    /** The caption under it: its name, or (while turned) its value. */
+    juce::String captionNow() const;
+
     juce::String caption;
+    std::vector<std::pair<double, juce::String>> scale;   // value, its number (blank: a tick only)
+    int knobSize = 24;
 private:
-    juce::Image strip;
+    juce::Colour cap;
+    bool pan = false;
+};
+
+/** A key of the Analog Console: square-cornered, lit in its colour (as the console it's after). */
+class ConsoleKey final : public juce::TextButton
+{
+public:
+    ConsoleKey (const juce::String& text, juce::Colour lit) : juce::TextButton (text), lit (lit) { setWantsKeyboardFocus (false); }
+    void paintButton (juce::Graphics&, bool over, bool down) override;
+    juce::Colour lit;
+};
+
+/** An insert slot (Input FX, Inserts): its plug-in's name and lamp, or "+" to add one. */
+class InsertSlot final : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    InsertSlot (const juce::String& name, int kind, bool on, std::function<void()> click)
+        : name (name), kind (kind), on (on), click (std::move (click)) {}
+    void paint (juce::Graphics&) override;
+    void mouseUp (const juce::MouseEvent& e) override { if (click && getLocalBounds().contains (e.getPosition())) click(); }
+    juce::String name;
+    int kind = 0;   // 0 empty, 1 built-in, 2 plug-in, 3 input FX built-in
+    bool on = true;
+    std::function<void()> click;
+};
+
+/** The console's MultiMeter: the master's spectrum (a curve or bars), its stereo image and loudness. */
+class ConsoleMeter final : public juce::Component, private juce::Timer
+{
+public:
+    ConsoleMeter (AudioEngine& engine, juce::ValueTree project);
+    ~ConsoleMeter() override;
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    static constexpr int bandCount = 31;
+private:
+    void timerCallback() override;
+    AudioEngine& engine;
+    juce::ValueTree project;
+    ConsoleKey spectrumKey { "Spectrum", juce::Colours::white }, stereoKey { "Stereo", juce::Colours::white }, loudnessKey { "Loudness", juce::Colours::white };
+    ConsoleKey curveKey { "Curve", juce::Colours::white }, barsKey { "Bars", juce::Colours::white };
+    juce::Rectangle<int> screen, readouts;
+    std::vector<float> readL, readR;
+    std::unique_ptr<struct ConsoleMeterState> state;
+    int tab = 0;
+    bool bars = false;
+    void setTab (int t);
 };
 
 /**
-    The Analog Console: the whole mixer as a large-format desk - every channel's input, filters, dynamics, four-band
-    EQ, inserts, sends, pan and keys as knobs (the built-in channel strip's), and its fader in the track's colour;
-    the master's VU, bus compressor and monitor section.
+    The Analog Console: the whole mixer as a large-format desk - every channel's input, Input FX, dynamics, filters,
+    four-band EQ, inserts, sends, pan and keys, its fader in the track's colour with a printed scale and an LED meter;
+    the master's compression meter, bus compressor, MultiMeter, inserts and Bounce.
 */
 class AnalogConsole final : public juce::Component,
                             private juce::ValueTree::Listener,
@@ -195,7 +253,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    static constexpr int columnWidth = 108, masterWidth = 300;
+    static constexpr int columnWidth = 116, masterWidth = 212;
 
 private:
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
@@ -209,7 +267,7 @@ private:
     ConsoleHost& host;
     juce::ValueTree project;
     bool rebuildWanted = true;
-    juce::OwnedArray<juce::TextButton> filterKeys;
+    juce::OwnedArray<ConsoleKey> filterKeys;
     int filter = 0;   // all, audio, buses
 
     /** A control bound to a property of the track (or the project): it follows it and writes it, undoably. */
@@ -220,26 +278,28 @@ private:
         juce::OwnedArray<juce::Component> parts;
         std::vector<Binding> bindings;
         strip::Fader fader;
-        LevelMeter meter { "" };
         juce::Label level;
-        juce::Rectangle<int> faderArea;
+        juce::Rectangle<int> faderArea, meterArea, compMeter;
         juce::String number, name;
         juce::Colour colour;
         std::vector<std::pair<juce::String, juce::Rectangle<int>>> sectionTitles;
-        float gr = 0.0f;
+        juce::String inputFxTime;   // (the Input FX title's round trip)
+        float gr = 0.0f, peakL = 0.0f, peakR = 0.0f, holdL = 0.0f, holdR = 0.0f;
+        int holdTicksL = 0, holdTicksR = 0;
         juce::Rectangle<int> grArea;
         bool isMaster = false;
-        const float* vuLevel = nullptr;   // (the master's VU)
         void paint (juce::Graphics&) override;
+        void paintMeter (juce::Graphics&, juce::Rectangle<float> area, float peak, float hold) const;
     };
     juce::OwnedArray<Strip> strips;
     std::unique_ptr<Strip> master;
+    std::unique_ptr<ConsoleMeter> meter;
     void buildStrip (Strip& s);
     void buildMaster (Strip& s);
     void refreshBindings (Strip& s);
     juce::Viewport view;
     juce::Component holder;
-    float vuValue = 0.0f;   // the master VU's needle (amplitude, with a VU's swing)
+    float busGr = 0.0f;
 };
 
 } // namespace riff

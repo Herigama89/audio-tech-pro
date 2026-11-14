@@ -123,7 +123,7 @@ namespace riff::theme
         // The faders' caps, whatever the skin: -1 the skin's own, 0 classic, 1 Studio White, 2 Xenon, 3 the REAPER theme's,
         // 4..7 photo caps (see Looks.h). Knobs, channel keys and the bus compressor's meter likewise (-1: the skin's own).
         int faderStyle = 8;   // (the Liquid Glass theme: the Dark VU caps and knobs, the black compression meter)
-        int knobStyle = -1, buttonStyle = -1, meterStyle = 1;   // (knobs: the glass skins' own LED-ring knobs)
+        int knobStyle = 8, buttonStyle = -1, meterStyle = 1;   // (knobs: Console caps; -1 the glass skins' own LED-ring knobs)
 
         // The editor (tracks area, ruler, editors) with a theme of its own: another Settings, as text;
         // empty: the same as the mixer and the rest of the app.

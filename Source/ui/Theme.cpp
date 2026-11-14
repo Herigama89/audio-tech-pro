@@ -684,7 +684,7 @@ Settings upgraded (const Settings& s)
         auto glass = s;
         // (the pieces: the Dark VU caps, LED-ring or Dark VU knobs, glass keys, the black compression meter)
         glass.faderStyle = 8;
-        if (glass.knobStyle != 7) glass.knobStyle = -1;
+        if (glass.knobStyle != 7 && glass.knobStyle != 8) glass.knobStyle = -1;
         glass.buttonStyle = -1;
         glass.meterStyle = 1;
         for (auto* area : { &glass.editorTheme, &glass.toolbarTheme, &glass.meterTheme })
@@ -774,7 +774,7 @@ juce::String Settings::toString() const
                                juce::URL::addEscapeChars (toolbarTheme, false), juce::URL::addEscapeChars (meterTheme, false),
                                juce::String::toHexString ((int) textColour), juce::String::toHexString ((int) stripTextColour),
                                juce::String (trackColouring), juce::String (gridStyle), juce::String (stripVu ? 1 : 0),
-                               juce::String (levelMeters), juce::String (stripMeterKind) }.joinIntoString (";");
+                               juce::String (levelMeters), juce::String (stripMeterKind), "caps" }.joinIntoString (";");
 }
 
 Settings Settings::fromString (const juce::String& text)
@@ -824,7 +824,7 @@ Settings Settings::fromString (const juce::String& text)
     }
     if (v.size() >= 27)
     {
-        s.knobStyle = juce::jlimit (-1, 7, v[24].getIntValue());
+        s.knobStyle = juce::jlimit (-1, 8, v[24].getIntValue());
         s.buttonStyle = juce::jlimit (-1, 4, v[25].getIntValue());
         s.meterStyle = juce::jlimit (-1, 3, v[26].getIntValue());
     }
@@ -848,6 +848,9 @@ Settings Settings::fromString (const juce::String& text)
         s.levelMeters = juce::jlimit (0, 1, v[35].getIntValue());
     if (v.size() >= 37)
         s.stripMeterKind = juce::jlimit (0, 1, v[36].getIntValue());
+    // (Console caps became the main knobs: a theme saved before them, on the glass's own knobs, takes them)
+    if (v.size() < 38 && s.knobStyle == -1)
+        s.knobStyle = 8;
     return s;
 }
 
