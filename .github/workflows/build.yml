@@ -13,12 +13,18 @@ on:
     branches: [ main ]
     tags: [ 'v*' ]
   workflow_dispatch:
+    inputs:
+      windows_only:
+        description: "Build only the Windows version (to check it; nothing is published)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write   # (to publish a release for a tag)
 
 jobs:
   mac:
+    if: ${{ ! inputs.windows_only }}
     # (the Intel image: the Apple-silicon runners have been unavailable; the app is built universal either way)
     runs-on: macos-15-intel
     timeout-minutes: 120
@@ -67,8 +73,6 @@ jobs:
           path: out/
 
   windows:
-    # (paused: the Mac version first - set back to run when Windows is worked on again)
-    if: ${{ false }}
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
@@ -118,6 +122,7 @@ jobs:
           path: out/
 
   plugins:
+    if: ${{ ! inputs.windows_only }}
     # The classic and mastering compressors and the classic EQs as VST3 and Audio Unit plug-ins (one for Apple Silicon
     # and Intel): "Audio Tech Pro Plugins <version>.pkg" (installs them) and a .zip of the same
     runs-on: macos-15-intel
@@ -150,7 +155,7 @@ jobs:
           path: out-plugins/
 
   release:
-    needs: [ mac, plugins ]
+    needs: [ mac, plugins, windows ]
     if: ${{ always() && needs.mac.result == 'success' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-latest
     steps:
