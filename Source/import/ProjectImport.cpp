@@ -479,12 +479,15 @@ namespace
                 {
                     if (t.samplerFile.existsAsFile())
                     {
-                        track.setProperty (ids::instrument, "sampler", nullptr);
-                        track.setProperty (ids::samplerFile, t.samplerFile.getFullPathName(), nullptr);
-                        track.setProperty (ids::samplerRoot, t.samplerRoot, nullptr);
+                        // (the Sampler Track: the file across the keys, from its root)
+                        track.setProperty (ids::instrument, "studio:sampler", nullptr);
+                        juce::ValueTree studioTree ("STUDIO");
+                        studioTree.setProperty ("file0", t.samplerFile.getFullPathName(), nullptr);
+                        studioTree.setProperty ("root", t.samplerRoot, nullptr);
+                        track.appendChild (studioTree, nullptr);
                     }
                     else if (t.drums)
-                        track.setProperty (ids::instrument, "drums", nullptr);
+                        track.setProperty (ids::instrument, "studio:drums", nullptr);
                 }
 
                 if (kind != model::busKind)

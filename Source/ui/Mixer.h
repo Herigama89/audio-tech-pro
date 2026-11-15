@@ -191,6 +191,7 @@ private:
     strip::DisplaySlider panKnob;
     juce::TextButton inputSlot, outputSlot;   // Logic's Input and Output slots
     juce::Colour masterTint;
+    strip::InsertBypassKey bypassKey;          // the channel's plug-ins all bypassed (as Cubase's)
     juce::TextButton outputsKey { "+" };      // a multi-output instrument's: add channels for its other outputs (Logic's +)
     bool multiOutputs() const;                // an instrument with outputs past its main pair
     void showOutputPairMenu();                // a multi-output channel's input: which of the instrument's outputs

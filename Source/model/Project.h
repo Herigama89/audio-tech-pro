@@ -543,6 +543,8 @@ namespace riff::model
 
     bool save (const juce::ValueTree& project, const juce::File& file, juce::String& error);
     juce::ValueTree load (const juce::File& file, juce::String& error);
+    /** The retired built-in instruments (Synth, Drum Kit, Sampler) to their replacements (Nemix, Studio Drums, the Sampler Track). */
+    void retireOldInstruments (juce::ValueTree project);
 
     inline const juce::String fileExtension { ".atp" };      // see AppInfo.h; ".riff" files still open
 }

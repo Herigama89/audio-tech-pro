@@ -9,6 +9,45 @@
 */
 namespace riff::strip
 {
+    /** A channel's inserts bypass (as Cubase's): a small round power key, lit amber while all that channel's
+        plug-ins are bypassed (they stay loaded). Its track's "consoleInsertIn" off = bypassed. */
+    class InsertBypassKey final : public juce::Button, private juce::ValueTree::Listener
+    {
+    public:
+        InsertBypassKey() : juce::Button ("Bypass inserts")
+        {
+            setTooltip ("Bypass: this channel's plug-ins all out of the signal (still loaded) - again to bring them back");
+            setWantsKeyboardFocus (false);
+        }
+        ~InsertBypassKey() override { tree.removeListener (this); }
+        void setTrack (juce::ValueTree t) { tree.removeListener (this); tree = t; tree.addListener (this); repaint(); }
+        bool bypassed() const { return tree.isValid() && ! (bool) tree.getProperty ("consoleInsertIn", true); }
+        std::function<void()> onToggle;
+        void paintButton (juce::Graphics& g, bool over, bool down) override
+        {
+            const auto r = getLocalBounds().toFloat().reduced (0.5f);
+            const auto d = juce::jmin (r.getWidth(), r.getHeight());
+            const auto c = r.withSizeKeepingCentre (d, d);
+            const bool on = bypassed();
+            g.setColour (on ? juce::Colour (0xffe8a028) : juce::Colour (0xff2c2f35).brighter (over ? 0.25f : 0.0f).darker (down ? 0.3f : 0.0f));
+            g.fillEllipse (c);
+            g.setColour (juce::Colours::white.withAlpha (0.25f));
+            g.drawEllipse (c, 0.8f);
+            // the power symbol
+            const auto ink = on ? juce::Colour (0xff1a1206) : juce::Colours::white.withAlpha (0.8f);
+            const auto rr = d * 0.27f;
+            juce::Path arc;
+            arc.addCentredArc (c.getCentreX(), c.getCentreY(), rr, rr, 0.0f, 0.75f, juce::MathConstants<float>::twoPi - 0.75f, true);
+            g.setColour (ink);
+            g.strokePath (arc, juce::PathStrokeType (juce::jmax (1.0f, d * 0.09f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.drawLine (c.getCentreX(), c.getCentreY() - rr * 1.25f, c.getCentreX(), c.getCentreY() - rr * 0.1f, juce::jmax (1.0f, d * 0.09f));
+        }
+        void clicked() override { if (onToggle) onToggle(); }
+    private:
+        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier& p) override { if (p.toString() == "consoleInsertIn") repaint(); }
+        juce::ValueTree tree;
+    };
+
     /** The strip's top section is laid out in this space (then scaled to the strip's width). */
     constexpr float artWidth = 196.0f, artHeight = 861.0f;   // the strip art cut from the picture (Skin.h)
 

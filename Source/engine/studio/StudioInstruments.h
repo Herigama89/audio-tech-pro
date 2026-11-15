@@ -228,6 +228,7 @@ namespace riff::studio
     public:
         static constexpr int padsPerBank = 18, banks = 4, numPads = padsPerBank * banks, steps = 16, outputs = 16;
         BeatPad();
+        ~BeatPad() override;
         juce::StringArray screenLines() const override;
         static juce::StringArray kitNames();
         /** A pad's name in the current kit (bank*18 + pad). */

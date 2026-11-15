@@ -167,11 +167,21 @@ private:
         void paint (juce::Graphics&) override;
         juce::Colour colour;
         juce::String number, name;
+        juce::String zone;   // "left", "right" or empty: where it stays as the console scrolls (the mixer's zones)
+        std::function<void (Column&)> onHeaderMenu;
+        void mouseUp (const juce::MouseEvent& e) override { if (e.getPosition().y < 40 && onHeaderMenu) onHeaderMenu (*this); }
     };
     juce::OwnedArray<Column> columns;
-    juce::Viewport view;
+    /** The console scrolls; the zones' channels (and their stacks' tracks) and the master stay at its sides. */
+    struct ScrollView final : juce::Viewport
+    {
+        std::function<void()> onMoved;
+        void visibleAreaChanged (const juce::Rectangle<int>&) override { if (onMoved) onMoved(); }
+    };
+    ScrollView view;
     juce::Component holder;
-};
+    int columnStride = 0;
+    void placeZones();
 
 //==============================================================================
 /** A knob of the Analog Console: a Console caps knob (its section's colour, or the pan knob) with its scale

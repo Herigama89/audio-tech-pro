@@ -43,7 +43,8 @@ namespace riff::commands
         toggleHeaderInserts = 0x3001, toggleExclusiveSolo, showMultiMeter, toggleMixerComments, automix,
         toggleSnap = 0x3101, toggleCatch, toggleSuspendPlugins, consolidateRegions, alignAudio, toggleHeaderIO, splitStems, detectKey, toggleGpuDrawing, saveCopy, closeProject, findMissingFiles, compareBypass, resetChannels, toggleEco, toggleLayerMeters,
         showManual = 0x3201, openManualPdf,
-        showConsoleView = 0x3301, showAnalogConsole
+        showConsoleView = 0x3301, showAnalogConsole,
+        newSamplerTrack = 0x3311, newStudioDrums, newStudioKeys, newStudioBass, newStudioGuitar, newBeatPad
     };
 
     struct Info

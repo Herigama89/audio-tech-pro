@@ -63,7 +63,7 @@ void StudioSampler::setSampleFile (int, const juce::File& f)
     std::shared_ptr<juce::AudioBuffer<float>> buffer;
     if (std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (f)); reader != nullptr)
     {
-        const auto length = (int) juce::jmin<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 120.0));
+        const auto length = (int) std::min<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 120.0));
         buffer = std::make_shared<juce::AudioBuffer<float>> (2, juce::jmax (4, length));
         buffer->clear();
         reader->read (buffer.get(), 0, length, 0, true, true);

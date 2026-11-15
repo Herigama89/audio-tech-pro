@@ -523,6 +523,7 @@ ConsoleView::ConsoleView (ConsoleHost& h, juce::ValueTree p) : host (h), project
         addAndMakeVisible (k);
     }
     view.setViewedComponent (&holder, false);
+    view.onMoved = [this] { placeZones(); };
     addAndMakeVisible (view);
     project.addListener (this);
     setSize (1500, 900);
@@ -606,7 +607,16 @@ void ConsoleView::rebuild()
         return;
 
     int index = 0;
-    auto list = channels (project);
+    // in zone order: the left zone, the tracks, the right zone, then the master (as the mixer)
+    juce::Array<juce::ValueTree> list, left, middle, right;
+    for (const auto& t : channels (project))
+    {
+        const auto z = MixerPanel::zoneOf (project, t);
+        (z == "left" ? left : z == "right" ? right : middle).add (t);
+    }
+    list.addArray (left);
+    list.addArray (middle);
+    list.addArray (right);
     list.add (juce::ValueTree());   // (the master, last: its inserts and its strip, the fader solid red)
     for (const auto& track : list)
     {
@@ -617,6 +627,20 @@ void ConsoleView::rebuild()
         column->number = isMaster ? juce::String ("M") : juce::String (index);
         column->name = isMaster ? juce::String ("Master") : track[ids::name].toString();
         column->colour = isMaster ? juce::Colour (0xffe8231d) : model::trackColour (track);
+        column->zone = isMaster ? juce::String ("right") : MixerPanel::zoneOf (project, track);
+        if (! isMaster)
+            column->onHeaderMenu = [this, track] (Column& c)
+            {
+                // the column's zone (a stack takes its tracks with it)
+                const auto zone = MixerPanel::zoneOf (project, track);
+                juce::PopupMenu menu;
+                menu.addSectionHeader (track[ids::name].toString() + ": Mixer Zone");
+                auto* mixer = host.mixer;
+                menu.addItem ("Left Zone (stays at the left)", true, zone == "left", [mixer, track] { mixer->setZone ({ track }, "left"); });
+                menu.addItem ("Right Zone (stays at the right)", true, zone == "right", [mixer, track] { mixer->setZone ({ track }, "right"); });
+                menu.addItem ("With the Tracks", true, zone.isEmpty(), [mixer, track] { mixer->setZone ({ track }, "none"); });
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&c));
+            };
         const auto id = isMaster ? juce::String (model::masterOwner) : track[ids::id].toString();
         const auto audio = ! isMaster && ! model::isInstrumentTrack (track) && ! model::isBusTrack (track);
 
@@ -716,7 +740,37 @@ void ConsoleView::layout()
         c->faces.repaint();
         c->repaint();
     }
+    columnStride = columnWidth + 8;
+    placeZones();
     repaint();
+}
+
+void ConsoleView::placeZones()
+{
+    // the left zone's columns stay at the left edge as it scrolls; the right zone's and the master at the right
+    if (columnStride <= 0)
+        return;
+    const auto shown = view.getViewArea();
+    int l = 0, rightCount = 0;
+    for (auto* c : columns)
+        rightCount += c->zone == "right" ? 1 : 0;
+    int r = 0;
+    for (int i = 0; i < columns.size(); ++i)
+    {
+        auto* c = columns[i];
+        if (c->zone == "left")
+        {
+            c->setTopLeftPosition (shown.getX() + l++ * columnStride, 0);
+            c->toFront (false);
+        }
+        else if (c->zone == "right")
+        {
+            c->setTopLeftPosition (juce::jmin (holder.getWidth(), shown.getRight()) - (rightCount - r++) * columnStride, 0);
+            c->toFront (false);
+        }
+        else
+            c->setTopLeftPosition (i * columnStride, 0);
+    }
 }
 
 void ConsoleView::paint (juce::Graphics& g)
@@ -1741,8 +1795,26 @@ void AnalogConsole::buildStrip (Strip& s)
         toggle ("EQ IN", ids::consoleIn, true, d, keyGreen);
         y += 24;
     }
+    const auto insertsTitle = y;
     if (section ("INSERTS"))
         slots (id, insertRows, false);
+    {
+        // the channel's inserts bypass: a small round key at the title's right end (clear of the title)
+        auto* b = new strip::InsertBypassKey();
+        b->setTrack (track);
+        auto tree = track;
+        b->onToggle = [this, tree, b, &um]() mutable
+        {
+            um.beginNewTransaction ("Bypass inserts");
+            const auto value = b->bypassed();
+            tree.setProperty (ids::consoleInsertIn, value, &um);
+            for (auto other : gangOf (tree))
+                other.setProperty (ids::consoleInsertIn, value, &um);
+        };
+        b->setBounds (w - 17, insertsTitle, 13, 13);
+        s.addAndMakeVisible (b);
+        s.parts.add (b);
+    }
     if (section ("SENDS"))
     {
         const auto sends = model::sendsOf (model::findChain (project, id));

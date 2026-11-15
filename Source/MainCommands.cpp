@@ -4,6 +4,7 @@
 #include "ui/Eco.h"
 #include "ui/ManualPanel.h"
 #include "MainComponent.h"
+#include "engine/studio/Studio.h"
 #include "ui/ToolChooser.h"
 #include "ui/ToolIcons.h"
 #include "model/Project.h"
@@ -273,6 +274,12 @@ bool MainComponent::perform (const InvocationInfo& info)
 
         case commands::newAudioTrack:          addTrack (model::audioKind); break;
         case commands::newInstrumentTrack:     addTrack (model::instrumentKind); break;
+        case commands::newSamplerTrack:        addStudioTrack ("sampler"); break;
+        case commands::newStudioDrums:         addStudioTrack ("drums"); break;
+        case commands::newStudioKeys:          addStudioTrack ("keys"); break;
+        case commands::newStudioBass:          addStudioTrack ("bass"); break;
+        case commands::newStudioGuitar:        addStudioTrack ("guitar"); break;
+        case commands::newBeatPad:             addStudioTrack ("beatpad"); break;
         case commands::newAuxBus:              addTrack (model::busKind); break;
         case commands::deleteTrack:            deleteSelectedTrack(); break;
         case commands::muteTrack:              toggleTrackFlag (ids::mute, "Mute"); break;
@@ -497,7 +504,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             break;
 
         case 2:
-            add ({ commands::newAudioTrack, commands::newInstrumentTrack, commands::newAuxBus, commands::newVca, commands::duplicateTrack });
+            add ({ commands::newAudioTrack, commands::newInstrumentTrack, commands::newAuxBus, commands::newVca, commands::duplicateTrack,
+                   commands::newSamplerTrack, commands::newStudioDrums, commands::newStudioKeys, commands::newStudioBass, commands::newStudioGuitar, commands::newBeatPad });
             menu.addSeparator();
             add ({ commands::newDrummerTrack, commands::newBassPlayerTrack, commands::newKeysPlayerTrack });
             menu.addSeparator();
@@ -1343,6 +1351,13 @@ void MainComponent::showToolMenu (bool withShortcuts)
         menu.addSeparator();
         menu.addCommandItem (&commandManager, commands::newAudioTrack);
         menu.addCommandItem (&commandManager, commands::newInstrumentTrack);
+        menu.addCommandItem (&commandManager, commands::newSamplerTrack);
+        {
+            juce::PopupMenu studio;
+            for (const auto c : { commands::newStudioDrums, commands::newStudioKeys, commands::newStudioBass, commands::newStudioGuitar, commands::newBeatPad })
+                studio.addCommandItem (&commandManager, c);
+            menu.addSubMenu ("New Studio Instrument Track", studio);
+        }
         menu.addCommandItem (&commandManager, commands::importAudio);
         menu.addSeparator();
         menu.addCommandItem (&commandManager, commands::createMarker);

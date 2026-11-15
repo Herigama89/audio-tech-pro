@@ -76,7 +76,7 @@ namespace
                             { "HAT", "TAPE", hatC, -3, 1, 0.5f, -3, 1 }, { "HAT", "OPEN", hatO, -3, 1, 0.5f, -4, 1 }, { "SHAKER", "", shaker, -2, 1, 0.5f },
                             { "RIDE", "OLD", ride, -3, 1, 0.5f }, { "PERC", "WOOD", clave, -5, 1, 0.6f }, { "PERC", "BELL", cowbell, -3, 1, 0.5f },
                             { "BASS", "SUB", bass808, -1, 1.2f, 0.5f }, { "TOM", "LO", tomL, -2, 1, 0.5f }, { "TOM", "HI", tomH, -2, 1, 0.5f },
-                            { "VOX", "CHOP", vox, -3, 1, 0.5f }, { "FX", "VINYL", riser, -12, 2, 0.3f }, { "BLIP", "", perc, -7, 1, 0.5f } }, true } },
+                            { "VOX", "CHOP", vox, -3, 1, 0.5f }, { "FX", "VINYL", riser, -12, 2, 0.3f }, { "BLIP", "", perc, -7, 1, 0.5f } } }, true },
         { "Acoustic Room", { { { "KICK", "ROOM", acoustic, 0, 1, 1, 0, 0, 0, 36 }, { "KICK", "2", acoustic, 0, 1, 1, 0, 0, 0, 35 }, { "SNARE", "CENTER", acoustic, 0, 1, 1, 0, 0, 0, 38 },
                                { "SNARE", "EDGE", acoustic, 0, 1, 1, 0, 0, 0, 40 }, { "STICK", "", acoustic, 0, 1, 1, 0, 0, 0, 37 }, { "HAT", "PEDAL", acoustic, 0, 1, 1, 0, 1, 0, 44 },
                                { "HAT", "CLOSED", acoustic, 0, 1, 1, 0, 1, 0, 42 }, { "HAT", "OPEN", acoustic, 0, 1, 1, 0, 1, 0, 46 }, { "CRASH", "", acoustic, 0, 1, 1, 0, 0, 0, 49 },
@@ -166,6 +166,8 @@ struct BeatPad::Voice
     double userPos = 0.0, userStep = 1.0;
 };
 
+BeatPad::~BeatPad() = default;
+
 juce::StringArray BeatPad::kitNames()
 {
     juce::StringArray n;
@@ -208,12 +210,12 @@ void BeatPad::setStep (int pad, int step, int velocity) noexcept
 juce::String BeatPad::patternText() const
 {
     // "pad:step=velocity,..." for the steps that play
-    juce::StringArray parts;
+    juce::StringArray on;
     for (int pad = 0; pad < numPads; ++pad)
         for (int s = 0; s < steps; ++s)
             if (const auto v = pattern[(size_t) pad][(size_t) s].load(); v > 0)
-                parts.add (juce::String (pad) + ":" + juce::String (s) + "=" + juce::String ((int) v));
-    return parts.joinIntoString (",");
+                on.add (juce::String (pad) + ":" + juce::String (s) + "=" + juce::String ((int) v));
+    return on.joinIntoString (",");
 }
 
 void BeatPad::setPatternText (const juce::String& text)
@@ -236,7 +238,7 @@ void BeatPad::setSampleFile (int pad, const juce::File& file)
     std::shared_ptr<juce::AudioBuffer<float>> buffer;
     if (std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file)); reader != nullptr)
     {
-        const auto length = (int) juce::jmin<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 20.0));
+        const auto length = (int) std::min<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 20.0));
         buffer = std::make_shared<juce::AudioBuffer<float>> (2, length + 1);
         buffer->clear();
         reader->read (buffer.get(), 0, length, 0, true, true);

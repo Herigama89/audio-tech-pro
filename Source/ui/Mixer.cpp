@@ -263,6 +263,20 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     inputSlot.setTooltip ("Input: what this channel records or plays (an interface input, or the instrument)");
     outputSlot.setTooltip ("Output: where this channel goes (the Stereo Out, a bus, or the interface's other outputs: Output 3-4 and so on)");
     inputSlot.onClick = [this] { showInputMenu(); };
+    if (! isMaster() && ! isVca())
+    {
+        bypassKey.setTrack (track);
+        bypassKey.onToggle = [this]
+        {
+            // the selected channels together (as the mixer's other keys)
+            auto& um = owner.getUndoManager();
+            um.beginNewTransaction ("Bypass inserts");
+            const auto value = bypassKey.bypassed();   // (bypassed now: bring them back)
+            for (auto t : acting())
+                t.setProperty (ids::consoleInsertIn, value, &um);
+        };
+        addAndMakeVisible (bypassKey);
+    }
     look::key (outputsKey, look::Key::slot);
     outputsKey.setWantsKeyboardFocus (false);
     outputsKey.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff19d3d0));
@@ -1374,7 +1388,10 @@ void ChannelStrip::refresh()
         sendLevels[i]->setVisible (shown);
     }
     for (int i = 0; i < maxInserts; ++i)
+    {
         slots[i]->setVisible (! isVca() && i < insertRows());
+        slots[i]->setAlpha (bypassKey.bypassed() ? 0.4f : 1.0f);   // (the channel's inserts bypassed: dimmed)
+    }
 
     if (! isMaster() && ! isVca())
     {
@@ -2378,7 +2395,16 @@ void ChannelStrip::resized()
         area.removeFromTop (4);
     }
 
-    settingSlot.setBounds (area.removeFromTop (15));
+    {
+        // Setting, and the round bypass key at its end (small: it fits the row)
+        auto row = area.removeFromTop (15);
+        if (bypassKey.isVisible())
+        {
+            bypassKey.setBounds (row.removeFromRight (15));
+            row.removeFromRight (2);
+        }
+        settingSlot.setBounds (row);
+    }
     area.removeFromTop (2);
     {
         auto row = area.removeFromTop (15);

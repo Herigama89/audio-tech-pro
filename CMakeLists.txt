@@ -306,6 +306,7 @@ set(RIFF_UI_SOURCES
     Source/ui/EffectDesigns.cpp
     Source/ui/Mixer.cpp
     Source/ui/ConsoleViews.cpp
+    Source/ui/StudioPanel.cpp
     Source/ui/ConsoleStripWindow.cpp
     Source/ui/EventList.cpp
     Source/ui/LiveLoopsGrid.cpp

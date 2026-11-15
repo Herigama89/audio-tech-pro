@@ -616,7 +616,7 @@ namespace player
         const auto names = std::map<juce::String, juce::String> { { "drums", "Drummer" }, { "bass", "Bass Player" }, { "keys", "Keyboard Player" } };
         auto track = model::addTrack (project, names.count (what) > 0 ? names.at (what) : juce::String ("Player"), um, -1, model::instrumentKind);
         if (what == "drums")
-            track.setProperty (ids::instrument, "drums", um);
+            track.setProperty (ids::instrument, "studio:drums", um);   // (Studio Drums play the GM drum notes)
         else if (what == "bass")
         {
             track.setProperty (ids::synthWave, 0, um);
@@ -706,7 +706,7 @@ juce::Array<juce::ValueTree> apply (juce::ValueTree project, const Result& resul
 
         switch (part.kind)
         {
-            case PartKind::drums:  track.setProperty (ids::instrument, "drums", um);   // the built-in Drum Kit plays GM drums
+            case PartKind::drums:  track.setProperty (ids::instrument, "studio:drums", um);   // Studio Drums play GM drums
                                    track.setProperty (ids::synthGain, 0.8, um); break;
             case PartKind::bass:   bassIs808 ? sound (3, 2500.0, 0.002, 1.2, 0.7, 0.25, 0.7)
                                              : sound (0, 700.0, 0.003, 0.3, 0.6, 0.12, 0.55); break;

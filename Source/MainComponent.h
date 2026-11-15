@@ -158,6 +158,9 @@ private:
     void showInstrumentMenu (juce::ValueTree track, juce::Component& target);
     /** Multi-output (Logic's + on an instrument channel): channels for the instrument's other outputs. */
     void showOutputsMenu (juce::ValueTree track, juce::Component& target);
+    /** A track with one of the studio instruments (drums, keys, bass, guitar, beatpad, sampler); returns it. */
+    juce::ValueTree addStudioTrack (const juce::String& kind, const juce::String& name = {});
+    std::map<int, bool> studioPedals;   // (the keys' latched pedals, by controller)
     void openInstrumentWindow (const juce::ValueTree& track);
     void showPluginScanner();
     void openPianoRoll (juce::ValueTree region);

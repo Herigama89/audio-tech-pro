@@ -732,7 +732,7 @@ TEST_CASE ("Drummer and Session Players write their regions from their settings"
     auto project = model::createProject();
     project.setProperty (ids::tempo, 100.0, nullptr);
     auto track = generator::player::addPlayerTrack (project, "drums", 0.0, 4, nullptr);
-    CHECK (track[ids::instrument].toString() == "drums");
+    CHECK (track[ids::instrument].toString() == "studio:drums");
     auto region = track.getChild (0);
     const auto busy = region.getNumChildren();
     CHECK (busy > 10);

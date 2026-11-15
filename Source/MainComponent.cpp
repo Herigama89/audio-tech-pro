@@ -4,6 +4,9 @@
 #include "ui/InsertBar.h"
 #include "ui/EffectDesigns.h"
 #include "MainComponent.h"
+#include "ui/StudioPanel.h"
+#include "model/StudioState.h"
+#include "engine/studio/Studio.h"
 #include "ui/MultiMeter.h"
 #include "ui/PluginWindowKeys.h"
 #include "ui/PluginHostPanel.h"
@@ -2058,6 +2061,22 @@ void MainComponent::addTrack (const juce::String& kind)
     timeline.changed();
 }
 
+juce::ValueTree MainComponent::addStudioTrack (const juce::String& kind, const juce::String& name)
+{
+    undoManager.beginNewTransaction ("New " + studio::displayName (kind) + " track");
+    auto track = model::addTrack (project, name.isNotEmpty() ? name : studio::displayName (kind), &undoManager, -1, model::instrumentKind);
+    track.setProperty (ids::instrument, studiostate::prefix + kind, &undoManager);
+    studiostate::getOrCreate (track, &undoManager);
+    timeline.selectedTrackId = track[ids::id].toString();
+    timeline.changed();
+    juce::Timer::callAfterDelay (250, [safe = juce::Component::SafePointer<MainComponent> (this), track]
+    {
+        if (safe != nullptr)
+            safe->openInstrumentWindow (track);
+    });
+    return track;
+}
+
 void MainComponent::addTrack()
 {
     undoManager.beginNewTransaction ("New track");
@@ -3111,6 +3130,23 @@ void MainComponent::showInstrumentMenu (juce::ValueTree track, juce::Component& 
     if (kind == "synth" || kind == "drums" || kind == "sampler")
         menu.addItem ("(this track's old built-in " + juce::String (kind == "drums" ? "Drum Kit" : kind == "sampler" ? "Sampler" : "Synth")
                       + " is retired: choose another instrument)", false, false, [] {});
+    {
+        // the studio instruments
+        juce::PopupMenu studioMenu;
+        for (const auto& k : studio::kinds())
+            studioMenu.addItem (studio::displayName (k), true, kind == studiostate::prefix + k, [this, track, k]() mutable
+            {
+                undoManager.beginNewTransaction ("Choose instrument");
+                track.setProperty (ids::instrument, studiostate::prefix + k, &undoManager);
+                studiostate::getOrCreate (track, &undoManager);
+                juce::Timer::callAfterDelay (300, [safe = juce::Component::SafePointer<MainComponent> (this), track]
+                {
+                    if (safe != nullptr)
+                        safe->openInstrumentWindow (track);
+                });
+            });
+        menu.addSubMenu ("Studio Instruments", studioMenu);
+    }
     menu.addItem ("Nemix (wavetable synth)", true, kind == "nemix", [this, track]() mutable
     {
         undoManager.beginNewTransaction ("Choose instrument");
@@ -3188,6 +3224,45 @@ void MainComponent::openInstrumentWindow (const juce::ValueTree& track)
     };
 
     const auto title = track[ids::name].toString();
+
+    // A studio instrument: its own window (the picture, the knobs, the screen, the MIX tab)
+    if (studiostate::isStudio (track))
+    {
+        StudioPanel::Host host;
+        host.instrument = [this, id] { return rack.getStudio (id); };
+        host.chooseEffect = consoleHost.chooseEffect;
+        host.openInsert = consoleHost.openInsert;
+        host.playNote = [this, id] (int note, int velocity, bool on)
+        {
+            if (player.getLiveMidiTrack() != id)
+                player.setLiveMidiTrack (id);
+            if (note < 0)
+            {
+                // a pedal key (sustain, sostenuto, soft): latched on and off
+                auto& down = studioPedals[-note];
+                down = ! down;
+                engine.sendLiveMidi (juce::MidiMessage::controllerEvent (1, -note, down ? 127 : 0));
+                return;
+            }
+            engine.sendLiveMidi (on ? juce::MidiMessage::noteOn (1, note, (juce::uint8) juce::jlimit (1, 127, velocity))
+                                    : juce::MidiMessage::noteOff (1, note));
+        };
+        host.slicesToBeatPad = [this, title] (const juce::Array<juce::File>& slices)
+        {
+            auto pad = addStudioTrack ("beatpad", title + " Slices");
+            auto tree = studiostate::getOrCreate (pad, &undoManager);
+            for (int i = 0; i < slices.size(); ++i)
+                tree.setProperty (studiostate::fileProperty (i), slices[i].getFullPathName(), &undoManager);
+        };
+        auto* panel = new StudioPanel (project, track, undoManager, host);
+        auto window = std::make_unique<EditorWindow> (title + " - " + studio::displayName (studiostate::kindOf (track)), panel, true, closer);
+        const auto natural = StudioPanel::naturalSize (studiostate::kindOf (track));
+        window->setResizeLimits (natural.getWidth() / 2, natural.getHeight() / 2, natural.getWidth() * 2, natural.getHeight() * 2);
+        if (auto* constrainer = window->getConstrainer())
+            constrainer->setFixedAspectRatio ((double) natural.getWidth() / (double) natural.getHeight());
+        editorWindows[id] = std::move (window);
+        return;
+    }
 
     if (track[ids::instrument].toString() == "plugin")
     {

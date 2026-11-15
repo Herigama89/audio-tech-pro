@@ -2798,7 +2798,37 @@ juce::ValueTree load (const juce::File& file, juce::String& error)
         return {};
     }
 
-    return fromJson (file.loadFileAsString(), file, error);
+    auto project = fromJson (file.loadFileAsString(), file, error);
+    retireOldInstruments (project);
+    return project;
+}
+
+void retireOldInstruments (juce::ValueTree project)
+{
+    // the old built-in instruments, retired: the Drum Kit opens on Studio Drums, the Sampler on the Sampler Track,
+    // the Synth on Nemix
+    for (auto track : project)
+    {
+        if (! track.hasType (ids::TRACK) || ! isInstrumentTrack (track))
+            continue;
+        const auto kind = track[ids::instrument].toString();
+        if (kind == "drums")
+            track.setProperty (ids::instrument, "studio:drums", nullptr);
+        else if (kind == "sampler")
+        {
+            track.setProperty (ids::instrument, "studio:sampler", nullptr);
+            auto studioTree = track.getChildWithName ("STUDIO");
+            if (! studioTree.isValid())
+            {
+                studioTree = juce::ValueTree ("STUDIO");
+                track.appendChild (studioTree, nullptr);
+            }
+            studioTree.setProperty ("file0", track[ids::samplerFile].toString(), nullptr);
+            studioTree.setProperty ("root", (int) track.getProperty (ids::samplerRoot, 60), nullptr);
+        }
+        else if (kind == "synth" || kind.isEmpty())
+            track.setProperty (ids::instrument, "nemix", nullptr);
+    }
 }
 
 juce::String mixerZoneOf (const juce::ValueTree& project, const juce::ValueTree& track)
@@ -2810,6 +2840,20 @@ juce::String mixerZoneOf (const juce::ValueTree& project, const juce::ValueTree&
         return own;
     if (own == "none")
         return {};
+    // a stack's tracks go where their stack goes (a folder or summing stack put in a zone takes its tracks with it)
+    if (const auto parent = track[ids::stackParent].toString(); parent.isNotEmpty())
+    {
+        auto main = findById (project, parent);
+        for (int depth = 0; main.isValid() && depth < 16; ++depth)
+        {
+            const auto z = main.getProperty ("mixerZone").toString();
+            if (z == "left" || z == "right")
+                return z;
+            if (z == "none")
+                break;
+            main = findById (project, main[ids::stackParent].toString());
+        }
+    }
     if (isBusTrack (track))
     {
         // (buses go to the right zone by themselves, unless you've put them elsewhere: "none" keeps them with the tracks;
