@@ -176,6 +176,8 @@ jobs:
           body: |
             Mac (Apple Silicon and Intel, macOS 11+): open the .dmg and drag Audio Tech Pro onto Applications, or use the .pkg installer. The first time, right-click the app and choose Open.
 
+            Windows (64-bit, Windows 10 and 11): run "Audio Tech Pro <version> Setup.exe". If Windows SmartScreen says it protected your PC, click More info > Run anyway.
+
             Plug-ins (VST3 and AU, for Logic, Ableton, Pro Tools via VST3 hosts, Studio One...): the Classic Compressors, the Mastering Compressors and the classic EQs. Run "Audio Tech Pro Plugins" .pkg (right-click > Open the first time), or unzip and copy the .vst3 files to /Library/Audio/Plug-Ins/VST3 and the .component files to /Library/Audio/Plug-Ins/Components.
           files: files/*
           overwrite_files: true
