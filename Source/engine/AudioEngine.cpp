@@ -1950,7 +1950,10 @@ bool AudioEngine::processTrack (const PlaybackGraph::Track& track, Pass& pass, c
 
     if (playingNow)
         for (const auto& automation : track.paramAutomation)
-            automation.effect->setAutomatedParameter (automation.paramIndex, automation.curve.valueAt (blockStart));
+            if (automation.effect != nullptr)
+                automation.effect->setAutomatedParameter (automation.paramIndex, automation.curve.valueAt (blockStart));
+            else if (automation.instrument != nullptr)
+                automation.instrument->setAutomatedParameter (automation.paramIndex, automation.curve.valueAt (blockStart));
 
     // Balance-style pan: unity at centre, the far side fades out.
     const auto targetL = track.audible ? gain * (pan <= 0.0f ? 1.0f : 1.0f - pan) : 0.0f;
@@ -2324,7 +2327,10 @@ bool AudioEngine::processTrack (const PlaybackGraph::Track& track, Pass& pass, c
         juce::FloatVectorOperations::copy (preFaderOutputs.getWritePointer (track.slot * 2 + 1), tR, n);
     }
 
-    // Stereo width (Stereo Pan mode): narrower towards mono, or wider.
+    // The transient shaper (TRANS): more snap, or softer fronts
+    shapers[(size_t) track.slot].process (tL, tR, n, track.transient, rate);
+
+    // Stereo width (WIDTH, and Stereo Pan mode): narrower towards mono, or wider.
     if (std::abs (track.width - 1.0f) > 1.0e-3f)
         for (int i = 0; i < n; ++i)
         {

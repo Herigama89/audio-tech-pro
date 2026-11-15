@@ -47,6 +47,24 @@ StudioInstrument::StudioInstrument (juce::String k, std::vector<Param> own, juce
     resetToDefaults();
 }
 
+const KindInfo& infoOf (const juce::String& kind)
+{
+    static std::map<juce::String, KindInfo> known;
+    auto it = known.find (kind);
+    if (it == known.end())
+    {
+        KindInfo info;
+        if (auto ins = create (kind))
+        {
+            info.params = ins->params();
+            info.numOwn = ins->numOwnParams();
+            info.parts = ins->partNames();
+        }
+        it = known.emplace (kind, std::move (info)).first;
+    }
+    return it->second;
+}
+
 int StudioInstrument::indexOf (const juce::String& id) const
 {
     for (size_t i = 0; i < table.size(); ++i)
@@ -192,7 +210,10 @@ void StudioInstrument::render (float* left, float* right, int numSamples, const 
             juce::FloatVectorOperations::addWithMultiply (bL, l, send, numSamples);
             juce::FloatVectorOperations::addWithMultiply (bR, r, send, numSamples);
         }
-        const bool own = p (base + 6) > 0.5f;
+        // (its own output only while a channel plays it: without one it stays in the main, so nothing goes silent)
+        const bool own = p (base + 6) > 0.5f
+                         && (partChains == nullptr || partChains->routed.empty()
+                             || (i < (int) partChains->routed.size() && partChains->routed[(size_t) i]));
         ownOut[(size_t) i] = own;
         if (own)
         {

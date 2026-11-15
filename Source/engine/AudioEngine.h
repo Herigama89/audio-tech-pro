@@ -10,6 +10,7 @@
 #include "BuiltInEffects.h"
 #include "MasterBusCompressor.h"
 #include "MixAnalysis.h"
+#include "TransientShaper.h"
 #include "ScreenAudioTap.h"
 #include <optional>
 #include <bitset>
@@ -674,6 +675,7 @@ private:
     MasterBusCompressor busComp;
     TapeSaturator masterTape;
     std::array<TapeSaturator, PlaybackGraph::maxTracks> tapes;
+    std::array<TransientShaper, PlaybackGraph::maxTracks> shapers;   // each channel's TRANS
     std::array<PreampSaturator, PlaybackGraph::maxTracks> preamps;
     std::array<ConsoleChannel, PlaybackGraph::maxTracks> consoles;
     std::atomic<int> analyzerSlot { -1 };

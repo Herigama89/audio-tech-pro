@@ -1,5 +1,6 @@
 #include "Profile.h"
 #include "TrackHeaders.h"
+#include "../engine/studio/StudioInstruments.h"
 #include "Theme.h"
 #include "ConsoleLook.h"
 #include "../model/Project.h"
@@ -204,7 +205,18 @@ void TrackHeader::refresh()
         armButton.setTooltip ("Record enable: records your MIDI keyboard");
 
         juce::String name = app::synthName;
-        if (track[ids::instrument].toString() == "drums")
+        if (track[ids::instrument].toString().startsWith ("studio:"))
+        {
+            // the studio instrument's own name (the Keys with their program, the Sampler with its file)
+            const auto kind = track[ids::instrument].toString().fromFirstOccurrenceOf ("studio:", false, false);
+            name = studio::displayName (kind);
+            const auto st = track.getChildWithName ("STUDIO");
+            if (kind == "sampler" && juce::File (st["file0"].toString()).existsAsFile())
+                name = "Sampler: " + juce::File (st["file0"].toString()).getFileNameWithoutExtension();
+            if (kind == "keys")
+                name = "Keys: " + studio::StudioKeys::programs()[(size_t) juce::jlimit (0, (int) studio::StudioKeys::programs().size() - 1, (int) st.getProperty ("program", 0))].name;
+        }
+        else if (track[ids::instrument].toString() == "drums")
             name = "Drum Kit";
         else if (track[ids::instrument].toString() == "nemix")
             name = "Nemix: " + track.getChildWithName ("NEMIX")["nmxPreset"].toString();
@@ -698,6 +710,28 @@ void TrackHeader::showAutomationMenu()
     menu.addItem ("Volume", true, current == model::volumeParam, [choose]() mutable { choose (model::volumeParam); });
     menu.addItem ("Pan", true, current == model::panParam, [choose]() mutable { choose (model::panParam); });
 
+    // A studio instrument's own knobs, and its parts' mix
+    if (const auto instrumentId = track[ids::instrument].toString(); instrumentId.startsWith ("studio:"))
+    {
+        const auto kind = instrumentId.fromFirstOccurrenceOf ("studio:", false, false);
+        const auto& info = studio::infoOf (kind);
+        juce::PopupMenu own, mix;
+        for (int i = 0; i < (int) info.params.size(); ++i)
+        {
+            const auto& p = info.params[(size_t) i];
+            const auto param = "studio:" + p.id;
+            auto item = [choose, param, project, owner = track[ids::id].toString(), label = studio::displayName (kind) + " " + p.name]() mutable
+            {
+                model::laneFor (project, owner, param, true).setProperty (ids::name, label, nullptr);
+                choose (param);
+            };
+            (i < info.numOwn ? own : mix).addItem (p.name, true, current == param, item);
+        }
+        own.addSeparator();
+        own.addSubMenu ("Mix", mix);
+        menu.addSubMenu (studio::displayName (kind), own);
+    }
+
     for (const auto& insert : model::insertsOf (model::findChain (project, track[ids::id].toString())))
     {
         const auto* info = findBuiltInEffect (insert[ids::effect].toString());
@@ -763,7 +797,7 @@ juce::String TrackHeader::automationParamName (const juce::ValueTree& project, c
 {
     if (param == model::volumeParam) return "Volume";
     if (param == model::panParam)    return "Pan";
-    if (param.contains (":#"))
+    if (param.contains (":#") || param.startsWith ("studio:"))
         return model::rangeOf (project, param).name;
 
     for (const auto& insert : model::insertsOf (model::findChain (project, track[ids::id].toString())))

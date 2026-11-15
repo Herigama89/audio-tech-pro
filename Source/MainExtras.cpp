@@ -127,6 +127,10 @@ namespace
             addRow (processRange, "Process buffer range", { "Off (all at the I/O buffer)", "Small", "Medium", "Large" },
                     juce::jlimit (0, 3, props.getIntValue ("processBufferRange", 2)) + 1,
                     [this] (int id) { props.setValue ("processBufferRange", id - 1); });
+            addRow (pinWindows, "Plug-in windows", { "Stay pinned (above the main window)", "Not pinned" },
+                    props.getBoolValue ("pinPluginWindows", true) ? 1 : 2,
+                    [this] (int id) { props.setValue ("pinPluginWindows", id == 1); EditorWindow::pinByDefault = id == 1; });
+            pinWindows.setTooltip ("Instrument and effect windows open pinned: they float above the main window and stay open while you work");
             processRange.setTooltip ("As Logic's: the tracks you aren't playing live are processed ahead of time in larger blocks, "
                                      "on their own thread, so the load stays steady and a small I/O buffer doesn't click. The track "
                                      "you play, armed and monitored tracks stay at the I/O buffer. Large: steadiest; Small: changes "
@@ -175,7 +179,7 @@ namespace
 
         juce::PropertiesFile& props;
         std::function<void()> onChange;
-        juce::ComboBox autosave, backups, autoBackup, bitDepth, stopBehaviour, ecoMode, processRange;
+        juce::ComboBox autosave, backups, autoBackup, bitDepth, stopBehaviour, ecoMode, processRange, pinWindows;
         juce::ToggleButton openLast;
         std::vector<Row> rows;
     };

@@ -32,6 +32,7 @@ namespace riff::studio
     {
         std::vector<std::vector<std::shared_ptr<Effect>>> parts;
         std::vector<std::shared_ptr<Effect>> fxA, fxB, main;
+        std::vector<bool> routed;   // which parts have a channel of their own (a multi-output track playing them)
     };
 
     /** Which chain owner (model::insertsOf) holds a part's inserts: part n, or "fxA", "fxB", "main". */
@@ -57,6 +58,8 @@ namespace riff::studio
         float getParam (int index) const noexcept;
         void resetToDefaults() noexcept;
         const juce::StringArray& partNames() const noexcept { return parts; }
+        /** How many of params() are the instrument's own (the parts' mix follows). */
+        int numOwnParams() const noexcept { return firstMix; }
         int numParts() const noexcept { return parts.size(); }
 
         /** A part's mix parameter's index: what is "gain", "pan", "mute", "solo", "sendA", "sendB" or "out". */
@@ -64,6 +67,15 @@ namespace riff::studio
 
         /** The chains to use for the coming block (audio thread, from the playing graph; may be null). */
         void setPartChains (const void* chains) noexcept override { partChains = static_cast<const PartChains*> (chains); }
+        /** Automation: a knob's lane ("studio:<param id>", 0..1 across its range). */
+        void setAutomatedParameter (int index, float normalised) noexcept override
+        {
+            if (! juce::isPositiveAndBelow (index, (int) table.size())) return;
+            const auto& prm = table[(size_t) index];
+            auto v = prm.min + (prm.max - prm.min) * juce::jlimit (0.0f, 1.0f, normalised);
+            if (! prm.choices.isEmpty()) v = (float) juce::roundToInt (v);
+            if (std::abs (getParam (index) - v) > 1.0e-6f) setParam (index, v);
+        }
 
         void prepare (double sampleRate, int maxBlockSize) final;
         void render (float* left, float* right, int numSamples, const juce::MidiBuffer& midi) noexcept final;
@@ -132,4 +144,8 @@ namespace riff::studio
 
     /** A new instrument of a kind (nullptr for an unknown one). */
     std::unique_ptr<StudioInstrument> create (const juce::String& kind);
+
+    /** A kind's parameter table and part names, without one playing (message thread; kept after the first ask). */
+    struct KindInfo { std::vector<Param> params; int numOwn = 0; juce::StringArray parts; };
+    const KindInfo& infoOf (const juce::String& kind);
 }

@@ -5,6 +5,9 @@
 #include "Looks.h"
 #include "../engine/BuiltInEffects.h"
 #include "Theme.h"
+#include "../model/Presets.h"
+#include "../engine/AutomationWriter.h"
+#include "InstrumentWindows.h"
 #include <BinaryData.h>
 
 namespace riff
@@ -13,6 +16,21 @@ namespace riff
 namespace
 {
     const juce::Colour teal (0xff19d3d0), amber (0xffe8a028), ink (0xffeef2f6), dim (0xff98a3ae);
+    const juce::Colour purple (0xffa25bff), blue (0xff3f8cff), green (0xff3fd06a), red (0xffe8231d);
+
+    /** The silver knobs' skirts by section: teal the sound, purple the space and envelopes, amber drive, compression
+        and filter, blue the amp's and the piano's tone, green the swing, red the master and volume. */
+    juce::Colour sectionColour (const juce::String& kind, const juce::String& id)
+    {
+        if (id == "master" || id == "level" || id == "mainGain") return red;
+        if (id == "swing") return green;
+        if (id == "comp" || id == "drive" || id == "cutoff" || id == "reso" || id == "#Filter" || id == "#Reso") return amber;
+        if (id == "overheads" || id == "room" || id == "ambience" || id == "reverb"
+            || (kind == "sampler" && (id == "attack" || id == "decay" || id == "sustain" || id == "release")))
+            return purple;
+        if (id == "bass" || id == "mid" || id == "treble" || (kind == "keys" && (id == "tone" || id == "resonance"))) return blue;
+        return teal;
+    }
     juce::Font font (float size, bool bold = true) { return juce::FontOptions (size, bold ? juce::Font::bold : juce::Font::plain); }
 
     juce::Image faceImage (const juce::String& kind)
@@ -63,11 +81,28 @@ struct StudioPanel::Layout
 // The MIX tab's strip
 struct StudioPanel::Strip final : juce::Component
 {
+    /** An insert slot: a click opens it (or chooses one); a right-click: Open, Replace, Bypass, Remove (as Logic's). */
+    struct Slot final : juce::TextButton
+    {
+        std::function<void()> onMenu;
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            if (e.mods.isPopupMenu()) { if (onMenu) onMenu(); return; }
+            juce::TextButton::mouseDown (e);
+        }
+        void mouseUp (const juce::MouseEvent& e) override
+        {
+            if (e.mods.isPopupMenu()) return;
+            juce::TextButton::mouseUp (e);
+        }
+    };
+
     StudioPanel& panel;
     int part;                 // -1 FX A, -2 FX B, -3 main
     juce::String name, owner;
     juce::TextButton output;
-    juce::OwnedArray<juce::TextButton> inserts;
+    juce::OwnedArray<Slot> inserts;
+    juce::Rectangle<int> bypassArea;   // (the strip's bypass key: all its inserts out, as Cubase's)
     juce::Slider sendA, sendB, pan;
     juce::TextButton mute { "M" }, solo { "S" };
     juce::Rectangle<int> faderArea, meterArea;
@@ -80,7 +115,7 @@ struct StudioPanel::Strip final : juce::Component
         const auto gainId = id ("gain");
         if (part >= 0)
         {
-            output.onClick = [this] { panel.showChoiceMenu (id ("out"), &output); };
+            output.onClick = [this] { showOutputMenu(); };
             addAndMakeVisible (output);
             for (auto* s : { &sendA, &sendB, &pan })
             {
@@ -119,20 +154,86 @@ struct StudioPanel::Strip final : juce::Component
         juce::ignoreUnused (gainId);
         for (int i = 0; i < 4; ++i)
         {
-            auto* b = inserts.add (new juce::TextButton());
+            auto* b = inserts.add (new Slot());
             b->onClick = [this, i, b]
             {
-                const auto insert = model::insertAtSlot (model::findChain (panel.project, owner), i);
-                if (insert.isValid() && ! juce::ModifierKeys::currentModifiers.isPopupMenu())
+                auto insert = model::insertAtSlot (model::findChain (panel.project, owner), i);
+                if (insert.isValid() && juce::ModifierKeys::currentModifiers.isAltDown())
+                {
+                    panel.um.beginNewTransaction ("Bypass insert");
+                    insert.setProperty (ids::bypass, ! (bool) insert[ids::bypass], &panel.um);
+                }
+                else if (insert.isValid())
                 {
                     if (panel.host.openInsert) panel.host.openInsert (insert);
                 }
                 else if (panel.host.chooseEffect)
                     panel.host.chooseEffect (owner, i, insert, *b);
             };
+            b->onMenu = [this, i, b] { showSlotMenu (i, *b); };
             addAndMakeVisible (b);
         }
         refresh();
+    }
+
+    void showSlotMenu (int i, juce::Component& target)
+    {
+        auto insert = model::insertAtSlot (model::findChain (panel.project, owner), i);
+        juce::PopupMenu menu;
+        if (insert.isValid())
+        {
+            menu.addItem ("Open", [this, insert] { if (panel.host.openInsert) panel.host.openInsert (insert); });
+            menu.addItem ("Replace...", [this, i, insert, &target] { if (panel.host.chooseEffect) panel.host.chooseEffect (owner, i, insert, target); });
+            menu.addItem ("Bypass", true, (bool) insert[ids::bypass], [this, insert]() mutable
+            {
+                panel.um.beginNewTransaction ("Bypass insert");
+                insert.setProperty (ids::bypass, ! (bool) insert[ids::bypass], &panel.um);
+            });
+            menu.addSeparator();
+            menu.addItem ("Remove", [this, insert]
+            {
+                panel.um.beginNewTransaction ("Remove insert");
+                model::removeInsert (insert, &panel.um);
+            });
+        }
+        else
+            menu.addItem ("Add an effect...", [this, i, &target] { if (panel.host.chooseEffect) panel.host.chooseEffect (owner, i, {}, target); });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+    }
+
+    /** Whether every insert of the strip is bypassed (the key lit); false with none. */
+    bool allBypassed() const
+    {
+        const auto all = model::insertsOf (model::findChain (panel.project, owner));
+        if (all.isEmpty()) return false;
+        for (const auto& insert : all)
+            if (! (bool) insert[ids::bypass]) return false;
+        return true;
+    }
+    void toggleBypass()
+    {
+        const auto all = model::insertsOf (model::findChain (panel.project, owner));
+        if (all.isEmpty()) return;
+        const auto to = ! allBypassed();
+        panel.um.beginNewTransaction (to ? "Bypass inserts" : "Activate inserts");
+        for (auto insert : all)
+            insert.setProperty (ids::bypass, to, &panel.um);
+    }
+
+    void showOutputMenu()
+    {
+        // Main, or its own channel in the mixer (made for it, and the part routed there: as Logic's multi-output)
+        const auto own = panel.value (id ("out")) > 0.5f;
+        juce::PopupMenu menu;
+        menu.addItem ("Main", true, ! own, [this] { panel.setValue (id ("out"), 0.0f, true); });
+        menu.addItem ("Own channel (outputs " + juce::String (part * 2 + 3) + "-" + juce::String (part * 2 + 4) + ")", true, own, [this]
+        {
+            panel.um.beginNewTransaction ("Multi-output");
+            panel.state.setProperty (juce::Identifier (id ("out")), 1.0f, &panel.um);
+            model::addMultiOutput (panel.project, panel.track, part + 1, panel.track[ids::name].toString() + " " + name, &panel.um);
+            refresh();
+        });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&output));
     }
 
     juce::String id (const char* what) const
@@ -165,6 +266,7 @@ struct StudioPanel::Strip final : juce::Component
                 if (text.isEmpty()) text = insert[ids::effect].toString();
             }
             b->setButtonText (text.isEmpty() ? juce::String ("+") : text);
+            b->setAlpha (insert.isValid() && (bool) insert[ids::bypass] ? 0.4f : 1.0f);
             b->setColour (juce::TextButton::buttonColourId, text.isEmpty() ? juce::Colours::white.withAlpha (0.06f) : plugin ? juce::Colour (0xd03fa8ff) : juce::Colour (0xd0d6962a));
             b->setColour (juce::TextButton::textColourOffId, text.isEmpty() ? dim : plugin ? juce::Colours::white : juce::Colour (0xff1a1206));
             b->setTooltip (text.isEmpty() ? "Add an insert: one of ours or any plug-in" : text + ": click to open, right-click to replace or remove");
@@ -189,6 +291,7 @@ struct StudioPanel::Strip final : juce::Component
     void resized() override
     {
         auto r = getLocalBounds().reduced (5, 4);
+        bypassArea = juce::Rectangle<int> (getWidth() - 21, 5, 14, 14);
         r.removeFromTop (18);
         if (part >= 0)
         {
@@ -244,7 +347,20 @@ struct StudioPanel::Strip final : juce::Component
         g.drawRoundedRectangle (r, 10.0f, 1.0f);
         g.setColour (ink);
         g.setFont (font (11.0f));
-        g.drawFittedText (name.toUpperCase(), getLocalBounds().reduced (4, 0).removeFromTop (20), juce::Justification::centred, 1, 0.7f);
+        g.drawFittedText (name.toUpperCase(), getLocalBounds().reduced (20, 0).removeFromTop (20), juce::Justification::centred, 1, 0.7f);
+        {
+            // the bypass key: small and round (the power sign), lit amber when the strip's inserts are out
+            const auto b = bypassArea.toFloat();
+            const auto on = allBypassed();
+            g.setColour (on ? amber : juce::Colours::white.withAlpha (0.10f));
+            g.fillEllipse (b);
+            g.setColour (on ? juce::Colour (0xff1a1206) : dim);
+            juce::Path power;
+            power.addCentredArc (b.getCentreX(), b.getCentreY(), b.getWidth() * 0.28f, b.getWidth() * 0.28f, 0.0f,
+                                 juce::degreesToRadians (35.0f), juce::degreesToRadians (325.0f), true);
+            g.strokePath (power, juce::PathStrokeType (1.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.drawLine (b.getCentreX(), b.getY() + 3.0f, b.getCentreX(), b.getCentreY(), 1.2f);
+        }
         // the slot, the scale, the meter, the white glass cap
         const auto gain = panel.value (id ("gain"));
         const auto cx = (float) faderArea.getX() + (float) faderArea.getWidth() * 0.4f;
@@ -275,6 +391,12 @@ struct StudioPanel::Strip final : juce::Component
 
     void mouseDown (const juce::MouseEvent& e) override
     {
+        if (bypassArea.expanded (2).contains (e.getPosition()))
+        {
+            toggleBypass();
+            repaint();
+            return;
+        }
         dragging = faderArea.expanded (6).contains (e.getPosition());
         if (dragging) panel.um.beginNewTransaction ("Instrument mix");
     }
@@ -378,8 +500,18 @@ StudioPanel::StudioPanel (juce::ValueTree p, juce::ValueTree t, juce::UndoManage
                 else if (i == 7) act = [this] { cycle ("artic", 1); };
                 else if (i == 8) act = [this] { applyKit (juce::roundToInt (value ("kit")) - 1); };
                 else if (i == 9) act = [this] { applyKit (juce::roundToInt (value ("kit")) + 1); };
-                else if (i == 10) act = [this] { screenPage = screenPage == 3 ? 0 : 3; repaint(); };
-                else act = [this] { screenPage = screenPage == 1 ? 0 : 1; repaint(); };
+                else if (i == 10)
+                {
+                    // GROOVE: a beat plays (the bar's Groove chooses which), in time with the song
+                    act = [this]
+                    {
+                        const auto now = juce::roundToInt (value ("groove"));
+                        if (now > 0) lastGroove = now;
+                        setValue ("groove", now > 0 ? 0.0f : (float) juce::jmax (1, lastGroove), true);
+                    };
+                    lit = [this] { return value ("groove") > 0.5f; };
+                }
+                else { act = [this] { showPage (0); screenPage = screenPage == 1 ? 0 : 1; repaint(); }; lit = [this] { return page == 0 && screenPage == 1; }; }
                 buttonAt (px[i % 4], py[i / 4] - yOff + 1.0f, 42.0f, 42.0f, padLabels[i], act, lit);
             }
             L.screenTabs = { "PLAY", "PIECE", "MIX", "ROOM", "MAP" };
@@ -388,7 +520,7 @@ StudioPanel::StudioPanel (juce::ValueTree p, juce::ValueTree t, juce::UndoManage
                          { { 565, 585 - yOff }, 88, 1, 38 }, { { 930, 600 - yOff }, 95, 3, 43 }, { { 915, 390 - yOff }, 100, 7, 57 },
                          { { 1113, 395 - yOff }, 118, 6, 51 }, { { 1138, 565 - yOff }, 95, 7, 52 }, { { 715, 450 - yOff }, 115, 0, 36 } };
             L.mix = { 100.0f, 236.0f, 1208.0f, 470.0f };
-            L.bar = { { "Kit", "kit" }, { "Velocity", "velocity" }, { "Articulation", "artic" }, { "Hi-Hat", "hatPedal" } };
+            L.bar = { { "Kit", "kit" }, { "Groove", "groove" }, { "Velocity", "velocity" }, { "Articulation", "artic" }, { "Hi-Hat", "hatPedal" } };
         }
         else
         {
@@ -614,6 +746,10 @@ StudioPanel::StudioPanel (juce::ValueTree p, juce::ValueTree t, juce::UndoManage
     if (L.height <= 0.0f)
         L.height = (float) L.crop.getHeight();
 
+    for (auto& c : controls)
+        if (c->type == Control::knob || c->type == Control::encoder)
+            c->colour = c->type == Control::encoder ? (c->id == "master" ? red : teal) : sectionColour (kind, c->id);
+
     buildBar();
     mixView.setViewedComponent (&mixHolder, false);
     mixView.setScrollBarsShown (false, true);
@@ -640,6 +776,9 @@ float StudioPanel::value (const juce::String& idIn) const
         id = studio::StudioDrums::pieceId (juce::roundToInt (value ("sel"))) + id.substring (1);
     else if (id.startsWith ("#"))
         id = "pad" + juce::String (juce::roundToInt (value ("sel"))) + id.substring (1);
+    if (inst != nullptr && automatedIds.contains (idIn) && dragging == nullptr)
+        if (const auto i = inst->indexOf (id); i >= 0)
+            return inst->getParam (i);   // (the automation playing it)
     if (state.hasProperty (id))
         return (float) (double) state[id];
     if (inst != nullptr)
@@ -766,21 +905,23 @@ void StudioPanel::buildBar()
     barLabels.clear();
     for (const auto& b : layout->bar)
     {
+        const auto light = theme::glassLight();
         auto* label = barLabels.add (new juce::Label ({}, b.label));
         label->setFont (font (12.0f, false));
-        label->setColour (juce::Label::textColourId, dim);
+        label->setColour (juce::Label::textColourId, light ? juce::Colour (0xff3a4048) : dim);
         addAndMakeVisible (label);
         auto* button = barButtons.add (new juce::TextButton());
         const auto id = b.id;
         button->onClick = [this, id, button] { showChoiceMenu (id, button); };
-        button->setColour (juce::TextButton::buttonColourId, juce::Colours::white.withAlpha (0.08f));
-        button->setColour (juce::TextButton::textColourOffId, ink);
+        button->setColour (juce::TextButton::buttonColourId, light ? juce::Colours::white.withAlpha (0.85f) : juce::Colours::white.withAlpha (0.08f));
+        button->setColour (juce::TextButton::textColourOffId, light ? juce::Colours::black : ink);
+        button->setColour (juce::TextButton::textColourOnId, light ? juce::Colours::black : ink);
         addAndMakeVisible (button);
     }
     auto* mixer = barButtons.add (new juce::TextButton ("Mixer"));
     mixer->onClick = [this] { showPage (page == 1 ? 0 : 1); };
-    mixer->setColour (juce::TextButton::buttonColourId, teal.withAlpha (0.3f));
-    mixer->setColour (juce::TextButton::textColourOffId, ink);
+    mixer->setColour (juce::TextButton::buttonColourId, theme::glassLight() ? teal.withAlpha (0.55f) : teal.withAlpha (0.3f));
+    mixer->setColour (juce::TextButton::textColourOffId, theme::glassLight() ? juce::Colours::black : ink);
     addAndMakeVisible (mixer);
 }
 
@@ -857,31 +998,28 @@ void StudioPanel::paint (juce::Graphics& g)
     {
         if (c->type == Control::knob || c->type == Control::encoder)
         {
+            // the silver knob, its skirt in its section's colour; only the middle turns, the ring shows the setting
             const auto n = juce::jlimit (0.0f, 1.0f, normalised (c->id));
-            const auto angle = (n - 0.5f) * juce::degreesToRadians (270.0f);
             const auto r = c->radius;
-            const auto src = c->centre.translated ((float) crop.getX(), (float) crop.getY());
-            const auto inner = r * (c->type == Control::encoder ? 0.86f : 0.80f);
+            const auto bipolar = c->id.endsWith ("Pan") || c->id == "pan" || c->id == "@Pan" || c->id == "#Pan";
+            const auto knobArea = juce::Rectangle<float> (r * 2.15f, r * 2.15f).withCentre (c->centre);
+            g.setColour (juce::Colour (0xff15171b));
+            g.fillEllipse (juce::Rectangle<float> (r * 2.2f, r * 2.2f).withCentre (c->centre));   // (the photographed one covered)
+            if (! looks::drawSilverKnob (g, knobArea, n, juce::degreesToRadians (-135.0f), juce::degreesToRadians (135.0f),
+                                         c->colour, c->colour, bipolar, true))
             {
-                juce::Graphics::ScopedSaveState keep (g);
-                juce::Path clip;
-                clip.addEllipse (juce::Rectangle<float> (inner * 2.0f, inner * 2.0f).withCentre (c->centre));
-                g.reduceClipRegion (clip);
-                g.setColour (juce::Colour (0xff1a1b1e));
-                g.fillEllipse (juce::Rectangle<float> (inner * 2.0f, inner * 2.0f).withCentre (c->centre));
-                g.drawImageTransformed (face, juce::AffineTransform::translation (-src.x, -src.y).rotated (angle).translated (c->centre.x, c->centre.y));
+                g.setColour (c->colour);
+                g.fillEllipse (knobArea.reduced (r * 0.2f));
             }
-            juce::Path track, lit;
-            const auto ring = r * 1.12f;
-            track.addCentredArc (c->centre.x, c->centre.y, ring, ring, 0.0f, juce::degreesToRadians (-135.0f), juce::degreesToRadians (135.0f), true);
-            lit.addCentredArc (c->centre.x, c->centre.y, ring, ring, 0.0f, juce::degreesToRadians (-135.0f), angle, true);
-            g.setColour (juce::Colours::black.withAlpha (0.35f));
-            g.strokePath (track, juce::PathStrokeType (2.0f));
-            g.setColour (teal.withAlpha (0.9f));
-            g.strokePath (lit, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            if (automatedIds.contains (c->id))
+            {
+                // automated: a small dot over it (as Logic's automation light)
+                g.setColour (juce::Colour (0xff4ce06a));
+                g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ c->centre.x + r * 0.95f, c->centre.y - r * 0.95f }));
+            }
             g.setColour (ink);
             g.setFont (font (r < 19.0f ? 9.5f : 11.0f));
-            const auto labelY = c->type == Control::encoder ? c->centre.y + r + 6.0f : c->centre.y + r + 6.0f;
+            const auto labelY = c->centre.y + r * 1.08f + 3.0f;
             g.drawText (c->label, juce::Rectangle<float> (c->centre.x - 45.0f, labelY, 90.0f, 13.0f), juce::Justification::centred, false);
             if (hoverId == c->id && hoverId.isNotEmpty() && inst != nullptr)
             {
@@ -951,7 +1089,14 @@ void StudioPanel::paint (juce::Graphics& g)
     }
 
     // the bar under the face (glass)
-    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.12f), 0.0f, barArea.getY(), juce::Colours::white.withAlpha (0.04f), 0.0f, barArea.getBottom(), false));
+    if (theme::glassLight())
+    {
+        g.setColour (juce::Colour (0xffe9edf2));
+        g.fillRect (barArea);
+        g.setGradientFill (juce::ColourGradient (juce::Colours::white, 0.0f, barArea.getY(), juce::Colour (0xffdfe4ea), 0.0f, barArea.getBottom(), false));
+    }
+    else
+        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.12f), 0.0f, barArea.getY(), juce::Colours::white.withAlpha (0.04f), 0.0f, barArea.getBottom(), false));
     g.fillRoundedRectangle (barArea.reduced (8.0f, 6.0f), 18.0f);
     g.setColour (teal.withAlpha (0.35f));
     g.drawRoundedRectangle (barArea.reduced (8.0f, 6.0f), 18.0f, 1.0f);
@@ -1076,7 +1221,69 @@ void StudioPanel::paintScreen (juce::Graphics& g, juce::Rectangle<float> area)
     g.setFont (mono);
     const auto programNo = kind == "keys" && lines.size() > 6 ? lines[6] : studio::displayName (kind).toUpperCase();
     g.drawText (programNo, top.reduced (4.0f, 0.0f), juce::Justification::centredLeft, false);
-    g.drawText (juce::String (juce::roundToInt (inst != nullptr ? 120.0 : 120.0)) + " BPM", top.reduced (4.0f, 0.0f), juce::Justification::centredRight, false);
+    // the song's tempo (drag it up or down, as in Logic)
+    {
+        const auto bpm = (double) project.getProperty (ids::tempo, 120.0);
+        const auto text = (std::abs (bpm - std::round (bpm)) < 0.05 ? juce::String (juce::roundToInt (bpm)) : juce::String (bpm, 1)) + " BPM";
+        tempoArea = top.reduced (4.0f, 0.0f).removeFromRight (56.0f);
+        if (tempoDragging)
+        {
+            g.setColour (teal.withAlpha (0.35f));
+            g.fillRect (tempoArea.expanded (2.0f, 0.0f));
+            g.setColour (juce::Colour (0xffbfffff));
+        }
+        g.drawText (text, top.reduced (4.0f, 0.0f), juce::Justification::centredRight, false);
+    }
+    // the drums' PIECE page: the selected piece's models (click one to swap it in)
+    if (kind == "drums" && screenPage == 1 && page == 0)
+    {
+        const auto sel = juce::roundToInt (value ("sel"));
+        const auto current = juce::roundToInt (value ("@Alt"));
+        auto list = r.reduced (4.0f, 2.0f).withTrimmedBottom (12.0f);
+        g.setColour (juce::Colour (0xff55ffdd));
+        g.setFont (mono);
+        g.drawText (studio::StudioDrums::pieceName (sel).toUpperCase() + "  MODEL", list.removeFromTop (11.0f), juce::Justification::centredLeft, false);
+        const auto rowH = list.getHeight() / 5.0f;
+        for (int m = 0; m < 5; ++m)
+        {
+            const auto row = list.removeFromTop (rowH).reduced (0.0f, 0.5f);
+            if (m == current)
+            {
+                g.setColour (teal.withAlpha (0.35f));
+                g.fillRect (row);
+            }
+            g.setColour (m == current ? juce::Colours::white : juce::Colour (0xffbfffff));
+            g.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), juce::jmin (9.5f, rowH * 0.7f), m == current ? juce::Font::bold : juce::Font::plain));
+            g.drawText (juce::String (m + 1) + "  " + studio::StudioDrums::altName (sel, m), row.reduced (4.0f, 0.0f), juce::Justification::centredLeft, false);
+        }
+    }
+    else if (const auto browse = browserId(); browse.isNotEmpty() && page == 0)
+    {
+        // a browser page: the programs (keys), the models (bass), the amps (guitar), the kits (beat pad)
+        const auto names = choicesOf (browse);
+        const auto current = juce::roundToInt (value (browse));
+        auto list = r.reduced (4.0f, 2.0f).withTrimmedBottom (12.0f);
+        g.setColour (juce::Colour (0xff55ffdd));
+        g.setFont (mono);
+        g.drawText (paramName (browse).toUpperCase() + "   " + juce::String (current + 1) + "/" + juce::String (names.size()),
+                    list.removeFromTop (11.0f), juce::Justification::centredLeft, false);
+        const auto rows = 5;
+        const auto first = juce::jlimit (0, juce::jmax (0, names.size() - rows), current - 2);
+        const auto rowH = list.getHeight() / (float) rows;
+        for (int k = first; k < juce::jmin (names.size(), first + rows); ++k)
+        {
+            const auto row = list.removeFromTop (rowH).reduced (0.0f, 0.5f);
+            if (k == current)
+            {
+                g.setColour (teal.withAlpha (0.35f));
+                g.fillRect (row);
+            }
+            g.setColour (k == current ? juce::Colours::white : juce::Colour (0xffbfffff));
+            g.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), juce::jmin (9.5f, rowH * 0.7f), k == current ? juce::Font::bold : juce::Font::plain));
+            g.drawText (juce::String (k + 1).paddedLeft ('0', 2) + "  " + names[k], row.reduced (4.0f, 0.0f), juce::Justification::centredLeft, false);
+        }
+    }
+    else
     // the beat pad's step page: the bank's pads by the 16 steps
     if (kind == "beatpad" && screenPage == 2)
         if (auto bp = std::dynamic_pointer_cast<studio::BeatPad> (inst))
@@ -1372,10 +1579,102 @@ void StudioPanel::press (Control& c, const juce::MouseEvent& e)
         repaint();
         return;
     }
+    if (e.mods.isPopupMenu() && c.id.isNotEmpty())
+    {
+        showControlMenu (c);
+        return;
+    }
     dragging = &c;
     dragStart = normalised (c.id);
     dragFrom = e.position;
+    lastTouched = c.id;
     um.beginNewTransaction (studio::displayName (kind));
+    if (auto* writer = AutomationWriter::current())
+    {
+        nameLane (c.id);
+        writer->begin (track[ids::id].toString(), "studio:" + resolve (c.id), dragStart);
+    }
+}
+
+juce::String StudioPanel::resolve (const juce::String& id) const
+{
+    if (id.startsWith ("@")) return studio::StudioDrums::pieceId (juce::roundToInt (value ("sel"))) + id.substring (1);
+    if (id.startsWith ("#")) return "pad" + juce::String (juce::roundToInt (value ("sel"))) + id.substring (1);
+    return id;
+}
+
+juce::String StudioPanel::browserId() const
+{
+    if (kind == "keys" && screenPage == 1) return "program";
+    if (kind == "bass" && screenPage == 1) return "model";
+    if (kind == "guitar" && screenPage == 2) return "amp";
+    if (kind == "beatpad" && screenPage == 1) return "kit";
+    return {};
+}
+
+juce::StringArray StudioPanel::choicesOf (const juce::String& id) const
+{
+    if (id == "program")
+    {
+        juce::StringArray names;
+        for (const auto& prog : studio::StudioKeys::programs())
+            names.add (prog.name);
+        return names;
+    }
+    for (const auto& prm : studio::infoOf (kind).params)
+        if (prm.id == id)
+            return prm.choices;
+    return {};
+}
+
+juce::String StudioPanel::paramName (const juce::String& id) const
+{
+    const auto& info = studio::infoOf (kind);
+    const auto real = resolve (id);
+    for (const auto& prm : info.params)
+        if (prm.id == real)
+            return prm.name;
+    return real;
+}
+
+void StudioPanel::nameLane (const juce::String& id)
+{
+    // (the lane carries its knob's name, for the track's automation menu and the lane's header)
+    const auto param = "studio:" + resolve (id);
+    auto lane = model::laneFor (project, track[ids::id].toString(), param, true);
+    if (! lane.hasProperty (ids::name))
+        lane.setProperty (ids::name, studio::displayName (kind) + " " + paramName (id), nullptr);
+}
+
+void StudioPanel::showAutomationOf (const juce::String& id)
+{
+    if (id.isEmpty()) return;
+    nameLane (id);
+    track.setProperty (ids::automationParam, "studio:" + resolve (id), nullptr);
+    track.setProperty (ids::showAutomation, true, nullptr);
+}
+
+void StudioPanel::showControlMenu (Control& c)
+{
+    juce::PopupMenu menu;
+    const auto name = paramName (c.id);
+    menu.addSectionHeader (name);
+    menu.addItem ("Show Automation (" + name + ")", [this, id = c.id] { showAutomationOf (id); });
+    const auto param = "studio:" + resolve (c.id);
+    const auto lane = model::laneFor (project, track[ids::id].toString(), param, false);
+    menu.addItem ("Clear Automation", lane.isValid() && lane.getNumChildren() > 0, false, [this, param]
+    {
+        um.beginNewTransaction ("Clear automation");
+        model::clearAutomation (project, track[ids::id].toString(), param, &um);
+    });
+    menu.addSeparator();
+    menu.addItem ("Reset to Default", [this, id = c.id]
+    {
+        if (auto inst = host.instrument ? host.instrument() : nullptr)
+            if (const auto i = inst->indexOf (resolve (id)); i >= 0)
+                setValue (id, inst->params()[(size_t) i].def, true);
+    });
+    menu.showMenuAsync ({});
 }
 
 void StudioPanel::mouseDown (const juce::MouseEvent& e)
@@ -1383,6 +1682,13 @@ void StudioPanel::mouseDown (const juce::MouseEvent& e)
     const auto p = toFace (e.position);
     grabKeyboardFocus();
     // the screen's tabs
+    if (! tempoArea.isEmpty() && tempoArea.expanded (2.0f).contains (p) && ! e.mods.isPopupMenu())
+    {
+        tempoDragging = true;
+        tempoStart = (double) project.getProperty (ids::tempo, 120.0);
+        tempoMoved = false;
+        return;
+    }
     if (layout->screen.contains (p))
     {
         auto tabs = layout->screen.withTrimmedTop (layout->screen.getHeight() - 12.0f);
@@ -1392,6 +1698,33 @@ void StudioPanel::mouseDown (const juce::MouseEvent& e)
             if (layout->screenTabs[i] == "MIX") showPage (page == 1 ? 0 : 1);
             else { showPage (0); screenPage = i; }
             repaint();
+            return;
+        }
+        // a browser page: click a row to choose it (the wheel scrolls it)
+        if (const auto browse = browserId(); browse.isNotEmpty() && page == 0)
+        {
+            const auto names = choicesOf (browse);
+            auto list = layout->screen.reduced (1.0f).withTrimmedTop (12.0f).reduced (4.0f, 2.0f).withTrimmedBottom (12.0f);
+            list.removeFromTop (11.0f);
+            const auto current = juce::roundToInt (value (browse));
+            const auto first = juce::jlimit (0, juce::jmax (0, names.size() - 5), current - 2);
+            const auto k = first + (int) ((p.y - list.getY()) / (list.getHeight() / 5.0f));
+            if (juce::isPositiveAndBelow (k, names.size()) && list.contains (p))
+                setValue (browse, (float) k, true);
+            return;
+        }
+        // the drums' models
+        if (kind == "drums" && screenPage == 1 && page == 0)
+        {
+            auto list = layout->screen.reduced (1.0f).withTrimmedTop (12.0f).reduced (4.0f, 2.0f).withTrimmedBottom (12.0f);
+            list.removeFromTop (11.0f);
+            const auto m = (int) ((p.y - list.getY()) / (list.getHeight() / 5.0f));
+            if (juce::isPositiveAndBelow (m, 5))
+            {
+                setValue ("@Alt", (float) m, true);
+                const auto note = studio::StudioDrums::noteOfPiece (juce::roundToInt (value ("sel")));
+                if (host.playNote) { host.playNote (note, 100, true); host.playNote (note, 0, false); }
+            }
             return;
         }
         // the beat pad's steps
@@ -1470,6 +1803,18 @@ void StudioPanel::mouseDrag (const juce::MouseEvent& e)
         setValue (ids[dragMarker], juce::jlimit (0.0f, 1.0f, (p.x - wave.getX()) / wave.getWidth()), false);
         return;
     }
+    if (tempoDragging)
+    {
+        const auto dy = -e.getDistanceFromDragStartY();
+        if (! tempoMoved && std::abs (dy) < 3) return;
+        if (! tempoMoved) { tempoMoved = true; um.beginNewTransaction ("Tempo"); }
+        const auto bpm = e.mods.isShiftDown() ? std::round ((tempoStart + dy * 0.1) * 10.0) / 10.0
+                                              : std::round (tempoStart) + std::round (dy / 3.0);
+        if (std::abs (bpm - (double) project.getProperty (ids::tempo, 120.0)) > 1.0e-6)
+            model::setTempo (project, juce::jlimit (20.0, 400.0, bpm), &um);
+        repaint();
+        return;
+    }
     if (dragging == nullptr)
     {
         // a held key or drum: dragging onto another plays it (as a glissando)
@@ -1483,7 +1828,10 @@ void StudioPanel::mouseDrag (const juce::MouseEvent& e)
     }
     const auto fine = e.mods.isShiftDown() ? 0.2f : 1.0f;
     const auto travel = dragging->type == Control::fader ? dragging->area.getHeight() * scale : 160.0f;
-    setNormalised (dragging->id, dragStart + (float) (dragFrom.y - e.position.y) / travel * fine, false);
+    const auto n = juce::jlimit (0.0f, 1.0f, dragStart + (float) (dragFrom.y - e.position.y) / travel * fine);
+    setNormalised (dragging->id, n, false);
+    if (auto* writer = AutomationWriter::current())
+        writer->move (track[ids::id].toString(), "studio:" + resolve (dragging->id), n);
 }
 
 void StudioPanel::mouseUp (const juce::MouseEvent&)
@@ -1491,8 +1839,30 @@ void StudioPanel::mouseUp (const juce::MouseEvent&)
     if (heldNote >= 0 && host.playNote)
         host.playNote (heldNote, 0, false);
     heldNote = -1;
+    if (dragging != nullptr)
+        if (auto* writer = AutomationWriter::current())
+            writer->end (track[ids::id].toString(), "studio:" + resolve (dragging->id));
     dragging = nullptr;
     dragMarker = -1;
+    tempoDragging = false;
+    repaint();
+}
+
+void StudioPanel::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
+{
+    // over the screen's browser: through its list; over a knob: turns it
+    const auto p = toFace (e.position);
+    const auto delta = wheel.deltaY != 0.0f ? wheel.deltaY : wheel.deltaX;
+    if (std::abs (delta) < 1.0e-4f) return;
+    if (const auto browse = browserId(); browse.isNotEmpty() && page == 0 && layout->screen.contains (p))
+    {
+        const auto count = choicesOf (browse).size();
+        if (count > 0)
+            setValue (browse, (float) juce::jlimit (0, count - 1, juce::roundToInt (value (browse)) + (delta < 0 ? 1 : -1)), true);
+        return;
+    }
+    if (auto* c = controlAt (p); c != nullptr && (c->type == Control::knob || c->type == Control::encoder || c->type == Control::fader) && c->id.isNotEmpty())
+        setNormalised (c->id, normalised (c->id) + delta * 0.08f, true);
 }
 
 void StudioPanel::mouseDoubleClick (const juce::MouseEvent& e)
@@ -1577,6 +1947,20 @@ void StudioPanel::timerCallback()
     // the parts appear once the instrument has loaded
     if (strips.isEmpty() && host.instrument && host.instrument() != nullptr)
         rebuildMix();
+    // the knobs that have automation (their light; they show what it plays)
+    if (++ticks % 8 == 0)
+    {
+        juce::StringArray now;
+        const auto owner = track[ids::id].toString();
+        const bool reading = track.getProperty (ids::automationMode, "read").toString() != "off";
+        for (const auto& lane : model::mixerOf (project))
+            if (reading && lane.hasType (ids::LANE) && lane[ids::owner].toString() == owner && lane.getNumChildren() > 0
+                && lane[ids::param].toString().startsWith ("studio:"))
+                for (auto& c : controls)
+                    if (c->id.isNotEmpty() && "studio:" + resolve (c->id) == lane[ids::param].toString())
+                        now.addIfNotAlreadyThere (c->id);
+        automatedIds = now;
+    }
     repaint();
 }
 
@@ -1584,6 +1968,298 @@ void StudioPanel::valueTreePropertyChanged (juce::ValueTree& tree, const juce::I
 {
     if (tree == state || tree.hasType (ids::INSERT) || tree.getParent().hasType (ids::INSERT))
         for (auto* s : strips) s->refresh();
+}
+
+//==============================================================================
+namespace
+{
+    juce::String presetOf (const juce::ValueTree& track)
+    {
+        return studiostate::of (track)["presetName"].toString();
+    }
+}
+
+juce::File StudioWindow::presetFolder (const juce::String& kind)
+{
+    return presets::root().getChildFile (juce::File::createLegalFileName ("Studio " + studio::displayName (kind)));
+}
+
+juce::Rectangle<int> StudioWindow::naturalSize (const juce::String& kind)
+{
+    const auto n = StudioPanel::naturalSize (kind);
+    return n.withHeight (n.getHeight() + headerHeight);
+}
+
+void StudioWindow::applyDefault (juce::ValueTree track, juce::UndoManager* um)
+{
+    const auto file = presetFolder (studiostate::kindOf (track)).getChildFile ("__default__.xml");
+    if (! file.existsAsFile())
+        return;
+    if (auto xml = juce::parseXML (file))
+    {
+        auto tree = studiostate::getOrCreate (track, um);
+        const auto loaded = juce::ValueTree::fromXml (*xml);
+        for (int i = 0; i < loaded.getNumProperties(); ++i)
+            tree.setProperty (loaded.getPropertyName (i), loaded[loaded.getPropertyName (i)], um);
+        tree.setProperty ("presetName", "Default", um);
+    }
+}
+
+StudioWindow::StudioWindow (juce::ValueTree p, juce::ValueTree t, juce::UndoManager& u, StudioPanel::Host host)
+    : project (p), track (t), um (u), kind (studiostate::kindOf (t)), panel (p, t, u, std::move (host))
+{
+    addAndMakeVisible (panel);
+    for (auto* b : { &pin, &bypass, &previous, &preset, &next, &copy, &paste, &automation })
+    {
+        b->setWantsKeyboardFocus (false);
+        addAndMakeVisible (b);
+    }
+    pin.setClickingTogglesState (true);
+    pin.setColour (juce::TextButton::buttonOnColourId, teal.withAlpha (0.8f));
+    pin.setTooltip ("Pin: the window stays above the main window while you work (Settings choose how new ones open)");
+    pin.onClick = [this]
+    {
+        if (auto* window = findParentComponentOfClass<EditorWindow>())
+            window->setPinned (pin.getToggleState());
+    };
+    bypass.setClickingTogglesState (true);
+    bypass.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffe9b949));
+    bypass.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+    bypass.setTooltip ("Bypass: the instrument out (silent)");
+    bypass.onClick = [this]
+    {
+        um.beginNewTransaction (bypass.getToggleState() ? "Bypass instrument" : "Activate instrument");
+        track.setProperty (ids::instrumentBypass, bypass.getToggleState(), &um);
+    };
+    preset.setTooltip ("Presets: the factory ones, yours, Save, Set as Default");
+    preset.onClick = [this] { showPresetMenu(); };
+    previous.setTooltip ("The previous preset");
+    next.setTooltip ("The next preset");
+    previous.onClick = [this] { step (-1); };
+    next.onClick = [this] { step (1); };
+    copy.setTooltip ("Copy the whole setting (paste it into another " + studio::displayName (kind) + ")");
+    copy.onClick = [this]
+    {
+        if (auto xml = studiostate::of (track).createXml())
+            juce::SystemClipboard::copyTextToClipboard (xml->toString());
+    };
+    paste.setTooltip ("Paste a copied setting");
+    paste.onClick = [this]
+    {
+        if (auto xml = juce::parseXML (juce::SystemClipboard::getTextFromClipboard()); xml != nullptr && xml->hasTagName ("STUDIO"))
+            loadXml (*xml, "Pasted");
+    };
+    automation.setTooltip ("Automation: the mode, and the lane of the knob you last turned (right-click a knob for its own)");
+    automation.onClick = [this] { showAutomationMenu(); };
+    track.addListener (this);
+    setSize (naturalSize (kind).getWidth(), naturalSize (kind).getHeight());
+    refresh();
+}
+
+StudioWindow::~StudioWindow()
+{
+    track.removeListener (this);
+}
+
+void StudioWindow::refresh()
+{
+    bypass.setToggleState ((bool) track[ids::instrumentBypass], juce::dontSendNotification);
+    if (auto* window = findParentComponentOfClass<EditorWindow>())
+        pin.setToggleState (window->isPinned(), juce::dontSendNotification);
+    const auto name = presetOf (track);
+    preset.setButtonText ((name.isNotEmpty() ? name : juce::String ("Preset")) + juce::String::fromUTF8 (" \xe2\x96\xbe"));
+    const auto light = theme::glassLight();
+    for (auto* b : { &pin, &bypass, &previous, &preset, &next, &copy, &paste, &automation })
+    {
+        b->setColour (juce::TextButton::buttonColourId, light ? juce::Colours::white.withAlpha (0.9f) : juce::Colours::white.withAlpha (0.08f));
+        b->setColour (juce::TextButton::textColourOffId, light ? juce::Colours::black : ink);
+    }
+    const auto mode = track.getProperty (ids::automationMode, "read").toString();
+    automation.setButtonText ("Automation: " + mode.substring (0, 1).toUpperCase() + mode.substring (1) + juce::String::fromUTF8 (" \xe2\x96\xbe"));
+}
+
+void StudioWindow::paint (juce::Graphics& g)
+{
+    const auto header = getLocalBounds().removeFromTop (headerHeight).toFloat();
+    if (theme::glassLight())
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xfff4f6f9), 0.0f, 0.0f, juce::Colour (0xffdde2e8), 0.0f, header.getBottom(), false));
+    else
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff23272e), 0.0f, 0.0f, juce::Colour (0xff15181d), 0.0f, header.getBottom(), false));
+    g.fillRect (header);
+    g.setColour (theme::glassLight() ? juce::Colours::black.withAlpha (0.12f) : juce::Colours::white.withAlpha (0.08f));
+    g.drawHorizontalLine ((int) header.getBottom() - 1, 0.0f, header.getRight());
+    g.setColour (theme::glassLight() ? juce::Colour (0xff20242a) : ink);
+    g.setFont (font (13.0f));
+    g.drawText (studio::displayName (kind), header.toNearestInt().reduced (12, 0), juce::Justification::centredRight, false);
+}
+
+void StudioWindow::resized()
+{
+    auto header = getLocalBounds().removeFromTop (headerHeight).reduced (8, 5);
+    const auto place = [&header] (juce::Component& c, int w) { c.setBounds (header.removeFromLeft (w)); header.removeFromLeft (6); };
+    place (pin, 44);
+    place (bypass, 66);
+    previous.setBounds (header.removeFromLeft (24)); header.removeFromLeft (2);
+    preset.setBounds (header.removeFromLeft (190)); header.removeFromLeft (2);
+    place (next, 24);
+    place (copy, 52);
+    place (paste, 52);
+    place (automation, 150);
+    panel.setBounds (getLocalBounds().withTrimmedTop (headerHeight));
+}
+
+juce::StringArray StudioWindow::factoryNames() const
+{
+    // the kits (drums, beat pad), the programs (keys), the models (bass, guitar), the sampler's playback
+    const auto& info = studio::infoOf (kind);
+    for (const auto* id : { "kit", "program", "model" })
+        for (const auto& prm : info.params)
+            if (prm.id == id)
+                return prm.choices;
+    return {};
+}
+
+void StudioWindow::loadFactory (int index)
+{
+    um.beginNewTransaction (studio::displayName (kind) + ": preset");
+    auto tree = studiostate::getOrCreate (track, &um);
+    // (the factory setting: everything back to its default, but the files kept)
+    for (int i = tree.getNumProperties(); --i >= 0;)
+        if (const auto name = tree.getPropertyName (i); ! studiostate::isFileProperty (name))
+            tree.removeProperty (name, &um);
+    const auto names = factoryNames();
+    if (kind == "drums")
+        for (const auto& [id, v] : studio::StudioDrums::kitSettings (index))
+            tree.setProperty (id, v, &um);
+    else
+    {
+        const auto& info = studio::infoOf (kind);
+        for (const auto* id : { "kit", "program", "model" })
+            for (const auto& prm : info.params)
+                if (prm.id == id && ! tree.hasProperty (id) && prm.choices.size() == names.size())
+                    tree.setProperty (id, (float) index, &um);
+    }
+    tree.setProperty ("presetName", names[index], &um);
+}
+
+juce::StringArray StudioWindow::presetNames() const
+{
+    juce::StringArray names;
+    for (const auto& f : presetFolder (kind).findChildFiles (juce::File::findFiles, false, "*.xml"))
+        if (f.getFileNameWithoutExtension() != "__default__")
+            names.add (f.getFileNameWithoutExtension());
+    names.sortNatural();
+    return names;
+}
+
+void StudioWindow::loadXml (const juce::XmlElement& xml, const juce::String& name)
+{
+    um.beginNewTransaction (studio::displayName (kind) + ": " + name);
+    auto tree = studiostate::getOrCreate (track, &um);
+    const auto loaded = juce::ValueTree::fromXml (xml);
+    for (int i = tree.getNumProperties(); --i >= 0;)
+        if (const auto p = tree.getPropertyName (i); ! loaded.hasProperty (p))
+            tree.removeProperty (p, &um);
+    for (int i = 0; i < loaded.getNumProperties(); ++i)
+        tree.setProperty (loaded.getPropertyName (i), loaded[loaded.getPropertyName (i)], &um);
+    tree.setProperty ("presetName", name, &um);
+}
+
+void StudioWindow::loadPreset (const juce::String& name)
+{
+    const auto file = presetFolder (kind).getChildFile (name == "Default" ? juce::String ("__default__.xml") : juce::File::createLegalFileName (name) + ".xml");
+    if (auto xml = juce::parseXML (file))
+        loadXml (*xml, name);
+}
+
+void StudioWindow::savePreset (const juce::String& name)
+{
+    auto folder = presetFolder (kind);
+    folder.createDirectory();
+    auto copyOf = studiostate::of (track).createCopy();
+    copyOf.removeProperty ("presetName", nullptr);
+    if (auto xml = copyOf.createXml())
+        xml->writeTo (folder.getChildFile (name == "Default" ? juce::String ("__default__.xml") : juce::File::createLegalFileName (name) + ".xml"));
+    studiostate::getOrCreate (track, nullptr).setProperty ("presetName", name, nullptr);
+}
+
+void StudioWindow::step (int direction)
+{
+    // through the factory presets, then yours
+    const auto factory = factoryNames();
+    auto all = factory;
+    all.addArray (presetNames());
+    if (all.isEmpty()) return;
+    const auto at = all.indexOf (presetOf (track));
+    const auto to = at < 0 ? (direction > 0 ? 0 : all.size() - 1) : (at + direction + all.size()) % all.size();
+    if (to < factory.size()) loadFactory (to);
+    else loadPreset (all[to]);
+}
+
+void StudioWindow::showPresetMenu()
+{
+    juce::PopupMenu menu;
+    const auto current = presetOf (track);
+    menu.addItem ("Save Preset...", [this]
+    {
+        auto* box = new juce::AlertWindow ("Save Preset", "A name for this " + studio::displayName (kind) + " setting:", juce::MessageBoxIconType::NoIcon);
+        box->addTextEditor ("name", presetOf (track) == "Default" ? juce::String() : presetOf (track));
+        box->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        box->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        box->enterModalState (true, juce::ModalCallbackFunction::create ([this, box] (int result)
+        {
+            const auto name = box->getTextEditorContents ("name").trim();
+            if (result == 1 && name.isNotEmpty())
+                savePreset (name);
+        }), true);
+    });
+    menu.addItem ("Set as Default for " + studio::displayName (kind), [this] { savePreset ("Default"); });
+    const auto hasDefault = presetFolder (kind).getChildFile ("__default__.xml").existsAsFile();
+    menu.addItem ("Load Default", hasDefault, false, [this] { loadPreset ("Default"); });
+    menu.addItem ("Clear Default (start from the factory settings)", hasDefault, false, [this] { presetFolder (kind).getChildFile ("__default__.xml").deleteFile(); });
+    menu.addSeparator();
+    const auto factory = factoryNames();
+    juce::PopupMenu factoryMenu;
+    for (int i = 0; i < factory.size(); ++i)
+        factoryMenu.addItem (factory[i], true, factory[i] == current, [this, i] { loadFactory (i); });
+    if (factory.isEmpty())
+        factoryMenu.addItem ("Init", [this] { loadFactory (0); });
+    menu.addSubMenu ("Factory", factoryMenu);
+    const auto names = presetNames();
+    if (names.isEmpty())
+        menu.addItem ("(no presets of yours yet)", false, false, [] {});
+    for (const auto& n : names)
+        menu.addItem (n, true, n == current, [this, n] { loadPreset (n); });
+    if (! names.isEmpty())
+    {
+        juce::PopupMenu remove;
+        for (const auto& n : names)
+            remove.addItem (n, [this, n] { presetFolder (kind).getChildFile (juce::File::createLegalFileName (n) + ".xml").deleteFile(); });
+        menu.addSeparator();
+        menu.addSubMenu ("Delete Preset", remove);
+    }
+    menu.addItem ("Show Presets Folder", [this]
+    {
+        auto folder = presetFolder (kind);
+        folder.createDirectory();
+        folder.revealToUser();
+    });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&preset));
+}
+
+void StudioWindow::showAutomationMenu()
+{
+    juce::PopupMenu menu;
+    const auto mode = track.getProperty (ids::automationMode, "read").toString();
+    for (auto [m, name] : { std::pair { "off", "Off" }, std::pair { "read", "Read" }, std::pair { "touch", "Touch" },
+                            std::pair { "latch", "Latch" }, std::pair { "write", "Write" } })
+        menu.addItem (name, true, mode == m, [this, value = juce::String (m)] { track.setProperty (ids::automationMode, value, nullptr); });
+    menu.addSeparator();
+    const auto last = panel.lastTouchedId();
+    menu.addItem (last.isNotEmpty() ? "Show Automation of the last knob turned" : juce::String ("Show Automation (turn a knob first)"),
+                  last.isNotEmpty(), false, [this, last] { panel.showAutomationOf (last); });
+    menu.addItem ("Hide Automation", (bool) track[ids::showAutomation], false, [this] { track.setProperty (ids::showAutomation, false, nullptr); });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&automation));
 }
 
 } // namespace riff

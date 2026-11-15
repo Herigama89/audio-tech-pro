@@ -267,7 +267,8 @@ MainComponent::MainComponent (bool openAudioDevice)
     tempoLabel.setJustificationType (juce::Justification::centred);
     tempoLabel.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 24.0f, juce::Font::plain));
     tempoLabel.setColour (juce::Label::textColourId, theme::lcdText);
-    tempoLabel.setTooltip ("Double-click to change the tempo; right-click to detect it from a region, or tap it");
+    tempoLabel.setTooltip ("Drag up or down to change the tempo (Shift: in tenths); double-click to type it; right-click to detect it from a region, or tap it");
+    tempoLabel.setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
     tempoLabel.addMouseListener (this, false);   // (its right-click: the tempo menu)
     tempoLabel.onTextChange = [this]
     {
@@ -586,6 +587,7 @@ MainComponent::MainComponent (bool openAudioDevice)
     if (! commands::presetNames().contains (keyPreset))
         keyPreset = commands::presetNames()[0];
     stopReturnsToStart = appProperties.getUserSettings()->getBoolValue ("stopReturnsToStart", commands::stopReturnsToStart (keyPreset));
+    EditorWindow::pinByDefault = appProperties.getUserSettings()->getBoolValue ("pinPluginWindows", true);
     returnButton.setToggleState (stopReturnsToStart, juce::dontSendNotification);
 
     commandManager.registerAllCommandsForTarget (this);
@@ -2008,6 +2010,39 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
         showSignatureMenu();
     else if (e.eventComponent == &tempoLabel && e.mods.isPopupMenu())
         showTempoMenu();
+    else if (e.eventComponent == &tempoLabel)
+    {
+        tempoDragStart = (double) project.getProperty (ids::tempo, 120.0);
+        tempoDragging = false;
+    }
+}
+
+void MainComponent::mouseDrag (const juce::MouseEvent& e)
+{
+    // the LCD's tempo: drag up or down to change it (as in Logic); Shift for tenths
+    if (e.eventComponent != &tempoLabel || e.mods.isPopupMenu() || tempoLabel.isBeingEdited())
+        return;
+    const auto dy = -e.getDistanceFromDragStartY();
+    if (! tempoDragging && std::abs (dy) < 3)
+        return;
+    if (! tempoDragging)
+    {
+        tempoDragging = true;
+        undoManager.beginNewTransaction ("Tempo");
+    }
+    const auto bpm = e.mods.isShiftDown() ? std::round ((tempoDragStart + dy * 0.1) * 10.0) / 10.0
+                                          : std::round (tempoDragStart) + std::round (dy / 3.0);
+    if (std::abs (bpm - (double) project.getProperty (ids::tempo, 120.0)) > 1.0e-6)
+    {
+        model::setTempo (project, juce::jlimit (20.0, 400.0, bpm), &undoManager);
+        refreshProjectControls();
+    }
+}
+
+void MainComponent::mouseUp (const juce::MouseEvent& e)
+{
+    if (e.eventComponent == &tempoLabel)
+        tempoDragging = false;
 }
 
 void MainComponent::showSignatureMenu()
@@ -2067,6 +2102,7 @@ juce::ValueTree MainComponent::addStudioTrack (const juce::String& kind, const j
     auto track = model::addTrack (project, name.isNotEmpty() ? name : studio::displayName (kind), &undoManager, -1, model::instrumentKind);
     track.setProperty (ids::instrument, studiostate::prefix + kind, &undoManager);
     studiostate::getOrCreate (track, &undoManager);
+    StudioWindow::applyDefault (track, &undoManager);   // (Set as Default: every new one starts so)
     timeline.selectedTrackId = track[ids::id].toString();
     timeline.changed();
     juce::Timer::callAfterDelay (250, [safe = juce::Component::SafePointer<MainComponent> (this), track]
@@ -3080,7 +3116,12 @@ void MainComponent::showOutputsMenu (juce::ValueTree track, juce::Component& tar
     {
         undoManager.beginNewTransaction ("Multi-output");
         for (const auto pair : pairs)
+        {
             model::addMultiOutput (project, track, pair, track[ids::name].toString() + " " + shortName (pair), &undoManager);
+            // a studio instrument's part goes out to its new channel straight away (as Logic's multi-output kits)
+            if (studiostate::isStudio (track))
+                studiostate::getOrCreate (track, &undoManager).setProperty ("p" + juce::String (pair - 1) + "out", 1.0f, &undoManager);
+        }
     };
 
     juce::PopupMenu menu;
@@ -3254,12 +3295,13 @@ void MainComponent::openInstrumentWindow (const juce::ValueTree& track)
             for (int i = 0; i < slices.size(); ++i)
                 tree.setProperty (studiostate::fileProperty (i), slices[i].getFullPathName(), &undoManager);
         };
-        auto* panel = new StudioPanel (project, track, undoManager, host);
+        auto* panel = new StudioWindow (project, track, undoManager, host);
         auto window = std::make_unique<EditorWindow> (title + " - " + studio::displayName (studiostate::kindOf (track)), panel, true, closer);
-        const auto natural = StudioPanel::naturalSize (studiostate::kindOf (track));
+        const auto natural = StudioWindow::naturalSize (studiostate::kindOf (track));
         window->setResizeLimits (natural.getWidth() / 2, natural.getHeight() / 2, natural.getWidth() * 2, natural.getHeight() * 2);
         if (auto* constrainer = window->getConstrainer())
             constrainer->setFixedAspectRatio ((double) natural.getWidth() / (double) natural.getHeight());
+        window->setPinned (EditorWindow::pinByDefault);
         editorWindows[id] = std::move (window);
         return;
     }
@@ -3276,6 +3318,7 @@ void MainComponent::openInstrumentWindow (const juce::ValueTree& track)
         // The plugin's face under a header (Editor / Controls, and its parameters for MIDI Learn).
         auto* host = new PluginHostPanel (*plugin, plugin->createEditorAndMakeActive(), { project, id, {}, &undoManager });
         editorWindows[id] = std::make_unique<EditorWindow> (title + ": " + plugin->getName(), host, host->isResizableHost(), closer);
+        editorWindows[id]->setPinned (EditorWindow::pinByDefault);
         return;
     }
 
@@ -3283,6 +3326,7 @@ void MainComponent::openInstrumentWindow (const juce::ValueTree& track)
     {
         auto* panel = new NemixPanel (track, undoManager, [this, id] { return rack.getNemix (id); });
         editorWindows[id] = std::make_unique<EditorWindow> (title + ": Nemix", panel, false, closer);
+        editorWindows[id]->setPinned (EditorWindow::pinByDefault);
         return;
     }
 

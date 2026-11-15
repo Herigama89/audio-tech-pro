@@ -252,7 +252,8 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         t.pan     = (float) juce::jlimit (-1.0, 1.0, (double) track.getProperty (ids::pan, 0.0));
         t.audible = ! (bool) track[ids::mute] && ! model::vcaMutes (project, track) && (! anySolo || soloed (track));
         t.vcaGain = (float) model::vcaGainOf (project, track);
-        t.width = (float) juce::jlimit (0.0, 2.0, (double) track.getProperty (ids::panWidth, 1.0));
+        t.width = (bool) track.getProperty ("widthOn", true) ? (float) juce::jlimit (0.0, 2.0, (double) track.getProperty (ids::panWidth, 1.0)) : 1.0f;
+        t.transient = (bool) track.getProperty ("transOn", true) ? (float) juce::jlimit (-1.0, 1.0, (double) track.getProperty ("trans", 0.0) / 100.0) : 0.0f;
         if (! model::isStereoChannel (track))
             t.width = 0.0f;   // a mono channel: both sides summed, then panned
         // Into a bus: any track, and buses too (a summing stack into a bus), unless that would loop back.
@@ -422,6 +423,8 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         {
             if (rack != nullptr)
                 t.instrument = rack->instrumentFor (track, sampleRate, AudioEngine::maxChunkSize);
+            if ((bool) track[ids::instrumentBypass])
+                t.instrument = nullptr;   // (bypassed: silent, its notes go nowhere)
 
             // a studio instrument's parts: their inserts (our effects or plug-ins), the returns' and the main's
             if (auto* s = dynamic_cast<studio::StudioInstrument*> (t.instrument.get()))
@@ -432,7 +435,30 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
                 chains->fxA = buildChain (studio::chainOwner (trackId, "fxA"), sampleRate, insertIds, effectsById);
                 chains->fxB = buildChain (studio::chainOwner (trackId, "fxB"), sampleRate, insertIds, effectsById);
                 chains->main = buildChain (studio::chainOwner (trackId, "main"), sampleRate, insertIds, effectsById);
+                chains->routed.assign ((size_t) s->numParts(), false);
+                for (const auto& aux : model::multiOutputsOf (project, track))
+                    if (const auto part = (int) aux.getProperty (ids::multiPair, 1) - 1; juce::isPositiveAndBelow (part, s->numParts()))
+                        chains->routed[(size_t) part] = true;
                 t.partChains = chains;
+
+                // its knobs' automation: lanes "studio:<param id>"
+                if (track.getProperty (ids::automationMode, "read").toString() != "off")
+                    for (const auto& lane : model::mixerOf (project))
+                    {
+                        if (! lane.hasType (ids::LANE) || lane[ids::owner].toString() != trackId || lane.getNumChildren() == 0)
+                            continue;
+                        const auto param = lane[ids::param].toString();
+                        if (! param.startsWith ("studio:") || suppressedLanes.count (trackId + "|" + param) > 0)
+                            continue;
+                        if (const auto index = s->indexOf (param.fromFirstOccurrenceOf ("studio:", false, false)); index >= 0)
+                        {
+                            PlaybackGraph::ParamAutomation a;
+                            a.instrument = s;
+                            a.paramIndex = index;
+                            a.curve = curveFor (trackId, param, sampleRate);
+                            t.paramAutomation.push_back (std::move (a));
+                        }
+                    }
             }
 
             if (t.instrument != nullptr)

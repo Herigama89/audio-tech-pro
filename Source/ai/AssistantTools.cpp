@@ -1,4 +1,5 @@
 #include "AssistantTools.h"
+#include "../engine/studio/Studio.h"
 #include "../model/Project.h"
 #include "../model/Generator.h"
 #include "../engine/BuiltInEffects.h"
@@ -271,6 +272,10 @@ juce::String AssistantTools::instrumentName (const juce::ValueTree& track) const
         return {};
     if (track[ids::instrument].toString() == "plugin")
         return pluginName (track[ids::pluginDescription].toString());
+    if (track[ids::instrument].toString().startsWith ("studio:"))
+        return studio::displayName (track[ids::instrument].toString().fromFirstOccurrenceOf ("studio:", false, false));
+    if (track[ids::instrument].toString() == "nemix")
+        return "Nemix";
     return app::synthName;
 }
 

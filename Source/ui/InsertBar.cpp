@@ -17,10 +17,9 @@ InsertBar::InsertBar (juce::ValueTree i, juce::ValueTree p, juce::UndoManager& u
     }
     pinButton.setClickingTogglesState (true);
     pinButton.setColour (juce::TextButton::buttonOnColourId, theme::accent);
-    pinButton.setTooltip ("Pin: the window stays above the main window and open while you work (and the next plugin window opens pinned too)");
+    pinButton.setTooltip ("Pin: the window stays above the main window and open while you work (Settings choose how new ones open)");
     pinButton.onClick = [this]
     {
-        EditorWindow::pinByDefault = pinButton.getToggleState();
         if (auto* window = findParentComponentOfClass<EditorWindow>())
             window->setPinned (pinButton.getToggleState());
     };

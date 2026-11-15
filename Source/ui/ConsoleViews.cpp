@@ -829,7 +829,8 @@ namespace
 
     // The sections' cap colours
     const juce::Colour capRed { 0xffc8312a }, capWhite { 0xffe8e8e6 }, capGate { 0xff2f6f2c }, capGrey { 0xff8d8f93 },
-                       capHmf { 0xff3e9b3c }, capBlue { 0xff2c5fbf }, capBrown { 0xff4a3020 }, capGold { 0xffd9a51f };
+                       capHmf { 0xff3e9b3c }, capBlue { 0xff2c5fbf }, capBrown { 0xff4a3020 }, capGold { 0xffd9a51f },
+                       capTeal { 0xff17b3ad }, capPurple { 0xff8a5bd6 };
     const juce::Colour keyAmber { 0xffffa21f }, keyGreen { 0xff3fbf3a }, keyRed { 0xffe5463b }, keyYellow { 0xffffd60a }, keyBlue { 0xff3a6df0 };
 
     juce::String hzText (double hz)
@@ -1864,7 +1865,21 @@ void AnalogConsole::buildStrip (Strip& s)
     if (section ("PAN"))
     {
         y += 4;
-        knob (capGrey, "Pan", ids::pan, 0.0, -1.0, 1.0, 0.0, juce::Rectangle<int> (w / 2 - boxW / 2, y, boxW, boxH),
+        // the shape of the channel either side of its pan: Trans (more snap, or softer fronts) and Width
+        {
+            const int sideW = 38;
+            auto& trans = knob (capTeal, "Trans", "trans", 0.0, -100.0, 100.0, 0.0, juce::Rectangle<int> (1, y, sideW, boxH),
+                                { { -100.0, "-" }, { 0.0, "0" }, { 100.0, "+" } },
+                                [] (double v) { const auto n = juce::roundToInt (v); return (n > 0 ? "+" : "") + juce::String (n); });
+            trans.knobSize = 20;
+            trans.setTooltip ("Transient shaper: up for more snap on every hit, down for softer fronts and more sustain");
+            auto& width = knob (capPurple, "Width", ids::panWidth, 1.0, 0.0, 2.0, 1.0, juce::Rectangle<int> (w - 1 - sideW, y, sideW, boxH),
+                                { { 0.0, "M" }, { 1.0, "1" }, { 2.0, "2" } },
+                                [] (double v) { return v < 0.005 ? juce::String ("Mono") : juce::String (juce::roundToInt (v * 100.0)) + "%"; });
+            width.knobSize = 20;
+            width.setTooltip ("Stereo width: 0% mono, 100% as it is, up to 200% wider");
+        }
+        knob (capGrey, "Pan", ids::pan, 0.0, -1.0, 1.0, 0.0, juce::Rectangle<int> (w / 2 - 20, y, 40, boxH),
               { { -1.0, "L" }, { 0.0, "C" }, { 1.0, "R" } },
               [] (double v)
               {

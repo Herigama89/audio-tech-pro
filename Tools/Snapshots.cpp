@@ -1020,12 +1020,13 @@ public:
             const auto id = track[ids::id].toString();
             StudioPanel::Host host;
             host.instrument = [&main, id] { return main.rack.getStudio (id); };
-            StudioPanel panel (main.project, track, main.undoManager, host);
+            StudioWindow window (main.project, track, main.undoManager, host);
+            auto& panel = window.getPanel();
             pump (main, 300);
-            save (panel, "studio-" + kind + ".png");
+            save (window, "studio-" + kind + ".png");
             panel.showPage (1);
             pump (main, 200);
-            save (panel, "studio-" + kind + "-mix.png");
+            save (window, "studio-" + kind + "-mix.png");
             if (kind == "beatpad")
             {
                 panel.showPage (0);

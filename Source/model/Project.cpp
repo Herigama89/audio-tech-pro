@@ -2543,6 +2543,12 @@ ParamRange rangeOf (const juce::ValueTree& project, const juce::String& param)
             if (lane.hasType (ids::LANE) && lane[ids::param].toString() == param && lane.hasProperty (ids::name))
                 return { 0.0, 1.0, 0.5, false, lane[ids::name].toString() };
 
+    // A studio instrument's knob ("studio:<param id>"): 0..1, named when its lane was made.
+    if (param.startsWith ("studio:"))
+        for (const auto& lane : project.getChildWithName (ids::MIXER))
+            if (lane.hasType (ids::LANE) && lane[ids::param].toString() == param && lane.hasProperty (ids::name))
+                return { 0.0, 1.0, 0.5, false, lane[ids::name].toString() };
+
     return { 0.0, 1.0, 0.5, false, param };
 }
 

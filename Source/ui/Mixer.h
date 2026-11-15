@@ -110,7 +110,7 @@ public:
     static constexpr int automationRow = 18;
     static constexpr int ioRow = 17;   // the Input slot (above the inserts) and the Output slot (below the sends)
     static constexpr int vuBand = 38;   // Themes > Strip VU meters: the amber VU at the top of each strip
-    static constexpr int tapeRow = 44;  // under the Output slot: the analog preamp (PRE key, its Gain), then the tape machine (TAPE key, its Drive)
+    static constexpr int tapeRow = 88;  // under the Output slot: the analog preamp (PRE key, its Gain), then the tape machine (TAPE key, its Drive)
     static constexpr int preampRowHeight = 18;   // the interface's preamp (48V, gain), under the Input slot, when it's connected
     static inline bool preampRows = false;
     static int preampRow() { return preampRows ? preampRowHeight : 0; }
@@ -204,6 +204,10 @@ private:
     void showTapeMenu();
     void updateTape();
     // The analog preamp (a class-A, transformer console preamp): its Gain turns the channel up and drives it
+    // The channel's shape: TRANS (the transient shaper: more snap, or softer fronts) and WIDTH (its stereo width)
+    juce::TextButton transKey { "TRANS" }, widthKey { "WIDTH" };
+    strip::DisplaySlider transAmount, widthAmount;
+    bool hasShape() const { return ! isMaster() && ! isVca(); }
     juce::TextButton preKey { "PRE" };
     strip::DisplaySlider preGain;
     bool hasAnalogPre() const { return ! isMaster() && ! isVca(); }

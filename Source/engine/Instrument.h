@@ -37,6 +37,9 @@ public:
     /** The studio instruments' parts' insert chains for the coming block (audio thread; a studio::PartChains, or null). */
     virtual void setPartChains (const void* /*chains*/) noexcept {}
 
+    /** Automation of one of its own parameters (audio thread): `normalised` 0..1 across the parameter's range. */
+    virtual void setAutomatedParameter (int /*index*/, float /*normalised*/) noexcept {}
+
     /** How many samples late this instrument's output is (for delay compensation). */
     virtual int getLatencySamples() const { return 0; }
 

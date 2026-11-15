@@ -2229,6 +2229,45 @@ void ArrangeCanvas::mouseUp (const juce::MouseEvent& e)
     if (dragMode == DragMode::move && wasClick && dragRegion.isValid() && ! e.mods.isShiftDown())
         timeline.selectOnlyRegion (dragRegion[ids::id].toString());
 
+    // An audio region dropped on a Sampler track: the Sampler plays it (that stretch of its file), the region stays
+    // where it was (as Cubase's Sampler Track takes a drop)
+    if (dragMode == DragMode::move && ! wasClick && dragged.size() == 1 && dragRegion.isValid() && ! model::isMidiRegion (dragRegion))
+    {
+        auto over = project.getChild (juce::jlimit (0, model::numTracks (project) - 1, timeline.trackIndexAt (e.y)));
+        if (over.isValid() && over[ids::instrument].toString() == "studio:sampler")
+        {
+            const juce::File file (dragRegion[ids::file].toString());
+            const auto offset = (double) dragRegion.getProperty (ids::offset, 0.0), length = (double) dragRegion.getProperty (ids::length, 0.0);
+            undoManager.undoCurrentTransactionOnly();
+            if (file.existsAsFile())
+            {
+                double seconds = 0.0;
+                juce::AudioFormatManager formats;
+                formats.registerBasicFormats();
+                if (std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file)); reader != nullptr && reader->sampleRate > 0.0)
+                    seconds = (double) reader->lengthInSamples / reader->sampleRate;
+                undoManager.beginNewTransaction ("Sampler: sample");
+                auto st = over.getChildWithName ("STUDIO");
+                if (! st.isValid())
+                {
+                    st = juce::ValueTree ("STUDIO");
+                    over.appendChild (st, &undoManager);
+                }
+                st.setProperty ("file0", file.getFullPathName(), &undoManager);
+                if (seconds > 0.0)
+                {
+                    st.setProperty ("start", juce::jlimit (0.0, 1.0, offset / seconds), &undoManager);
+                    st.setProperty ("end", juce::jlimit (0.0, 1.0, (offset + length) / seconds), &undoManager);
+                    st.setProperty ("loopStart", juce::jlimit (0.0, 1.0, offset / seconds), &undoManager);
+                    st.setProperty ("loopEnd", juce::jlimit (0.0, 1.0, (offset + length) / seconds), &undoManager);
+                }
+                timeline.selectedTrackId = over[ids::id].toString();
+            }
+            dragged.clear();
+            dragMode = DragMode::none;   // (the rest below is for regions that moved)
+        }
+    }
+
     // The Drag mode: No Overlap, X-Fade or Shuffle (moved regions also leave a gap on the tracks they came from).
     if (dragMode == DragMode::move && ! wasClick)
     {

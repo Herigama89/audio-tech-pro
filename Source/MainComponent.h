@@ -247,6 +247,10 @@ private:
     void refreshProjectControls();
     void showSignatureMenu();
     void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDrag (const juce::MouseEvent& e) override;
+    void mouseUp (const juce::MouseEvent& e) override;
+    double tempoDragStart = 0.0;   // (the LCD's tempo, dragged up or down as in Logic)
+    bool tempoDragging = false;
     juce::String deviceStatusText() const;
     juce::String formatPosition (double seconds) const;
     juce::String formatClock (double seconds) const;

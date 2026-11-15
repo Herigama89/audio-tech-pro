@@ -46,6 +46,10 @@ public:
 
     /** The page: 0 play, 1 mix (and the beat pad's sequencer, 2). */
     void showPage (int page);
+    /** The track's automation lane for a knob, shown in the arrange (as Logic's). */
+    void showAutomationOf (const juce::String& id);
+    /** The knob last turned (the header's automation key shows its lane). */
+    const juce::String& lastTouchedId() const noexcept { return lastTouched; }
     /** The size it opens at (it scales to its window). */
     static juce::Rectangle<int> naturalSize (const juce::String& kind);
 
@@ -78,6 +82,13 @@ private:
     int keyAt (juce::Point<float> facePoint) const;
     juce::Rectangle<float> keyRect (int note) const;
     void slice();
+    juce::String resolve (const juce::String& id) const;   // "@x" / "#x": the selected piece's / pad's
+    juce::String paramName (const juce::String& id) const;
+    juce::String browserId() const;   // the screen page that browses a choice (programs, models, kits), or none
+    juce::StringArray choicesOf (const juce::String& id) const;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    void nameLane (const juce::String& id);
+    void showControlMenu (Control&);
 
     juce::ValueTree project, track, state;
     juce::UndoManager& um;
@@ -96,6 +107,13 @@ private:
     float scale = 1.0f;
     juce::Rectangle<float> faceArea, barArea, mixArea;
     int dragMarker = -1;   // (the sampler's: start, loop start, loop end, end)
+    juce::String lastTouched;
+    juce::StringArray automatedIds;
+    int ticks = 0;
+    int lastGroove = 1;
+    juce::Rectangle<float> tempoArea;   // (the screen's BPM: dragged up or down)
+    double tempoStart = 120.0;
+    bool tempoDragging = false, tempoMoved = false;
 
     // the bar under the face: the main choices
     juce::OwnedArray<juce::TextButton> barButtons;
@@ -106,6 +124,55 @@ private:
     juce::OwnedArray<Strip> strips;
     juce::Component mixHolder;
     juce::Viewport mixView;
+};
+
+/**
+    A studio instrument's whole window: the plug-in header (as Logic's) over its face -
+      Pin         the window stays above the main window while you work
+      Bypass      the instrument out (silent)
+      < Preset >  its presets: the factory kits and programs, yours saved, Set as Default (every new one starts so)
+      Copy/Paste  its whole setting, to another of its kind
+      Automation  the mode, and the lane of the knob you last turned (right-click a knob for its own)
+*/
+class StudioWindow final : public juce::Component,
+                           private juce::ValueTree::Listener
+{
+public:
+    StudioWindow (juce::ValueTree project, juce::ValueTree track, juce::UndoManager& um, StudioPanel::Host host);
+    ~StudioWindow() override;
+
+    StudioPanel& getPanel() noexcept { return panel; }
+    static constexpr int headerHeight = 34;
+    static juce::Rectangle<int> naturalSize (const juce::String& kind);
+
+    /** A new track of a kind starts from its Default preset, if one was set (Set as Default). */
+    static void applyDefault (juce::ValueTree track, juce::UndoManager* um);
+    /** Where a kind's presets are kept. */
+    static juce::File presetFolder (const juce::String& kind);
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+
+private:
+    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { refresh(); }
+    void refresh();
+    void parentHierarchyChanged() override { refresh(); }
+    void showPresetMenu();
+    void showAutomationMenu();
+    void step (int direction);
+    juce::StringArray presetNames() const;
+    void loadXml (const juce::XmlElement& xml, const juce::String& name);
+    void loadPreset (const juce::String& name);
+    void savePreset (const juce::String& name);
+    juce::StringArray factoryNames() const;
+    void loadFactory (int index);
+
+    juce::ValueTree project, track;
+    juce::UndoManager& um;
+    juce::String kind;
+    StudioPanel panel;
+    juce::TextButton pin { "Pin" }, bypass { "Bypass" }, previous { "<" }, preset, next { ">" },
+                     copy { "Copy" }, paste { "Paste" }, automation { "Automation" };
 };
 
 } // namespace riff

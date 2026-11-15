@@ -25,6 +25,8 @@ namespace riff::studio
         static int noteOfPiece (int piece);
         /** A kit's settings (its pieces' models, damping, tuning, the room), to write to the track. */
         static std::vector<std::pair<juce::String, float>> kitSettings (int kit);
+        /** The beats the GROOVE key plays ("Off" first). */
+        static juce::StringArray grooveNames();
 
     protected:
         void renderParts (float* const* l, float* const* r, int n, const juce::MidiBuffer& midi) noexcept override;
@@ -37,6 +39,8 @@ namespace riff::studio
         juce::AudioBuffer<float> sum;
         dsp::Room room, plate;
         dsp::Svf ohFilter[2];
+        juce::MidiBuffer grooveMidi;
+        double grooveClock = 0.0;
     };
 
     //==============================================================================

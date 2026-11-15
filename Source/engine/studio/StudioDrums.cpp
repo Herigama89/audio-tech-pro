@@ -51,6 +51,7 @@ namespace
         p.push_back ({ "velocity", "Velocity", 0, 3, 0, { "Linear", "Soft", "Hard", "Fixed" } });
         p.push_back ({ "artic", "Articulation", 0, 2, 0, { "Center", "Edge", "Rim" } });
         p.push_back ({ "hatPedal", "Hi-Hat Pedal (CC4)", 0, 1, 1, { "Off", "On" } });
+        p.push_back ({ "groove", "Groove", 0, 6, 0, StudioDrums::grooveNames() });
         return p;
     }
 
@@ -117,6 +118,7 @@ StudioDrums::StudioDrums()
 
 void StudioDrums::prepareVoices (double sampleRate, int maxBlockSize)
 {
+    grooveMidi.ensureSize (4096);
     voices.prepare (sampleRate);
     sum.setSize (2, maxBlockSize);
     room.prepare (sampleRate);
@@ -164,8 +166,68 @@ void StudioDrums::play (int note, int velocity) noexcept
     }
 }
 
-void StudioDrums::renderParts (float* const* pl, float* const* pr, int n, const juce::MidiBuffer& midi) noexcept
+juce::StringArray StudioDrums::grooveNames()
 {
+    return { "Off", "Rock", "Funk", "Shuffle", "Half-Time", "Jazz Ride", "Four on the Floor" };
+}
+
+namespace
+{
+    // The grooves, a bar of 16 steps each: kick, snare, closed hat, open hat, ride, pedal hat (velocities; 0 none)
+    struct Groove { juce::uint8 kick[16], snare[16], hat[16], open[16], ride[16], pedal[16]; };
+    const Groove grooves[] {
+        { { 120,0,0,0, 0,0,0,0, 110,0,90,0, 0,0,0,0 }, { 0,0,0,0, 118,0,0,0, 0,0,0,0, 120,0,0,0 },
+          { 96,0,70,0, 92,0,70,0, 96,0,70,0, 92,0,70,0 }, {}, {}, {} },                                        // Rock
+        { { 120,0,0,100, 0,0,0,0, 0,0,105,0, 0,0,0,0 }, { 0,0,0,0, 120,0,0,38, 0,40,0,0, 118,0,0,0 },
+          { 90,50,75,50, 90,50,75,50, 90,50,75,50, 90,50,0,50 }, { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,80,0 }, {}, {} }, // Funk
+        { { 120,0,0,0, 0,0,0,0, 110,0,0,95, 0,0,0,0 }, { 0,0,0,0, 118,0,0,0, 0,0,0,0, 120,0,0,0 },
+          { 96,0,0,70, 92,0,0,70, 96,0,0,70, 92,0,0,70 }, {}, {}, {} },                                       // Shuffle
+        { { 120,0,0,0, 0,0,0,0, 0,0,100,0, 0,0,0,0 }, { 0,0,0,0, 0,0,0,0, 122,0,0,0, 0,0,0,0 },
+          { 92,0,64,0, 88,0,64,0, 92,0,64,0, 88,0,64,0 }, {}, {}, {} },                                       // Half-Time
+        { { 50,0,0,0, 0,0,0,0, 45,0,0,0, 0,0,0,0 }, { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,35 },
+          {}, {}, { 100,0,0,0, 92,0,0,80, 98,0,0,0, 92,0,0,80 }, { 0,0,0,0, 90,0,0,0, 0,0,0,0, 90,0,0,0 } },   // Jazz Ride
+        { { 124,0,0,0, 120,0,0,0, 124,0,0,0, 120,0,0,0 }, { 0,0,0,0, 112,0,0,0, 0,0,0,0, 112,0,0,0 },
+          { 80,0,0,0, 76,0,0,0, 80,0,0,0, 76,0,0,0 }, { 0,0,96,0, 0,0,96,0, 0,0,96,0, 0,0,96,0 }, {}, {} },  // Four on the Floor
+    };
+}
+
+void StudioDrums::renderParts (float* const* pl, float* const* pr, int n, const juce::MidiBuffer& midiIn) noexcept
+{
+    // The GROOVE key: a beat of its own, in time with the song (and running while it's stopped)
+    const juce::MidiBuffer* source = &midiIn;
+    if (const auto g = choice (indexOf ("groove")); g > 0 && g <= (int) std::size (grooves))
+    {
+        grooveMidi.clear();
+        grooveMidi.addEvents (midiIn, 0, n, 0);
+        const auto stepLength = rate * 60.0 / juce::jmax (20.0, songBpm) / 4.0;
+        const auto start = songPlaying ? (double) songPosition : grooveClock;
+        const auto& groove = grooves[(size_t) g - 1];
+        auto step = (juce::int64) std::ceil (start / stepLength);
+        for (;; ++step)
+        {
+            const auto at = (int) std::llround ((double) step * stepLength - start);
+            if (at >= n) break;
+            if (at < 0) continue;
+            const auto s = (size_t) (step % 16);
+            const auto add = [this, at] (int note, juce::uint8 velocity)
+            {
+                if (velocity > 0)
+                    grooveMidi.addEvent (juce::MidiMessage::noteOn (10, note, velocity), at);
+            };
+            add (36, groove.kick[s]);
+            add (38, groove.snare[s]);
+            add (42, groove.hat[s]);
+            add (46, groove.open[s]);
+            add (51, groove.ride[s]);
+            add (44, groove.pedal[s]);
+        }
+        grooveClock = songPlaying ? (double) songPosition + n : grooveClock + n;
+        source = &grooveMidi;
+    }
+    else
+        grooveClock = 0.0;
+    const auto& midi = *source;
+
     int done = 0;
     auto renderTo = [&] (int until)
     {
@@ -230,7 +292,8 @@ juce::StringArray StudioDrums::screenLines() const
              juce::String (p (indexOf (id + "Gain")), 1) + " dB",
              (p (indexOf (id + "Tune")) >= 0 ? "+" : "") + juce::String (p (indexOf (id + "Tune")), 1) + " st",
              juce::String (juce::roundToInt (p (indexOf (id + "Damp")) * 100.0f)) + "%",
-             params()[(size_t) indexOf ("artic")].choices[choice (indexOf ("artic"))] };
+             params()[(size_t) indexOf ("artic")].choices[choice (indexOf ("artic"))],
+             choice (indexOf ("groove")) > 0 ? "GROOVE: " + grooveNames()[choice (indexOf ("groove"))] : juce::String() };
 }
 
 } // namespace riff::studio

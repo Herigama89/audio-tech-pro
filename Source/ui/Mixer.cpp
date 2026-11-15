@@ -1,5 +1,6 @@
 #include "Profile.h"
 #include "Mixer.h"
+#include "../engine/studio/Studio.h"
 #include "Eco.h"
 #include "InsertBar.h"
 #include "Skin.h"
@@ -406,6 +407,51 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     tapeDrive.onRightClick = [this] (const juce::MouseEvent&) { showTapeMenu(); };
     addAndMakeVisible (tapeDrive);
     tapeDrive.setVisible (! isVca());
+
+    // TRANS and WIDTH: the key in or out, the amount dragged
+    for (auto* key : { &transKey, &widthKey })
+    {
+        look::key (*key, look::Key::console);
+        key->setClickingTogglesState (false);
+        key->setColour (juce::TextButton::textColourOnId, juce::Colours::white);
+        key->setWantsKeyboardFocus (false);
+        addAndMakeVisible (key);
+        key->setVisible (hasShape());
+    }
+    transKey.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff17a9a4));
+    widthKey.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff7d52c8));
+    transKey.setTooltip ("Transient shaper in or out: the TRANS knob gives every hit more snap (up) or softer fronts and more sustain (down)");
+    widthKey.setTooltip ("Stereo width in or out: the WIDTH knob from mono (0%) through as it is (100%) to wider (200%)");
+    const auto toggleShape = [this] (const char* property, const juce::String& what)
+    {
+        owner.getUndoManager().beginNewTransaction (what);
+        const auto on = ! (bool) track.getProperty (property, true);
+        for (auto t2 : acting())
+            t2.setProperty (property, on, &owner.getUndoManager());
+    };
+    transKey.onClick = [toggleShape] { toggleShape ("transOn", "Transient shaper"); };
+    widthKey.onClick = [toggleShape] { toggleShape ("widthOn", "Stereo width"); };
+    transAmount.setRange (-100.0, 100.0, 1.0);
+    transAmount.knobAndValue = true;
+    transAmount.capColour = juce::Colour (0xff19c6c0);
+    transAmount.textFromValueFunction = [] (double v) { const auto n = juce::roundToInt (v); return (n > 0 ? "+" : "") + juce::String (n); };
+    transAmount.setDoubleClickReturnValue (true, 0.0);
+    transAmount.setTooltip ("Transient shaper, -100 to +100: up for more attack on every hit, down for softer fronts. Double-click for 0.");
+    transAmount.onDragStart = [this] { owner.getUndoManager().beginNewTransaction ("Transient shaper"); };
+    transAmount.onValueChange = [this] { for (auto t2 : acting()) t2.setProperty ("trans", transAmount.getValue(), &owner.getUndoManager()); };
+    widthAmount.setRange (0.0, 200.0, 1.0);
+    widthAmount.knobAndValue = true;
+    widthAmount.capColour = juce::Colour (0xff8a5bd6);
+    widthAmount.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v)); };
+    widthAmount.setDoubleClickReturnValue (true, 100.0);
+    widthAmount.setTooltip ("Stereo width, 0 (mono) to 200% (wider). Double-click for 100%.");
+    widthAmount.onDragStart = [this] { owner.getUndoManager().beginNewTransaction ("Stereo width"); };
+    widthAmount.onValueChange = [this] { for (auto t2 : acting()) t2.setProperty (ids::panWidth, widthAmount.getValue() / 100.0, &owner.getUndoManager()); };
+    for (auto* knob : { &transAmount, &widthAmount })
+    {
+        addAndMakeVisible (knob);
+        knob->setVisible (hasShape());
+    }
 
     for (int i = 0; i < maxInputFxRows; ++i)
     {
@@ -1342,7 +1388,8 @@ void ChannelStrip::refresh()
         else if (model::isInstrumentTrack (track))
         {
             const auto kind = track[ids::instrument].toString();
-            juce::String name = kind == "drums" ? "Drum Kit" : kind == "sampler" ? "Sampler" : kind == "nemix" ? "Nemix" : "Synth";
+            juce::String name = kind.startsWith ("studio:") ? studio::displayName (kind.fromFirstOccurrenceOf ("studio:", false, false))
+                              : kind == "drums" ? "Drum Kit" : kind == "sampler" ? "Sampler" : kind == "nemix" ? "Nemix" : "Synth";
             if (kind == "plugin")
             {
                 juce::PluginDescription d;
@@ -2461,20 +2508,16 @@ void ChannelStrip::resized()
     }
     outputSlot.setBounds (area.removeFromTop (15));
     area.removeFromTop (2);
+    // PRE, TAPE, TRANS, WIDTH: each its key and its knob
+    for (auto [key, knob] : { std::pair<juce::Component*, juce::Component*> { &preKey, &preGain }, { &tapeKey, &tapeDrive },
+                              { &transKey, &transAmount }, { &widthKey, &widthAmount } })
     {
-        auto row = area.removeFromTop (tapeRow / 2 - 2);
+        auto row = area.removeFromTop (tapeRow / 4 - 2);
         const auto keyWidth = row.getWidth() / 2 + 2;
-        preKey.setBounds (row.removeFromLeft (keyWidth).withSizeKeepingCentre (keyWidth, 16));
+        key->setBounds (row.removeFromLeft (keyWidth).withSizeKeepingCentre (keyWidth, 16));
         row.removeFromLeft (2);
-        preGain.setBounds (row);
+        knob->setBounds (row);
         area.removeFromTop (1);
-    }
-    {
-        auto row = area.removeFromTop (tapeRow / 2 - 2);
-        const auto keyWidth = row.getWidth() / 2 + 2;
-        tapeKey.setBounds (row.removeFromLeft (keyWidth).withSizeKeepingCentre (keyWidth, 16));
-        row.removeFromLeft (2);
-        tapeDrive.setBounds (row);
     }
 
     // Fader on the left, the scale, then the meter; the level box under the meter (as in the picture)
@@ -2569,6 +2612,17 @@ void ChannelStrip::updateTape()
         if (! preGain.isMouseButtonDown())
             preGain.setValue ((double) track.getProperty ("preGain", 0.0), juce::dontSendNotification);
         preGain.setDimmed (preKey.getToggleState() ? 1.0f : 0.5f);
+    }
+    if (hasShape())
+    {
+        transKey.setToggleState ((bool) track.getProperty ("transOn", true) && std::abs ((double) track.getProperty ("trans", 0.0)) > 0.5, juce::dontSendNotification);
+        widthKey.setToggleState ((bool) track.getProperty ("widthOn", true) && std::abs ((double) track.getProperty (ids::panWidth, 1.0) - 1.0) > 0.005, juce::dontSendNotification);
+        if (! transAmount.isMouseButtonDown())
+            transAmount.setValue ((double) track.getProperty ("trans", 0.0), juce::dontSendNotification);
+        if (! widthAmount.isMouseButtonDown())
+            widthAmount.setValue ((double) track.getProperty (ids::panWidth, 1.0) * 100.0, juce::dontSendNotification);
+        transAmount.setDimmed ((bool) track.getProperty ("transOn", true) ? 1.0f : 0.5f);
+        widthAmount.setDimmed ((bool) track.getProperty ("widthOn", true) ? 1.0f : 0.5f);
     }
     tapeKey.setToggleState ((bool) tree.getProperty (tapeId ("On"), false), juce::dontSendNotification);
     const auto speed = (int) tree.getProperty (tapeId ("Speed"), 1);

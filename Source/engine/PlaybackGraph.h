@@ -61,6 +61,7 @@ struct PlaybackGraph
         Effect* effect = nullptr;
         int paramIndex = 0;
         Curve curve;
+        Instrument* instrument = nullptr;   // (or the track's instrument's own parameter: a studio instrument's knob)
     };
 
     /** A MIDI note at absolute timeline positions, already clipped to its region. */
@@ -113,6 +114,7 @@ struct PlaybackGraph
         float pan = 0.0f;           // -1 .. +1
         bool audible = true;        // already accounts for mute and solo
         float vcaGain = 1.0f;       // VCA and folder stack faders on top of the track's own
+        float transient = 0.0f;     // the TRANS knob: -1 softer fronts .. +1 more snap (0: off)
         float width = 1.0f;         // stereo width: 0 mono, 1 as recorded, up to 2 wider
         int outputBus = -1;         // plays into this bus instead of the main output (-1)
         int hardwareOut = -1;       // or straight to the interface's outputs from this one (0-based), past the master
