@@ -235,13 +235,13 @@ juce::StringArray StudioBass::screenLines() const
     const juce::StringArray names5 { "B", "E", "A", "D", "G" }, names4 { "E", "A", "D", "G" };
     const bool five = choice (indexOf ("strings")) == 1;
     return { models()[juce::jlimit (0, 6, choice (indexOf ("model")))] + (five ? " 5" : ""),
-             styles()[choice (indexOf ("style"))].toUpperCase() + (choice (indexOf ("mode")) == 1 ? " · ACTIVE" : " · PASSIVE"),
+             styles()[choice (indexOf ("style"))].toUpperCase() + (choice (indexOf ("mode")) == 1 ? juce::String (juce::CharPointer_UTF8 (" · ACTIVE")) : juce::String (juce::CharPointer_UTF8 (" · PASSIVE"))),
              juce::String (juce::roundToInt (p (indexOf ("pickups")) * 100.0f)) + "/" + juce::String (100 - juce::roundToInt (p (indexOf ("pickups")) * 100.0f)),
              juce::String (juce::roundToInt (p (indexOf ("hipass")))) + "Hz",
              juce::String (juce::roundToInt (p (indexOf ("tone")) * 100.0f)) + "%",
              juce::String (juce::roundToInt (p (indexOf ("drive")) * 100.0f)) + "%",
-             note >= 0 && string >= 0 ? "STRING " + (five ? names5 : names4)[string] + " · FRET " + juce::String (fret)
-                                          + " · NOTE " + juce::MidiMessage::getMidiNoteName (note, true, true, 3)
+             note >= 0 && string >= 0 ? "STRING " + (five ? names5 : names4)[string] + juce::String (juce::CharPointer_UTF8 (" · FRET ")) + juce::String (fret)
+                                          + juce::String (juce::CharPointer_UTF8 (" · NOTE ")) + juce::MidiMessage::getMidiNoteName (note, true, true, 3)
                                       : juce::String ("STRINGS ") + (five ? "B E A D G" : "E A D G") };
 }
 
@@ -288,7 +288,7 @@ juce::StringArray StudioGuitar::patterns()
 {
     juce::StringArray p;
     for (const auto* s : strumPatterns)
-        p.add (juce::String (s).replace (".", "·").replace ("D", "↓").replace ("U", "↑").replace ("x", "×"));
+        p.add (juce::String (s).replace (".", juce::String (juce::CharPointer_UTF8 ("·"))).replace ("D", juce::String (juce::CharPointer_UTF8 ("↓"))).replace ("U", juce::String (juce::CharPointer_UTF8 ("↑"))).replace ("x", juce::String (juce::CharPointer_UTF8 ("×"))));
     return p;
 }
 
@@ -611,13 +611,13 @@ juce::StringArray StudioGuitar::screenLines() const
 {
     const auto name = chordName();
     return { models()[juce::jlimit (0, 3, choice (indexOf ("model")))],
-             styles()[choice (indexOf ("style"))].toUpperCase() + " · AMP: " + params()[(size_t) indexOf ("amp")].choices[choice (indexOf ("amp"))].toUpperCase()
-                 + (name.isNotEmpty() ? " · CHORD: " + name : juce::String()),
+             styles()[choice (indexOf ("style"))].toUpperCase() + juce::String (juce::CharPointer_UTF8 (" · AMP: ")) + params()[(size_t) indexOf ("amp")].choices[choice (indexOf ("amp"))].toUpperCase()
+                 + (name.isNotEmpty() ? juce::String (juce::CharPointer_UTF8 (" · CHORD: ")) + name : juce::String()),
              juce::String (juce::roundToInt (p (indexOf ("pickup")) * 100.0f)) + "/" + juce::String (100 - juce::roundToInt (p (indexOf ("pickup")) * 100.0f)),
              juce::String (juce::roundToInt (p (indexOf ("tone")) * 100.0f)) + "%",
              juce::String (juce::roundToInt (p (indexOf ("drive")) * 100.0f)) + "%",
              patterns()[choice (indexOf ("pattern"))],
-             "TUNING " + params()[(size_t) indexOf ("tuning")].choices[choice (indexOf ("tuning"))].toUpperCase() + " · CAPO " + juce::String (choice (indexOf ("capo"))) };
+             "TUNING " + params()[(size_t) indexOf ("tuning")].choices[choice (indexOf ("tuning"))].toUpperCase() + juce::String (juce::CharPointer_UTF8 (" · CAPO ")) + juce::String (choice (indexOf ("capo"))) };
 }
 
 } // namespace riff::studio

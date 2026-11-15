@@ -28,7 +28,7 @@ namespace
 //==============================================================================
 struct StudioPanel::Control
 {
-    enum Type { knob, fader, button, pad, encoder } type = knob;
+    enum Type { knob, fader, button, padKey, encoder } type = knob;
     juce::Point<float> centre;        // knobs and encoders
     float radius = 20.0f;
     juce::Rectangle<float> area;      // faders (the slot), buttons and pads
@@ -44,6 +44,7 @@ struct StudioPanel::Control
 struct StudioPanel::Layout
 {
     juce::Rectangle<int> crop;              // the part of the picture shown (picture pixels)
+    float height = 0.0f;                    // the face's height (face coordinates): the picture's, or more (the sampler's editor)
     juce::Rectangle<float> screen;          // the screen (face coordinates)
     juce::Rectangle<float> mix;             // where the MIX tab covers
     juce::StringArray screenTabs;
@@ -81,11 +82,16 @@ struct StudioPanel::Strip final : juce::Component
         {
             output.onClick = [this] { panel.showChoiceMenu (id ("out"), &output); };
             addAndMakeVisible (output);
+            for (auto* s : { &sendA, &sendB, &pan })
+            {
+                s->setColour (juce::Slider::backgroundColourId, juce::Colours::white.withAlpha (0.06f));
+                s->setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+                s->setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
+            }
             for (auto* s : { &sendA, &sendB })
             {
                 s->setSliderStyle (juce::Slider::LinearBar);
                 s->setRange (-60.0, 6.0, 0.1);
-                s->setTextValueSuffix (" dB");
                 s->setColour (juce::Slider::trackColourId, teal.withAlpha (0.35f));
                 s->setColour (juce::Slider::textBoxTextColourId, ink);
                 addAndMakeVisible (*s);
@@ -98,6 +104,9 @@ struct StudioPanel::Strip final : juce::Component
             pan.setColour (juce::Slider::textBoxTextColourId, ink);
             pan.textFromValueFunction = [] (double v) { return std::abs (v) < 0.01 ? juce::String ("C") : (v < 0 ? "L" : "R") + juce::String (juce::roundToInt (std::abs (v) * 100.0)); };
             pan.onValueChange = [this] { panel.setValue (id ("pan"), (float) pan.getValue(), ! pan.isMouseButtonDown()); };
+            pan.updateText();
+            sendA.textFromValueFunction = [] (double v) { return v <= -59.9 ? juce::String ("FX A  off") : "FX A  " + juce::String (v, 1); };
+            sendB.textFromValueFunction = [] (double v) { return v <= -59.9 ? juce::String ("FX B  off") : "FX B  " + juce::String (v, 1); };
             addAndMakeVisible (pan);
             for (auto* b : { &mute, &solo })
             {
@@ -163,15 +172,16 @@ struct StudioPanel::Strip final : juce::Component
         if (part >= 0)
         {
             const auto outChoices = panel.layout != nullptr ? juce::StringArray { "Main", "Own channel" } : juce::StringArray();
-            output.setButtonText (panel.value (id ("out")) > 0.5f ? "Own " + juce::String (part * 2 + 3) + "-" + juce::String (part * 2 + 4) + " ▾" : juce::String ("Main ▾"));
+            output.setButtonText (panel.value (id ("out")) > 0.5f ? "Own " + juce::String (part * 2 + 3) + "-" + juce::String (part * 2 + 4) + juce::String (juce::CharPointer_UTF8 (" ▾")) : juce::String (juce::String (juce::CharPointer_UTF8 ("Main ▾"))));
             juce::ignoreUnused (outChoices);
             sendA.setValue (panel.value (id ("sendA")), juce::dontSendNotification);
             sendB.setValue (panel.value (id ("sendB")), juce::dontSendNotification);
             pan.setValue (panel.value (id ("pan")), juce::dontSendNotification);
             mute.setColour (juce::TextButton::buttonColourId, panel.value (id ("mute")) > 0.5f ? amber : juce::Colours::white.withAlpha (0.08f));
             solo.setColour (juce::TextButton::buttonColourId, panel.value (id ("solo")) > 0.5f ? juce::Colour (0xffffd84a) : juce::Colours::white.withAlpha (0.08f));
-            sendA.setTextValueSuffix (" dB  A");
-            sendB.setTextValueSuffix (" dB  B");
+            sendA.updateText();
+            sendB.updateText();
+            pan.updateText();
         }
         repaint();
     }
@@ -346,12 +356,13 @@ StudioPanel::StudioPanel (juce::ValueTree p, juce::ValueTree t, juce::UndoManage
     {
         const auto yOff = 40.0f;
         L.crop = kind == "drums" ? juce::Rectangle<int> (0, 40, 1408, 730) : juce::Rectangle<int> (0, 40, 1408, 236);
+        L.height = kind == "drums" ? 730.0f : 690.0f;
         if (kind == "drums")
         {
             panelRow ({ "GAIN", "TUNE", "DAMPEN", "PAN", "TONE", "OVERHEADS", "ROOM", "AMBIENCE", "REVERB", "MASTER" },
                       { "@Gain", "@Tune", "@Damp", "@Pan", "@Tone", "overheads", "room", "ambience", "reverb", "master" },
                       { "KICK", "SNARE", "TOMS", "CYMB" }, { "p0gain", "p1gain", "p2gain", "p4gain" }, yOff);
-            const juce::StringArray padLabels { "KICK", "SNARE", "TOMS", "HATS", "CRASH", "RIDE", "MIX", "ARTIC", "◀ KIT", "KIT ▶", "GROOVE", "EDIT" };
+            const juce::StringArray padLabels { "KICK", "SNARE", "TOMS", "HATS", "CRASH", "RIDE", "MIX", "ARTIC", juce::String (juce::CharPointer_UTF8 ("◀ KIT")), juce::String (juce::CharPointer_UTF8 ("KIT ▶")), "GROOVE", "EDIT" };
             const int padPiece[] { 0, 1, 2, 4, 5, 6 };
             for (int i = 0; i < 12; ++i)
             {
@@ -384,7 +395,7 @@ StudioPanel::StudioPanel (juce::ValueTree p, juce::ValueTree t, juce::UndoManage
             panelRow ({ "PITCH", "FINE", "CUTOFF", "RESO", "DRIVE", "ATTACK", "DECAY", "SUSTAIN", "RELEASE", "LEVEL" },
                       { "pitch", "fine", "cutoff", "reso", "drive", "attack", "decay", "sustain", "release", "level" },
                       { "GLIDE", "LFO RT", "LFO AMT", "VEL" }, { "glide", "lfoRate", "lfoAmt", "velAmp" }, yOff);
-            const juce::StringArray padLabels { "ONE SHOT", "LOOP", "ALT LOOP", "REVERSE", "WARP", "LEGATO", "SLICE", "MONO", "◀ SMP", "SMP ▶", "PREVIEW", "EDIT" };
+            const juce::StringArray padLabels { "ONE SHOT", "LOOP", "ALT LOOP", "REVERSE", "WARP", "LEGATO", "SLICE", "MONO", juce::String (juce::CharPointer_UTF8 ("◀ SMP")), juce::String (juce::CharPointer_UTF8 ("SMP ▶")), "PREVIEW", "EDIT" };
             for (int i = 0; i < 12; ++i)
             {
                 std::function<void()> act;
@@ -431,7 +442,7 @@ StudioPanel::StudioPanel (juce::ValueTree p, juce::ValueTree t, juce::UndoManage
         panelRow ({ "GAIN", "TUNE", "PICKUPS", "HI-PASS", "TONE", "COMP", "DRIVE", "AMBIENCE", "REVERB", "MASTER" },
                   { "gain", "tune", "pickups", "hipass", "tone", "comp", "drive", "ambience", "reverb", "master" },
                   { "DI", "AMP", "ROOM", "MAIN" }, { "p0gain", "p1gain", "p2gain", "master" }, yOff);
-        const juce::StringArray padLabels { "FINGER", "PICK", "SLAP", "MUTE", "SLIDE", "HARM", "GHOST", "HOLD", "◀ PROG", "PROG ▶", "PLAY", "MIX" };
+        const juce::StringArray padLabels { "FINGER", "PICK", "SLAP", "MUTE", "SLIDE", "HARM", "GHOST", "HOLD", juce::String (juce::CharPointer_UTF8 ("◀ PROG")), juce::String (juce::CharPointer_UTF8 ("PROG ▶")), "PLAY", "MIX" };
         for (int i = 0; i < 12; ++i)
         {
             std::function<void()> act;
@@ -462,7 +473,7 @@ StudioPanel::StudioPanel (juce::ValueTree p, juce::ValueTree t, juce::UndoManage
         for (int i = 0; i < 4; ++i)
             buttonAt (505.0f, (104.0f + 45.0f * (float) i) - yOff, 36.0f, 24.0f, sideLabels[i], [this, i] { if (i == 3) showPage (page == 1 ? 0 : 1); else { screenPage = i; repaint(); } },
                       [this, i] { return i == 3 ? page == 1 : screenPage == i; });
-        const juce::StringArray padLabels { "STRUM", "PICK", "MUTE", "HOLD", "POWER", "HARM", "◀ PROG", "PROG ▶", "PATTERN" };
+        const juce::StringArray padLabels { "STRUM", "PICK", "MUTE", "HOLD", "POWER", "HARM", juce::String (juce::CharPointer_UTF8 ("◀ PROG")), juce::String (juce::CharPointer_UTF8 ("PROG ▶")), "PATTERN" };
         const float gx[3] { 1030, 1083, 1137 }, gy[3] { 128, 183, 238 };
         const int styleOf[] { 0, 1, 2, 3, 4, 5 };
         for (int i = 0; i < 9; ++i)
@@ -504,8 +515,8 @@ StudioPanel::StudioPanel (juce::ValueTree p, juce::ValueTree t, juce::UndoManage
         for (int i = 0; i < 3; ++i)
             buttonAt (1043.0f, sy[i] - yOff, 30.0f, 18.0f, side[i], [this, i] { if (i == 2) showPage (page == 1 ? 0 : 1); else { showPage (0); screenPage = i; repaint(); } },
                       [this, i] { return i == 2 ? page == 1 : (page == 0 && screenPage == i); });
-        buttonAt (1121.0f, 230.0f - yOff, 30.0f, 18.0f, "◀ PROG", [this] { cycle ("program", -1); });
-        buttonAt (1160.0f, 230.0f - yOff, 30.0f, 18.0f, "PROG ▶", [this] { cycle ("program", 1); });
+        buttonAt (1121.0f, 230.0f - yOff, 30.0f, 18.0f, juce::String (juce::CharPointer_UTF8 ("◀ PROG")), [this] { cycle ("program", -1); });
+        buttonAt (1160.0f, 230.0f - yOff, 30.0f, 18.0f, juce::String (juce::CharPointer_UTF8 ("PROG ▶")), [this] { cycle ("program", 1); });
         // the pedals: latched (as foot switches)
         const auto pedal = [this] (int cc) { return [this, cc] { if (host.playNote) host.playNote (-cc, 127, true); }; };
         buttonAt (1043.0f, 314.0f - yOff, 30.0f, 18.0f, "SUS", pedal (64), [this] { return heldNote == -64; }, amber);
@@ -536,7 +547,7 @@ StudioPanel::StudioPanel (juce::ValueTree p, juce::ValueTree t, juce::UndoManage
             buttonAt (424.0f, 126.0f + 51.5f * (float) i - yOff, 34.0f, 22.0f, side[i],
                       [this, i] { if (i == 3) showPage (page == 1 ? 0 : 1); else { showPage (0); screenPage = i == 2 ? 2 : i == 1 ? 1 : 0; repaint(); } },
                       [this, i] { return i == 3 ? page == 1 : page == 0 && screenPage == (i == 2 ? 2 : i == 1 ? 1 : 3); });
-        const juce::StringArray tl { "PLAY", "REPEAT", "FULL LVL", "STOP", "16 LVLS", "ERASE", "◀ BANK", "BANK ▶", "UNDO" };
+        const juce::StringArray tl { "PLAY", "REPEAT", "FULL LVL", "STOP", "16 LVLS", "ERASE", juce::String (juce::CharPointer_UTF8 ("◀ BANK")), juce::String (juce::CharPointer_UTF8 ("BANK ▶")), "UNDO" };
         const float tx[3] { 990, 1052, 1114 }, ty[3] { 147, 210, 273 };
         for (int i = 0; i < 9; ++i)
         {
@@ -578,7 +589,7 @@ StudioPanel::StudioPanel (juce::ValueTree p, juce::ValueTree t, juce::UndoManage
             for (int col = 0; col < 6; ++col)
             {
                 auto c = std::make_unique<Control>();
-                c->type = Control::pad;
+                c->type = Control::padKey;
                 c->area = { cx[col] + 2.0f, cy[row] - yOff + 2.0f, 84.0f, 84.0f };
                 c->pad = (2 - row) * 6 + col;   // (pad 1 bottom left, as on the machines)
                 controls.push_back (std::move (c));
@@ -600,6 +611,8 @@ StudioPanel::StudioPanel (juce::ValueTree p, juce::ValueTree t, juce::UndoManage
         L.bar = { { "Kit", "kit" }, { "Bank", "bank" }, { "Repeat", "repeat" }, { "16 Levels", "levels16" }, { "Swing", "swing" } };
     }
     juce::ignoreUnused (inst);
+    if (L.height <= 0.0f)
+        L.height = (float) L.crop.getHeight();
 
     buildBar();
     mixView.setViewedComponent (&mixHolder, false);
@@ -798,7 +811,7 @@ void StudioPanel::resized()
 {
     const auto crop = layout->crop;
     scale = (float) getWidth() / (float) crop.getWidth();
-    faceArea = { 0.0f, 0.0f, (float) getWidth(), (float) crop.getHeight() * scale };
+    faceArea = { 0.0f, 0.0f, (float) getWidth(), layout->height * scale };
     barArea = { 0.0f, faceArea.getBottom(), (float) getWidth(), (float) getHeight() - faceArea.getBottom() };
     auto bar = barArea.reduced (14.0f, 12.0f).toNearestInt();
     const auto count = barButtons.size();
@@ -833,7 +846,7 @@ void StudioPanel::paint (juce::Graphics& g)
     const auto crop = layout->crop;
     g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
     if (face.isValid())
-        g.drawImage (face, 0, 0, getWidth(), (int) faceArea.getHeight(), crop.getX(), crop.getY(), crop.getWidth(), crop.getHeight());
+        g.drawImage (face, 0, 0, getWidth(), juce::roundToInt ((float) crop.getHeight() * scale), crop.getX(), crop.getY(), crop.getWidth(), crop.getHeight());
 
     g.saveState();
     g.addTransform (juce::AffineTransform::scale (scale));
@@ -924,9 +937,18 @@ void StudioPanel::paint (juce::Graphics& g)
     paintPads (g);
     if (layout->screen.getWidth() > 0.0f)
         paintScreen (g, layout->screen);
-    if (kind == "sampler")
+    if (kind == "sampler" && page == 0)
         paintSampler (g, layout->editor);
     g.restoreState();
+
+    // the MIX tab: dark glass over the picture, the strips on it
+    if (page == 1)
+    {
+        g.setColour (juce::Colour (0xf20d1015));
+        g.fillRoundedRectangle (mixArea.reduced (4.0f), 16.0f);
+        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.08f), 0.0f, mixArea.getY(), juce::Colours::transparentWhite, 0.0f, mixArea.getY() + 80.0f, false));
+        g.fillRoundedRectangle (mixArea.reduced (5.0f), 15.0f);
+    }
 
     // the bar under the face (glass)
     g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.12f), 0.0f, barArea.getY(), juce::Colours::white.withAlpha (0.04f), 0.0f, barArea.getBottom(), false));
@@ -946,8 +968,8 @@ void StudioPanel::paint (juce::Graphics& g)
         else if (id == "layer") text = juce::roundToInt (value (id)) <= 0 ? juce::String ("None") : studio::StudioKeys::programs()[(size_t) juce::jlimit (0, (int) studio::StudioKeys::programs().size() - 1, juce::roundToInt (value (id)) - 1)].name;
         else if (! p.choices.isEmpty()) text = p.choices[juce::jlimit (0, p.choices.size() - 1, juce::roundToInt (value (id) - p.min))];
         else text = juce::String (value (id), id == "swing" ? 0 : 0) + (id == "swing" ? "%" : "");
-        if (barButtons[i]->getButtonText() != text + " ▾")
-            barButtons[i]->setButtonText (text + " ▾");
+        if (barButtons[i]->getButtonText() != text + juce::String (juce::CharPointer_UTF8 (" ▾")))
+            barButtons[i]->setButtonText (text + juce::String (juce::CharPointer_UTF8 (" ▾")));
     }
 }
 
@@ -1011,7 +1033,7 @@ void StudioPanel::paintPads (juce::Graphics& g)
             const auto sel = juce::roundToInt (value ("sel"));
             for (auto& c : controls)
             {
-                if (c->type != Control::pad) continue;
+                if (c->type != Control::padKey) continue;
                 const auto pad = bank * studio::BeatPad::padsPerBank + c->pad;
                 const auto colour = bp->padColour (pad);
                 const auto level = inst->noteLevel[(size_t) ((36 + pad) & 127)].load();
@@ -1027,11 +1049,11 @@ void StudioPanel::paintPads (juce::Graphics& g)
                 g.setFont (font (8.0f));
                 g.drawText (juce::String ("ABCD"[bank]) + juce::String (c->pad + 1).paddedLeft ('0', 2), r.reduced (6.0f, 5.0f), juce::Justification::topLeft, false);
                 g.setColour (ink);
-                g.setFont (font (9.5f));
-                g.drawText (bp->padName (pad), r.reduced (4.0f, 16.0f).translated (0.0f, 6.0f), juce::Justification::centredBottom, false);
+                g.setFont (font (10.0f));
+                g.drawText (bp->padName (pad), r.reduced (4.0f, 0.0f).withTrimmedBottom (20.0f).removeFromBottom (14.0f), juce::Justification::centred, false);
                 g.setColour (dim);
                 g.setFont (font (7.5f));
-                g.drawText (bp->padSound (pad), r.reduced (4.0f, 6.0f), juce::Justification::centredBottom, false);
+                g.drawText (bp->padSound (pad), r.reduced (4.0f, 0.0f).withTrimmedBottom (8.0f).removeFromBottom (11.0f), juce::Justification::centred, false);
             }
         }
 }
@@ -1246,7 +1268,7 @@ void StudioPanel::paintOverChildren (juce::Graphics& g)
         g.drawRoundedRectangle (mixArea.reduced (4.0f), 16.0f, 1.0f);
         g.setColour (ink);
         g.setFont (font (11.0f, false));
-        g.drawText ("MIX  ·  inserts take our effects or any plug-in  ·  Output sends a part to its own mixer channel",
+        g.drawText (juce::String (juce::CharPointer_UTF8 ("MIX  ·  inserts take our effects or any plug-in  ·  Output sends a part to its own mixer channel")),
                     mixArea.reduced (18.0f, 8.0f).removeFromTop (16.0f), juce::Justification::centredLeft, false);
     }
 }
@@ -1258,7 +1280,7 @@ StudioPanel::Control* StudioPanel::controlAt (juce::Point<float> p)
     {
         if ((c->type == Control::knob || c->type == Control::encoder) && c->centre.getDistanceFrom (p) <= c->radius * 1.2f) return c.get();
         if ((c->type == Control::fader) && c->area.expanded (8.0f, 16.0f).contains (p)) return c.get();
-        if ((c->type == Control::button || c->type == Control::pad) && c->area.contains (p)) return c.get();
+        if ((c->type == Control::button || c->type == Control::padKey) && c->area.contains (p)) return c.get();
     }
     return nullptr;
 }
@@ -1305,7 +1327,7 @@ int StudioPanel::keyAt (juce::Point<float> p) const
 
 void StudioPanel::press (Control& c, const juce::MouseEvent& e)
 {
-    if (c.type == Control::pad)
+    if (c.type == Control::padKey)
     {
         const auto pad = juce::roundToInt (value ("bank")) * studio::BeatPad::padsPerBank + c.pad;
         if (e.mods.isPopupMenu())
@@ -1505,7 +1527,7 @@ void StudioPanel::filesDropped (const juce::StringArray& files, int x, int y)
         return;
     }
     if (kind == "beatpad")
-        if (auto* c = controlAt (toFace ({ (float) x, (float) y })); c != nullptr && c->type == Control::pad)
+        if (auto* c = controlAt (toFace ({ (float) x, (float) y })); c != nullptr && c->type == Control::padKey)
         {
             const auto pad = juce::roundToInt (value ("bank")) * studio::BeatPad::padsPerBank + c->pad;
             um.beginNewTransaction ("Beat pad: sample");

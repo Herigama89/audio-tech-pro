@@ -346,13 +346,13 @@ juce::StringArray StudioSampler::screenLines() const
     const auto seconds = s != nullptr ? (double) s->getNumSamples() / sampleRate : 0.0;
     const auto loopNames = params()[(size_t) indexOf ("loopMode")].choices;
     return { file.existsAsFile() ? file.getFileName() : juce::String ("Drop audio here"),
-             loopNames[choice (indexOf ("loopMode"))].toUpperCase() + " · WARP: " + params()[(size_t) indexOf ("warp")].choices[choice (indexOf ("warp"))].toUpperCase()
-                 + " · " + juce::String (seconds, 2) + " s",
+             loopNames[choice (indexOf ("loopMode"))].toUpperCase() + juce::String (juce::CharPointer_UTF8 (" · WARP: ")) + params()[(size_t) indexOf ("warp")].choices[choice (indexOf ("warp"))].toUpperCase()
+                 + juce::String (juce::CharPointer_UTF8 (" · ")) + juce::String (seconds, 2) + " s",
              juce::String (p (indexOf ("start")) * seconds, 3),
              juce::String (p (indexOf ("loopStart")) * seconds, 2) + "-" + juce::String (p (indexOf ("loopEnd")) * seconds, 2),
              (p (indexOf ("pitch")) >= 0 ? "+" : "") + juce::String (juce::roundToInt (p (indexOf ("pitch")))) + " st",
              params()[(size_t) indexOf ("filterType")].choices[choice (indexOf ("filterType"))],
-             "ROOT " + juce::MidiMessage::getMidiNoteName (choice (indexOf ("root")), true, true, 3) + " · " + juce::String (sampleRate / 1000.0, 1) + "k" };
+             "ROOT " + juce::MidiMessage::getMidiNoteName (choice (indexOf ("root")), true, true, 3) + juce::String (juce::CharPointer_UTF8 (" · ")) + juce::String (sampleRate / 1000.0, 1) + "k" };
 }
 
 //==============================================================================

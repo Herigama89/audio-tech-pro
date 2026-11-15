@@ -182,6 +182,7 @@ private:
     juce::Component holder;
     int columnStride = 0;
     void placeZones();
+};
 
 //==============================================================================
 /** A knob of the Analog Console: a Console caps knob (its section's colour, or the pan knob) with its scale

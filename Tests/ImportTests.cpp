@@ -521,8 +521,8 @@ TEST_CASE ("Import: an FL Studio project", "[import]")
     const auto lead = trackNamed (project, "Lead"), kick = trackNamed (project, "Kick"), audio = trackNamed (project, "Kick audio");
     REQUIRE (lead[ids::instrument].toString() == "plugin");
     REQUIRE (lead[ids::pluginDescription].toString().contains ("Test Synth"));
-    REQUIRE (kick[ids::instrument].toString() == "sampler");
-    REQUIRE (juce::File (kick[ids::samplerFile].toString()).existsAsFile());
+    REQUIRE (kick[ids::instrument].toString() == "studio:sampler");
+    REQUIRE (juce::File (kick.getChildWithName ("STUDIO")["file0"].toString()).existsAsFile());
 
     const auto spb = 60.0 / 128.0;
     const auto leadRegions = regionsOf (lead);

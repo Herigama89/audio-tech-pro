@@ -5,6 +5,9 @@
 #include "../Source/ui/ManualPanel.h"
 #include "../Source/ui/Skin.h"
 #include "../Source/ui/NemixPanel.h"
+#include "../Source/ui/StudioPanel.h"
+#include "../Source/model/StudioState.h"
+#include "../Source/engine/studio/Studio.h"
 #include "../Source/engine/nemix/Nemix.h"
 #include "../Source/model/NemixState.h"
 #include "../Source/engine/nemix/NemixPresets.h"
@@ -1001,6 +1004,38 @@ public:
     }
 
     /** Input FX on a strip, its window, Console mode and the Analog Console (Liquid Glass). */
+    /** The studio instruments' windows: each kind's face, and its MIX tab. */
+    int studioOnly()
+    {
+        out.createDirectory();
+        MainComponent main (false);
+        main.setSize (1440, 920);
+        for (const auto& kind : studio::kinds())
+        {
+            auto track = model::addTrack (main.project, studio::displayName (kind), nullptr, -1, model::instrumentKind);
+            track.setProperty (ids::instrument, studiostate::prefix + kind, nullptr);
+            auto tree = studiostate::getOrCreate (track, nullptr);
+            juce::ignoreUnused (tree);
+            main.player.rebuildNow();
+            const auto id = track[ids::id].toString();
+            StudioPanel::Host host;
+            host.instrument = [&main, id] { return main.rack.getStudio (id); };
+            StudioPanel panel (main.project, track, main.undoManager, host);
+            pump (main, 300);
+            save (panel, "studio-" + kind + ".png");
+            panel.showPage (1);
+            pump (main, 200);
+            save (panel, "studio-" + kind + "-mix.png");
+            if (kind == "beatpad")
+            {
+                panel.showPage (0);
+                // its step page
+                juce::ignoreUnused (panel);
+            }
+        }
+        return 0;
+    }
+
     int consolesOnly()
     {
         out.createDirectory();
@@ -3007,6 +3042,12 @@ int main (int argc, char* argv[])
     if (argc > 2 && juce::String (argv[1]) == "automix")
     {
         const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).automixOnly();
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        return r;
+    }
+    if (argc > 2 && juce::String (argv[1]) == "studio")
+    {
+        const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).studioOnly();
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         return r;
     }

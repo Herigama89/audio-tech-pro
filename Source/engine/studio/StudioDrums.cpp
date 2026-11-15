@@ -226,7 +226,7 @@ juce::StringArray StudioDrums::screenLines() const
     const juce::String id (pieces[sel].id);
     const auto kitNames = params()[(size_t) indexOf ("kit")].choices;
     return { kitNames[juce::jlimit (0, 4, choice (indexOf ("kit")))] + " Kit",
-             juce::String (pieces[sel].name).toUpperCase() + " · " + altName (sel, choice (indexOf (id + "Alt"))),
+             juce::String (pieces[sel].name).toUpperCase() + juce::String (juce::CharPointer_UTF8 (" · ")) + altName (sel, choice (indexOf (id + "Alt"))),
              juce::String (p (indexOf (id + "Gain")), 1) + " dB",
              (p (indexOf (id + "Tune")) >= 0 ? "+" : "") + juce::String (p (indexOf (id + "Tune")), 1) + " st",
              juce::String (juce::roundToInt (p (indexOf (id + "Damp")) * 100.0f)) + "%",

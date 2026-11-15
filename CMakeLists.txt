@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
 endif()
 
-project(AudioTechPro VERSION 1.21.0 LANGUAGES C CXX)
+project(AudioTechPro VERSION 1.22.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -384,6 +384,7 @@ if(RIFF_BUILD_TESTS)
         Tests/TestMain.cpp
         Tests/ModelTests.cpp
         Tests/EngineTests.cpp
+        Tests/StudioTests.cpp
         Tests/CommandTests.cpp
         Tests/ConsoleTests.cpp
         Tests/GeneratorTests.cpp

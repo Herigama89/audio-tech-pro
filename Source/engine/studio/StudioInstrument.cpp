@@ -166,7 +166,9 @@ void StudioInstrument::render (float* left, float* right, int numSamples, const 
 
         const auto base = firstMix + i * mixCount;
         const bool heard = p (base + 2) < 0.5f && (! anySolo || p (base + 3) > 0.5f);
-        const auto gain = heard ? dsp::dbToGain (p (base)) : 0.0f;
+        // (the bottom of a fader's or send's range is off: -inf, not -60 dB)
+        const auto offOrGain = [] (float db) { return db <= -59.9f ? 0.0f : dsp::dbToGain (db); };
+        const auto gain = heard ? offOrGain (p (base)) : 0.0f;
         const auto pan = p (base + 1);
         partGainL[(size_t) i].setTargetValue (gain * (pan <= 0.0f ? 1.0f : 1.0f - pan));
         partGainR[(size_t) i].setTargetValue (gain * (pan >= 0.0f ? 1.0f : 1.0f + pan));
@@ -180,12 +182,12 @@ void StudioInstrument::render (float* left, float* right, int numSamples, const 
         levels[(size_t) i].store (juce::jmax (peak, levels[(size_t) i].load (std::memory_order_relaxed) * 0.9f), std::memory_order_relaxed);
 
         // sends (after its fader), then where it goes: the main output or its own
-        if (const auto send = dsp::dbToGain (p (base + 4)); send > 0.0f && heard)
+        if (const auto send = offOrGain (p (base + 4)); send > 0.0f && heard)
         {
             juce::FloatVectorOperations::addWithMultiply (aL, l, send, numSamples);
             juce::FloatVectorOperations::addWithMultiply (aR, r, send, numSamples);
         }
-        if (const auto send = dsp::dbToGain (p (base + 5)); send > 0.0f && heard)
+        if (const auto send = offOrGain (p (base + 5)); send > 0.0f && heard)
         {
             juce::FloatVectorOperations::addWithMultiply (bL, l, send, numSamples);
             juce::FloatVectorOperations::addWithMultiply (bR, r, send, numSamples);
@@ -211,7 +213,7 @@ void StudioInstrument::render (float* left, float* right, int numSamples, const 
             for (const auto& effect : *chain)
                 if (effect != nullptr)
                     effect->process (l, r, numSamples);
-        const auto g = dsp::dbToGain (gainDb);
+        const auto g = gainDb <= -59.9f ? 0.0f : dsp::dbToGain (gainDb);
         juce::FloatVectorOperations::addWithMultiply (left, l, g, numSamples);
         juce::FloatVectorOperations::addWithMultiply (right, r, g, numSamples);
     };
