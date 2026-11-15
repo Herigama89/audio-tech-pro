@@ -1008,6 +1008,12 @@ public:
     int studioOnly()
     {
         out.createDirectory();
+        if (juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_SKIN", {}) == "glasslight")
+        {
+            theme::Settings t;
+            t.skin = theme::Skin::glassLight;
+            theme::set (t);
+        }
         MainComponent main (false);
         main.setSize (1440, 920);
         for (const auto& kind : studio::kinds())
