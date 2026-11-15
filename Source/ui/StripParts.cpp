@@ -401,9 +401,13 @@ void Fader::paint (juce::Graphics& g)
     const auto half = capHeight() * 0.85f;
     const auto top = juce::jlimit (0, image.getHeight(), juce::roundToInt ((cy - half) * scale));
     const auto bottom = juce::jlimit (0, image.getHeight(), juce::roundToInt ((cy + half) * scale));
-    if (bottom > top)
+    // only across the cap itself (nothing beside it - a scale mark, the slot's edge - takes the colour)
+    const auto capHalfWidth = capHeight() * 0.42f;
+    const auto left = juce::jlimit (0, image.getWidth(), juce::roundToInt ((getWidth() * 0.5f - capHalfWidth) * scale));
+    const auto right = juce::jlimit (0, image.getWidth(), juce::roundToInt ((getWidth() * 0.5f + capHalfWidth) * scale));
+    if (bottom > top && right > left)
     {
-        juce::Image::BitmapData data (image, 0, top, image.getWidth(), bottom - top, juce::Image::BitmapData::readWrite);
+        juce::Image::BitmapData data (image, left, top, right - left, bottom - top, juce::Image::BitmapData::readWrite);
         const auto amount = isEnabled() ? 1.0f : 0.5f;
         const float tr = tint.getFloatRed(), tg = tint.getFloatGreen(), tb = tint.getFloatBlue();
         for (int y = 0; y < data.height; ++y)
