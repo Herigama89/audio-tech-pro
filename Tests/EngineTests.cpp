@@ -628,6 +628,7 @@ TEST_CASE ("Instrument tracks play MIDI regions on time", "[engine][midi]")
 {
     Fixture f;
     auto track = model::addTrack (f.project, "Keys", nullptr, -1, model::instrumentKind);
+    track.setProperty (ids::instrument, "synth", nullptr);   // (the old synth: these timings are its)
     track.setProperty (ids::synthAttack, 0.001, nullptr);
     track.setProperty (ids::synthRelease, 0.02, nullptr);
 
@@ -3049,6 +3050,7 @@ TEST_CASE ("Render ahead (Process Buffer Range): the same mix as rendering every
                 send.setProperty (ids::pre, true, nullptr);
         }
         auto keys = model::addTrack (f.project, "Keys", nullptr, -1, model::instrumentKind);
+        keys.setProperty (ids::instrument, "synth", nullptr);   // (a deterministic instrument)
         auto region = model::addMidiRegion (keys, 0.0, 2.0, nullptr);
         for (int k = 0; k < 8; ++k)
             model::addNote (region, 48 + k * 3, k * 0.5, 0.4, 100, nullptr);

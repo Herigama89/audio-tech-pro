@@ -3449,7 +3449,10 @@ void MixerPanel::rebuild()
 
     existing.clear();   // (strips for tracks no longer here)
     if (masterStrip == nullptr || masterStrip->getProject() != project)
+    {
         masterStrip = std::make_unique<ChannelStrip> (*this, project, juce::ValueTree());
+        masterStrip->setMasterTint (juce::Colour (0xffe8231d));   // (the master fader: red, as in the Console windows)
+    }
     else
         masterStrip->refresh();
     body.addAndMakeVisible (*masterStrip);
