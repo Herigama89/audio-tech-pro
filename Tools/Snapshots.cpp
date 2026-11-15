@@ -1056,6 +1056,17 @@ public:
             pump (main, 400);
             save (analog, "consoles-analog.png");
         }
+        {
+            // narrow, the first channel in the left zone, two channels selected
+            main.project.setProperty ("analogNarrow", true, nullptr);
+            main.mixer.setZone ({ tracks[0] }, "left");
+            main.consoleHost.selectTrack (tracks[1][ids::id].toString(), {});
+            main.consoleHost.selectTrack (tracks[2][ids::id].toString(), juce::ModifierKeys (juce::ModifierKeys::commandModifier));
+            AnalogConsole analog (main.consoleHost, main.project);
+            analog.setSize (1300, 1200);
+            pump (main, 400);
+            save (analog, "consoles-analog-narrow.png");
+        }
         return 0;
     }
 

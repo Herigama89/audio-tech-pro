@@ -1265,12 +1265,49 @@ AnalogConsole::AnalogConsole (ConsoleHost& h, juce::ValueTree p) : host (h), pro
         };
         addAndMakeVisible (k);
     }
-    view.setViewedComponent (&holder, false);
+    content.addAndMakeVisible (holder);
+    view.setViewedComponent (&content, false);
+    view.onMoved = [this] { placeZones(); };
     addAndMakeVisible (view);
+    narrow = (bool) project.getProperty ("analogNarrow", false);
+    narrowKey.setToggleState (narrow, juce::dontSendNotification);
+    narrowKey.setTooltip ("Narrow: the whole desk smaller, more channels in view");
+    narrowKey.onClick = [this]
+    {
+        narrow = ! narrow;
+        narrowKey.setToggleState (narrow, juce::dontSendNotification);
+        project.setProperty ("analogNarrow", narrow, nullptr);
+        resized();
+    };
+    addAndMakeVisible (narrowKey);
+    setWantsKeyboardFocus (true);
     project.addListener (this);
     setSize (1500, 980);
     setClosed (closedSections);
     startTimerHz (30);
+}
+
+bool AnalogConsole::keyPressed (const juce::KeyPress& key)
+{
+    if (key == juce::KeyPress ('a', juce::ModifierKeys::commandModifier, 0))
+    {
+        selectAllChannels();
+        return true;
+    }
+    return false;
+}
+
+void AnalogConsole::selectAllChannels()
+{
+    // every channel selected: a knob, key or fader moved on one moves them all
+    if (! host.selectTrack)
+        return;
+    bool first = true;
+    for (auto* s : strips)
+    {
+        host.selectTrack (s->track[ids::id].toString(), first ? juce::ModifierKeys() : juce::ModifierKeys (juce::ModifierKeys::commandModifier));
+        first = false;
+    }
 }
 
 void AnalogConsole::setClosed (const juce::StringArray& closed)
@@ -1309,6 +1346,17 @@ void AnalogConsole::showChannelMenu (juce::ValueTree track, juce::Component& tar
     for (int i = 0; i < juce::jmin (48, palette.size()); ++i)
         colours.addColouredItem (1000 + i, "        ", palette[i], true, false, nullptr);
     menu.addSubMenu ("Colour", colours);
+    menu.addItem ("Select All Channels (Cmd-A)", [this] { selectAllChannels(); });
+    if (host.mixer != nullptr)
+    {
+        juce::PopupMenu zones;
+        const auto zone = MixerPanel::zoneOf (project, track);
+        auto* mixer = host.mixer;
+        zones.addItem ("Left Zone (stays at the left)", true, zone == "left", [mixer, track] { mixer->setZone ({ track }, "left"); });
+        zones.addItem ("Right Zone (stays at the right)", true, zone == "right", [mixer, track] { mixer->setZone ({ track }, "right"); });
+        zones.addItem ("With the Others", true, zone.isEmpty(), [mixer, track] { mixer->setZone ({ track }, "none"); });
+        menu.addSubMenu ("Zone", zones);
+    }
     menu.addItem ("Duplicate Channel", [proj, track, &um]
     {
         um.beginNewTransaction ("Duplicate Track");
@@ -1340,8 +1388,11 @@ void AnalogConsole::Strip::mouseUp (const juce::MouseEvent& e)
             if (onTitle) onTitle (title);
             return;
         }
-    if (e.getPosition().y < 30 && ! isMaster && onName)
-        onName (*this);
+    if (e.getPosition().y < 30 && ! isMaster)
+    {
+        if (e.mods.isPopupMenu()) { if (onName) onName (*this); }
+        else if (onSelect) onSelect (e.mods);
+    }
 }
 
 AnalogConsole::~AnalogConsole()
@@ -1437,7 +1488,14 @@ void AnalogConsole::buildStrip (Strip& s)
         k->textFromValueFunction = std::move (text);
         auto tree = track;
         k->onDragStart = [&um, caption] { um.beginNewTransaction ("Analog Console: " + caption); };
-        k->onValueChange = [k, tree, property, &um]() mutable { tree.setProperty (property, k->getValue(), &um); };
+        k->onValueChange = [this, k, tree, property, fallback, lo, hi, &um]() mutable
+        {
+            // the selected channels with it: each moved by as much (as Logic's mixer)
+            const auto before = (double) tree.getProperty (property, fallback);
+            tree.setProperty (property, k->getValue(), &um);
+            for (auto other : gangOf (tree))
+                other.setProperty (property, juce::jlimit (lo, hi, (double) other.getProperty (property, fallback) + k->getValue() - before), &um);
+        };
         k->setBounds (where);
         s.addAndMakeVisible (k);
         s.parts.add (k);
@@ -1451,10 +1509,13 @@ void AnalogConsole::buildStrip (Strip& s)
         b->setToggleState ((bool) track.getProperty (property, fallback), juce::dontSendNotification);
         b->setTooltip (tip.isNotEmpty() ? tip : text);
         auto tree = track;
-        b->onClick = [tree, property, fallback, &um]() mutable
+        b->onClick = [this, tree, property, fallback, &um]() mutable
         {
             um.beginNewTransaction ("Analog Console");
-            tree.setProperty (property, ! (bool) tree.getProperty (property, fallback), &um);
+            const auto value = ! (bool) tree.getProperty (property, fallback);
+            tree.setProperty (property, value, &um);
+            for (auto other : gangOf (tree))
+                other.setProperty (property, value, &um);
         };
         b->setBounds (where);
         s.addAndMakeVisible (b);
@@ -1823,6 +1884,7 @@ void AnalogConsole::buildMaster (Strip& s)
     if (host.engine != nullptr)
     {
         meter = std::make_unique<ConsoleMeter> (*host.engine, project);
+        meter->onOpenBig = [this] { if (host.openMultiMeter) host.openMultiMeter(); };
         meter->setBounds (8, y, w - 16, 150);
         s.addAndMakeVisible (*meter);
         y += 156;
@@ -1889,15 +1951,27 @@ void AnalogConsole::rebuild()
         insertRows = juce::jmax (insertRows, rowsFor (track[ids::id].toString()));
     }
     int index = 0;
+    std::vector<std::pair<juce::ValueTree, int>> left, middle, right;
     for (const auto& track : channels (project))
     {
         ++index;
         const auto bus = model::isBusTrack (track);
         if ((filter == 1 && bus) || (filter == 2 && ! bus))
             continue;
+        const auto zone = host.mixer != nullptr ? MixerPanel::zoneOf (project, track) : juce::String();
+        (zone == "left" ? left : zone == "right" ? right : middle).push_back ({ track, index });
+    }
+    const auto selectedIds = host.mixer != nullptr ? host.mixer->getSelectedTrackIds() : juce::StringArray();
+    selectionShown = selectedIds.joinIntoString (",");
+    for (const auto* group : { &left, &middle, &right })
+      for (const auto& [track, number] : *group)
+    {
         auto* s = strips.add (new Strip());
+        s->zone = group == &left ? "left" : group == &right ? "right" : "";
+        s->selected = selectedIds.contains (track[ids::id].toString());
+        s->onSelect = [this, id = track[ids::id].toString()] (juce::ModifierKeys mods) { if (host.selectTrack) host.selectTrack (id, mods); };
         s->track = track;
-        s->number = juce::String (index);
+        s->number = juce::String (number);
         s->name = track[ids::name].toString();
         s->colour = model::trackColour (track);
         s->closed = closedSections;
@@ -1939,7 +2013,15 @@ void AnalogConsole::rebuild()
             if (strip->isMaster)
                 project.setProperty (ids::masterGain, gain, host.undo);
             else
+            {
+                const auto before = gainToDb ((double) strip->track.getProperty (ids::volume, 1.0));
                 strip->track.setProperty (ids::volume, gain, host.undo);
+                for (auto other : gangOf (strip->track))
+                {
+                    const auto db = juce::jlimit (minDb, 6.0, gainToDb ((double) other.getProperty (ids::volume, 1.0)) + strip->fader.getValue() - before);
+                    other.setProperty (ids::volume, db <= minDb + 0.01 ? 0.0 : dbToGain (db), host.undo);
+                }
+            }
             const auto db = strip->fader.getValue();
             strip->level.setText (db <= minDb + 0.01 ? juce::String ("-inf") : juce::String (db, 1), juce::dontSendNotification);
         };
@@ -1986,8 +2068,8 @@ void AnalogConsole::Strip::paint (juce::Graphics& g)
     auto r = getLocalBounds().toFloat().reduced (2.0f, 0.0f);
     g.setGradientFill (juce::ColourGradient (d.top.withAlpha (0.92f), 0.0f, r.getY(), d.bottom.withAlpha (0.92f), 0.0f, r.getBottom(), false));
     g.fillRoundedRectangle (r, 12.0f);
-    g.setColour (d.edge);
-    g.drawRoundedRectangle (r.reduced (0.5f), 12.0f, 1.0f);
+    g.setColour (selected ? juce::Colour (0xffffd60a).withAlpha (0.85f) : d.edge);
+    g.drawRoundedRectangle (r.reduced (0.5f), 12.0f, selected ? 2.0f : 1.0f);
     // the header: number, name, the track's colour under it
     auto head = getLocalBounds().reduced (8, 0).removeFromTop (28);
     g.setColour (juce::Colours::black.withAlpha (theme::glassLight() ? 0.08f : 0.3f));
@@ -2106,6 +2188,21 @@ void AnalogConsole::Strip::paint (juce::Graphics& g)
 
 void AnalogConsole::timerCallback()
 {
+    // the selection (made here or anywhere): the selected channels lit
+    if (host.mixer != nullptr)
+    {
+        const auto now = host.mixer->getSelectedTrackIds().joinIntoString (",");
+        if (now != selectionShown)
+        {
+            selectionShown = now;
+            const auto ids_ = host.mixer->getSelectedTrackIds();
+            for (auto* s : strips)
+            {
+                s->selected = ids_.contains (s->track[ids::id].toString());
+                s->repaint();
+            }
+        }
+    }
     if (! isShowing() || host.engine == nullptr || host.player == nullptr)
         return;
     const auto ballistics = [] (Strip& s, float l, float r)
@@ -2182,8 +2279,11 @@ void AnalogConsole::resized()
         k->setBounds (tabs.removeFromLeft (58));
         tabs.removeFromLeft (4);
     }
+    tabs.removeFromLeft (16);
+    narrowKey.setBounds (tabs.removeFromLeft (70));
     auto area = getLocalBounds().withTrimmedTop (74).reduced (6, 0).withTrimmedBottom (6);
     view.setBounds (area);
+    const auto scale = narrow ? 0.72f : 1.0f;
     // every fader starts at the same height (as on a desk), below the tallest channel's sections
     int faderTop = 0;
     for (auto* s : strips)
@@ -2194,9 +2294,12 @@ void AnalogConsole::resized()
         s->faderArea.setY (faderTop);
     if (master != nullptr)
         master->faderArea.setY (faderTop);
-    const auto contentHeight = juce::jmax (faderTop + 250 + 64, area.getHeight() - view.getScrollBarThickness());
+    const auto shownHeight = area.getHeight() - view.getScrollBarThickness();
+    const auto contentHeight = juce::jmax (faderTop + 250 + 64, juce::roundToInt ((float) shownHeight / scale));
     const auto width = strips.size() * (columnWidth + 4) + masterWidth + 12;
-    holder.setSize (juce::jmax (width, area.getWidth() - 2), contentHeight);
+    holder.setSize (juce::jmax (width, juce::roundToInt ((float) (area.getWidth() - 2) / scale)), contentHeight);
+    holder.setTransform (juce::AffineTransform::scale (scale));
+    content.setSize (juce::roundToInt ((float) holder.getWidth() * scale), juce::roundToInt ((float) holder.getHeight() * scale));
     auto placeFader = [] (Strip& s, int height)
     {
         auto f = s.faderArea.withHeight (juce::jmax (140, height - s.faderArea.getY() - 64));
@@ -2220,6 +2323,55 @@ void AnalogConsole::resized()
             if (auto* key = dynamic_cast<ConsoleKey*> (part); key != nullptr && key->getButtonText() == "Bnce")
                 key->setBounds (masterWidth - 60, master->level.getY(), 50, 20);
     }
+    placeZones();
+}
+
+void AnalogConsole::placeZones()
+{
+    // The left zone's channels stay at the left edge as the desk scrolls; the right zone's and the master at the right
+    const auto scale = narrow ? 0.72f : 1.0f;
+    const auto shown = view.getViewArea();
+    const auto leftEdge = juce::roundToInt ((float) shown.getX() / scale);
+    const auto rightEdge = juce::roundToInt ((float) shown.getRight() / scale);
+    int rightCount = 0;
+    for (auto* s : strips)
+        rightCount += s->zone == "right" ? 1 : 0;
+    int l = 0, r = 0;
+    for (int i = 0; i < strips.size(); ++i)
+    {
+        auto* s = strips[i];
+        if (s->zone == "left")
+        {
+            s->setTopLeftPosition (leftEdge + l++ * (columnWidth + 4), 0);
+            s->toFront (false);
+        }
+        else if (s->zone == "right")
+        {
+            s->setTopLeftPosition (rightEdge - masterWidth - 6 - (rightCount - r++) * (columnWidth + 4), 0);
+            s->toFront (false);
+        }
+    }
+    if (master != nullptr)
+    {
+        master->setTopLeftPosition (juce::jmin (holder.getWidth(), rightEdge) - masterWidth - 2, 0);
+        master->toFront (false);
+    }
+}
+
+juce::Array<juce::ValueTree> AnalogConsole::gangOf (const juce::ValueTree& track) const
+{
+    juce::Array<juce::ValueTree> others;
+    if (host.mixer == nullptr)
+        return others;
+    const auto& selected = host.mixer->getSelectedTrackIds();
+    const auto id = track[ids::id].toString();
+    if (selected.size() < 2 || ! selected.contains (id))
+        return others;
+    for (const auto& other : selected)
+        if (other != id)
+            if (auto t = model::findById (project, other); t.isValid())
+                others.add (t);
+    return others;
 }
 
 } // namespace riff

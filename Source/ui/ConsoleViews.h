@@ -37,6 +37,10 @@ struct ConsoleHost
     std::function<std::pair<float, float>()> masterLevels;
     /** Bounce (the master's Bnce key): the song, or the cycle, to a file. */
     std::function<void()> bounce;
+    /** The master's MultiMeter in its own (resizable) window: double-click the console's. */
+    std::function<void()> openMultiMeter;
+    /** Selecting a channel (as a click on its strip in the mixer: shift and command add to the selection). */
+    std::function<void (const juce::String& trackId, juce::ModifierKeys mods)> selectTrack;
 };
 
 /** A component shown at a fraction of its size, to fit a width (a plug-in face in a console column). */
@@ -237,6 +241,8 @@ class ConsoleMeter final : public juce::Component, private juce::Timer
 {
 public:
     ConsoleMeter (AudioEngine& engine, juce::ValueTree project);
+    void mouseDoubleClick (const juce::MouseEvent&) override { if (onOpenBig) onOpenBig(); }
+    std::function<void()> onOpenBig;
     ~ConsoleMeter() override;
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -270,6 +276,8 @@ public:
     ~AnalogConsole() override;
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress&) override;
+    void selectAllChannels();
 
     static constexpr int columnWidth = 116, masterWidth = 212;
 
@@ -315,7 +323,10 @@ private:
         std::unique_ptr<ChannelStrip> helper;   // (the mixer's strip for this channel, not shown: its menus)
         std::function<void (const juce::String&)> onTitle;
         std::function<void (juce::Component&)> onName;
+        std::function<void (juce::ModifierKeys)> onSelect;
         juce::StringArray closed;
+        bool selected = false;
+        juce::String zone;   // "left", "right" or empty: where it stays as the desk scrolls (as the mixer's zones)
         void paint (juce::Graphics&) override;
         void mouseUp (const juce::MouseEvent&) override;
         void paintMeter (juce::Graphics&, juce::Rectangle<float> area, float peak, float hold) const;
@@ -326,9 +337,21 @@ private:
     void buildStrip (Strip& s);
     void buildMaster (Strip& s);
     void refreshBindings (Strip& s);
-    juce::Viewport view;
-    juce::Component holder;
+    /** The desk scrolls; the zones' channels and the master stay at its sides (as the mixer's zones). */
+    struct DeskView final : juce::Viewport
+    {
+        std::function<void()> onMoved;
+        void visibleAreaChanged (const juce::Rectangle<int>&) override { if (onMoved) onMoved(); }
+    };
+    DeskView view;
+    juce::Component content, holder;   // (content: the desk at its shown size; holder: at its own, scaled into it in Narrow)
     float busGr = 0.0f;
+    bool narrow = false;
+    ConsoleKey narrowKey { "Narrow", juce::Colour (0xffffa21f) };
+    void placeZones();
+    juce::String selectionShown;
+    /** Ganged: the other selected channels a change to this one goes to too (as Logic's mixer). */
+    juce::Array<juce::ValueTree> gangOf (const juce::ValueTree& track) const;
 };
 
 } // namespace riff

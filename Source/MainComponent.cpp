@@ -4153,6 +4153,8 @@ void MainComponent::setUpConsoleHost()
     };
     consoleHost.sampleRate = [this] { return engine.getSampleRate() > 0.0 ? engine.getSampleRate() : 48000.0; };
     consoleHost.bounce = [this] { exportSong(); };
+    consoleHost.openMultiMeter = [this] { showMultiMeter(); };
+    consoleHost.selectTrack = [this] (const juce::String& id, juce::ModifierKeys mods) { selectTrackFromMixer (id, mods); };
     consoleHost.masterLevels = [this]
     {
         const std::pair<float, float> levels { consoleMasterL, consoleMasterR };
@@ -4205,7 +4207,7 @@ void MainComponent::openConsoleView()
 {
     if (consoleWindow != nullptr)
     {
-        consoleWindow->toFront (true);
+        consoleWindow.reset();                     // the same shortcut closes it
         return;
     }
     auto closer = [this]
@@ -4223,7 +4225,7 @@ void MainComponent::openAnalogConsole()
 {
     if (analogWindow != nullptr)
     {
-        analogWindow->toFront (true);
+        analogWindow.reset();                     // the same shortcut closes it
         return;
     }
     auto closer = [this]
