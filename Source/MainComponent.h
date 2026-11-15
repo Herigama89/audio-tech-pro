@@ -89,6 +89,10 @@ public:
     // The menu bar (the Mac's main menu)
     juce::StringArray getMenuBarNames() override;
     juce::PopupMenu getMenuForIndex (int index, const juce::String& name) override;
+    /** The menus by their place on the Mac's bar (File 0, Edit 1 ... View 6): on Windows the app's menu comes first. */
+    juce::PopupMenu menuFor (int index);
+    /** Windows' first menu (the Mac's app menu): About, Settings, Key Commands, Exit. */
+    juce::PopupMenu appMenuForWindows();
     void menuItemSelected (int, int) override {}
 
     juce::ApplicationCommandManager& getCommandManager() { return commandManager; }

@@ -1196,7 +1196,7 @@ void MainComponent::showLocalMenu (int which, juce::Component& target)
     };
 
     if (which == 0)
-        menu = getMenuForIndex (1, "Edit");
+        menu = menuFor (1);
     else if (which == 1)
     {
         menu.addSectionHeader ("Region");
@@ -1213,7 +1213,7 @@ void MainComponent::showLocalMenu (int which, juce::Component& target)
     }
     else
     {
-        menu = getMenuForIndex (6, "View");
+        menu = menuFor (6);
         menu.addSeparator();
         add ({ commands::showHiddenTracks, commands::showAutomation });
     }

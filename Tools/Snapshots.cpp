@@ -1043,6 +1043,34 @@ public:
         return 0;
     }
 
+    /** The Windows window: the menus along its top (as the Mac's menu bar), over the arrange and mixer. */
+    int windowsMenuOnly()
+    {
+        out.createDirectory();
+        audioFolder = out.getChildFile ("demo-audio");
+        audioFolder.createDirectory();
+        MainComponent main (false);
+        buildDemoProject (main);
+        theme::Settings t;
+        t.skin = juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_LIGHT", {}).isNotEmpty() ? theme::Skin::glassLight : theme::Skin::glassDark;
+        main.applyTheme (t);
+        struct Window final : juce::Component
+        {
+            juce::MenuBarComponent bar;
+            juce::Component* content = nullptr;
+            void resized() override { bar.setBounds (0, 0, getWidth(), 28); if (content) content->setBounds (0, 28, getWidth(), getHeight() - 28); }
+        } window;
+        window.bar.setModel (&main);
+        window.content = &main;
+        window.addAndMakeVisible (window.bar);
+        window.addAndMakeVisible (main);
+        window.setSize (1440, 948);
+        main.showMixer();
+        pump (main, 400);
+        save (window, "windows-menu.png");
+        return 0;
+    }
+
     int consolesOnly()
     {
         out.createDirectory();
@@ -3055,6 +3083,12 @@ int main (int argc, char* argv[])
     if (argc > 2 && juce::String (argv[1]) == "studio")
     {
         const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).studioOnly();
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        return r;
+    }
+    if (argc > 2 && juce::String (argv[1]) == "winmenu")
+    {
+        const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).windowsMenuOnly();
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         return r;
     }

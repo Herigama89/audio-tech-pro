@@ -105,6 +105,11 @@ private:
         {
             setUsingNativeTitleBar (true);
             setContentOwned (new riff::MainComponent(), true);
+           #if ! JUCE_MAC
+            // Windows: the menus along the top of the window (the Mac has them in its menu bar)
+            if (auto* menus = dynamic_cast<juce::MenuBarModel*> (getContentComponent()))
+                setMenuBar (menus, 28);
+           #endif
             setResizable (true, true);
             setResizeLimits (1240, 480, 10000, 10000);
 

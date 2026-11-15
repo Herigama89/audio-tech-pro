@@ -384,6 +384,44 @@ void ConsoleLook::drawPopupMenuBackground (juce::Graphics& g, int width, int hei
     g.drawRect (0, 0, width, height);
 }
 
+void ConsoleLook::drawMenuBarBackground (juce::Graphics& g, int width, int height, bool, juce::MenuBarComponent&)
+{
+    // a strip of glass the width of the window, lit along its top, a hairline under it
+    const auto light = theme::glassLight();
+    g.setGradientFill (juce::ColourGradient (light ? juce::Colour (0xfff7f8fa) : juce::Colour (0xff2a2e35), 0.0f, 0.0f,
+                                             light ? juce::Colour (0xffe3e7ec) : juce::Colour (0xff1a1d22), 0.0f, (float) height, false));
+    g.fillAll();
+    g.setColour ((light ? juce::Colours::black : juce::Colours::white).withAlpha (light ? 0.12f : 0.08f));
+    g.fillRect (0, height - 1, width, 1);
+}
+
+void ConsoleLook::drawMenuBarItem (juce::Graphics& g, int width, int height, int itemIndex, const juce::String& itemText,
+                                   bool over, bool open, bool, juce::MenuBarComponent& bar)
+{
+    const auto light = theme::glassLight();
+    if (open || over)
+    {
+        // the chosen menu: a soft pill (teal when open), as the Mac's menu bar shows it
+        const auto pill = juce::Rectangle<float> (0.0f, 0.0f, (float) width, (float) height).reduced (1.0f, 3.0f);
+        g.setColour (open ? juce::Colour (0xff19b9b5) : (light ? juce::Colours::black : juce::Colours::white).withAlpha (0.10f));
+        g.fillRoundedRectangle (pill, 5.0f);
+    }
+    g.setColour (open ? juce::Colours::white : light ? juce::Colour (0xff15181c) : juce::Colour (0xffeef2f6));
+    g.setFont (getMenuBarFont (bar, itemIndex, itemText));
+    g.drawText (itemText, 0, 0, width, height, juce::Justification::centred, false);
+}
+
+juce::Font ConsoleLook::getMenuBarFont (juce::MenuBarComponent&, int itemIndex, const juce::String&)
+{
+    // the first menu is the app's (bold, as on the Mac)
+    return juce::FontOptions (13.5f, itemIndex == 0 ? juce::Font::bold : juce::Font::plain);
+}
+
+int ConsoleLook::getMenuBarItemWidth (juce::MenuBarComponent& bar, int itemIndex, const juce::String& itemText)
+{
+    return juce::GlyphArrangement::getStringWidthInt (getMenuBarFont (bar, itemIndex, itemText), itemText) + 22;
+}
+
 void ConsoleLook::drawComboBox (juce::Graphics& g, int width, int height, bool down, int bx, int by, int bw, int bh, juce::ComboBox& box)
 {
     LookAndFeel_V4::drawComboBox (g, width, height, down, bx, by, bw, bh, box);

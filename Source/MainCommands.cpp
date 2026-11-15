@@ -458,10 +458,43 @@ bool MainComponent::perform (const InvocationInfo& info)
 //==============================================================================
 juce::StringArray MainComponent::getMenuBarNames()
 {
-    return { "File", "Edit", "Track", "Navigate", "Record", "Mix", "View", "Audio Process", "Window", "Help" };
+    juce::StringArray names { "File", "Edit", "Track", "Navigate", "Record", "Mix", "View", "Audio Process", "Window", "Help" };
+   #if ! JUCE_MAC
+    names.insert (0, app::name);   // (Windows: the app's own menu first, as the Mac's)
+   #endif
+    return names;
 }
 
 juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
+{
+   #if ! JUCE_MAC
+    if (index == 0)
+        return appMenuForWindows();
+    return menuFor (index - 1);
+   #else
+    return menuFor (index);
+   #endif
+}
+
+juce::PopupMenu MainComponent::appMenuForWindows()
+{
+    juce::PopupMenu menu;
+    menu.addItem ("About " + app::name, []
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon, app::name,
+                                                "Version " + juce::JUCEApplication::getInstance()->getApplicationVersion());
+    });
+    menu.addSeparator();
+    menu.addCommandItem (&commandManager, commands::audioSettings, "Settings...");
+    menu.addCommandItem (&commandManager, commands::preferences);
+    menu.addCommandItem (&commandManager, commands::keyCommands);
+    menu.addCommandItem (&commandManager, commands::themeSettings);
+    menu.addSeparator();
+    menu.addItem ("Exit", [] { juce::JUCEApplication::getInstance()->systemRequestedQuit(); });
+    return menu;
+}
+
+juce::PopupMenu MainComponent::menuFor (int index)
 {
     juce::PopupMenu menu;
     auto add = [&] (std::initializer_list<juce::CommandID> list)
