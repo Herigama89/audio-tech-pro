@@ -1904,6 +1904,8 @@ bool AudioEngine::canRunInParallel (const PlaybackGraph::Track& track) noexcept
     // Not a bus (they wait for the tracks' sends), and not listening to another track this block
     if (track.isBus || (track.monitorInput && track.inputTrackSlot >= 0 && track.inputTrackSlot != track.slot))
         return false;
+    if (track.auxSourceSlot >= 0)
+        return false;   // (waits for its instrument)
     for (const auto& s : track.sidechains)
         if (s.sourceSlot != track.slot)
             return false;
@@ -1991,6 +1993,21 @@ bool AudioEngine::processTrack (const PlaybackGraph::Track& track, Pass& pass, c
             juce::FloatVectorOperations::add (tR, inR, n);
             anyAudio = true;
         }
+    }
+    else if (track.auxSourceSlot >= 0)
+    {
+        // A multi-output channel: the instrument's other output pair, as it rendered this chunk
+        if (track.auxInstrument != nullptr)
+        {
+            const auto* l = track.auxInstrument->getExtraOutput (track.auxPair, 0);
+            const auto* r = track.auxInstrument->getExtraOutput (track.auxPair, 1);
+            if (l != nullptr)
+            {
+                juce::FloatVectorOperations::copy (tL, l, n);
+                juce::FloatVectorOperations::copy (tR, r != nullptr ? r : l, n);
+            }
+        }
+        anyAudio = true;
     }
     else if (track.isInstrument)
     {
@@ -2564,6 +2581,12 @@ AudioEngine::SlotSet AudioEngine::liveSlotsOf (const PlaybackGraph& graph, SlotS
             if (! juce::isPositiveAndBelow (t.slot, PlaybackGraph::maxTracks))
                 continue;
             const bool isLive = live.test ((size_t) t.slot);
+            if (juce::isPositiveAndBelow (t.auxSourceSlot, PlaybackGraph::maxTracks))
+            {
+                // a multi-output channel plays in the same pass as its instrument
+                if (isLive) mark (t.auxSourceSlot, changed);
+                else if (live.test ((size_t) t.auxSourceSlot)) mark (t.slot, changed);
+            }
             for (const auto& side : t.sidechains)
             {
                 if (isLive) mark (side.sourceSlot, changed);                                         // its key, as it is now

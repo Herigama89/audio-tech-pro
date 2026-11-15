@@ -27,6 +27,13 @@ public:
     /** Where the song is and its tempo, before each render (audio thread): for LFOs, delays and arpeggios in time. */
     virtual void setPosition (juce::int64 /*samplePosition*/, bool /*playing*/, double /*bpm*/) noexcept {}
 
+    /** Multi-output (as Logic's multi-output instruments): stereo pairs beyond the main one (outputs 3-4, 5-6...).
+        After render() (same audio thread, same block), getExtraOutput gives each pair's channel; nullptr = silence. */
+    virtual int getNumExtraOutputs() const noexcept { return 0; }
+    virtual const float* getExtraOutput (int /*pair: 1 = outputs 3-4*/, int /*channel*/) const noexcept { return nullptr; }
+    /** The name of an output pair (0 = the main one), for the mixer: "Kick", "Out 3-4"... (message thread). */
+    virtual juce::String getOutputName (int pair) const { return pair == 0 ? juce::String ("Main") : "Out " + juce::String (pair * 2 + 1) + "-" + juce::String (pair * 2 + 2); }
+
     /** How many samples late this instrument's output is (for delay compensation). */
     virtual int getLatencySamples() const { return 0; }
 

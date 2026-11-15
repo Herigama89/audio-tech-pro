@@ -85,6 +85,19 @@ std::shared_ptr<Nemix> InstrumentRack::getNemix (const juce::String& trackId)
     return std::dynamic_pointer_cast<Nemix> (it->second.instrument);
 }
 
+juce::StringArray InstrumentRack::outputNamesOf (const juce::String& trackId)
+{
+    juce::StringArray names { "Main" };
+    const auto it = entries.find (trackId);
+    if (it == entries.end() || it->second.instrument == nullptr)
+        return names;
+    const auto& instrument = *it->second.instrument;
+    names.set (0, instrument.getOutputName (0));
+    for (int pair = 1; pair <= instrument.getNumExtraOutputs(); ++pair)
+        names.add (instrument.getOutputName (pair));
+    return names;
+}
+
 std::shared_ptr<Instrument> InstrumentRack::instrumentFor (const juce::ValueTree& track, double sampleRate, int maxBlockSize)
 {
     const auto id = track[ids::id].toString();

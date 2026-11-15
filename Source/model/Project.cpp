@@ -150,6 +150,42 @@ juce::ValueTree createProject (const juce::String& name)
     return project;
 }
 
+juce::Array<juce::ValueTree> multiOutputsOf (const juce::ValueTree& project, const juce::ValueTree& instrumentTrack)
+{
+    juce::Array<juce::ValueTree> found;
+    const auto id = instrumentTrack[ids::id].toString();
+    if (id.isEmpty())
+        return found;
+    for (const auto& t : project)
+        if (t.hasType (ids::TRACK) && t[ids::multiFrom].toString() == id)
+            found.add (t);
+    std::sort (found.begin(), found.end(), [] (const juce::ValueTree& a, const juce::ValueTree& b)
+               { return (int) a.getProperty (ids::multiPair, 1) < (int) b.getProperty (ids::multiPair, 1); });
+    return found;
+}
+
+juce::ValueTree addMultiOutput (juce::ValueTree project, juce::ValueTree instrumentTrack, int pair, const juce::String& name,
+                                juce::UndoManager* um)
+{
+    const auto existing = multiOutputsOf (project, instrumentTrack);
+    for (const auto& t : existing)
+        if ((int) t.getProperty (ids::multiPair, 1) == pair)
+            return t;
+    // right after the instrument and its other outputs (in pair order)
+    int index = project.indexOf (instrumentTrack) + 1;
+    for (const auto& t : existing)
+        if ((int) t.getProperty (ids::multiPair, 1) < pair)
+            index = juce::jmax (index, project.indexOf (t) + 1);
+    auto track = addTrack (project, name, um, index, audioKind);
+    track.setProperty (ids::multiFrom, instrumentTrack[ids::id].toString(), um);
+    track.setProperty (ids::multiPair, pair, um);
+    track.setProperty (ids::colour, instrumentTrack[ids::colour].toString(), um);
+    track.setProperty (ids::inputStereo, true, um);
+    if (instrumentTrack.hasProperty (ids::output))
+        track.setProperty (ids::output, instrumentTrack[ids::output].toString(), um);
+    return track;
+}
+
 juce::ValueTree addTrack (juce::ValueTree project, const juce::String& name, juce::UndoManager* um,
                           int index, const juce::String& kind)
 {
@@ -173,7 +209,7 @@ juce::ValueTree addTrack (juce::ValueTree project, const juce::String& name, juc
 
     if (kind == instrumentKind)
     {
-        track.setProperty (ids::instrument, "synth", nullptr);
+        track.setProperty (ids::instrument, "nemix", nullptr);   // (the old Synth, Drum Kit and Sampler are retired: Nemix to start)
         track.setProperty (ids::synthWave, 0, nullptr);
         track.setProperty (ids::synthCutoff, 3000.0, nullptr);
         track.setProperty (ids::synthResonance, 0.2, nullptr);

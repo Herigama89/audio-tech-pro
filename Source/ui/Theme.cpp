@@ -683,7 +683,7 @@ Settings upgraded (const Settings& s)
         // (an area with an older skin's theme of its own: back to the main one, so the whole app is glass)
         auto glass = s;
         // (the pieces: the Dark VU caps, LED-ring or Dark VU knobs, glass keys, the black compression meter)
-        glass.faderStyle = 8;
+        if (glass.faderStyle != 10) glass.faderStyle = 8;   // (Dark VU caps in track colours, or white glass)
         if (glass.knobStyle != 7 && glass.knobStyle != 8) glass.knobStyle = -1;
         glass.buttonStyle = -1;
         glass.meterStyle = 1;
@@ -813,7 +813,7 @@ Settings Settings::fromString (const juce::String& text)
     if (v.size() >= 20)
     {
         s.themePack = juce::URL::removeEscapeChars (v[18]);
-        s.faderStyle = juce::jlimit (-1, 9, v[19].getIntValue());
+        s.faderStyle = juce::jlimit (-1, 10, v[19].getIntValue());
     }
     if (v.size() >= 24)
     {

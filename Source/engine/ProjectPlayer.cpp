@@ -1,5 +1,6 @@
 #include "ProjectPlayer.h"
 #include "../model/Project.h"
+#include <functional>
 
 namespace riff
 {
@@ -398,6 +399,24 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         }
         t.receivesLiveMidi = t.isInstrument && track[ids::id].toString() == liveMidiTrackId;
 
+        // A multi-output channel: no regions or input of its own, it plays its instrument's other outputs
+        if (const auto from = track[ids::multiFrom].toString(); from.isNotEmpty() && ! t.isInstrument)
+        {
+            if (const auto source = model::findById (project, from); source.isValid() && model::isInstrumentTrack (source))
+            {
+                t.auxSourceSlot = slotFor (from);
+                t.auxPair = juce::jmax (1, (int) track.getProperty (ids::multiPair, 1));
+            }
+            t.monitorInput = false;
+            t.inputTrackSlot = -1;
+            t.armed = false;
+            t.inputFx.clear();
+            t.printInserts.clear();
+            graph->tracks.push_back (std::move (t));
+            latencies.push_back (latency);
+            continue;
+        }
+
         if (t.isInstrument)
         {
             if (rack != nullptr)
@@ -614,6 +633,55 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
 
         graph->tracks.push_back (std::move (t));
         latencies.push_back (latency);
+    }
+
+    // Multi-output channels: their instrument (as its track has it), its latency, and after it in the order played
+    {
+        std::map<int, size_t> bySlot;
+        for (size_t i = 0; i < graph->tracks.size(); ++i)
+            bySlot[graph->tracks[i].slot] = i;
+        std::vector<size_t> order;
+        std::vector<bool> placed (graph->tracks.size(), false);
+        const std::function<void (size_t)> place = [&] (size_t i)
+        {
+            if (placed[i]) return;
+            placed[i] = true;
+            order.push_back (i);
+            for (size_t j = 0; j < graph->tracks.size(); ++j)   // its multi-output channels right after it
+                if (! placed[j] && graph->tracks[j].auxSourceSlot >= 0 && graph->tracks[j].auxSourceSlot == graph->tracks[i].slot)
+                    place (j);
+        };
+        bool anyAux = false;
+        for (auto& t : graph->tracks)
+            if (t.auxSourceSlot >= 0)
+            {
+                anyAux = true;
+                if (const auto it = bySlot.find (t.auxSourceSlot); it != bySlot.end())
+                {
+                    const auto& source = graph->tracks[it->second];
+                    t.auxInstrument = source.isInstrument ? source.instrument : nullptr;   // (none while frozen or loading)
+                    if (t.auxInstrument != nullptr)
+                        latencies[(size_t) (&t - graph->tracks.data())] += t.auxInstrument->getLatencySamples();
+                }
+            }
+        if (anyAux)
+        {
+            for (size_t i = 0; i < graph->tracks.size(); ++i)
+                if (graph->tracks[i].auxSourceSlot < 0 || bySlot.find (graph->tracks[i].auxSourceSlot) == bySlot.end())
+                    place (i);
+            for (size_t i = 0; i < graph->tracks.size(); ++i)
+                place (i);
+            std::vector<PlaybackGraph::Track> reordered;
+            std::vector<int> latencyOrder;
+            reordered.reserve (order.size());
+            for (const auto i : order)
+            {
+                reordered.push_back (std::move (graph->tracks[i]));
+                latencyOrder.push_back (latencies[i]);
+            }
+            graph->tracks = std::move (reordered);
+            latencies = std::move (latencyOrder);
+        }
     }
 
     // Delay compensation. Every ordinary track is delayed to match the slowest

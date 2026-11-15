@@ -83,11 +83,11 @@ ThemePanel::ThemePanel (theme::Settings initial, std::function<void (const theme
     refreshReaperThemes();
 
     // (Liquid Glass: the Dark VU caps only; knobs LED-ringed or Dark VU; glass keys; the black compression meter)
-    faderBox.addItemList ({ "Dark VU" }, 1);
+    faderBox.addItemList ({ "Dark VU (track colours)", "White glass" }, 1);
     faderBox.setTooltip ("The fader caps (mixer, track headers, editors), whatever the skin: Xenon with black long-throw caps, say");
     faderBox.onChange = [this]
     {
-        settings.faderStyle = 8;
+        settings.faderStyle = faderBox.getSelectedItemIndex() == 1 ? 10 : 8;
         changed();
     };
     addAndMakeVisible (faderBox);
@@ -514,7 +514,7 @@ void ThemePanel::addRow (const juce::String& name, double min, double max, doubl
 void ThemePanel::refreshControls()
 {
     skinBox.setSelectedItemIndex (settings.skin == theme::Skin::glassLight ? 1 : 0, juce::dontSendNotification);
-    faderBox.setSelectedItemIndex (0, juce::dontSendNotification);
+    faderBox.setSelectedItemIndex (settings.faderStyle == 10 ? 1 : 0, juce::dontSendNotification);
     knobBox.setSelectedItemIndex (settings.knobStyle == 7 ? 1 : settings.knobStyle == 8 ? 2 : 0, juce::dontSendNotification);
     buttonBox.setSelectedItemIndex (0, juce::dontSendNotification);
     meterBox.setSelectedItemIndex (0, juce::dontSendNotification);

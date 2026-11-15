@@ -15,6 +15,9 @@ public:
     void prepare (double sampleRate, int maxBlockSize) override;
     void render (float* left, float* right, int numSamples, const juce::MidiBuffer& midi) noexcept override;
     juce::String getName() const override;
+    int getNumExtraOutputs() const noexcept override;
+    const float* getExtraOutput (int pair, int channel) const noexcept override;
+    juce::String getOutputName (int pair) const override;
     int getLatencySamples() const override { return plugin->getLatencySamples(); }
 
     juce::AudioPluginInstance& getPlugin() noexcept { return *plugin; }
@@ -28,6 +31,7 @@ private:
     juce::AudioBuffer<float> buffer;
     juce::MidiBuffer midiCopy;
     bool prepared = false;
+    std::atomic<int> renderedOutputs { 0 }, renderedSamples { 0 };   // what the last render left in `buffer`
 };
 
 } // namespace riff

@@ -146,6 +146,12 @@ struct PlaybackGraph
 
         int inputTrackSlot = -1;    // its input is another track's output (that track's slot), not the device's
 
+        /** A multi-output channel (Logic's aux from an instrument's outputs 3-4, 5-6...): plays that output pair
+            of the instrument on the track in slot auxSourceSlot (rendered before it in the same chunk). */
+        int auxSourceSlot = -1;
+        int auxPair = 0;
+        std::shared_ptr<Instrument> auxInstrument;
+
         /** Printed inserts (LUNA style): they process the input while the track is armed, so what's recorded has
             them in it (and you hear them as you play); on playback they're left out (the recording has them). */
         std::vector<std::shared_ptr<Effect>> printInserts;

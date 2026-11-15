@@ -156,6 +156,8 @@ private:
 
     // Instruments and MIDI
     void showInstrumentMenu (juce::ValueTree track, juce::Component& target);
+    /** Multi-output (Logic's + on an instrument channel): channels for the instrument's other outputs. */
+    void showOutputsMenu (juce::ValueTree track, juce::Component& target);
     void openInstrumentWindow (const juce::ValueTree& track);
     void showPluginScanner();
     void openPianoRoll (juce::ValueTree region);

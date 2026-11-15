@@ -207,6 +207,8 @@ namespace riff::ids
     RIFF_DECLARE_ID (print)          // an insert printed while recording (LUNA style): on the input, not on playback
     RIFF_DECLARE_ID (sidechain)      // an insert's side chain: the track (id) whose output keys it
     RIFF_DECLARE_ID (inputTrack)     // a track recording or hearing another track's output instead of an input
+    RIFF_DECLARE_ID (multiFrom)      // a multi-output channel (Logic's aux): the instrument track (id) whose other outputs it plays
+    RIFF_DECLARE_ID (multiPair)      //   which output pair: 1 = outputs 3-4, 2 = 5-6...
     RIFF_DECLARE_ID (slot)          // an insert's slot on the strip (0 at the top); slots can be left empty above it
     RIFF_DECLARE_ID (target)
     RIFF_DECLARE_ID (level)

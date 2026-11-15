@@ -24,6 +24,8 @@ namespace riff::looks
 
     /** A photo fader cap (faderStyle 4..7) centred in `cap` (its height; the width follows the photo). False otherwise. */
     bool drawFaderCap (juce::Graphics& g, juce::Rectangle<float> cap, bool vertical, float opacity = 1.0f);
+    /** The white glass fader cap (Themes > Faders "White glass", and the instruments' MIX tabs). */
+    juce::Image whiteGlassCap();
 
     /** A photo cap's width for a height (for the strip's fader). */
     float capWidthForHeight (float height);

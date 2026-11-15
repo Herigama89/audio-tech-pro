@@ -66,6 +66,8 @@ public:
     void pushGainReduction (float db);
     juce::String getOwnerId() const;
     juce::ValueTree getTrack() const { return track; }
+    /** The master's fader cap in a colour (the Console windows' solid red); none: as the theme has it. */
+    void setMasterTint (juce::Colour c) { masterTint = c; fader.setTint (c); }
     juce::ValueTree getProject() const { return project; }
 
     void paint (juce::Graphics& g) override;
@@ -188,6 +190,10 @@ private:
     bool canRecord() const;
     strip::DisplaySlider panKnob;
     juce::TextButton inputSlot, outputSlot;   // Logic's Input and Output slots
+    juce::Colour masterTint;
+    juce::TextButton outputsKey { "+" };      // a multi-output instrument's: add channels for its other outputs (Logic's +)
+    bool multiOutputs() const;                // an instrument with outputs past its main pair
+    void showOutputPairMenu();                // a multi-output channel's input: which of the instrument's outputs
     juce::TextButton settingSlot { "Setting" };   // Logic's Setting button: copy, paste, reset, patches
     // Tape saturation (every channel, bus and the master, as on a console that runs everything through tape)
     juce::TextButton tapeKey { "TAPE" };
@@ -412,6 +418,9 @@ public:
     /** For the strips' Input slots: the interface's inputs, and an instrument track's instrument chooser. */
     std::function<juce::StringArray()> inputNames;
     std::function<void (juce::ValueTree track, juce::Component& target)> onInstrumentMenu;
+    /** Multi-output: an instrument track's output names (the main pair first), and its + menu. */
+    std::function<juce::StringArray (const juce::ValueTree& track)> outputNamesOf;
+    std::function<void (juce::ValueTree track, juce::Component& target)> onOutputsMenu;
 
     /** The strip's Setting button (copy / paste / reset the channel strip, save and load patches). */
     std::function<void (juce::ValueTree track, juce::Component& target)> onSettingMenu;

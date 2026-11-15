@@ -606,16 +606,19 @@ void ConsoleView::rebuild()
         return;
 
     int index = 0;
-    for (const auto& track : channels (project))
+    auto list = channels (project);
+    list.add (juce::ValueTree());   // (the master, last: its inserts and its strip, the fader solid red)
+    for (const auto& track : list)
     {
         ++index;
+        const bool isMaster = ! track.isValid();
         auto* column = columns.add (new Column());
         column->track = track;
-        column->number = juce::String (index);
-        column->name = track[ids::name].toString();
-        column->colour = model::trackColour (track);
-        const auto id = track[ids::id].toString();
-        const auto audio = ! model::isInstrumentTrack (track) && ! model::isBusTrack (track);
+        column->number = isMaster ? juce::String ("M") : juce::String (index);
+        column->name = isMaster ? juce::String ("Master") : track[ids::name].toString();
+        column->colour = isMaster ? juce::Colour (0xffe8231d) : model::trackColour (track);
+        const auto id = isMaster ? juce::String (model::masterOwner) : track[ids::id].toString();
+        const auto audio = ! isMaster && ! model::isInstrumentTrack (track) && ! model::isBusTrack (track);
 
         auto addSection = [this, column] (const juce::String& title, const juce::String& owner, bool canAdd)
         {
@@ -656,12 +659,14 @@ void ConsoleView::rebuild()
         };
         if (showInput && audio)
             addSection ("INPUT FX", model::inputOwner (id), true);
-        if (showStrip && model::findChain (project, model::stripOwner (id)).isValid() && ! model::insertsOf (model::findChain (project, model::stripOwner (id))).isEmpty())
+        if (showStrip && ! isMaster && model::findChain (project, model::stripOwner (id)).isValid() && ! model::insertsOf (model::findChain (project, model::stripOwner (id))).isEmpty())
             addSection ("CHANNEL STRIP", model::stripOwner (id), false);
         if (showInserts)
             addSection ("INSERTS", id, true);
 
         column->strip = std::make_unique<ChannelStrip> (*host.mixer, project, track);
+        if (isMaster)
+            column->strip->setMasterTint (juce::Colour (0xffe8231d));
         column->addAndMakeVisible (*column->strip);
         host.mixer->addExtraStrip (column->strip.get());
         holder.addAndMakeVisible (column);
@@ -1378,21 +1383,33 @@ void AnalogConsole::showChannelMenu (juce::ValueTree track, juce::Component& tar
     });
 }
 
+void AnalogConsole::Strip::mouseDown (const juce::MouseEvent& e)
+{
+    // A click on one of its controls selects the channel, as in the mixer: a selected one stays in the selection
+    // (so moving its knob moves the others too); Cmd/Shift add to it
+    if (e.eventComponent == this || isMaster || e.mods.isPopupMenu() || ! onSelect || e.eventTime == lastDown)
+        return;
+    lastDown = e.eventTime;
+    if (! selected || e.mods.isCommandDown() || e.mods.isShiftDown())
+        onSelect (e.mods.isCommandDown() || e.mods.isShiftDown() ? e.mods : juce::ModifierKeys());
+}
+
 void AnalogConsole::Strip::mouseUp (const juce::MouseEvent& e)
 {
-    if (! e.mouseWasClicked())
+    if (e.eventComponent != this || ! e.mouseWasClicked() || e.eventTime == lastUp)
         return;
+    lastUp = e.eventTime;
     for (const auto& [title, area] : sectionTitles)
         if (area.contains (e.getPosition()) && ! isMaster)
         {
             if (onTitle) onTitle (title);
             return;
         }
-    if (e.getPosition().y < 30 && ! isMaster)
-    {
-        if (e.mods.isPopupMenu()) { if (onName) onName (*this); }
-        else if (onSelect) onSelect (e.mods);
-    }
+    if (isMaster)
+        return;
+    // anywhere on the channel: select it (Cmd: add or take away, Shift: from the last one); the name's right-click: its menu
+    if (e.mods.isPopupMenu()) { if (e.getPosition().y < 30 && onName) onName (*this); }
+    else if (onSelect) onSelect (e.mods);
 }
 
 AnalogConsole::~AnalogConsole()
@@ -1970,6 +1987,7 @@ void AnalogConsole::rebuild()
         s->zone = group == &left ? "left" : group == &right ? "right" : "";
         s->selected = selectedIds.contains (track[ids::id].toString());
         s->onSelect = [this, id = track[ids::id].toString()] (juce::ModifierKeys mods) { if (host.selectTrack) host.selectTrack (id, mods); };
+        s->addMouseListener (s, true);   // (its controls' clicks select it too)
         s->track = track;
         s->number = juce::String (number);
         s->name = track[ids::name].toString();
@@ -2004,7 +2022,7 @@ void AnalogConsole::rebuild()
         s.fader.setSkewFactorFromMidPoint (-12.0);
         s.fader.setDoubleClickReturnValue (true, 0.0);
         s.fader.setPopupDisplayEnabled (true, true, nullptr);
-        s.fader.setTint (s.isMaster ? juce::Colour() : s.colour);
+        s.fader.setTint (s.isMaster ? juce::Colour (0xffe8231d) : s.colour);   // (the master's solid red)
         auto* strip = &s;
         s.fader.onDragStart = [this] { host.undo->beginNewTransaction ("Volume"); };
         s.fader.onValueChange = [this, strip]

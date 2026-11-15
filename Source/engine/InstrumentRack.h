@@ -52,6 +52,10 @@ public:
     /** The track's Nemix, if it has one (for its editor's live readings). */
     std::shared_ptr<class Nemix> getNemix (const juce::String& trackId);
 
+    /** A track's instrument's outputs (multi-output, as Logic): the names of its stereo pairs, the main one first
+        ("Main", "Kick", "Out 5-6"...); just the main one when it has no others (or isn't loaded). */
+    juce::StringArray outputNamesOf (const juce::String& trackId);
+
     /** Settings for the built-in synth, read from the track. */
     static BuiltInSynth::Settings synthSettingsFrom (const juce::ValueTree& track);
     static void applyBuiltInSettings (Instrument* instrument, const juce::ValueTree& track);

@@ -383,7 +383,7 @@ float Fader::yForValue (double value)
 
 void Fader::paint (juce::Graphics& g)
 {
-    if (tint.isTransparent() || getWidth() <= 0 || getHeight() <= 0)
+    if (tint.isTransparent() || getWidth() <= 0 || getHeight() <= 0 || theme::faderStyle() == 10)   // (white glass stays white)
     {
         paintFader (g);
         return;

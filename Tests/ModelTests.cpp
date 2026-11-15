@@ -339,7 +339,7 @@ TEST_CASE ("MIDI regions and notes", "[model][midi]")
 
     CHECK_FALSE (model::isInstrumentTrack (audio));
     CHECK (model::isInstrumentTrack (inst));
-    CHECK (inst[ids::instrument].toString() == "synth");
+    CHECK (inst[ids::instrument].toString() == "nemix");
 
     um.beginNewTransaction();
     auto r = model::addMidiRegion (inst, 2.0, 2.0, &um);

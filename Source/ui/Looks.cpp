@@ -26,6 +26,7 @@ namespace
     RIFF_LOOK_IMAGE (meterCream,    look_vu_cream_png)
     RIFF_LOOK_IMAGE (meterAmber,    look_vu_amber_png)   // the Dark VU theme's pieces
     RIFF_LOOK_IMAGE (capDark,       look_cap_dark_png)
+    RIFF_LOOK_IMAGE (capWhiteGlass, look_cap_whiteglass_png)
     RIFF_LOOK_IMAGE (knobDark,      look_knob_dark_png)
     RIFF_LOOK_IMAGE (buttonDark,    look_btn_dark_png)
     RIFF_LOOK_IMAGE (cap_blue, look_cap_ssl_blue_png)
@@ -52,6 +53,7 @@ namespace
             case 7: return capSilver();
             case 8: return capDark();
             case 9: return skin::faderCap();   // (Studio Grey's, with any skin)
+            case 10: return capWhiteGlass();   // (the white glass cap: stays white, not in the track's colour)
             default: return {};
         }
     }
@@ -200,7 +202,7 @@ juce::StringArray faderNames()
 {
     return { "Skin's own", "Classic", "Studio White (photo cap)", "Xenon (glass cap)", "REAPER theme's",
              "Black (photo)", "Black long-throw", "Black, red line", "Silver console", "Dark VU (picture)",
-             "Studio Grey (picture)" };
+             "Studio Grey (picture)", "White glass" };
 }
 
 juce::StringArray knobNames()
@@ -224,6 +226,8 @@ float capWidthForHeight (float height)
     const auto cap = capFor (theme::faderStyle());
     return cap.isValid() ? height * (float) cap.getWidth() / (float) juce::jmax (1, cap.getHeight()) : height * 0.55f;
 }
+
+juce::Image whiteGlassCap() { return capWhiteGlass(); }
 
 bool drawFaderCap (juce::Graphics& g, juce::Rectangle<float> cap, bool vertical, float opacity)
 {

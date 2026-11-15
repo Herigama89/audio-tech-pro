@@ -329,6 +329,8 @@ private:
         juce::String zone;   // "left", "right" or empty: where it stays as the desk scrolls (as the mixer's zones)
         void paint (juce::Graphics&) override;
         void mouseUp (const juce::MouseEvent&) override;
+        void mouseDown (const juce::MouseEvent&) override;   // (its knobs, keys and fader too: they select it, as in the mixer)
+        juce::Time lastUp, lastDown;   // (it listens to itself too: each event once)
         void paintMeter (juce::Graphics&, juce::Rectangle<float> area, float peak, float hold) const;
     };
     juce::OwnedArray<Strip> strips;

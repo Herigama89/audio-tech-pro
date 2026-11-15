@@ -1013,6 +1013,8 @@ public:
         t.skin = juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_LIGHT", {}).isNotEmpty() ? theme::Skin::glassLight : theme::Skin::glassDark;
         if (const auto k = juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_KNOBS", {}); k.isNotEmpty())
             t.knobStyle = k.getIntValue();
+        if (const auto f = juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_FADER", {}); f.isNotEmpty())
+            t.faderStyle = f.getIntValue();
         main.applyTheme (t);
         // Input FX on the first track (the 737, then the 76), inserts on a few others
         juce::Array<juce::ValueTree> tracks;
@@ -1031,6 +1033,13 @@ public:
             tracks[1].setProperty (ids::consoleHF, 4.0, nullptr);
             tracks[1].setProperty (ids::consoleDynamics, 5.0, nullptr);
         }
+        // a multi-output channel from the instrument track (its outputs 3-4)
+        for (const auto& t : tracks)
+            if (model::isInstrumentTrack (t))
+            {
+                model::addMultiOutput (main.project, t, 1, t[ids::name].toString() + " Out 3-4", nullptr);
+                break;
+            }
         main.player.rebuildNow();
         main.showMixer();
         main.mixer.relayoutStrips();

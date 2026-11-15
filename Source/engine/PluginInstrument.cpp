@@ -43,6 +43,7 @@ void PluginInstrument::render (float* left, float* right, int numSamples, const 
     // A non-owning view of exactly numSamples, so the plugin sees the right block size.
     if (plugin->isSuspended() || ! pluginbuses::fits (*plugin, buffer.getNumChannels()))
     {
+        renderedOutputs.store (0, std::memory_order_relaxed);
         juce::FloatVectorOperations::clear (left, numSamples);
         juce::FloatVectorOperations::clear (right, numSamples);
         return;
@@ -58,6 +59,8 @@ void PluginInstrument::render (float* left, float* right, int numSamples, const 
     plugin->processBlock (view, midiCopy);
 
     const auto outs = juce::jmax (1, plugin->getTotalNumOutputChannels());
+    renderedOutputs.store (outs, std::memory_order_relaxed);
+    renderedSamples.store (numSamples, std::memory_order_relaxed);
     juce::FloatVectorOperations::copy (left, view.getReadPointer (0), numSamples);
     juce::FloatVectorOperations::copy (right, view.getReadPointer (outs > 1 ? 1 : 0), numSamples);
 }
@@ -65,6 +68,42 @@ void PluginInstrument::render (float* left, float* right, int numSamples, const 
 juce::String PluginInstrument::getName() const
 {
     return plugin->getName();
+}
+
+int PluginInstrument::getNumExtraOutputs() const noexcept
+{
+    // (by channel pairs, as Logic lists a multi-output instrument's outputs: 3-4, 5-6...)
+    return juce::jmax (0, (plugin->getTotalNumOutputChannels() + 1) / 2 - 1);
+}
+
+const float* PluginInstrument::getExtraOutput (int pair, int channel) const noexcept
+{
+    const auto outs = renderedOutputs.load (std::memory_order_relaxed);
+    if (pair < 1 || outs <= 0)
+        return nullptr;
+    auto index = pair * 2 + juce::jlimit (0, 1, channel);
+    if (index >= outs)
+        index = pair * 2;            // (a last mono output: both sides)
+    return index < outs && index < buffer.getNumChannels() ? buffer.getReadPointer (index) : nullptr;
+}
+
+juce::String PluginInstrument::getOutputName (int pair) const
+{
+    // The plugin's own name for the bus that output starts in ("Kick", "Snare", "Toms"...), with its channels
+    const auto first = pair * 2;
+    int channel = 0;
+    for (int b = 0; b < plugin->getBusCount (false); ++b)
+        if (const auto* bus = plugin->getBus (false, b); bus != nullptr && bus->isEnabled())
+        {
+            const auto count = bus->getNumberOfChannels();
+            if (first >= channel && first < channel + count)
+            {
+                const auto numbers = juce::String (first + 1) + (first + 1 < plugin->getTotalNumOutputChannels() ? "-" + juce::String (first + 2) : juce::String());
+                return bus->getName().isNotEmpty() && b > 0 ? bus->getName() + " (" + numbers + ")" : Instrument::getOutputName (pair);
+            }
+            channel += count;
+        }
+    return Instrument::getOutputName (pair);
 }
 
 juce::String PluginInstrument::getStateBase64() const

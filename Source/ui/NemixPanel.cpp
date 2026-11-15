@@ -4,6 +4,7 @@
 #include "../model/NemixState.h"
 #include "../engine/nemix/SampleLibrary.h"
 #include "BinaryData.h"
+#include "Looks.h"
 #include <complex>
 #include <cstring>
 
@@ -21,7 +22,18 @@ namespace
     {
         const juce::Colour teal (0xff19d3d0), purple (0xffa25bff), orange (0xffff8a1f), red (0xffff3b54), pink (0xffff4fb4),
                            yellow (0xffffd84a), green (0xff5cff8f), blue (0xff3fa8ff), text (0xffeef2f6), dim (0xff98a3ae),
-                           panel (0xd80c0f14), well (0xff07090c);
+                           panelGraffiti (0xd80c0f14), wellGraffiti (0xff07090c);
+        // (the Liquid Glass skin: frosted panels over the blurred wall; set by setSkin)
+        juce::Colour panel = panelGraffiti, well = wellGraffiti;
+    }
+
+    /** Nemix's skin: Liquid Glass (frosted, silver knobs) or Graffiti (the original dark panels). */
+    bool glassSkin = true;
+    void setSkin (bool glass)
+    {
+        glassSkin = glass;
+        col::panel = glass ? juce::Colour (0x24ffffff) : col::panelGraffiti;
+        col::well = glass ? juce::Colour (0x8c05070b) : col::wellGraffiti;
     }
 
     juce::Font font (float size, bool bold = false) { return juce::FontOptions (size, bold ? juce::Font::bold : juce::Font::plain); }
@@ -98,6 +110,11 @@ namespace
         void drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float start, float end, juce::Slider& s) override
         {
             const auto accent = s.getProperties().contains ("accent") ? juce::Colour::fromString (s.getProperties()["accent"].toString()) : col::teal;
+            if (glassSkin && w >= 30
+                && looks::drawSilverKnob (g, RF ((float) x, (float) y, (float) w, (float) h).reduced (1.0f), pos, start, end,
+                                          accent.withMultipliedBrightness (0.55f).withMultipliedSaturation (0.9f), accent,
+                                          (bool) s.getProperties()["bipolar"], s.isEnabled()))
+                return;
             const auto area = RF ((float) x, (float) y, (float) w, (float) h).reduced (5.0f);
             const auto size = std::min (area.getWidth(), area.getHeight());
             const auto c = area.getCentre();
@@ -130,10 +147,11 @@ namespace
         void drawComboBox (juce::Graphics& g, int w, int h, bool, int, int, int, int, juce::ComboBox& box) override
         {
             const auto r = RF (0.0f, 0.0f, (float) w, (float) h).reduced (0.5f);
-            g.setColour (col::well.withAlpha (0.9f));
-            g.fillRoundedRectangle (r, 4.0f);
-            g.setColour (box.hasKeyboardFocus (false) ? col::teal : juce::Colours::white.withAlpha (0.14f));
-            g.drawRoundedRectangle (r, 4.0f, 1.0f);
+            const auto corner = glassSkin ? std::min (8.0f, r.getHeight() * 0.5f) : 4.0f;
+            g.setColour (glassSkin ? juce::Colours::white.withAlpha (0.08f) : col::well.withAlpha (0.9f));
+            g.fillRoundedRectangle (r, corner);
+            g.setColour (box.hasKeyboardFocus (false) ? col::teal : juce::Colours::white.withAlpha (glassSkin ? 0.22f : 0.14f));
+            g.drawRoundedRectangle (r, corner, 1.0f);
             juce::Path arrow;
             const auto ax = (float) w - 12.0f, ay = (float) h * 0.5f;
             arrow.addTriangle (ax - 4.0f, ay - 2.0f, ax + 4.0f, ay - 2.0f, ax, ay + 3.0f);
@@ -153,6 +171,24 @@ namespace
             const auto accent = b.getProperties().contains ("accent") ? juce::Colour::fromString (b.getProperties()["accent"].toString()) : col::teal;
             const auto r = b.getLocalBounds().toFloat().reduced (0.5f);
             const auto on = b.getToggleState();
+            if (glassSkin)
+            {
+                // a glass pill: frosted when off, lit from inside in its colour when on
+                const auto corner = std::min (8.0f, r.getHeight() * 0.5f);
+                g.setColour (on ? accent.withAlpha (0.34f) : juce::Colours::white.withAlpha (down ? 0.16f : over ? 0.11f : 0.07f));
+                g.fillRoundedRectangle (r, corner);
+                g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.16f), 0.0f, r.getY(),
+                                                         juce::Colours::transparentWhite, 0.0f, r.getCentreY(), false));
+                g.fillRoundedRectangle (r.reduced (1.0f), corner);
+                if (on)
+                {
+                    g.setColour (accent.withAlpha (0.35f));
+                    g.drawRoundedRectangle (r.expanded (1.0f), corner + 1.0f, 3.0f);
+                }
+                g.setColour (on ? accent.brighter (0.5f) : juce::Colours::white.withAlpha (over ? 0.38f : 0.22f));
+                g.drawRoundedRectangle (r, corner, 1.0f);
+                return;
+            }
             g.setColour (on ? accent.withAlpha (0.9f) : col::well.withAlpha (down ? 1.0f : 0.85f));
             g.fillRoundedRectangle (r, 4.0f);
             g.setColour (on ? accent.brighter (0.4f) : juce::Colours::white.withAlpha (over ? 0.3f : 0.14f));
@@ -160,7 +196,7 @@ namespace
         }
         void drawButtonText (juce::Graphics& g, juce::TextButton& b, bool, bool) override
         {
-            g.setColour (b.getToggleState() ? juce::Colours::black : col::text);
+            g.setColour (b.getToggleState() && ! glassSkin ? juce::Colours::black : col::text);
             g.setFont (font (std::min (13.0f, (float) b.getHeight() * 0.55f), true));
             g.drawText (b.getButtonText(), b.getLocalBounds().reduced (3, 0), juce::Justification::centred, false);
         }
@@ -393,12 +429,13 @@ namespace
         {
             const auto c = sourceColour (source);
             const auto r = getLocalBounds().toFloat().reduced (1.0f);
-            g.setColour (selected ? c.withAlpha (0.9f) : col::well.withAlpha (0.9f));
-            g.fillRoundedRectangle (r, 4.0f);
+            const auto corner = glassSkin ? std::min (8.0f, r.getHeight() * 0.5f) : 4.0f;
+            g.setColour (selected ? c.withAlpha (glassSkin ? 0.4f : 0.9f) : (glassSkin ? juce::Colours::white.withAlpha (0.07f) : col::well.withAlpha (0.9f)));
+            g.fillRoundedRectangle (r, corner);
             g.setColour (c.withAlpha (selected ? 1.0f : 0.7f));
-            g.drawRoundedRectangle (r, 4.0f, 1.2f);
+            g.drawRoundedRectangle (r, corner, 1.2f);
             // the grip: three dots
-            g.setColour (selected ? juce::Colours::black : c);
+            g.setColour (selected && ! glassSkin ? juce::Colours::black : selected ? juce::Colours::white : c);
             for (int k = 0; k < 3; ++k)
                 g.fillEllipse (r.getX() + 6.0f, r.getCentreY() - 5.0f + (float) k * 4.0f, 2.5f, 2.5f);
             g.setFont (font (label.length() > 4 ? 10.0f : 11.5f, true));
@@ -436,10 +473,28 @@ namespace
             for (const auto& b : boxes)
             {
                 const auto r = b.area.toFloat();
-                g.setColour (col::panel);
-                g.fillRoundedRectangle (r, 8.0f);
-                g.setColour (b.colour.withAlpha (0.5f));
-                g.drawRoundedRectangle (r.reduced (0.5f), 8.0f, 1.3f);
+                if (glassSkin)
+                {
+                    // frosted glass: the blurred wall shows through, lit along the top, a neon rim in the section's colour
+                    g.setColour (juce::Colours::white.withAlpha (0.075f));
+                    g.fillRoundedRectangle (r, 16.0f);
+                    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.13f), 0.0f, r.getY(),
+                                                             juce::Colours::transparentWhite, 0.0f, r.getY() + 70.0f, false));
+                    g.fillRoundedRectangle (r.reduced (1.0f), 15.0f);
+                    g.setColour (b.colour.withAlpha (0.16f));
+                    g.drawRoundedRectangle (r.expanded (1.5f), 17.0f, 4.0f);
+                    g.setColour (b.colour.withAlpha (0.7f));
+                    g.drawRoundedRectangle (r.reduced (0.5f), 16.0f, 1.2f);
+                    g.setColour (juce::Colours::white.withAlpha (0.35f));
+                    g.drawLine (r.getX() + 18.0f, r.getY() + 1.0f, r.getRight() - 18.0f, r.getY() + 1.0f, 1.0f);
+                }
+                else
+                {
+                    g.setColour (col::panel);
+                    g.fillRoundedRectangle (r, 8.0f);
+                    g.setColour (b.colour.withAlpha (0.5f));
+                    g.drawRoundedRectangle (r.reduced (0.5f), 8.0f, 1.3f);
+                }
                 if (b.title.isNotEmpty())
                 {
                     g.setColour (b.colour);
@@ -714,7 +769,7 @@ struct NemixPanel::Impl final : public Host,
     juce::UndoManager& um;
     std::function<std::shared_ptr<Nemix>()> live;
     Look look;
-    juce::Image logo, wall;
+    juce::Image logo, wall, blurredWall;
 
     juce::OwnedArray<juce::Component> owned;
     std::vector<Knob*> knobs;
@@ -754,6 +809,7 @@ struct NemixPanel::Impl final : public Host,
     Impl (NemixPanel& o, juce::ValueTree t, juce::UndoManager& u, std::function<std::shared_ptr<Nemix>()> l)
         : owner (o), track (t), um (u), live (std::move (l))
     {
+        setSkin (juce::SystemStats::getEnvironmentVariable ("RIFF_NEMIX_SKIN", {}) != "graffiti");
         state = nemixstate::getOrCreate (track, nullptr);
         state.addListener (this);
         logo = juce::ImageCache::getFromMemory (BinaryData::logo_jpg, BinaryData::logo_jpgSize);
@@ -1567,17 +1623,42 @@ void NemixPanel::paint (juce::Graphics& g)
 {
     // The wall, darkened, filling the window
     g.fillAll (juce::Colour (0xff15171b));
-    if (impl->wall.isValid())
+    if (glassSkin && impl->wall.isValid())
+    {
+        // Liquid Glass: the wall blurred soft behind everything, darkened, a little colour glowing through
+        if (! impl->blurredWall.isValid())
+        {
+            const auto& w = impl->wall;
+            juce::Image small (juce::Image::ARGB, juce::jmax (1, w.getWidth() / 24), juce::jmax (1, w.getHeight() / 24), true);
+            {
+                juce::Graphics sg (small);
+                sg.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+                sg.drawImage (w, small.getBounds().toFloat(), juce::RectanglePlacement::stretchToFit);
+            }
+            impl->blurredWall = small;
+        }
+        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+        g.drawImage (impl->blurredWall, getLocalBounds().toFloat(), juce::RectanglePlacement::fillDestination);
+        g.setColour (juce::Colour (0xff070a10).withAlpha (0.62f));
+        g.fillRect (getLocalBounds());
+    }
+    else if (impl->wall.isValid())
     {
         const auto& w = impl->wall;
         const auto scale = std::max ((float) getWidth() / (float) w.getWidth(), (float) getHeight() / (float) w.getHeight());
         g.setOpacity (1.0f);
         g.drawImageTransformed (w, juce::AffineTransform::scale (scale));
     }
-    g.setColour (juce::Colours::black.withAlpha (0.35f));
-    g.fillRect (getLocalBounds());
+    if (! glassSkin)
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.fillRect (getLocalBounds());
+    }
     // The header: a dark bar with the logo sticker
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xf20a0c10), 0.0f, 0.0f, juce::Colour (0xd90a0c10), 0.0f, (float) Impl::headerH, false));
+    if (glassSkin)
+        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.12f), 0.0f, 0.0f, juce::Colours::white.withAlpha (0.04f), 0.0f, (float) Impl::headerH, false));
+    else
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xf20a0c10), 0.0f, 0.0f, juce::Colour (0xd90a0c10), 0.0f, (float) Impl::headerH, false));
     g.fillRect (0, 0, getWidth(), Impl::headerH);
     g.setGradientFill (juce::ColourGradient (col::teal, 0.0f, 0.0f, col::red, (float) getWidth(), 0.0f, false));
     g.fillRect (0, Impl::headerH - 2, getWidth(), 2);

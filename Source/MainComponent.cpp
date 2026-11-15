@@ -492,6 +492,8 @@ MainComponent::MainComponent (bool openAudioDevice)
     addChildComponent (inspector);
     mixer.inputNames = [this] { return headers.inputNames ? headers.inputNames() : juce::StringArray(); };
     mixer.onInstrumentMenu = [this] (juce::ValueTree track, juce::Component& target) { showInstrumentMenu (track, target); };
+    mixer.outputNamesOf = [this] (const juce::ValueTree& track) { return rack.outputNamesOf (track[ids::id].toString()); };
+    mixer.onOutputsMenu = [this] (juce::ValueTree track, juce::Component& target) { showOutputsMenu (track, target); };
     mixer.onSettingMenu = [this] (juce::ValueTree track, juce::Component& target) { showChannelSettingMenu (track, target); };
     headers.inputNames = [this]
     {
@@ -3043,21 +3045,72 @@ void MainComponent::closePianoRoll()
     commandManager.commandStatusChanged();
 }
 
+void MainComponent::showOutputsMenu (juce::ValueTree track, juce::Component& target)
+{
+    const auto names = rack.outputNamesOf (track[ids::id].toString());
+    const auto existing = model::multiOutputsOf (project, track);
+    const auto has = [existing] (int pair)
+    {
+        for (const auto& t : existing)
+            if ((int) t.getProperty (ids::multiPair, 1) == pair)
+                return true;
+        return false;
+    };
+    const auto shortName = [names] (int pair) { return names[pair].upToFirstOccurrenceOf (" (", false, false); };
+    const auto add = [this, track, shortName] (juce::Array<int> pairs)
+    {
+        undoManager.beginNewTransaction ("Multi-output");
+        for (const auto pair : pairs)
+            model::addMultiOutput (project, track, pair, track[ids::name].toString() + " " + shortName (pair), &undoManager);
+    };
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader (track[ids::name].toString() + ": outputs");
+    int next = -1;
+    juce::Array<int> missing;
+    for (int pair = 1; pair < names.size(); ++pair)
+        if (! has (pair))
+        {
+            missing.add (pair);
+            if (next < 0) next = pair;
+        }
+    menu.addItem (next > 0 ? "Add Next Output (" + names[next] + ")" : juce::String ("Add Next Output"), next > 0, false,
+                  [add, next] { add ({ next }); });
+    menu.addItem ("Add All Outputs (" + juce::String (names.size() - 1) + ")", ! missing.isEmpty(), false, [add, missing] { add (missing); });
+    menu.addItem ("Remove Unused Outputs", ! existing.isEmpty(), false, [this, track, names]
+    {
+        // the channels past the instrument's outputs now, or with nothing on them (no inserts, sends or automation)
+        undoManager.beginNewTransaction ("Multi-output");
+        for (auto t : model::multiOutputsOf (project, track))
+        {
+            const auto chain = model::findChain (project, t[ids::id].toString());
+            const bool used = (int) t.getProperty (ids::multiPair, 1) < names.size()
+                              && (model::insertsOf (chain).size() > 0 || model::sendsOf (chain).size() > 0);
+            if (! used)
+                model::deleteTrack (t, &undoManager);
+        }
+    });
+    menu.addSeparator();
+    juce::PopupMenu each;
+    for (int pair = 1; pair < names.size(); ++pair)
+        each.addItem (names[pair], ! has (pair), has (pair), [add, pair] { add ({ pair }); });
+    menu.addSubMenu ("Outputs", each, names.size() > 1);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+}
+
 void MainComponent::showInstrumentMenu (juce::ValueTree track, juce::Component& target)
 {
     const bool isPlugin = track[ids::instrument].toString() == "plugin";
     const auto currentDescription = track[ids::pluginDescription].toString();
 
     juce::PopupMenu menu;
-    menu.addItem (isPlugin ? "Show plugin window" : "Show synth controls", [this, track] { openInstrumentWindow (track); });
+    menu.addItem (isPlugin ? "Show plugin window" : "Show instrument window", [this, track] { openInstrumentWindow (track); });
     menu.addSeparator();
 
     const auto kind = track[ids::instrument].toString();
-    menu.addItem (app::synthName, true, kind == "synth" || kind.isEmpty(), [this, track]() mutable
-    {
-        undoManager.beginNewTransaction ("Choose instrument");
-        track.setProperty (ids::instrument, "synth", &undoManager);
-    });
+    if (kind == "synth" || kind == "drums" || kind == "sampler")
+        menu.addItem ("(this track's old built-in " + juce::String (kind == "drums" ? "Drum Kit" : kind == "sampler" ? "Sampler" : "Synth")
+                      + " is retired: choose another instrument)", false, false, [] {});
     menu.addItem ("Nemix (wavetable synth)", true, kind == "nemix", [this, track]() mutable
     {
         undoManager.beginNewTransaction ("Choose instrument");
@@ -3068,18 +3121,6 @@ void MainComponent::showInstrumentMenu (juce::ValueTree track, juce::Component& 
                 safe->openInstrumentWindow (track);
         });
     });
-    menu.addItem ("Drum Kit", true, kind == "drums", [this, track]() mutable
-    {
-        undoManager.beginNewTransaction ("Choose instrument");
-        track.setProperty (ids::instrument, "drums", &undoManager);
-    });
-    menu.addItem ("Sampler...", true, kind == "sampler", [this, track]() mutable
-    {
-        undoManager.beginNewTransaction ("Choose instrument");
-        track.setProperty (ids::instrument, "sampler", &undoManager);
-        openInstrumentWindow (track);   // to choose its sound
-    });
-
     // Instrument plugins found by the scanner, grouped by maker.
     std::map<juce::String, juce::PopupMenu> byMaker;
     int numInstruments = 0;

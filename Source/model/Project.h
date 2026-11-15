@@ -27,6 +27,15 @@ namespace riff::model
     juce::ValueTree addTrack (juce::ValueTree project, const juce::String& name, juce::UndoManager* um,
                               int index = -1, const juce::String& kind = audioKind);
 
+    /** Multi-output channels (as Logic's): a channel playing one of an instrument track's other output pairs. */
+    inline bool isMultiOutputTrack (const juce::ValueTree& track) { return track[ids::multiFrom].toString().isNotEmpty(); }
+    /** The instrument track's multi-output channels, in pair order. */
+    juce::Array<juce::ValueTree> multiOutputsOf (const juce::ValueTree& project, const juce::ValueTree& instrumentTrack);
+    /** Adds the channel for output pair `pair` (1 = outputs 3-4) after the instrument's others, named `name`
+        (the instrument's name for it); returns the existing one if that pair has one. */
+    juce::ValueTree addMultiOutput (juce::ValueTree project, juce::ValueTree instrumentTrack, int pair, const juce::String& name,
+                                    juce::UndoManager* um);
+
     juce::ValueTree addRegion (juce::ValueTree track, const juce::File& audioFile,
                                double start, double length, juce::UndoManager* um);
 

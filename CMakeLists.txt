@@ -225,6 +225,7 @@ juce_add_binary_data(AudioTechProData
                 Resources/skin/looks/look_vu_cream.png
                 Resources/skin/looks/look_vu_amber.png
                 Resources/skin/looks/look_cap_dark.png
+                Resources/skin/looks/look_cap_whiteglass.png
                 Resources/skin/looks/look_knob_dark.png
                 Resources/skin/looks/look_btn_dark.png
                 # Console caps knobs, cut from your picture by Tools/console_assets/make_cap_knobs.py

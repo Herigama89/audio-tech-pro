@@ -3308,3 +3308,62 @@ TEST_CASE ("Bypass on and off while the audio thread plays: the effect's meters 
     audio.join();
     CHECK (frozen == 0);
 }
+
+namespace
+{
+    /** An instrument with a constant main output and a second, different output pair (outputs 3-4). */
+    struct TwoOutputInstrument final : Instrument
+    {
+        std::vector<float> extraL, extraR;
+        void prepare (double rate, int block) override { preparedRate = rate; extraL.assign ((size_t) block, 0.0f); extraR.assign ((size_t) block, 0.0f); }
+        void render (float* l, float* r, int n, const juce::MidiBuffer&) noexcept override
+        {
+            for (int i = 0; i < n; ++i) { l[i] = 0.1f; r[i] = 0.1f; extraL[(size_t) i] = 0.5f; extraR[(size_t) i] = 0.25f; }
+        }
+        juce::String getName() const override { return "Two Out"; }
+        int getNumExtraOutputs() const noexcept override { return 1; }
+        const float* getExtraOutput (int pair, int channel) const noexcept override
+        {
+            return pair == 1 ? (channel == 0 ? extraL.data() : extraR.data()) : nullptr;
+        }
+    };
+}
+
+TEST_CASE ("Multi-output: a channel plays an instrument's outputs 3-4 beside its main output", "[engine][multiout]")
+{
+    AudioEngine engine;
+    engine.prepare (48000.0, 512);
+    auto instrument = std::make_shared<TwoOutputInstrument>();
+    instrument->prepare (48000.0, AudioEngine::maxChunkSize);
+
+    const auto render = [&] (bool withAux, bool auxFirst)
+    {
+        auto graph = std::make_unique<PlaybackGraph>();
+        graph->sampleRate = 48000.0;
+        graph->masterGain = 1.0f;
+        PlaybackGraph::Track inst;
+        inst.slot = 0;
+        inst.isInstrument = true;
+        inst.instrument = instrument;
+        PlaybackGraph::Track aux;
+        aux.slot = 1;
+        aux.auxSourceSlot = 0;
+        aux.auxPair = 1;
+        aux.auxInstrument = instrument;
+        if (withAux && auxFirst) graph->tracks.push_back (aux);
+        graph->tracks.push_back (inst);
+        if (withAux && ! auxFirst) graph->tracks.push_back (aux);
+        engine.setGraph (std::move (graph));
+        juce::AudioBuffer<float> out (2, 512);
+        for (int b = 0; b < 8; ++b)
+            engine.render (nullptr, 0, out.getArrayOfWritePointers(), 2, 512);   // (past the gain smoothing)
+        return std::pair<float, float> (out.getSample (0, 500), out.getSample (1, 500));
+    };
+
+    const auto main = render (false, false);
+    const auto both = render (true, false);
+    REQUIRE (main.first > 0.0f);
+    // the aux adds its own pair, scaled the same way as the main output (the same master and pan law)
+    CHECK_THAT (both.first - main.first, WithinAbs (main.first * 5.0f, 1.0e-3));
+    CHECK_THAT (both.second - main.second, WithinAbs (main.second * 2.5f, 1.0e-3));
+}

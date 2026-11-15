@@ -263,6 +263,13 @@ ChannelStrip::ChannelStrip (MixerPanel& o, juce::ValueTree p, juce::ValueTree t)
     inputSlot.setTooltip ("Input: what this channel records or plays (an interface input, or the instrument)");
     outputSlot.setTooltip ("Output: where this channel goes (the Stereo Out, a bus, or the interface's other outputs: Output 3-4 and so on)");
     inputSlot.onClick = [this] { showInputMenu(); };
+    look::key (outputsKey, look::Key::slot);
+    outputsKey.setWantsKeyboardFocus (false);
+    outputsKey.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff19d3d0));
+    outputsKey.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff002a2a));
+    outputsKey.setTooltip ("Multi-output: give this instrument's other outputs (kick, snare, toms...) their own channels");
+    outputsKey.onClick = [this] { if (owner.onOutputsMenu) owner.onOutputsMenu (track, outputsKey); };
+    addChildComponent (outputsKey);
 
     formatButton.setTooltip ("Channel format: mono (one circle) or stereo (two). Click to switch.");
     formatButton.setWantsKeyboardFocus (false);
@@ -1310,6 +1317,14 @@ void ChannelStrip::refresh()
             inputSlot.setButtonText ((bool) track.getProperty ("busHardwareInput", false)
                                          ? model::inputName (track, owner.inputNames ? owner.inputNames() : juce::StringArray())
                                          : track[ids::name].toString());
+        else if (model::isMultiOutputTrack (track))
+        {
+            // its instrument's output, as the instrument names it ("Kick (3-4)"), else by number
+            const auto source = model::findById (project, track[ids::multiFrom].toString());
+            const auto pair = juce::jmax (1, (int) track.getProperty (ids::multiPair, 1));
+            const auto names = source.isValid() && owner.outputNamesOf ? owner.outputNamesOf (source) : juce::StringArray();
+            inputSlot.setButtonText (pair < names.size() ? names[pair] : "Out " + juce::String (pair * 2 + 1) + "-" + juce::String (pair * 2 + 2));
+        }
         else if (model::isInstrumentTrack (track))
         {
             const auto kind = track[ids::instrument].toString();
@@ -1336,7 +1351,7 @@ void ChannelStrip::refresh()
     const auto gain = isMaster() ? (double) project.getProperty (ids::masterGain, 0.8)
                                  : (double) track.getProperty (ids::volume, 1.0);
     fader.setValue (gainToDb (gain), juce::dontSendNotification);
-    fader.setTint (isMaster() ? juce::Colour() : model::trackColour (track));   // (the cap in the track's colour)
+    fader.setTint (isMaster() ? masterTint : model::trackColour (track));   // (the cap in the track's colour)
     const auto db = gainToDb (gain);
     dbLabel.setText (db <= minDb + 0.01 ? juce::String ("-inf") : juce::String (db, 1), juce::dontSendNotification);
 
@@ -1481,6 +1496,12 @@ void ChannelStrip::itemDropped (const SourceDetails& details)
 void ChannelStrip::paintOverChildren (juce::Graphics& g)
 {
     RIFF_PROFILE ("Mixer strip (over)");
+    // A multi-output instrument and its channels: a teal line along the top joining them (as one group)
+    if (! isMaster() && (model::isMultiOutputTrack (track) || (model::isInstrumentTrack (track) && ! model::multiOutputsOf (project, track).isEmpty())))
+    {
+        g.setColour (juce::Colour (0xff19d3d0));
+        g.fillRect (0, 0, getWidth(), 2);
+    }
     // The input clipped at the preamp: a red frame round its gain
     if (preampClipped && preampGain.isVisible())
     {
@@ -2110,10 +2131,41 @@ float MixerPanel::whenHeard (const juce::String& owner, float reported, double l
     return r.shown;
 }
 
+bool ChannelStrip::multiOutputs() const
+{
+    return ! isMaster() && model::isInstrumentTrack (track) && owner.outputNamesOf && owner.outputNamesOf (track).size() > 1;
+}
+
+void ChannelStrip::showOutputPairMenu()
+{
+    const auto source = model::findById (project, track[ids::multiFrom].toString());
+    if (! source.isValid())
+        return;
+    const auto names = owner.outputNamesOf ? owner.outputNamesOf (source) : juce::StringArray();
+    const int current = track.getProperty (ids::multiPair, 1);
+    juce::PopupMenu menu;
+    menu.addSectionHeader (source[ids::name].toString() + ": outputs");
+    for (int pair = 1; pair < juce::jmax (names.size(), current + 1); ++pair)
+    {
+        const auto label = pair < names.size() ? names[pair] : "Out " + juce::String (pair * 2 + 1) + "-" + juce::String (pair * 2 + 2);
+        menu.addItem (label, true, pair == current, [t = track, pair, &um = owner.getUndoManager()]() mutable
+        {
+            um.beginNewTransaction ("Multi-output");
+            t.setProperty (ids::multiPair, pair, &um);
+        });
+    }
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (menuTarget != nullptr ? menuTarget : &inputSlot));
+}
+
 void ChannelStrip::showInputMenu()
 {
     if (isMaster() || isVca())
         return;
+    if (model::isMultiOutputTrack (track))
+    {
+        showOutputPairMenu();
+        return;
+    }
     if (model::isInstrumentTrack (track))
     {
         if (owner.onInstrumentMenu)
@@ -2334,6 +2386,12 @@ void ChannelStrip::resized()
         {
             formatButton.setBounds (row.removeFromLeft (15));   // mono / stereo, left of the Input slot (as in Logic)
             row.removeFromLeft (2);
+        }
+        outputsKey.setVisible (multiOutputs());
+        if (outputsKey.isVisible())
+        {
+            outputsKey.setBounds (row.removeFromRight (15));
+            row.removeFromRight (2);
         }
         inputSlot.setBounds (row);
     }
@@ -2579,7 +2637,7 @@ void ChannelStrip::showZoneMenu()
 
 bool ChannelStrip::canRecord() const
 {
-    return ! isMaster() && ! isVca() && track.isValid() && ! model::isBusTrack (track);
+    return ! isMaster() && ! isVca() && track.isValid() && ! model::isBusTrack (track) && ! model::isMultiOutputTrack (track);
 }
 
 void ChannelStrip::updateAutomationButton()
@@ -3340,6 +3398,10 @@ void MixerPanel::setSelectedTracks (const juce::StringArray& trackIds, const juc
                 viewport.setViewPosition (right - viewW, viewport.getViewPositionY());
         }
     }
+    // the Console window's strips (and the Inspector's) show it too
+    for (auto* s : extraStrips)
+        if (s->getTrack().isValid())
+            s->setSelected (trackIds.contains (s->getTrack()[ids::id].toString()) || s->getTrack()[ids::id].toString() == trackId);
 }
 
 void MixerPanel::rebuild()
