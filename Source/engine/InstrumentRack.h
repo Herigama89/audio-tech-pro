@@ -18,6 +18,8 @@ namespace riff
     Plugins load asynchronously; until one is ready its track is silent.
     Message thread only.
 */
+namespace studio { class StudioInstrument; }
+
 class InstrumentRack
 {
 public:
@@ -49,6 +51,11 @@ public:
 
     /** Nemix: one knob changed in a track's NEMIX tree - straight to the synth, nothing rebuilt. False if it isn't playing. */
     bool applyNemix (const juce::ValueTree& nemixTree, const juce::Identifier& property);
+    /** A studio instrument: one setting changed in a track's STUDIO tree - straight to it. False if it isn't playing. */
+    bool applyStudio (const juce::ValueTree& studioTree, const juce::Identifier& property);
+    /** The track's studio instrument, if it has one (for its window). */
+    std::shared_ptr<studio::StudioInstrument> getStudio (const juce::String& trackId);
+
     /** The track's Nemix, if it has one (for its editor's live readings). */
     std::shared_ptr<class Nemix> getNemix (const juce::String& trackId);
 

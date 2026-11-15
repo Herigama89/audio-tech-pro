@@ -121,6 +121,7 @@ struct PlaybackGraph
 
         bool isInstrument = false;
         std::shared_ptr<Instrument> instrument;   // owned by the InstrumentRack; may be null while loading
+        std::shared_ptr<const void> partChains;   // a studio instrument's parts' insert chains (a studio::PartChains)
         bool receivesLiveMidi = false;            // the track your MIDI keyboard plays
 
         ConsoleChannel::Settings console;               // the strip's EQ and Dynamics, before the inserts

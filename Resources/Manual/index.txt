@@ -5,7 +5,7 @@ Start|03-projects-and-files.md|Projects and Files
 Record & Edit|04-recording.md|Recording
 Record & Edit|05-tracks-and-regions.md|Tracks and Regions
 Record & Edit|06-piano-roll-and-midi.md|Piano Roll and MIDI
-Record & Edit|07-audio-editing-flex-and-pitch.md|Audio Editing, Flex and Pitch
+Record & Edit|07-audio-editing-flex-and-pitch.md|Audio Editing, Fluid and Pitch
 Record & Edit|08-automation.md|Automation
 Mix|09-the-mixer.md|The Mixer
 Mix|10-the-channel-strip.md|The Channel Strip

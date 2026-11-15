@@ -55,7 +55,7 @@ private:
     juce::OwnedArray<juce::TextButton> buttons;
 
     // Flex Pitch: the notes found in the audio; drag one up or down to move its pitch.
-    juce::TextButton flexPitchButton { "Flex Pitch" };
+    juce::TextButton flexPitchButton { "Fluid Pitch" };
     std::unique_ptr<PitchEditor> pitchEditor;   // (shown while Flex Pitch is on)
     void showPitchEditor (bool show);
 public:
@@ -78,7 +78,7 @@ private:
 
     // Flex Time: markers on the hits (and any you add); drag one sideways and the
     // audio on either side of it stretches, up to the markers next to it.
-    juce::TextButton flexTimeButton { "Flex Time" };
+    juce::TextButton flexTimeButton { "Fluid Time" };
     std::vector<double> markers;       // seconds into the region, in order
     std::vector<double> handMarkers;   // the ones you added (kept through edits)
     int dragMarker = -1;

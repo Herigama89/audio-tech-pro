@@ -245,7 +245,7 @@ void Inspector::buildTrackBox()
     }
 
     if (! inst && ! vca)
-        trackBox.addMenu ("Flex Mode", [t] { const auto m = t.getProperty (ids::flexMode, "off").toString(); return capitalised (m); },
+        trackBox.addMenu ("Fluid Mode", [t] { const auto m = t.getProperty (ids::flexMode, "off").toString(); return capitalised (m); },
                           [t, &um] (juce::Component& target) mutable
         {
             juce::PopupMenu menu;
@@ -256,7 +256,7 @@ void Inspector::buildTrackBox()
                     menu.addSeparator();
                 menu.addItem (capitalised (m), true, mode == m, [t, &um, v = juce::String (m)]() mutable
                 {
-                    um.beginNewTransaction ("Flex Mode");
+                    um.beginNewTransaction ("Fluid Mode");
                     t.setProperty (ids::flexMode, v, &um);
                 });
             }
@@ -431,7 +431,7 @@ void Inspector::buildRegionBox()
 
         const auto flexId = id (ids::flex);
         auto trackOf = [owner] { return owner; };
-        regionBox.addSwitch ("Flex", flexId, false);
+        regionBox.addSwitch ("Fluid", flexId, false);
         regionBox.enableLastWhen ([trackOf] { return trackOf().getProperty (ids::flexMode, "off").toString() != "off"; });
         const auto stId = id (ids::smartTempo);
         regionBox.addMenu ("Smart Tempo", [r, stId] { return r.getProperty (stId, "on").toString() == "off" ? juce::String ("Off") : juce::String ("On"); },

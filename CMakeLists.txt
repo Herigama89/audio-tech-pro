@@ -119,6 +119,12 @@ set(RIFF_CORE_SOURCES
     Source/engine/nemix/Nemix.cpp
     Source/engine/nemix/SampleLibrary.cpp
     Source/engine/nemix/NemixPresets.cpp
+    Source/engine/studio/StudioInstrument.cpp
+    Source/engine/studio/StudioDrums.cpp
+    Source/engine/studio/StudioKeys.cpp
+    Source/engine/studio/StudioStrings.cpp
+    Source/engine/studio/BeatPad.cpp
+    Source/engine/studio/StudioSampler.cpp
     Source/engine/BuiltInInstruments.cpp
     Source/engine/PluginInstrument.cpp
     Source/engine/InstrumentRack.cpp

@@ -80,6 +80,8 @@ private:
             return;   // a built-in effect's knob: straight to the effect, no new graph
         if (tree.getType() == juce::Identifier ("NEMIX") && rack != nullptr && rack->applyNemix (tree, p))
             return;   // a Nemix knob: straight to the synth
+        if (tree.getType() == juce::Identifier ("STUDIO") && rack != nullptr && rack->applyStudio (tree, p))
+            return;   // a studio instrument's knob, file or pattern: straight to it
         if (p != ids::height && p != ids::hidden && p != ids::showAutomation && p != ids::automationParam && p != ids::collapsed && p != ids::icon && p != ids::takesOpen && p != ids::smartControls)   // view settings: nothing to hear
             triggerAsyncUpdate();
     }

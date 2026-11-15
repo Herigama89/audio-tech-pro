@@ -3,6 +3,8 @@
 #include "BuiltInInstruments.h"
 #include "nemix/Nemix.h"
 #include "../model/NemixState.h"
+#include "../model/StudioState.h"
+#include "studio/Studio.h"
 #if ! JUCE_WASM
  #include "ClapFormat.h"
  #include "PluginScanChild.h"
@@ -58,6 +60,8 @@ juce::String InstrumentRack::keyFor (const juce::ValueTree& track)
         return "sampler:" + track[ids::samplerFile].toString();
     if (track[ids::instrument].toString() == "nemix")
         return "nemix";
+    if (studiostate::isStudio (track))
+        return track[ids::instrument].toString();
 
     return "synth";
 }
@@ -75,6 +79,54 @@ bool InstrumentRack::applyNemix (const juce::ValueTree& nemixTree, const juce::I
     if (index >= 0)
         synth->setParameter (index, nemixstate::valueOf (nemixTree, index));
     return true;
+}
+
+namespace
+{
+    /** A studio instrument's whole setting from the track: its parameters, its files, the beat pad's pattern. */
+    void applyStudioState (studio::StudioInstrument& instrument, const juce::ValueTree& track)
+    {
+        instrument.resetToDefaults();
+        const auto tree = studiostate::of (track);
+        if (! tree.isValid())
+            return;
+        for (int i = 0; i < tree.getNumProperties(); ++i)
+        {
+            const auto name = tree.getPropertyName (i);
+            if (studiostate::isFileProperty (name))
+                instrument.useFile (studiostate::fileSlot (name), tree[name].toString());
+            else if (name == studiostate::pattern)
+                instrument.setPatternText (tree[name].toString());
+            else if (const auto index = instrument.indexOf (name.toString()); index >= 0)
+                instrument.setParam (index, (float) (double) tree[name]);
+        }
+    }
+}
+
+bool InstrumentRack::applyStudio (const juce::ValueTree& studioTree, const juce::Identifier& property)
+{
+    const auto track = studioTree.getParent();
+    const auto it = entries.find (track[ids::id].toString());
+    if (it == entries.end() || ! it->second.key.startsWith (studiostate::prefix))
+        return false;
+    auto* instrument = dynamic_cast<studio::StudioInstrument*> (it->second.instrument.get());
+    if (instrument == nullptr)
+        return false;
+    if (studiostate::isFileProperty (property))
+        instrument->useFile (studiostate::fileSlot (property), studioTree[property].toString());
+    else if (property == studiostate::pattern)
+        instrument->setPatternText (studioTree[property].toString());
+    else if (const auto index = instrument->indexOf (property.toString()); index >= 0)
+        instrument->setParam (index, studioTree.hasProperty (property) ? (float) (double) studioTree[property] : instrument->params()[(size_t) index].def);
+    return true;
+}
+
+std::shared_ptr<studio::StudioInstrument> InstrumentRack::getStudio (const juce::String& trackId)
+{
+    const auto it = entries.find (trackId);
+    if (it == entries.end())
+        return nullptr;
+    return std::dynamic_pointer_cast<studio::StudioInstrument> (it->second.instrument);
 }
 
 std::shared_ptr<Nemix> InstrumentRack::getNemix (const juce::String& trackId)
@@ -132,6 +184,26 @@ std::shared_ptr<Instrument> InstrumentRack::instrumentFor (const juce::ValueTree
         synth->prepare (sampleRate, maxBlockSize);
         entry = { key, sampleRate, synth, false };
         return synth;
+    }
+
+    // A studio instrument (Drums, Keys, Bass, Guitar, Beat Pad, Sampler): its setting from the track each time
+    if (key.startsWith (studiostate::prefix))
+    {
+        if (sameKind && rateOk)
+        {
+            if (auto* s = dynamic_cast<studio::StudioInstrument*> (entry.instrument.get()))
+                applyStudioState (*s, track);
+            return entry.instrument;
+        }
+        if (! sameKind && onPluginReplaced && entry.instrument != nullptr)
+            onPluginReplaced (id);
+        std::shared_ptr<studio::StudioInstrument> instrument = studio::create (studiostate::kindOf (track));
+        if (instrument == nullptr)
+            return nullptr;
+        applyStudioState (*instrument, track);
+        instrument->prepare (sampleRate, maxBlockSize);
+        entry = { key, sampleRate, instrument, false };
+        return instrument;
     }
 
     // Already set up (or loading) for this instrument at this rate.

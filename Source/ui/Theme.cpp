@@ -43,9 +43,13 @@ void apply (juce::LookAndFeel& lf)
     lf.setColour (AlertWindow::backgroundColourId,         panel);
     lf.setColour (AlertWindow::textColourId,               text);
     lf.setColour (AlertWindow::outlineColourId,            outline);
-    lf.setColour (TooltipWindow::backgroundColourId,       toolbarDark);
-    lf.setColour (TooltipWindow::textColourId,             text);
-    lf.setColour (TooltipWindow::outlineColourId,          outline);
+    // Tooltips and the value bubbles (a knob's frequency, a fader's level): dark glass with white writing, in
+    // the light theme too (dark writing on them could not be read)
+    lf.setColour (TooltipWindow::backgroundColourId,       Colour (0xf0161a20));
+    lf.setColour (TooltipWindow::textColourId,             Colours::white);
+    lf.setColour (TooltipWindow::outlineColourId,          Colours::white.withAlpha (0.15f));
+    lf.setColour (BubbleComponent::backgroundColourId,     Colour (0xf0161a20));
+    lf.setColour (BubbleComponent::outlineColourId,        Colours::white.withAlpha (0.15f));
     lf.setColour (ListBox::backgroundColourId,             background);
     lf.setColour (ListBox::textColourId,                   text);
     lf.setColour (TreeView::backgroundColourId,            background);
@@ -774,7 +778,7 @@ juce::String Settings::toString() const
                                juce::URL::addEscapeChars (toolbarTheme, false), juce::URL::addEscapeChars (meterTheme, false),
                                juce::String::toHexString ((int) textColour), juce::String::toHexString ((int) stripTextColour),
                                juce::String (trackColouring), juce::String (gridStyle), juce::String (stripVu ? 1 : 0),
-                               juce::String (levelMeters), juce::String (stripMeterKind), "caps" }.joinIntoString (";");
+                               juce::String (levelMeters), juce::String (stripMeterKind), "caps", "darkvu" }.joinIntoString (";");
 }
 
 Settings Settings::fromString (const juce::String& text)
@@ -851,6 +855,9 @@ Settings Settings::fromString (const juce::String& text)
     // (Console caps became the main knobs: a theme saved before them, on the glass's own knobs, takes them)
     if (v.size() < 38 && s.knobStyle == -1)
         s.knobStyle = 8;
+    // (then the Dark VU knobs became the main ones: a theme saved before, on the glass's or the caps knobs, takes them)
+    if (v.size() < 39 && (s.knobStyle == -1 || s.knobStyle == 8))
+        s.knobStyle = 7;
     return s;
 }
 

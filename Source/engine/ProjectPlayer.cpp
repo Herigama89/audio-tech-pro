@@ -1,6 +1,7 @@
 #include "ProjectPlayer.h"
 #include "../model/Project.h"
 #include <functional>
+#include "studio/Studio.h"
 
 namespace riff
 {
@@ -421,6 +422,18 @@ std::unique_ptr<PlaybackGraph> ProjectPlayer::buildGraph (double sampleRate)
         {
             if (rack != nullptr)
                 t.instrument = rack->instrumentFor (track, sampleRate, AudioEngine::maxChunkSize);
+
+            // a studio instrument's parts: their inserts (our effects or plug-ins), the returns' and the main's
+            if (auto* s = dynamic_cast<studio::StudioInstrument*> (t.instrument.get()))
+            {
+                auto chains = std::make_shared<studio::PartChains>();
+                for (int part = 0; part < s->numParts(); ++part)
+                    chains->parts.push_back (buildChain (studio::chainOwner (trackId, juce::String (part)), sampleRate, insertIds, effectsById));
+                chains->fxA = buildChain (studio::chainOwner (trackId, "fxA"), sampleRate, insertIds, effectsById);
+                chains->fxB = buildChain (studio::chainOwner (trackId, "fxB"), sampleRate, insertIds, effectsById);
+                chains->main = buildChain (studio::chainOwner (trackId, "main"), sampleRate, insertIds, effectsById);
+                t.partChains = chains;
+            }
 
             if (t.instrument != nullptr)
                 latency += t.instrument->getLatencySamples();

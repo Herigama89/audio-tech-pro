@@ -28,18 +28,18 @@ AudioEditorPanel::AudioEditorPanel (juce::ValueTree r, juce::UndoManager& um, ju
     add ("Silence", "Make the selection silent", [this] { run ({ Op::silence }, "Silence"); });
     add ("Reverse", "Play the selection backwards", [this] { run ({ Op::reverse }, "Reverse"); });
     add ("Invert", "Flip the polarity (phase)", [this] { run ({ Op::invert }, "Invert"); });
-    add ("Time Stretch...", "Make the region longer or shorter without changing its pitch (Flex Time)", [this]
+    add ("Time Stretch...", "Make the region longer or shorter without changing its pitch (Fluid Time)", [this]
     {
         ask ("Time Stretch", "New length as a percentage of now (e.g. 200 for twice as long, 50 for half):", "100",
              [this] (double percent) { if (percent > 0.0) run ({ Op::timeStretch, percent / 100.0 }, "Time stretch"); });
     });
-    add ("Transpose...", "Change the pitch without changing the length (Flex Pitch)", [this]
+    add ("Transpose...", "Change the pitch without changing the length (Fluid Pitch)", [this]
     {
         ask ("Transpose", "Semitones up (or down, with a minus):", "2",
              [this] (double semis) { run ({ Op::pitchShift, semis }, "Transpose"); });
     });
 
-    add ("Quantize (Flex)...", "Flex Time: move every hit onto the grid, the audio between stretched to fit", [this]
+    add ("Quantize (Fluid)...", "Fluid Time: move every hit onto the grid, the audio between stretched to fit", [this]
     {
         juce::PopupMenu menu;
         menu.addSectionHeader ("Move the hits to");
@@ -55,7 +55,7 @@ AudioEditorPanel::AudioEditorPanel (juce::ValueTree r, juce::UndoManager& um, ju
                     const auto beat = map.beatAt (regionStart + t);
                     return map.secondsAt (std::round (beat / beats) * beats) - regionStart;
                 };
-                run (request, "Flex quantize");
+                run (request, "Fluid quantize");
             });
         menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
     });
@@ -94,7 +94,7 @@ AudioEditorPanel::AudioEditorPanel (juce::ValueTree r, juce::UndoManager& um, ju
 
     flexPitchButton.setClickingTogglesState (true);
     flexPitchButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffd08a1c));
-    flexPitchButton.setTooltip ("Flex Pitch: the notes as blobs at their pitch (as Melodyne); drag them, correct them, straighten them");
+    flexPitchButton.setTooltip ("Fluid Pitch: the notes as blobs at their pitch (as Melodyne); drag them, correct them, straighten them");
     flexPitchButton.onClick = [this]
     {
         if (flexPitchButton.getToggleState())
@@ -106,7 +106,7 @@ AudioEditorPanel::AudioEditorPanel (juce::ValueTree r, juce::UndoManager& um, ju
 
     flexTimeButton.setClickingTogglesState (true);
     flexTimeButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff8f5bd6));
-    flexTimeButton.setTooltip ("Flex Time: markers on the hits. Drag one sideways to move that moment; the audio either side stretches to fit. "
+    flexTimeButton.setTooltip ("Fluid Time: markers on the hits. Drag one sideways to move that moment; the audio either side stretches to fit. "
                                "Double-click to add a marker, right-click one to remove it.");
     flexTimeButton.onClick = [this]
     {
@@ -287,7 +287,7 @@ void AudioEditorPanel::mouseUp (const juce::MouseEvent&)
             for (auto& h : handMarkers)
                 h = mapped (h);
             selFrom = selTo = 0.0;
-            run (request, "Flex Time");
+            run (request, "Fluid Time");
         }
         repaint();
         return;
@@ -298,7 +298,7 @@ void AudioEditorPanel::mouseUp (const juce::MouseEvent&)
         const auto& n = notes[(size_t) dragNote];
         audioedit::Request request { audioedit::Operation::pitchShift, (double) dragSemitones, n.start / notesRate, n.end / notesRate };
         selFrom = selTo = 0.0;
-        run (request, "Flex Pitch");
+        run (request, "Fluid Pitch");
     }
     dragNote = -1;
     dragSemitones = 0;

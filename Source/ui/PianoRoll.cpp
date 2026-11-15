@@ -1235,7 +1235,9 @@ void PianoRoll::mouseMove (const juce::MouseEvent& e)
 {
     const auto note = noteAt (e.position);
     const bool atEdge = note.isValid() && noteBounds (note).getRight() - e.position.x <= edgeGrab;
-    setMouseCursor (atEdge ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor);
+    // the note's end: the resize arrows; elsewhere the tool's own pointer (its icon)
+    setMouseCursor (atEdge && (tool == Tool::draw || tool == Tool::select) ? juce::MouseCursor (juce::MouseCursor::LeftRightResizeCursor)
+                                                                          : notetoolicons::cursor ((int) tool));
 }
 
 void PianoRoll::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)

@@ -2029,6 +2029,7 @@ bool AudioEngine::processTrack (const PlaybackGraph::Track& track, Pass& pass, c
                 trackMidi.addEvents (liveMidi, 0, -1, 0);
 
             track.instrument->setPosition (pass.position, pass.playing, pass.bpm);
+            track.instrument->setPartChains (track.partChains.get());
             track.instrument->render (tL, tR, n, trackMidi);
             anyAudio = true;
         }

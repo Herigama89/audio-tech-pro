@@ -34,6 +34,9 @@ public:
     /** The name of an output pair (0 = the main one), for the mixer: "Kick", "Out 3-4"... (message thread). */
     virtual juce::String getOutputName (int pair) const { return pair == 0 ? juce::String ("Main") : "Out " + juce::String (pair * 2 + 1) + "-" + juce::String (pair * 2 + 2); }
 
+    /** The studio instruments' parts' insert chains for the coming block (audio thread; a studio::PartChains, or null). */
+    virtual void setPartChains (const void* /*chains*/) noexcept {}
+
     /** How many samples late this instrument's output is (for delay compensation). */
     virtual int getLatencySamples() const { return 0; }
 

@@ -4260,6 +4260,7 @@ void MainComponent::openConsoleView()
         });
     };
     consoleWindow = std::make_unique<EditorWindow> ("Console", new ConsoleView (consoleHost, project), true, closer);
+    consoleWindow->fillScreen();   // (opens filling the screen)
 }
 
 void MainComponent::openAnalogConsole()
@@ -4278,6 +4279,7 @@ void MainComponent::openAnalogConsole()
         });
     };
     analogWindow = std::make_unique<EditorWindow> ("Analog Console", new AnalogConsole (consoleHost, project), true, closer);
+    analogWindow->fillScreen();    // (opens filling the screen)
 }
 
 void MainComponent::closeConsoleWindows()

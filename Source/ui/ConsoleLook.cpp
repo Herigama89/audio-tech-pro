@@ -402,13 +402,14 @@ void ConsoleLook::positionComboBoxText (juce::ComboBox& box, juce::Label& label)
 
 void ConsoleLook::drawTooltip (juce::Graphics& g, const juce::String& text, int width, int height)
 {
-    g.fillAll (theme::toolbarDark);
-    g.setColour (theme::outline);
+    // dark glass, white writing (readable in the light theme as in the dark)
+    g.fillAll (juce::Colour (0xf0161a20));
+    g.setColour (juce::Colours::white.withAlpha (0.15f));
     g.drawRect (0, 0, width, height);
 
     juce::AttributedString s;
     s.setJustification (juce::Justification::centred);
-    s.append (text, juce::FontOptions (13.0f), theme::text);
+    s.append (text, juce::FontOptions (13.0f), juce::Colours::white);
     juce::TextLayout layout;
     layout.createLayoutWithBalancedLineLengths (s, (float) width - 8.0f);
     layout.draw (g, { 4.0f, 0.0f, (float) width - 8.0f, (float) height });

@@ -108,6 +108,15 @@ public:
         toFront (true);
     }
 
+    /** Fills the screen it's on (its whole work area, as a maximised window - not a separate full-screen space). */
+    void fillScreen()
+    {
+        if (const auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect (getScreenBounds()))
+        {
+            setBounds (display->userArea);
+        }
+    }
+
     void closeButtonPressed() override
     {
         if (onClose)

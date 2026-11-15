@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 
 #include <JuceHeader.h>
 #include "ToolIcons.h"
@@ -126,12 +127,35 @@ namespace riff::notetoolicons
     }
 
     /** The mouse pointer for the tool: the Edit window's tool pointer where there is one. */
+    /** The mouse pointer for a tool: its own icon, small (20 points), white with a black outline so it shows on
+        any colour, its hot spot where the tool works (the pencil's tip, the glass's centre...). */
     inline juce::MouseCursor cursor (int i)
     {
-        if (i == 0) return juce::MouseCursor::NormalCursor;   // (Draw: also moves and resizes notes, so the plain arrow)
-        if (const auto t = shared (i))
-            return toolicons::cursor (*t);
-        return i == 4 || i == 5 ? juce::MouseCursor::CrosshairCursor : juce::MouseCursor::NormalCursor;
+        static std::map<int, juce::MouseCursor> cache;
+        if (auto it = cache.find (i); it != cache.end())
+            return it->second;
+        constexpr int size = 20, scale = 2;
+        juce::Image image (juce::Image::ARGB, size * scale, size * scale, true);
+        const auto area = juce::Rectangle<float> (1.5f, 1.5f, 17.0f, 17.0f) * (float) scale;
+        {
+            juce::Graphics g (image);
+            for (const auto d : { juce::Point<float> (-1.6f, 0.0f), { 1.6f, 0.0f }, { 0.0f, -1.6f }, { 0.0f, 1.6f },
+                                  { -1.2f, -1.2f }, { 1.2f, 1.2f }, { -1.2f, 1.2f }, { 1.2f, -1.2f } })
+                draw (g, i, area.translated (d.x, d.y), juce::Colours::black);
+            draw (g, i, area, juce::Colours::white);
+        }
+        juce::Point<float> hot (12.0f, 12.0f);   // (on the icons' 24 grid)
+        switch (i)
+        {
+            case 0: hot = { 5.3f, 20.0f }; break;   // pencil
+            case 1: hot = { 4.5f, 20.0f }; break;   // brush
+            case 2: hot = { 5.0f, 18.5f }; break;   // eraser
+            case 4: hot = { 12.0f, 9.0f }; break;   // knife
+            case 6: hot = { 9.5f, 9.5f }; break;    // glass
+            default: break;
+        }
+        const auto hx = juce::roundToInt (1.5f + hot.x * 17.0f / 24.0f), hy = juce::roundToInt (1.5f + hot.y * 17.0f / 24.0f);
+        return cache.emplace (i, juce::MouseCursor (juce::ScaledImage (image, (double) scale), { hx, hy })).first->second;
     }
 
     /** A toolbar button: the tool's icon, lit while it's the tool in use, its key in the corner. */

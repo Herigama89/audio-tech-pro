@@ -2045,8 +2045,9 @@ void AnalogConsole::rebuild()
         };
         s.addAndMakeVisible (s.fader);
         s.level.setJustificationType (juce::Justification::centred);
-        s.level.setColour (juce::Label::textColourId, juce::Colour (0xff34c759));
-        s.level.setColour (juce::Label::backgroundColourId, juce::Colours::black.withAlpha (0.3f));
+        // (the light theme: black numbers on a light box, easy to read; the dark: green on black)
+        s.level.setColour (juce::Label::textColourId, theme::glassLight() ? juce::Colours::black : juce::Colour (0xff34c759));
+        s.level.setColour (juce::Label::backgroundColourId, theme::glassLight() ? juce::Colours::white.withAlpha (0.55f) : juce::Colours::black.withAlpha (0.3f));
         s.level.setFont (juce::FontOptions (11.0f, juce::Font::bold));
         s.addAndMakeVisible (s.level);
         refreshBindings (s);

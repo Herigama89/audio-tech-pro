@@ -1,4 +1,4 @@
-# Audio Editing, Flex and Pitch
+# Audio Editing, Fluid and Pitch
 
 ## The audio editor
 
@@ -14,18 +14,18 @@ Double-click an audio region (or select it and press `P`) to open the **audio ed
 - **Invert** - flips the polarity (phase).
 - **Time Stretch...** - makes the region longer or shorter without changing the pitch (200% = twice as long).
 - **Transpose...** - changes the pitch without changing the length.
-- **Quantize (Flex)...** - moves every hit onto the grid; the audio between is stretched to fit.
+- **Quantize (Fluid)...** - moves every hit onto the grid; the audio between is stretched to fit.
 - **Detect Tempo** - finds the tempo this audio was played at, and sets the project to it if you like.
 
-## Flex Time
+## Fluid Time
 
-Click **Flex Time** in the audio editor. Markers appear on the hits. Drag a marker sideways to move that moment; the audio on either side stretches to fit. Double-click to add a marker; right-click one to remove it. Use it to tighten a drum or bass part without cutting it up.
+Click **Fluid Time** in the audio editor. Markers appear on the hits. Drag a marker sideways to move that moment; the audio on either side stretches to fit. Double-click to add a marker; right-click one to remove it. Use it to tighten a drum or bass part without cutting it up.
 
-![Flex Time markers](img/flex-time.jpg)
+![Fluid Time markers](img/flex-time.jpg)
 
-## Flex Pitch - the pitch editor
+## Fluid Pitch - the pitch editor
 
-Click **Flex Pitch** to see a vocal or solo instrument as notes (blobs) at their pitch, as in a pitch-correction program. Each note shows its name and how many cents it is off.
+Click **Fluid Pitch** to see a vocal or solo instrument as notes (blobs) at their pitch, as in a pitch-correction program. Each note shows its name and how many cents it is off.
 
 ![The pitch editor](img/pitch-editor.jpg)
 
