@@ -7,7 +7,7 @@
     Audio Tech Pro Console: the app. Opens the audio interface, restores the plugin list and the last
     session (strips, plugins and their settings), and saves both when it quits.
 */
-class ConsoleApplication final : public juce::JUCEApplication
+class AtpConsoleApp final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override    { return JUCE_APPLICATION_NAME_STRING; }
@@ -105,4 +105,4 @@ private:
     std::unique_ptr<MainWindow> window;
 };
 
-START_JUCE_APPLICATION (ConsoleApplication)
+START_JUCE_APPLICATION (AtpConsoleApp)
