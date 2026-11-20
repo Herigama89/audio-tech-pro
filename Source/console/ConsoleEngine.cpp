@@ -1,6 +1,7 @@
 #include "ConsoleEngine.h"
 #include "../engine/ClapFormat.h"
 #include "../engine/PluginScanChild.h"
+#include "bridge/BridgeShared.h"
 #include <algorithm>
 #include <iterator>
 
