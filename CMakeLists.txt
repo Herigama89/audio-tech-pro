@@ -366,6 +366,98 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# Audio Tech Pro Console: a real-time input console for any audio interface (VST3 / AU / CLAP plugins on
+# every input, cue mixes, talkback, direct outs), in the spirit of an Apollo's Console with Unison preamps.
+#   cmake --build build --target AudioTechProConsole
+# ---------------------------------------------------------------------------
+option(RIFF_BUILD_CONSOLE "Build Audio Tech Pro Console" ON)
+if(RIFF_BUILD_CONSOLE)
+    juce_add_gui_app(AudioTechProConsole
+        PRODUCT_NAME "Audio Tech Pro Console"
+        COMPANY_NAME "Audio Tech Pro"
+        BUNDLE_ID    "com.audiotechpro.console"
+        ICON_BIG     "${CMAKE_CURRENT_SOURCE_DIR}/Resources/AppIcon.png"
+        MICROPHONE_PERMISSION_ENABLED TRUE
+        MICROPHONE_PERMISSION_TEXT "Audio Tech Pro Console needs audio input access to process your inputs live."
+    )
+    juce_generate_juce_header(AudioTechProConsole)
+    target_sources(AudioTechProConsole PRIVATE
+        Source/console/ConsoleMain.cpp
+        Source/console/ConsoleEngine.cpp
+        Source/console/ConsoleUI.cpp
+        Source/console/bridge/BridgeServer.cpp
+        Source/engine/AggregateDevice.cpp
+        Source/engine/InterfaceControl.cpp
+        Source/engine/PluginScanChild.cpp
+        Source/engine/ClapFormat.cpp
+    )
+    target_include_directories(AudioTechProConsole PRIVATE Source)
+    set(RIFF_CONSOLE_DEFINITIONS ${RIFF_DEFINITIONS})
+    list(REMOVE_ITEM RIFF_CONSOLE_DEFINITIONS JUCE_PLUGINHOST_ARA=1 RIFF_HAS_ARA=1)
+    target_compile_definitions(AudioTechProConsole PRIVATE
+        ${RIFF_CONSOLE_DEFINITIONS}
+        JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:AudioTechProConsole,JUCE_PRODUCT_NAME>"
+        JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:AudioTechProConsole,JUCE_VERSION>"
+    )
+    target_link_libraries(AudioTechProConsole
+        PRIVATE
+            juce::juce_audio_utils
+            juce::juce_audio_devices
+            juce::juce_audio_processors
+        PUBLIC
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_lto_flags
+            juce::juce_recommended_warning_flags
+    )
+    if(WIN32)
+        target_link_libraries(AudioTechProConsole PRIVATE ole32 gdi32 user32)
+    endif()
+    if(APPLE)
+        target_link_libraries(AudioTechProConsole PRIVATE "-framework CoreAudioKit")
+    endif()
+
+    # Windows: the "Audio Tech Pro Console" ASIO driver, for the DAW (no JUCE in it: a small COM DLL,
+    # from the ASIO SDK headers JUCE bundles). Built next to the console's .exe; its installer registers it.
+    if(WIN32)
+        if(RIFF_JUCE_DIR)
+            set(RIFF_ASIO_HEADERS "${RIFF_JUCE_DIR}/modules/juce_audio_devices/native/asio")
+        else()
+            set(RIFF_ASIO_HEADERS "${juce_SOURCE_DIR}/modules/juce_audio_devices/native/asio")
+        endif()
+        add_library(AudioTechProConsoleASIO SHARED
+            Source/console/asio/ConsoleAsioDriver.cpp
+            Source/console/asio/ConsoleAsioDriver.def)
+        target_include_directories(AudioTechProConsoleASIO PRIVATE "${RIFF_ASIO_HEADERS}")
+        target_compile_definitions(AudioTechProConsoleASIO PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
+        target_link_libraries(AudioTechProConsoleASIO PRIVATE ole32 advapi32 user32 winmm avrt)
+        set_target_properties(AudioTechProConsoleASIO PROPERTIES
+            OUTPUT_NAME "AudioTechProConsoleASIO"
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"   # (no runtime DLLs needed in the DAW)
+            RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/AudioTechProConsole_artefacts/Release"
+            RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/AudioTechProConsole_artefacts/Debug")
+        add_dependencies(AudioTechProConsole AudioTechProConsoleASIO)
+    endif()
+
+    # macOS: the "Audio Tech Pro Console" audio device, for the DAW: a Core Audio driver bundle
+    # (AudioTechProConsole.driver, for /Library/Audio/Plug-Ins/HAL; its .pkg installs it).
+    if(APPLE)
+        add_library(AudioTechProConsoleDriver MODULE Source/console/macdriver/ConsoleDriver.cpp)
+        set_target_properties(AudioTechProConsoleDriver PROPERTIES
+            BUNDLE TRUE
+            BUNDLE_EXTENSION driver
+            OUTPUT_NAME "AudioTechProConsole"
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Source/console/macdriver/Info.plist"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+            MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/ConsoleDriver"
+            CXX_VISIBILITY_PRESET hidden)
+        target_compile_features(AudioTechProConsoleDriver PRIVATE cxx_std_17)
+        target_link_libraries(AudioTechProConsoleDriver PRIVATE "-framework CoreAudio" "-framework CoreFoundation")
+        add_dependencies(AudioTechProConsole AudioTechProConsoleDriver)
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # Tests:  cmake --build build --target AudioTechProTests && ./build/AudioTechProTests_artefacts/Debug/AudioTechProTests
 # ---------------------------------------------------------------------------
 if(RIFF_BUILD_TESTS)
