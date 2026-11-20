@@ -105,7 +105,7 @@ namespace
         AudioStreamBasicDescription f {};
         f.mSampleRate = rate;
         f.mFormatID = kAudioFormatLinearPCM;
-        f.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagsNativeEndian | kAudioFormatFlagIsPacked;
+        f.mFormatFlags = (UInt32) kAudioFormatFlagIsFloat | (UInt32) kAudioFormatFlagsNativeEndian | (UInt32) kAudioFormatFlagIsPacked;
         f.mBytesPerPacket = 4 * numChannels;
         f.mFramesPerPacket = 1;
         f.mBytesPerFrame = 4 * numChannels;
@@ -395,7 +395,7 @@ static OSStatus GetPropertyData (AudioServerPlugInDriverRef driver, AudioObjectI
                 if (qualifierSize != sizeof (CFStringRef) || qualifier == nullptr) return kAudioHardwareBadPropertySizeError;
                 CFStringRef uid = *static_cast<const CFStringRef*> (qualifier);
                 CFStringRef ours = cf (deviceUID);
-                const AudioObjectID result = (uid != nullptr && CFStringCompare (uid, ours, 0) == kCFCompareEqualTo) ? deviceID : kAudioObjectUnknown;
+                const AudioObjectID result = (uid != nullptr && CFStringCompare (uid, ours, 0) == kCFCompareEqualTo) ? (AudioObjectID) deviceID : (AudioObjectID) kAudioObjectUnknown;
                 CFRelease (ours);
                 return put<AudioObjectID> (result, inSize, outSize, out);
             }
