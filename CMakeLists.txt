@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
 endif()
 
-project(AudioTechPro VERSION 1.24.0 LANGUAGES C CXX)
+project(AudioTechPro VERSION 1.25.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -415,6 +415,10 @@ if(RIFF_BUILD_TESTS)
     if(WIN32)
         target_sources(AudioTechProTests PRIVATE Source/ui/ScreenRecorder_win.cpp)
         target_link_libraries(AudioTechProTests PRIVATE mfplat mfreadwrite mfuuid ole32 gdi32 user32)
+        # (the tests keep whole engines on the stack: Windows' 1 MB default is too small, the Mac's 8 MB is fine)
+        if(MSVC)
+            target_link_options(AudioTechProTests PRIVATE /STACK:16777216)
+        endif()
     endif()
 
     # Two tiny CLAP plugins the tests load.
