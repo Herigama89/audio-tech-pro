@@ -186,6 +186,12 @@ jobs:
           New-Item -ItemType Directory -Force out-plugins-windows | Out-Null
           Compress-Archive -Path "$stage\*" -DestinationPath "out-plugins-windows\Audio Tech Pro Plugins $version Windows.zip" -Force
           Get-ChildItem $stage
+          # Pitch Correction on its own: "Audio Tech Pro Pitch Correction <version> Setup.exe"
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          $pluginDir = (Resolve-Path $stage).Path
+          & $iscc "/DAppVersion=$version" "/DPluginDir=$pluginDir" "/DOutputDir=..\..\out-plugins-windows" installer\windows\PitchCorrection.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem out-plugins-windows
       - uses: actions/upload-artifact@v4
         with:
@@ -218,6 +224,7 @@ jobs:
 
             Plug-ins (VST3, and AU on the Mac: Logic, Ableton Live, FL Studio, Cubase, Studio One, Reaper...): Pitch Correction, the Classic Compressors, the Mastering Compressors and the classic EQs.
             Mac: run "Audio Tech Pro Plugins" .pkg (right-click > Open the first time), or unzip and copy the .vst3 files to /Library/Audio/Plug-Ins/VST3 and the .component files to /Library/Audio/Plug-Ins/Components.
+            Pitch Correction on its own: "Audio Tech Pro Pitch Correction <version>.pkg" (Mac) or "... Setup.exe" (Windows).
             Windows: unzip "Audio Tech Pro Plugins <version> Windows.zip" and copy the .vst3 folders to C:\Program Files\Common Files\VST3.
           files: files/*
           overwrite_files: true

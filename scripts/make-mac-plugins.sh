@@ -18,5 +18,13 @@ for b in "$STAGE"/Library/Audio/Plug-Ins/*/*; do codesign --force --deep --sign 
 ls -la "$STAGE/Library/Audio/Plug-Ins/VST3" "$STAGE/Library/Audio/Plug-Ins/Components"
 
 pkgbuild --root "$STAGE" --identifier com.audiotechpro.plugins --version "$VERSION" --install-location / "out-plugins/${NAME}.pkg"
+# Pitch Correction on its own too: "Audio Tech Pro Pitch Correction <version>.pkg"
+ONE="build-plugins/stage-pitch"
+rm -rf "$ONE"
+mkdir -p "$ONE/Library/Audio/Plug-Ins/VST3" "$ONE/Library/Audio/Plug-Ins/Components"
+ditto "$STAGE/Library/Audio/Plug-Ins/VST3/Pitch Correction.vst3" "$ONE/Library/Audio/Plug-Ins/VST3/Pitch Correction.vst3"
+ditto "$STAGE/Library/Audio/Plug-Ins/Components/Pitch Correction.component" "$ONE/Library/Audio/Plug-Ins/Components/Pitch Correction.component"
+pkgbuild --root "$ONE" --identifier com.audiotechpro.pitchcorrection --version "$VERSION" --install-location / "out-plugins/Audio Tech Pro Pitch Correction ${VERSION}.pkg"
+
 (cd "$STAGE/Library/Audio/Plug-Ins" && zip -qry "$(cd ../../../../.. && pwd)/out-plugins/${NAME}.zip" VST3 Components)
 ls -la out-plugins
