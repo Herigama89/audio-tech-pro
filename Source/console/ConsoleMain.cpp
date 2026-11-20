@@ -50,6 +50,8 @@ public:
         if (session != nullptr)
             if (auto* d = session->getChildByName ("DEVICE"))
                 device = d->getFirstChildElement();
+        if (session != nullptr)
+            engine->setPreferredMacInterface (session->getStringAttribute ("macInterface"));
         engine->start (device);
 
         window = std::make_unique<MainWindow> (*engine, properties);

@@ -12,6 +12,8 @@ on:
       - 'Source/engine/InterfaceControl.*'
       - 'Source/engine/PluginScanChild.*'
       - 'Source/engine/ClapFormat.*'
+      - 'Source/engine/AggregateDevice.*'
+      - 'CMakeLists.txt'
       - 'scripts/make-mac-console-pkg.sh'
       - 'installer/windows/AudioTechProConsole.iss'
       - '.github/workflows/console.yml'

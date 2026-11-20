@@ -386,6 +386,7 @@ if(RIFF_BUILD_CONSOLE)
         Source/console/ConsoleEngine.cpp
         Source/console/ConsoleUI.cpp
         Source/console/bridge/BridgeServer.cpp
+        Source/engine/AggregateDevice.cpp
         Source/engine/InterfaceControl.cpp
         Source/engine/PluginScanChild.cpp
         Source/engine/ClapFormat.cpp
@@ -435,6 +436,24 @@ if(RIFF_BUILD_CONSOLE)
             RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/AudioTechProConsole_artefacts/Release"
             RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/AudioTechProConsole_artefacts/Debug")
         add_dependencies(AudioTechProConsole AudioTechProConsoleASIO)
+    endif()
+
+    # macOS: the "Audio Tech Pro Console" audio device, for the DAW: a Core Audio driver bundle
+    # (AudioTechProConsole.driver, for /Library/Audio/Plug-Ins/HAL; its .pkg installs it).
+    if(APPLE)
+        add_library(AudioTechProConsoleDriver MODULE Source/console/macdriver/ConsoleDriver.cpp)
+        set_target_properties(AudioTechProConsoleDriver PROPERTIES
+            BUNDLE TRUE
+            BUNDLE_EXTENSION driver
+            OUTPUT_NAME "AudioTechProConsole"
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Source/console/macdriver/Info.plist"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+            MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/ConsoleDriver"
+            CXX_VISIBILITY_PRESET hidden)
+        target_compile_features(AudioTechProConsoleDriver PRIVATE cxx_std_17)
+        target_link_libraries(AudioTechProConsoleDriver PRIVATE "-framework CoreAudio" "-framework CoreFoundation")
+        add_dependencies(AudioTechProConsole AudioTechProConsoleDriver)
     endif()
 endif()
 

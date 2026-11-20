@@ -513,7 +513,8 @@ juce::String StripView::sourceText() const
     switch (channel.kind)
     {
         case Kind::input:  return channel.stereo ? channel.sourceName + " (stereo)" : channel.sourceName;
-        case Kind::daw:    return owner.engine.isDawConnected() ? "DAW connected" : "Waiting for your DAW";
+        case Kind::daw:    return owner.engine.isMacLink() ? "From your DAW (DAW L/R)"
+                                  : (owner.engine.isDawConnected() ? "DAW connected" : "Waiting for your DAW");
         case Kind::fx:     return "Returns to all mixes";
         case Kind::cue:    return "Headphone mix";
         case Kind::main:
@@ -879,7 +880,9 @@ void MainView::timerCallback()
                    + "     Plugin latency (worst strip): " + juce::String (pluginMs, 1) + " ms"
                    + "     Monitor path: Input > Trim > PRE > Inserts > Cue / Main"
                    + "     Hardware control: " + (engine.hardware.isConnected() ? "connected" : "not found")
-                   + (engine.hasDawBridge() ? juce::String ("     DAW (ASIO driver): ") + (engine.isDawConnected() ? "connected" : "not connected") : juce::String())
+                   + (engine.isMacLink() ? "     DAW device: Audio Tech Pro Console (with " + engine.getMacInterface() + ")"
+                      : engine.hasDawBridge() ? juce::String ("     DAW (ASIO driver): ") + (engine.isDawConnected() ? "connected" : "not connected")
+                                              : juce::String())
                    + "     Dropouts: " + (xruns >= 0 ? juce::String (xruns) : juce::String ("n/a"));
         for (auto* v : busViews)
             if (v->channel.kind == Kind::daw)

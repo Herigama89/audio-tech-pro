@@ -114,8 +114,13 @@ public:
 
     /** The virtual ASIO driver's bridge (Windows): a DAW records each input wet and dry and the Main mix,
         and its playback comes back in the DAW strip. */
-    bool hasDawBridge() const noexcept              { return bridge.isOpen(); }
-    bool isDawConnected() const noexcept            { return bridge.isDawConnected(); }
+    bool hasDawBridge() const noexcept              { return bridge.isOpen() || macLink.active; }
+    bool isDawConnected() const noexcept            { return bridge.isDawConnected(); }   // (Windows only: the Mac can't tell)
+    bool isMacLink() const noexcept                 { return macLink.active; }
+
+    /** Mac: the real interface the console runs (combined with the "Audio Tech Pro Console" device). */
+    juce::String getMacInterface() const            { return macInterface; }
+    void setPreferredMacInterface (const juce::String& name) { macInterface = name; }
     juce::StringArray getOutputNames() const        { return outputNames; }
 
     void setStereo (int stripIndex, bool stereo);
@@ -166,6 +171,19 @@ private:
     void deletePluginsOf (Channel&);
     void configureBridge();   // (under the lock)
 
+    // The DAW link, either kind: Windows (shared memory to the ASIO driver) or the Mac (the virtual device's
+    // channels, at the end of the combined device). Audio thread.
+    int wetChannel (int strip) const noexcept   { return macLink.active ? 4 + strip : strip; }
+    int dryChannel (int strip) const noexcept   { return macLink.active ? 4 + macStrips + strip : bridgeStrips + strip; }
+    int mainChannel (int side) const noexcept   { return macLink.active ? 2 + side : 2 * bridgeStrips + side; }
+    void dawBegin (int n) noexcept;
+    void dawWrite (int channel, const float* samples, int n, float* const* out, int numOut) noexcept;
+    void dawRead (float* const* dest, int n, const float* const* in, int numIn) noexcept;
+    void dawEnd (int n) noexcept;
+
+    /** Mac: if a real interface is open (not yet combined), combine it with the virtual device and open that. */
+    void combineForMac();
+
     void processStrip (Channel&, const float* const* in, int numIn, float* const* out, int numOut, int n, bool anySolo);
     void runChain (Channel&, int n);
     static void runPlugin (juce::AudioPluginInstance&, juce::AudioBuffer<float>&, juce::MidiBuffer&, int n);
@@ -179,6 +197,11 @@ private:
     std::unique_ptr<Channel> fxBus, mainBus, dawBus;
     atpbridge::BridgeServer bridge;
     int bridgeStrips = 0;     // inputs sent to the DAW (wet and dry each)
+
+    static constexpr int macStrips = 31;   // (the Mac device's fixed layout: DAW L/R, Main L/R, 31 wet, 31 dry)
+    struct MacLink { bool active = false; int inputOffset = 0, outputOffset = 0; } macLink;   // (under the lock)
+    juce::String macInterface;   // (message thread)
+    bool combining = false;
     std::array<std::unique_ptr<Channel>, 2> cues;
     juce::StringArray outputNames;
     juce::MidiBuffer midi;

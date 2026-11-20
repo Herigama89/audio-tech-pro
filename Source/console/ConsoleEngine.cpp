@@ -2,6 +2,7 @@
 #include "../engine/ClapFormat.h"
 #include "../engine/PluginScanChild.h"
 #include "bridge/BridgeShared.h"
+#include "../engine/AggregateDevice.h"
 #include <algorithm>
 #include <iterator>
 
@@ -10,6 +11,9 @@ namespace atpconsole
 
 namespace
 {
+    const juce::String macDeviceUid { "com.audiotechpro.console.device" };   // (the virtual device: macdriver/ConsoleDriver.cpp)
+    constexpr int macDeviceChannels = 66;
+
     // Fader scale: dB at each point along the fader, top (0) to bottom (1), as a console is printed.
     struct ScalePoint { double db, fromTop; };
     constexpr ScalePoint faderScale[] = { { 10.0, 0.0 }, { 5.0, 0.11 }, { 0.0, 0.23 }, { -5.0, 0.35 }, { -10.0, 0.47 },
@@ -96,6 +100,18 @@ void Engine::start (const juce::XmlElement* savedDevice)
     {
         DBG ("Audio device: " << error);
     }
+   #if JUCE_MAC
+    // (the session's interface: the combined device it ran on doesn't outlive the app)
+    if (macInterface.isNotEmpty() && macInterface != getDeviceName().fromFirstOccurrenceOf (" · ", false, false))
+    {
+        auto setup = deviceManager.getAudioDeviceSetup();
+        setup.inputDeviceName = setup.outputDeviceName = macInterface;
+        setup.useDefaultInputChannels = setup.useDefaultOutputChannels = false;
+        setup.inputChannels.setRange (0, 256, true);
+        setup.outputChannels.setRange (0, 256, true);
+        deviceManager.setAudioDeviceSetup (setup, true);
+    }
+   #endif
     syncToDevice();
     deviceManager.addAudioCallback (this);
     hardware.start();
@@ -108,6 +124,9 @@ void Engine::shutdown()
     deviceManager.closeAudioDevice();
     hardware.stop();
     bridge.close();
+   #if JUCE_MAC
+    riff::aggregate::destroy();
+   #endif
     forEachChannel ([this] (Channel& c) { deletePluginsOf (c); });
 }
 
@@ -154,9 +173,68 @@ void Engine::changeListenerCallback (juce::ChangeBroadcaster*)
     syncToDevice();
 }
 
+void Engine::combineForMac()
+{
+   #if JUCE_MAC
+    auto* device = deviceManager.getCurrentAudioDevice();
+    if (device == nullptr || combining)
+        return;
+    const auto name = device->getName();
+    if (name == riff::aggregate::deviceName)
+        return;
+
+    const auto interfaces = riff::aggregate::listInterfaces();
+    juce::String ifaceUid;
+    bool haveVirtual = false;
+    for (const auto& i : interfaces)
+    {
+        haveVirtual = haveVirtual || i.uid == macDeviceUid;
+        if (i.name == name && i.uid != macDeviceUid)
+            ifaceUid = i.uid;
+    }
+    if (! haveVirtual || ifaceUid.isEmpty())
+        return;   // (no driver installed, or the console opened the virtual device itself)
+
+    riff::aggregate::Setup combo;
+    combo.uids.add (ifaceUid);
+    combo.uids.add (macDeviceUid);
+    combo.clockUid = ifaceUid;          // (your interface is the clock; the virtual device follows it)
+    combo.driftCorrection = true;
+    if (riff::aggregate::create (combo).isNotEmpty())
+        return;
+
+    macInterface = name;
+    combining = true;
+    auto setup = deviceManager.getAudioDeviceSetup();
+    setup.inputDeviceName = setup.outputDeviceName = riff::aggregate::deviceName;
+    setup.useDefaultInputChannels = setup.useDefaultOutputChannels = false;
+    setup.inputChannels.setRange (0, 256, true);
+    setup.outputChannels.setRange (0, 256, true);
+    if (auto* type = deviceManager.getCurrentDeviceTypeObject())
+        type->scanForDevices();
+    const auto error = deviceManager.setAudioDeviceSetup (setup, true);
+    combining = false;
+    if (error.isNotEmpty())
+    {
+        DBG ("Couldn't open the combined device: " << error);
+    }
+   #endif
+}
+
 void Engine::syncToDevice()
 {
+   #if JUCE_MAC
+    if (! combining)
+        if (auto* d = deviceManager.getCurrentAudioDevice(); d != nullptr && d->getName() != riff::aggregate::deviceName)
+        {
+            combineForMac();   // (opens the combined device, which calls back here)
+            if (auto* now = deviceManager.getCurrentAudioDevice(); now != nullptr && now->getName() == riff::aggregate::deviceName)
+                return;
+        }
+   #endif
+
     juce::StringArray inNames, outNames;
+    MacLink link;
     if (auto* device = deviceManager.getCurrentAudioDevice())
     {
         const auto allIn = device->getInputChannelNames(), allOut = device->getOutputChannelNames();
@@ -169,6 +247,19 @@ void Engine::syncToDevice()
                 outNames.add (allOut[i]);
         sampleRate = device->getCurrentSampleRate();
         blockSize = device->getCurrentBufferSizeSamples();
+
+       #if JUCE_MAC
+        // The combined device: your interface's channels, then the virtual device's (kept for the DAW)
+        if (device->getName() == riff::aggregate::deviceName && macInterface.isNotEmpty())
+            for (const auto& i : riff::aggregate::listInterfaces())
+                if (i.name == macInterface && i.uid != macDeviceUid
+                    && inNames.size() >= i.inputs + macDeviceChannels && outNames.size() >= i.outputs + macDeviceChannels)
+                {
+                    link = { true, i.inputs, i.outputs };
+                    inNames.removeRange (i.inputs, inNames.size());
+                    outNames.removeRange (i.outputs, outNames.size());
+                }
+       #endif
     }
 
     const bool outputsChanged = outNames != outputNames;
@@ -203,6 +294,7 @@ void Engine::syncToDevice()
         forEachChannel ([this] (Channel& c) { if (c.buffer.getNumSamples() < capacity) allocate (c); });
         updateVisibility();
         outputNames = outNames;
+        macLink = link;
         configureBridge();
     }
 
@@ -239,6 +331,8 @@ void Engine::applyDefaultOutputs (bool firstTime)
 
 void Engine::configureBridge()
 {
+    if (macLink.active)
+        bridgeStrips = juce::jmin ((int) strips.size(), macStrips);
     if (! bridge.isOpen())
         return;
     bridgeStrips = juce::jmin ((int) strips.size(), (atpbridge::maxToDaw - 2) / 2);
@@ -418,9 +512,9 @@ void Engine::processStrip (Channel& s, const float* const* in, int numIn, float*
 
     // To the DAW: this input after its plugins (the "Wet" channels)
     if (s.input < bridgeStrips)
-        bridge.write (s.input, b.getReadPointer (0), n);
+        dawWrite (wetChannel (s.input), b.getReadPointer (0), n, out, numOut);
     if (s.stereo && s.input + 1 < bridgeStrips)
-        bridge.write (s.input + 1, b.getReadPointer (1), n);
+        dawWrite (wetChannel (s.input + 1), b.getReadPointer (1), n, out, numOut);
 
     // 3. Direct out: the processed signal, before the fader (to record it)
     if (const int d = s.output.load (std::memory_order_relaxed); d >= 0)
@@ -472,17 +566,17 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
     const juce::SpinLock::ScopedTryLockType tl (lock);
     if (! tl.isLocked() || n > capacity || n <= 0)
     {
-        bridge.beginBlock (n);   // (the structure is being changed: one block of silence, for the DAW too)
-        bridge.endBlock (n);
+        dawBegin (n);   // (the structure is being changed: one block of silence, for the DAW too)
+        dawEnd (n);
         return;
     }
 
     const juce::ScopedNoDenormals noDenormals;
 
     // To the DAW: every raw input (the "Dry" channels)
-    bridge.beginBlock (n);
+    dawBegin (n);
     for (int i = 0; i < bridgeStrips && i < numIn; ++i)
-        bridge.write (bridgeStrips + i, in[i], n);
+        dawWrite (dryChannel (i), in[i], n, out, numOut);
 
     fxBus->buffer.clear (0, n);
     mainBus->buffer.clear (0, n);
@@ -498,11 +592,11 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
             processStrip (*s, in, numIn, out, numOut, n, anySolo);
 
     // The DAW's playback (through the virtual ASIO driver): its plugins, the cues (before the fader), Main
-    if (bridge.isOpen())
+    if (bridge.isOpen() || macLink.active)
     {
         auto& d = *dawBus;
         float* dest[2] = { d.buffer.getWritePointer (0), d.buffer.getWritePointer (1) };
-        bridge.readFromDaw (dest, 2, n);
+        dawRead (dest, n, in, numIn);
         runChain (d, n);
         const bool muted = d.mute.load (std::memory_order_relaxed);
         for (int i = 0; i < 2; ++i)
@@ -568,9 +662,50 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
     writeOutput (m.buffer, m.output.load (std::memory_order_relaxed), out, numOut, n);
 
     // To the DAW: the Main mix, then the block is complete (and the driver wakes)
-    bridge.write (2 * bridgeStrips, m.buffer.getReadPointer (0), n);
-    bridge.write (2 * bridgeStrips + 1, m.buffer.getReadPointer (1), n);
-    bridge.endBlock (n);
+    dawWrite (mainChannel (0), m.buffer.getReadPointer (0), n, out, numOut);
+    dawWrite (mainChannel (1), m.buffer.getReadPointer (1), n, out, numOut);
+    dawEnd (n);
+}
+
+void Engine::dawBegin (int n) noexcept
+{
+    if (! macLink.active)
+        bridge.beginBlock (n);   // (the Mac's outputs were cleared already)
+}
+
+void Engine::dawWrite (int channel, const float* samples, int n, float* const* out, int numOut) noexcept
+{
+    if (macLink.active)
+    {
+        const int o = macLink.outputOffset + channel;
+        if (o < numOut && out[o] != nullptr && samples != nullptr)
+            juce::FloatVectorOperations::copy (out[o], samples, n);
+        return;
+    }
+    bridge.write (channel, samples, n);
+}
+
+void Engine::dawRead (float* const* dest, int n, const float* const* in, int numIn) noexcept
+{
+    if (macLink.active)
+    {
+        for (int c = 0; c < 2; ++c)   // (the DAW plays into the virtual device's channels 1-2)
+        {
+            const int i = macLink.inputOffset + c;
+            if (i < numIn && in[i] != nullptr)
+                juce::FloatVectorOperations::copy (dest[c], in[i], n);
+            else
+                juce::FloatVectorOperations::clear (dest[c], n);
+        }
+        return;
+    }
+    bridge.readFromDaw (dest, 2, n);
+}
+
+void Engine::dawEnd (int n) noexcept
+{
+    if (! macLink.active)
+        bridge.endBlock (n);
 }
 
 //==============================================================================
@@ -709,6 +844,8 @@ std::unique_ptr<juce::XmlElement> Engine::saveSession() const
     auto root = std::make_unique<juce::XmlElement> ("ATPCONSOLE");
     root->setAttribute ("version", 1);
     root->setAttribute ("talkbackInput", talkbackInput.load());
+    if (macInterface.isNotEmpty())
+        root->setAttribute ("macInterface", macInterface);
     if (auto device = deviceManager.createStateXml())
         root->createNewChildElement ("DEVICE")->addChildElement (device.release());
 
