@@ -68,6 +68,12 @@ Engine::Engine()
         cues[i]->fxReturnDb = -6.0f;
     }
 
+    dawBus = std::make_unique<Channel> (Kind::daw);
+    dawBus->name = "DAW Playback";
+    dawBus->colour = juce::Colour (0xff5ab4e8);
+    dawBus->sendDb[sendCueA] = 0.0f;   // (the artist hears the track in their headphones)
+    dawBus->sendDb[sendCueB] = 0.0f;
+
     mainBus = std::make_unique<Channel> (Kind::main);
     mainBus->name = "Main";
     mainBus->colour = juce::Colours::white;
@@ -83,6 +89,7 @@ Engine::~Engine()
 void Engine::start (const juce::XmlElement* savedDevice)
 {
     // (as many channels as the interface has: every input becomes a strip)
+    bridge.open();   // (Windows: the DAW's "Audio Tech Pro Console" ASIO driver connects to this)
     const auto error = deviceManager.initialise (256, 256, savedDevice, true);
     if (error.isNotEmpty())
     {
@@ -99,6 +106,7 @@ void Engine::shutdown()
     deviceManager.removeChangeListener (this);
     deviceManager.closeAudioDevice();
     hardware.stop();
+    bridge.close();
     forEachChannel ([this] (Channel& c) { deletePluginsOf (c); });
 }
 
@@ -106,6 +114,7 @@ Channel& Engine::bus (Kind k)
 {
     switch (k)
     {
+        case Kind::daw:  return *dawBus;
         case Kind::fx:   return *fxBus;
         case Kind::cue:  return *cues[0];
         case Kind::main:
@@ -118,6 +127,7 @@ void Engine::forEachChannel (const std::function<void (Channel&)>& f)
 {
     for (auto& s : strips)
         f (*s);
+    f (*dawBus);
     f (*fxBus);
     for (auto& c : cues)
         f (*c);
@@ -192,6 +202,7 @@ void Engine::syncToDevice()
         forEachChannel ([this] (Channel& c) { if (c.buffer.getNumSamples() < capacity) allocate (c); });
         updateVisibility();
         outputNames = outNames;
+        configureBridge();
     }
 
     for (auto& r : removed)
@@ -223,6 +234,28 @@ void Engine::applyDefaultOutputs (bool firstTime)
         clamp (c->output);
     for (auto& s : strips)
         clamp (s->output);
+}
+
+void Engine::configureBridge()
+{
+    if (! bridge.isOpen())
+        return;
+    bridgeStrips = juce::jmin ((int) strips.size(), (atpbridge::maxToDaw - 2) / 2);
+    std::vector<std::string> toDaw, fromDaw { "DAW L", "DAW R" };
+    for (int i = 0; i < bridgeStrips; ++i)
+        toDaw.push_back ("IN " + std::to_string (i + 1) + " Wet");
+    for (int i = 0; i < bridgeStrips; ++i)
+        toDaw.push_back ("IN " + std::to_string (i + 1) + " Dry");
+    toDaw.push_back ("Main L");
+    toDaw.push_back ("Main R");
+
+    int inLatency = 0, outLatency = 0;
+    if (auto* d = deviceManager.getCurrentAudioDevice())
+    {
+        inLatency = d->getInputLatencyInSamples();
+        outLatency = d->getOutputLatencyInSamples();
+    }
+    bridge.configure (sampleRate, blockSize, inLatency, outLatency, toDaw, fromDaw);
 }
 
 void Engine::updateVisibility()
@@ -317,9 +350,14 @@ void Engine::audioDeviceAboutToStart (juce::AudioIODevice* device)
             }
     });
     midi.ensureSize (2048);
+    configureBridge();
+    bridge.setRunning (true);
 }
 
-void Engine::audioDeviceStopped() {}
+void Engine::audioDeviceStopped()
+{
+    bridge.setRunning (false);
+}
 
 void Engine::runPlugin (juce::AudioPluginInstance& p, juce::AudioBuffer<float>& b, juce::MidiBuffer& midi, int n)
 {
@@ -377,6 +415,12 @@ void Engine::processStrip (Channel& s, const float* const* in, int numIn, float*
     s.lastTrim = trim;
     runChain (s, n);
 
+    // To the DAW: this input after its plugins (the "Wet" channels)
+    if (s.input < bridgeStrips)
+        bridge.write (s.input, b.getReadPointer (0), n);
+    if (s.stereo && s.input + 1 < bridgeStrips)
+        bridge.write (s.input + 1, b.getReadPointer (1), n);
+
     // 3. Direct out: the processed signal, before the fader (to record it)
     if (const int d = s.output.load (std::memory_order_relaxed); d >= 0)
     {
@@ -426,9 +470,18 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
 
     const juce::SpinLock::ScopedTryLockType tl (lock);
     if (! tl.isLocked() || n > capacity || n <= 0)
-        return;   // (the structure is being changed: one block of silence)
+    {
+        bridge.beginBlock (n);   // (the structure is being changed: one block of silence, for the DAW too)
+        bridge.endBlock (n);
+        return;
+    }
 
     const juce::ScopedNoDenormals noDenormals;
+
+    // To the DAW: every raw input (the "Dry" channels)
+    bridge.beginBlock (n);
+    for (int i = 0; i < bridgeStrips && i < numIn; ++i)
+        bridge.write (bridgeStrips + i, in[i], n);
 
     fxBus->buffer.clear (0, n);
     mainBus->buffer.clear (0, n);
@@ -442,6 +495,29 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
     for (auto& s : strips)
         if (s->visible)
             processStrip (*s, in, numIn, out, numOut, n, anySolo);
+
+    // The DAW's playback (through the virtual ASIO driver): its plugins, the cues (before the fader), Main
+    if (bridge.isOpen())
+    {
+        auto& d = *dawBus;
+        float* dest[2] = { d.buffer.getWritePointer (0), d.buffer.getWritePointer (1) };
+        bridge.readFromDaw (dest, 2, n);
+        runChain (d, n);
+        const bool muted = d.mute.load (std::memory_order_relaxed);
+        for (int i = 0; i < 2; ++i)
+        {
+            const float g = muted ? 0.0f : gainOf (d.sendDb[(size_t) i].load (std::memory_order_relaxed));
+            auto& last = d.lastSend[(size_t) i];
+            cues[(size_t) i]->buffer.addFromWithRamp (0, 0, d.buffer.getReadPointer (0), n, last[0], g);
+            cues[(size_t) i]->buffer.addFromWithRamp (1, 0, d.buffer.getReadPointer (1), n, last[1], g);
+            last = { g, g };
+        }
+        const float g = muted ? 0.0f : gainOf (d.faderDb.load (std::memory_order_relaxed));
+        mainBus->buffer.addFromWithRamp (0, 0, d.buffer.getReadPointer (0), n, d.lastMainL, g);
+        mainBus->buffer.addFromWithRamp (1, 0, d.buffer.getReadPointer (1), n, d.lastMainR, g);
+        d.lastMainL = d.lastMainR = g;
+        d.meter.push (d.buffer.getMagnitude (0, 0, n) * g, d.buffer.getMagnitude (1, 0, n) * g);
+    }
 
     // The FX bus: its plugins (a reverb), then into the Main mix and each cue
     {
@@ -489,6 +565,11 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
     m.lastMainL = g;
     m.meter.push (m.buffer.getMagnitude (0, 0, n), m.buffer.getMagnitude (1, 0, n));
     writeOutput (m.buffer, m.output.load (std::memory_order_relaxed), out, numOut, n);
+
+    // To the DAW: the Main mix, then the block is complete (and the driver wakes)
+    bridge.write (2 * bridgeStrips, m.buffer.getReadPointer (0), n);
+    bridge.write (2 * bridgeStrips + 1, m.buffer.getReadPointer (1), n);
+    bridge.endBlock (n);
 }
 
 //==============================================================================
@@ -519,6 +600,7 @@ int Engine::countPlugins() const
     int count = 0;
     auto add = [&count] (const Channel& c) { for (auto& s : c.slots) count += s.plugin != nullptr ? 1 : 0; };
     for (auto& s : strips) add (*s);
+    add (*dawBus);
     add (*fxBus);
     for (auto& c : cues) add (*c);
     add (*mainBus);
@@ -537,6 +619,7 @@ int Engine::maxPluginLatencySamples() const
         worst = juce::jmax (worst, sum);
     };
     for (auto& s : strips) check (*s);
+    check (*dawBus);
     check (*fxBus);
     for (auto& c : cues) check (*c);
     check (*mainBus);
@@ -634,6 +717,7 @@ std::unique_ptr<juce::XmlElement> Engine::saveSession() const
         x->setAttribute ("input", (int) i);
         root->addChildElement (x.release());
     }
+    root->addChildElement (saveChannel (*dawBus, "DAW").release());
     root->addChildElement (saveChannel (*fxBus, "FXBUS").release());
     for (size_t i = 0; i < cues.size(); ++i)
     {
@@ -668,6 +752,8 @@ void Engine::loadSession (const juce::XmlElement& root, juce::StringArray& probl
             setStereo (i, x->getBoolAttribute ("stereo"));
         }
     }
+    if (auto* x = root.getChildByName ("DAW"))
+        loadChannel (*dawBus, *x, problems);
     if (auto* x = root.getChildByName ("FXBUS"))
         loadChannel (*fxBus, *x, problems);
     for (auto* x : root.getChildWithTagNameIterator ("CUE"))
@@ -690,7 +776,7 @@ void Engine::resetToDefaults()
         c.faderDb = c.kind == Kind::fx ? -6.0f : 0.0f;
         c.pan = 0.0f;
         c.mute = c.solo = c.polarity = false;
-        for (auto& s : c.sendDb) s = minusInfinityDb;
+        for (auto& s : c.sendDb) s = c.kind == Kind::daw ? 0.0f : minusInfinityDb;
         c.fxReturnDb = c.kind == Kind::cue ? -6.0f : minusInfinityDb;
         if (c.kind == Kind::input)
         {

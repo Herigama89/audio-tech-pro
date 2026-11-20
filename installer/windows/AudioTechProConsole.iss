@@ -38,7 +38,9 @@ Name: "desktopicon"; Description: "Make a desktop shortcut"; GroupDescription: "
 
 [Files]
 Source: "{#BuildDir}\Audio Tech Pro Console.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#BuildDir}\*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+; The ASIO driver your DAW opens ("Audio Tech Pro Console"): registered on install, unregistered on uninstall
+Source: "{#BuildDir}\AudioTechProConsoleASIO.dll"; DestDir: "{app}"; Flags: ignoreversion regserver restartreplace uninsrestartdelete
+Source: "{#BuildDir}\*.dll"; DestDir: "{app}"; Excludes: "AudioTechProConsoleASIO.dll"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
 Name: "{group}\Audio Tech Pro Console"; Filename: "{app}\Audio Tech Pro Console.exe"

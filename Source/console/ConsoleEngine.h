@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "../engine/InterfaceControl.h"
+#include "bridge/BridgeServer.h"
 #include <array>
 #include <atomic>
 #include <memory>
@@ -32,7 +33,7 @@ constexpr int numSends = 3;            // cue A, cue B, FX
 constexpr int maxChannels = 8;         // channels a strip's buffer has (for plugins with side-chains)
 constexpr float minusInfinityDb = -80.0f;
 
-enum class Kind { input, fx, cue, main };
+enum class Kind { input, daw, fx, cue, main };
 enum Send { sendCueA = 0, sendCueB = 1, sendFx = 2 };
 
 struct Slot
@@ -109,6 +110,12 @@ public:
     Channel& strip (int i)                          { return *strips[(size_t) i]; }
     Channel& bus (Kind k);                          // fx, cue A (index 0), main
     Channel& cue (int index)                        { return *cues[(size_t) index]; }
+    Channel& dawStrip()                             { return *dawBus; }
+
+    /** The virtual ASIO driver's bridge (Windows): a DAW records each input wet and dry and the Main mix,
+        and its playback comes back in the DAW strip. */
+    bool hasDawBridge() const noexcept              { return bridge.isOpen(); }
+    bool isDawConnected() const noexcept            { return bridge.isDawConnected(); }
     juce::StringArray getOutputNames() const        { return outputNames; }
 
     void setStereo (int stripIndex, bool stereo);
@@ -157,6 +164,7 @@ private:
     void applyDefaultOutputs (bool firstTime);
     void forEachChannel (const std::function<void (Channel&)>&);
     void deletePluginsOf (Channel&);
+    void configureBridge();   // (under the lock)
 
     void processStrip (Channel&, const float* const* in, int numIn, float* const* out, int numOut, int n, bool anySolo);
     void runChain (Channel&, int n);
@@ -168,7 +176,9 @@ private:
 
     juce::SpinLock lock;
     std::vector<std::unique_ptr<Channel>> strips;
-    std::unique_ptr<Channel> fxBus, mainBus;
+    std::unique_ptr<Channel> fxBus, mainBus, dawBus;
+    atpbridge::BridgeServer bridge;
+    int bridgeStrips = 0;     // inputs sent to the DAW (wet and dry each)
     std::array<std::unique_ptr<Channel>, 2> cues;
     juce::StringArray outputNames;
     juce::MidiBuffer midi;

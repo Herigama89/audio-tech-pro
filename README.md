@@ -39,6 +39,13 @@ plus talkback (hold the button; choose the mic in Session > Talkback mic), sessi
 reopened with every plugin's settings), crash-safe plugin scanning and stereo strips (an interface's
 loopback pair is linked automatically; right-click a strip's name for more).
 
+**Recording in your DAW (Windows).** The console installs an ASIO driver called **Audio Tech Pro
+Console**. Open the console first (it holds your real interface), then choose that driver in your
+DAW's audio settings. The DAW gets, as its inputs, `IN 1 Wet`, `IN 2 Wet`... (each input after its
+plugins), `IN 1 Dry`... (each raw input) and `Main L/R`; its outputs `DAW L/R` play in the console's
+**DAW** strip, which has its own sends to the headphone mixes. The DAW runs at the console's sample
+rate and buffer size (set them in the console's Audio Setup), one buffer behind it.
+
 Build it on its own: `cmake --build build --target AudioTechProConsole`. The Console workflow
 (Actions > Console) builds `Audio Tech Pro Console <version>.pkg` (Mac) and `... Setup.exe` (Windows)
 whenever its code changes; the Build workflow publishes them with each release.

@@ -364,7 +364,7 @@ StripView::StripView (MainView& o, Channel& c, int index, int cue)
         k.setSkewFactorFromMidPoint (-12.0);
         k.setTooltip (sendNames[i]);
         k.onValueChange = [this, i] { channel.sendDb[(size_t) i] = (float) sends[(size_t) i].getValue(); };
-        if (isInput) addAndMakeVisible (k);
+        if (isInput || (c.kind == Kind::daw && i != sendFx)) addAndMakeVisible (k);
     }
 
     setupKnob (fxReturn, colours::green, minusInfinityDb, 6.0, -6.0, false);
@@ -392,7 +392,7 @@ StripView::StripView (MainView& o, Channel& c, int index, int cue)
     fader.setValue (0.0, juce::dontSendNotification);
     fader.setDoubleClickReturnValue (true, 0.0);
     fader.setSliderSnapsToMousePosition (false);
-    fader.setColour (juce::Slider::thumbColourId, isInput || c.kind == Kind::fx ? c.colour : juce::Colours::white);
+    fader.setColour (juce::Slider::thumbColourId, isInput || c.kind == Kind::fx || c.kind == Kind::daw ? c.colour : juce::Colours::white);
     fader.setTooltip ("Double-click: 0 dB");
     fader.onValueChange = [this] { channel.faderDb = (float) fader.getValue(); repaint(); };
     addAndMakeVisible (fader);
@@ -418,7 +418,7 @@ StripView::StripView (MainView& o, Channel& c, int index, int cue)
     output.setTooltip (isInput ? "Direct out: the processed signal (before the fader) to an output - to record it"
                                : "Where this mix plays");
     output.onChange = [this] { channel.output = output.getSelectedId() - 2; repaint(); };
-    if (c.kind != Kind::fx) addAndMakeVisible (output);
+    if (c.kind != Kind::fx && c.kind != Kind::daw) addAndMakeVisible (output);
 
     refresh();
 }
@@ -450,7 +450,7 @@ void StripView::refresh()
     trim.setValue (channel.trimDb.load(), juce::dontSendNotification);
     pan.setValue (channel.pan.load(), juce::dontSendNotification);
     fader.setValue (channel.faderDb.load(), juce::dontSendNotification);
-    fader.setColour (juce::Slider::thumbColourId, channel.kind == Kind::input || channel.kind == Kind::fx ? channel.colour : juce::Colours::white);
+    fader.setColour (juce::Slider::thumbColourId, channel.kind == Kind::input || channel.kind == Kind::fx || channel.kind == Kind::daw ? channel.colour : juce::Colours::white);
     mute.setToggleState (channel.mute.load(), juce::dontSendNotification);
     solo.setToggleState (channel.solo.load(), juce::dontSendNotification);
     polarity.setToggleState (channel.polarity.load(), juce::dontSendNotification);
@@ -500,6 +500,7 @@ juce::String StripView::numberText() const
     {
         case Kind::input:
             return "IN " + juce::String (channel.input + 1) + (channel.stereo ? juce::String (juce::CharPointer_UTF8 ("\xe2\x80\x93")) + juce::String (channel.input + 2) : juce::String());
+        case Kind::daw:  return "DAW";
         case Kind::fx:   return "FX BUS";
         case Kind::cue:  return "CUE " + juce::String::charToString ((juce::juce_wchar) ('A' + cueIndex));
         case Kind::main:
@@ -512,6 +513,7 @@ juce::String StripView::sourceText() const
     switch (channel.kind)
     {
         case Kind::input:  return channel.stereo ? channel.sourceName + " (stereo)" : channel.sourceName;
+        case Kind::daw:    return owner.engine.isDawConnected() ? "DAW connected" : "Waiting for your DAW";
         case Kind::fx:     return "Returns to all mixes";
         case Kind::cue:    return "Headphone mix";
         case Kind::main:
@@ -529,7 +531,7 @@ void StripView::paint (juce::Graphics& g)
     g.drawRoundedRectangle (area.reduced (0.5f), 4.0f, 1.0f);
 
     // The colour tab
-    g.setColour (channel.kind == Kind::input || channel.kind == Kind::fx ? channel.colour : (channel.kind == Kind::main ? juce::Colours::white : colours::dim));
+    g.setColour (channel.kind == Kind::input || channel.kind == Kind::fx || channel.kind == Kind::daw ? channel.colour : (channel.kind == Kind::main ? juce::Colours::white : colours::dim));
     g.fillRect (area.removeFromTop (5.0f).reduced (1.0f, 0.0f));
 
     g.setFont (font (9.5f, false));
@@ -539,6 +541,13 @@ void StripView::paint (juce::Graphics& g)
 
     // Knob labels
     g.setFont (font (8.5f, false));
+    if (channel.kind == Kind::daw)
+    {
+        const char* labels[] = { "CUE A", "CUE B" };
+        for (int i = 0; i < 2; ++i)
+            g.drawText (labels[i], sends[(size_t) i].getBounds().translated (0, sends[(size_t) i].getHeight() - 2).withHeight (10),
+                        juce::Justification::centred, false);
+    }
     if (channel.kind == Kind::input)
     {
         const char* labels[] = { "CUE A", "CUE B", "FX" };
@@ -835,6 +844,8 @@ void MainView::rebuildStrips()
         if (engine.strip (i).visible)
             stripHolder.addAndMakeVisible (inputViews.add (new StripView (*this, engine.strip (i), i, -1)));
 
+    if (engine.hasDawBridge())
+        addAndMakeVisible (busViews.add (new StripView (*this, engine.dawStrip(), -1, -1)));
     addAndMakeVisible (busViews.add (new StripView (*this, engine.bus (Kind::fx), -1, -1)));
     addAndMakeVisible (busViews.add (new StripView (*this, engine.cue (0), -1, 0)));
     addAndMakeVisible (busViews.add (new StripView (*this, engine.cue (1), -1, 1)));
@@ -868,7 +879,11 @@ void MainView::timerCallback()
                    + "     Plugin latency (worst strip): " + juce::String (pluginMs, 1) + " ms"
                    + "     Monitor path: Input > Trim > PRE > Inserts > Cue / Main"
                    + "     Hardware control: " + (engine.hardware.isConnected() ? "connected" : "not found")
+                   + (engine.hasDawBridge() ? juce::String ("     DAW (ASIO driver): ") + (engine.isDawConnected() ? "connected" : "not connected") : juce::String())
                    + "     Dropouts: " + (xruns >= 0 ? juce::String (xruns) : juce::String ("n/a"));
+        for (auto* v : busViews)
+            if (v->channel.kind == Kind::daw)
+                v->repaint();
         repaint (0, 0, getWidth(), 58);
         repaint (0, getHeight() - 28, getWidth(), 28);
     }

@@ -385,6 +385,7 @@ if(RIFF_BUILD_CONSOLE)
         Source/console/ConsoleMain.cpp
         Source/console/ConsoleEngine.cpp
         Source/console/ConsoleUI.cpp
+        Source/console/bridge/BridgeServer.cpp
         Source/engine/InterfaceControl.cpp
         Source/engine/PluginScanChild.cpp
         Source/engine/ClapFormat.cpp
@@ -412,6 +413,28 @@ if(RIFF_BUILD_CONSOLE)
     endif()
     if(APPLE)
         target_link_libraries(AudioTechProConsole PRIVATE "-framework CoreAudioKit")
+    endif()
+
+    # Windows: the "Audio Tech Pro Console" ASIO driver, for the DAW (no JUCE in it: a small COM DLL,
+    # from the ASIO SDK headers JUCE bundles). Built next to the console's .exe; its installer registers it.
+    if(WIN32)
+        if(RIFF_JUCE_DIR)
+            set(RIFF_ASIO_HEADERS "${RIFF_JUCE_DIR}/modules/juce_audio_devices/native/asio")
+        else()
+            set(RIFF_ASIO_HEADERS "${juce_SOURCE_DIR}/modules/juce_audio_devices/native/asio")
+        endif()
+        add_library(AudioTechProConsoleASIO SHARED
+            Source/console/asio/ConsoleAsioDriver.cpp
+            Source/console/asio/ConsoleAsioDriver.def)
+        target_include_directories(AudioTechProConsoleASIO PRIVATE "${RIFF_ASIO_HEADERS}")
+        target_compile_definitions(AudioTechProConsoleASIO PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
+        target_link_libraries(AudioTechProConsoleASIO PRIVATE ole32 advapi32 user32 winmm avrt)
+        set_target_properties(AudioTechProConsoleASIO PROPERTIES
+            OUTPUT_NAME "AudioTechProConsoleASIO"
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"   # (no runtime DLLs needed in the DAW)
+            RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/AudioTechProConsole_artefacts/Release"
+            RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/AudioTechProConsole_artefacts/Debug")
+        add_dependencies(AudioTechProConsole AudioTechProConsoleASIO)
     endif()
 endif()
 
