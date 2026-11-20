@@ -530,7 +530,8 @@ if(RIFF_BUILD_PLUGINS)
         "masterIron|Iron Master Comp|Amir"
         "consoleEq|Console EQ|Aceq"
         "tubeEq|Tube EQ|Ateq"
-        "graphicEq|Graphic EQ|Ageq")
+        "graphicEq|Graphic EQ|Ageq"
+        "pitchCorrection|Pitch Correction|Apcr|Fx Pitch Shift")
     set(RIFF_PLUGIN_FORMATS VST3)
     if(APPLE)
         list(APPEND RIFF_PLUGIN_FORMATS AU)
@@ -587,6 +588,12 @@ namespace ProjectInfo
         list(GET parts 0 fxType)
         list(GET parts 1 fxName)
         list(GET parts 2 fxCode)
+        list(LENGTH parts partCount)
+        set(fxCategories Fx Dynamics)
+        if(partCount GREATER 3)
+            list(GET parts 3 fxCategories)
+            string(REPLACE " " ";" fxCategories "${fxCategories}")
+        endif()
         set(target "Fx_${fxType}")
         juce_add_plugin(${target}
             PRODUCT_NAME "${fxName}"
@@ -599,7 +606,7 @@ namespace ProjectInfo
             NEEDS_MIDI_INPUT FALSE
             EDITOR_WANTS_KEYBOARD_FOCUS FALSE
             COPY_PLUGIN_AFTER_BUILD FALSE
-            VST3_CATEGORIES Fx Dynamics
+            VST3_CATEGORIES ${fxCategories}
             AU_MAIN_TYPE kAudioUnitType_Effect
             DESCRIPTION "${fxName} by Audio Tech Pro")
         juce_generate_juce_header(${target})

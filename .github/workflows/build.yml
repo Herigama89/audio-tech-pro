@@ -154,8 +154,46 @@ jobs:
           name: AudioTechPro-plugins
           path: out-plugins/
 
+  plugins-windows:
+    # The same plug-ins as VST3 for Windows (any VST3 host: Ableton Live, FL Studio, Cubase, Studio One, Reaper...):
+    # "Audio Tech Pro Plugins <version> Windows.zip"
+    runs-on: windows-2022
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build-plugins -G "Visual Studio 17 2022" -A x64 -DRIFF_BUILD_TESTS=OFF -DRIFF_BUILD_PLUGINS=ON
+      - name: Build the plug-ins
+        shell: pwsh
+        run: |
+          $out = & cmake --build build-plugins --config Release --target RiffPlugins --parallel 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          $out | Write-Output
+          if ($code -ne 0) {
+            $errors = ($out -split "`r?`n" | Where-Object { $_ -match ': error |: fatal error|error C|error LNK' } | Select-Object -Unique -First 60) -join '%0A'
+            Write-Output "::error title=Windows plug-in build errors::$errors"
+            exit $code
+          }
+      - name: Package (.zip)
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path CMakeLists.txt -Pattern 'project\(AudioTechPro VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          $stage = "stage\Audio Tech Pro Plugins"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Get-ChildItem build-plugins -Recurse -Directory -Filter *.vst3 | Where-Object { $_.FullName -match '\\Release\\VST3\\[^\\]+\.vst3$' } |
+            ForEach-Object { Copy-Item $_.FullName -Destination $stage -Recurse -Force }
+          Set-Content "$stage\Read Me.txt" "Copy the .vst3 folders into C:\Program Files\Common Files\VST3, then rescan plug-ins in your DAW."
+          New-Item -ItemType Directory -Force out-plugins-windows | Out-Null
+          Compress-Archive -Path "$stage\*" -DestinationPath "out-plugins-windows\Audio Tech Pro Plugins $version Windows.zip" -Force
+          Get-ChildItem $stage
+          Get-ChildItem out-plugins-windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AudioTechPro-plugins-windows
+          path: out-plugins-windows/
+
   release:
-    needs: [ mac, plugins, windows ]
+    needs: [ mac, plugins, windows, plugins-windows ]
     if: ${{ always() && needs.mac.result == 'success' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-latest
     steps:
@@ -178,6 +216,8 @@ jobs:
 
             Windows (64-bit, Windows 10 and 11): run "Audio Tech Pro <version> Setup.exe". If Windows SmartScreen says it protected your PC, click More info > Run anyway.
 
-            Plug-ins (VST3 and AU, for Logic, Ableton, Pro Tools via VST3 hosts, Studio One...): the Classic Compressors, the Mastering Compressors and the classic EQs. Run "Audio Tech Pro Plugins" .pkg (right-click > Open the first time), or unzip and copy the .vst3 files to /Library/Audio/Plug-Ins/VST3 and the .component files to /Library/Audio/Plug-Ins/Components.
+            Plug-ins (VST3, and AU on the Mac: Logic, Ableton Live, FL Studio, Cubase, Studio One, Reaper...): Pitch Correction, the Classic Compressors, the Mastering Compressors and the classic EQs.
+            Mac: run "Audio Tech Pro Plugins" .pkg (right-click > Open the first time), or unzip and copy the .vst3 files to /Library/Audio/Plug-Ins/VST3 and the .component files to /Library/Audio/Plug-Ins/Components.
+            Windows: unzip "Audio Tech Pro Plugins <version> Windows.zip" and copy the .vst3 folders to C:\Program Files\Common Files\VST3.
           files: files/*
           overwrite_files: true

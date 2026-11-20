@@ -136,6 +136,9 @@ public:
             for (int i = 0; i < n; ++i)
                 l[i] = 0.5f * (l[i] + r[i]);
         effect->tapOutput (l, mono ? l : r, n);
+        // (its delay can change with a setting - Pitch Correction's Live mode has none: the host is told)
+        if (effect->getLatencySamples() != getLatencySamples())
+            triggerAsyncUpdate();
     }
 
     //==============================================================================
@@ -209,6 +212,8 @@ private:
 
     void handleAsyncUpdate() override
     {
+        if (effect->getLatencySamples() != getLatencySamples())
+            setLatencySamples (effect->getLatencySamples());
         const juce::ScopedValueSetter<bool> guard (fromHost, true);
         for (size_t i = 0; i < params.size(); ++i)
         {
