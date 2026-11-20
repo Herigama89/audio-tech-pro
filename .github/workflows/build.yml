@@ -3,6 +3,7 @@
 #   Mac:      "Audio Tech Pro <version>.dmg", "Audio Tech Pro <version>.pkg" and "Uninstall Audio Tech Pro.pkg"
 #             (one app for Apple Silicon and Intel)
 #   Windows:  "Audio Tech Pro <version> Setup.exe" (64-bit)
+#   Both:     "Audio Tech Pro Console <version>" .pkg (Mac) and Setup.exe (Windows)
 # The files are attached to each run (the run's page > Artifacts), and when both builds pass they're
 # published on the repository's Releases page as "Audio Tech Pro <version>" (replacing that version's
 # files if it's built again).
@@ -62,6 +63,10 @@ jobs:
         env:
           RIFF_BUILD_TESTS: "ON"
         run: sh scripts/make-mac-pkg.sh
+      - name: Console installer (.pkg)
+        env:
+          RIFF_BUILD_TESTS: "ON"
+        run: sh scripts/make-mac-console-pkg.sh
       - name: Collect
         run: |
           mkdir -p out
@@ -114,6 +119,8 @@ jobs:
           if (-not (Test-Path $iscc) -and $iscc -ne "iscc") { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
           New-Item -ItemType Directory -Force out | Out-Null
           & $iscc "/DAppVersion=$version" "/DBuildDir=..\..\build-windows\AudioTechPro_artefacts\Release" "/DOutputDir=..\..\out" installer\windows\AudioTechPro.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $iscc "/DAppVersion=$version" "/DBuildDir=..\..\build-windows\AudioTechProConsole_artefacts\Release" "/DOutputDir=..\..\out" installer\windows\AudioTechProConsole.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem out
       - uses: actions/upload-artifact@v4
@@ -224,6 +231,7 @@ jobs:
 
             Plug-ins (VST3, and AU on the Mac: Logic, Ableton Live, FL Studio, Cubase, Studio One, Reaper...): Pitch Correction, the Classic Compressors, the Mastering Compressors and the classic EQs.
             Mac: run "Audio Tech Pro Plugins" .pkg (right-click > Open the first time), or unzip and copy the .vst3 files to /Library/Audio/Plug-Ins/VST3 and the .component files to /Library/Audio/Plug-Ins/Components.
+            Audio Tech Pro Console (a real-time plugin console for any audio interface): "Audio Tech Pro Console <version>.pkg" (Mac) or "Audio Tech Pro Console <version> Setup.exe" (Windows).
             Pitch Correction on its own: "Audio Tech Pro Pitch Correction <version>.pkg" (Mac) or "... Setup.exe" (Windows).
             Windows: unzip "Audio Tech Pro Plugins <version> Windows.zip" and copy the .vst3 folders to C:\Program Files\Common Files\VST3.
           files: files/*

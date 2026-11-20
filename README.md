@@ -22,6 +22,27 @@ coloured knobs and metal fader caps). It has:
 
 All of it runs on a real-time engine that never blocks the audio thread.
 
+## Audio Tech Pro Console
+
+A second app in this repository: a real-time input console for **any** audio interface, in the
+spirit of an Apollo's Console with Unison preamps. Every input of the interface becomes a channel
+strip with:
+
+- a **PRE** slot (the input stage: load a preamp plugin there) and three insert slots, for any
+  VST3, Audio Unit (Mac) or CLAP plugin
+- input trim, polarity, pan, an analog-style fader, mute and solo, and a peak meter with a clip light
+- cue sends A and B (before the fader) for two headphone mixes, and an FX send to a reverb bus
+- a **direct out**: the processed signal, before the fader, to any output (to record it)
+- the interface's own preamp gain and 48 V on the strip, for PreSonus interfaces (with Universal Control running)
+
+plus talkback (hold the button; choose the mic in Session > Talkback mic), sessions (saved and
+reopened with every plugin's settings), crash-safe plugin scanning and stereo strips (an interface's
+loopback pair is linked automatically; right-click a strip's name for more).
+
+Build it on its own: `cmake --build build --target AudioTechProConsole`. The Console workflow
+(Actions > Console) builds `Audio Tech Pro Console <version>.pkg` (Mac) and `... Setup.exe` (Windows)
+whenever its code changes; the Build workflow publishes them with each release.
+
 ## Build and run
 
 ### macOS

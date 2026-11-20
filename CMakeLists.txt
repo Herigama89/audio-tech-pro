@@ -366,6 +366,56 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# Audio Tech Pro Console: a real-time input console for any audio interface (VST3 / AU / CLAP plugins on
+# every input, cue mixes, talkback, direct outs), in the spirit of an Apollo's Console with Unison preamps.
+#   cmake --build build --target AudioTechProConsole
+# ---------------------------------------------------------------------------
+option(RIFF_BUILD_CONSOLE "Build Audio Tech Pro Console" ON)
+if(RIFF_BUILD_CONSOLE)
+    juce_add_gui_app(AudioTechProConsole
+        PRODUCT_NAME "Audio Tech Pro Console"
+        COMPANY_NAME "Audio Tech Pro"
+        BUNDLE_ID    "com.audiotechpro.console"
+        ICON_BIG     "${CMAKE_CURRENT_SOURCE_DIR}/Resources/AppIcon.png"
+        MICROPHONE_PERMISSION_ENABLED TRUE
+        MICROPHONE_PERMISSION_TEXT "Audio Tech Pro Console needs audio input access to process your inputs live."
+    )
+    juce_generate_juce_header(AudioTechProConsole)
+    target_sources(AudioTechProConsole PRIVATE
+        Source/console/ConsoleMain.cpp
+        Source/console/ConsoleEngine.cpp
+        Source/console/ConsoleUI.cpp
+        Source/engine/InterfaceControl.cpp
+        Source/engine/PluginScanChild.cpp
+        Source/engine/ClapFormat.cpp
+    )
+    target_include_directories(AudioTechProConsole PRIVATE Source)
+    set(RIFF_CONSOLE_DEFINITIONS ${RIFF_DEFINITIONS})
+    list(REMOVE_ITEM RIFF_CONSOLE_DEFINITIONS JUCE_PLUGINHOST_ARA=1 RIFF_HAS_ARA=1)
+    target_compile_definitions(AudioTechProConsole PRIVATE
+        ${RIFF_CONSOLE_DEFINITIONS}
+        JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:AudioTechProConsole,JUCE_PRODUCT_NAME>"
+        JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:AudioTechProConsole,JUCE_VERSION>"
+    )
+    target_link_libraries(AudioTechProConsole
+        PRIVATE
+            juce::juce_audio_utils
+            juce::juce_audio_devices
+            juce::juce_audio_processors
+        PUBLIC
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_lto_flags
+            juce::juce_recommended_warning_flags
+    )
+    if(WIN32)
+        target_link_libraries(AudioTechProConsole PRIVATE ole32 gdi32 user32)
+    endif()
+    if(APPLE)
+        target_link_libraries(AudioTechProConsole PRIVATE "-framework CoreAudioKit")
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # Tests:  cmake --build build --target AudioTechProTests && ./build/AudioTechProTests_artefacts/Debug/AudioTechProTests
 # ---------------------------------------------------------------------------
 if(RIFF_BUILD_TESTS)

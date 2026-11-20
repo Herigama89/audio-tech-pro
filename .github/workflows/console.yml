@@ -1,0 +1,83 @@
+# Builds only Audio Tech Pro Console, quickly, on GitHub's computers: when its code changes, or by hand
+# (Actions tab > Console > Run workflow). The installers are attached to the run (the run's page > Artifacts):
+#   Mac:      "Audio Tech Pro Console <version>.pkg" (one app for Apple Silicon and Intel, macOS 11+)
+#   Windows:  "Audio Tech Pro Console <version> Setup.exe" (64-bit)
+# (Releases are published by the Build workflow, with the rest of Audio Tech Pro.)
+name: Console
+
+on:
+  push:
+    paths:
+      - 'Source/console/**'
+      - 'Source/engine/InterfaceControl.*'
+      - 'Source/engine/PluginScanChild.*'
+      - 'Source/engine/ClapFormat.*'
+      - 'scripts/make-mac-console-pkg.sh'
+      - 'installer/windows/AudioTechProConsole.iss'
+      - '.github/workflows/console.yml'
+  workflow_dispatch:
+
+jobs:
+  mac:
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile cache
+        run: brew install ccache && ccache --max-size=2G && ccache --zero-stats
+      - uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-console-mac-${{ github.sha }}
+          restore-keys: ccache-console-mac-
+      - name: Build the console and its installer (.pkg)
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+          CMAKE_OBJC_COMPILER_LAUNCHER: ccache
+          CMAKE_OBJCXX_COMPILER_LAUNCHER: ccache
+        run: |
+          set -o pipefail
+          sh scripts/make-mac-console-pkg.sh 2>&1 | tee build-log.txt || {
+            errors=$(grep -E 'error:' build-log.txt | sort -u | head -60 | awk '{printf "%s%%0A", $0}')
+            echo "::error title=Mac console build errors::$errors"
+            exit 1
+          }
+          mkdir -p out && mv ../*.pkg out/ && ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AudioTechProConsole-mac
+          path: out/
+
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build-windows -G "Visual Studio 17 2022" -A x64 -DRIFF_BUILD_TESTS=OFF -DRIFF_ARA=OFF
+      - name: Build
+        shell: pwsh
+        run: |
+          $out = & cmake --build build-windows --config Release --target AudioTechProConsole --parallel 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          $out | Write-Output
+          if ($code -ne 0) {
+            $errors = ($out -split "`r?`n" | Where-Object { $_ -match ': error |: fatal error|error C|error LNK' } | Select-Object -Unique -First 60) -join '%0A'
+            Write-Output "::error title=Windows console build errors::$errors"
+            exit $code
+          }
+      - name: Installer (Setup.exe)
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path CMakeLists.txt -Pattern 'project\(AudioTechPro VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          New-Item -ItemType Directory -Force out | Out-Null
+          & $iscc "/DAppVersion=$version" "/DBuildDir=..\..\build-windows\AudioTechProConsole_artefacts\Release" "/DOutputDir=..\..\out" installer\windows\AudioTechProConsole.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AudioTechProConsole-windows
+          path: out/
