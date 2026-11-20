@@ -82,11 +82,11 @@ private:
     class MainWindow final : public juce::DocumentWindow
     {
     public:
-        MainWindow (atpconsole::Engine& engine, juce::ApplicationProperties& props)
+        MainWindow (atpconsole::Engine& consoleEngine, juce::ApplicationProperties& props)
             : juce::DocumentWindow ("Audio Tech Pro Console", atpconsole::ui::colours::background, juce::DocumentWindow::allButtons)
         {
             setUsingNativeTitleBar (true);
-            view = new atpconsole::ui::MainView (engine, props);
+            view = new atpconsole::ui::MainView (consoleEngine, props);
             setContentOwned (view, true);
             setResizable (true, false);
             setResizeLimits (900, 680, 10000, 10000);

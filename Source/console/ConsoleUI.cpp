@@ -748,7 +748,7 @@ PluginWindow::PluginWindow (juce::AudioProcessor& p, std::function<void()> onClo
       closed (std::move (onClose))
 {
     setUsingNativeTitleBar (true);
-    juce::AudioProcessorEditor* editor = p.hasEditor() ? p.createEditorIfNeeded() : nullptr;
+    juce::AudioProcessorEditor* editor = p.hasEditor() ? p.createEditorAndMakeActive() : nullptr;
     if (editor == nullptr)
         editor = new juce::GenericAudioProcessorEditor (p);
     setResizable (editor->isResizable(), false);
@@ -1103,7 +1103,7 @@ void MainView::stripMenuFor (StripView& view)
                                                                  { "Purple", 0xffa88bf0 }, { "Green", 0xff9bd34a }, { "Yellow", 0xfff2d14b },
                                                                  { "Grey", 0xff8c9aa1 } };
         for (const auto& [label, argb] : choices)
-            colourMenu.addItem (label, true, c.colour == juce::Colour (argb), [this, &c, argb = argb] { c.colour = juce::Colour (argb); refreshAll(); });
+            colourMenu.addItem (label, true, c.colour == juce::Colour (argb), [this, &c, value = argb] { c.colour = juce::Colour (value); refreshAll(); });
         menu.addSubMenu ("Colour", colourMenu);
     }
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&view));

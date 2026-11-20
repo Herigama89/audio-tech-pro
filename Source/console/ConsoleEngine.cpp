@@ -85,7 +85,9 @@ void Engine::start (const juce::XmlElement* savedDevice)
     // (as many channels as the interface has: every input becomes a strip)
     const auto error = deviceManager.initialise (256, 256, savedDevice, true);
     if (error.isNotEmpty())
+    {
         DBG ("Audio device: " << error);
+    }
     syncToDevice();
     deviceManager.addAudioCallback (this);
     hardware.start();
