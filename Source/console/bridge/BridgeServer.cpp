@@ -75,7 +75,7 @@ void BridgeServer::configure (double sampleRate, int blockSize, int inputLatency
     auto copyName = [] (char* dest, const std::string& name)
     {
         std::memset (dest, 0, nameLength);
-        std::strncpy (dest, name.c_str(), nameLength - 1);
+        std::memcpy (dest, name.data(), std::min (name.size(), (size_t) nameLength - 1));
     };
 
     const bool changed = shared->sampleRate != sampleRate || shared->blockSize != blockSize

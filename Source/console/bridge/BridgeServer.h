@@ -45,9 +45,10 @@ namespace atpbridge
 
     private:
         Shared* shared = nullptr;
-        void* mapping = nullptr;
-        void* tick = nullptr;
-        int toDaw = 0, fromDaw = 0, block = 0;
-        long long readFromDawPos = -1;
+        [[maybe_unused]] void* mapping = nullptr;
+        [[maybe_unused]] void* tick = nullptr;
+        int toDaw = 0, fromDaw = 0;
+        [[maybe_unused]] int block = 0;
+        [[maybe_unused]] long long readFromDawPos = -1;
     };
 }
