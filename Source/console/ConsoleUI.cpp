@@ -266,7 +266,8 @@ void ConsoleSlider::mouseUp (const juce::MouseEvent& e)
         at.y = getPositionOfValue (getValue());
     else if (isHorizontal())
         at.x = getPositionOfValue (getValue());
-    e.source.setScreenPosition (localPointToGlobal (at));
+    auto source = e.source;   // (a handle to the mouse; this copy can move it)
+    source.setScreenPosition (localPointToGlobal (at));
     if (onDragEnd != nullptr)
         onDragEnd();
 }
