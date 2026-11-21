@@ -509,9 +509,12 @@ juce::Colour buttonTextColour (bool on, juce::Colour onColour)
 
 static bool drawFace (juce::Graphics& g, juce::Rectangle<float> area, const MeterFace& face, float value, bool keepProportion);
 
+static int meterStyleOverride = -2;
+void setMeterStyleOverride (int style) noexcept { meterStyleOverride = style; }
+
 bool drawMeter (juce::Graphics& g, juce::Rectangle<float> area, float reductionDb)
 {
-    const auto* m = meterFor (theme::meterStyle());
+    const auto* m = meterFor (meterStyleOverride != -2 ? meterStyleOverride : theme::meterStyle());
     if (m == nullptr || ! m->image.isValid())
         return false;
     return drawFace (g, area, *m, reductionDb, true);

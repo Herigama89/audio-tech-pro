@@ -3086,6 +3086,59 @@ int main (int argc, char* argv[])
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         return r;
     }
+    if (argc > 2 && juce::String (argv[1]) == "vu")
+    {
+        // Every shared meter, each at three readings: vu.png
+        const int cw = 300, ch = 170, pad = 24, top = 44;
+        const char* rows[] { "Classic (drawn) - gain reduction", "Black compression meter - gain reduction",
+                             "Cream VU - gain reduction", "Amber VU - gain reduction", "Amber VU - level (strip VU)",
+                             "Strip compression meter - gain reduction" };
+        const float readings[3][2] { { 0.0f, -20.0f }, { 6.0f, -7.0f }, { 14.0f, 0.0f } };
+        const int W = pad + 3 * (cw + pad), H = 6 * (ch + top) + pad;
+        juce::Image img (juce::Image::ARGB, W, H, true);
+        {
+            juce::Graphics g (img);
+            g.fillAll (juce::Colour (0xff1a1c20));
+            for (int r = 0; r < 6; ++r)
+            {
+                const int y = r * (ch + top) + pad;
+                g.setColour (juce::Colours::white);
+                g.setFont (juce::FontOptions (17.0f, juce::Font::bold));
+                g.drawText (juce::String (r + 1) + ".  " + rows[r], pad, y, W - 2 * pad, 24, juce::Justification::centredLeft);
+                for (int c = 0; c < 3; ++c)
+                {
+                    const juce::Rectangle<float> area ((float) (pad + c * (cw + pad)), (float) (y + 30), (float) cw, (float) ch - 14);
+                    if (r <= 3)
+                    {
+                        riff::looks::setMeterStyleOverride (r);   // 0 classic (none: drawn), 1 black, 2 cream, 3 amber
+                        riff::GainReductionMeter m;
+                        m.setBounds (area.toNearestInt().withPosition (0, 0));
+                        for (int k = 0; k < 60; ++k) m.push (readings[c][0]);
+                        juce::Graphics::ScopedSaveState s (g);
+                        g.setOrigin (area.getPosition().toInt());
+                        m.paintEntireComponent (g, false);
+                    }
+                    else if (r == 4)
+                        riff::looks::drawLevelVu (g, area, readings[c][1], false);
+                    else
+                        riff::looks::drawStripCompMeter (g, area.withSizeKeepingCentre (cw, cw * 0.45f), readings[c][0]);
+                    g.setColour (juce::Colours::white.withAlpha (0.6f));
+                    g.setFont (juce::FontOptions (12.0f));
+                    g.drawText (r == 4 ? juce::String (readings[c][1], 0) + " VU" : juce::String (readings[c][0], 0) + " dB reduction",
+                                area.toNearestInt().withTop ((int) area.getBottom()).withHeight (14), juce::Justification::centred);
+                }
+            }
+            riff::looks::setMeterStyleOverride (-2);
+        }
+        const juce::File dir { juce::String (argv[2]) };
+        dir.createDirectory();
+        auto f = dir.getChildFile ("vu.png");
+        f.deleteFile();
+        juce::FileOutputStream out (f);
+        juce::PNGImageFormat().writeImageToStream (img, out);
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        return 0;
+    }
     if (argc > 2 && juce::String (argv[1]) == "winmenu")
     {
         const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).windowsMenuOnly();
