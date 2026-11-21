@@ -281,6 +281,8 @@ void Engine::syncToDevice()
             {
                 auto s = std::make_unique<Channel> (Kind::input);
                 s->name = inNames[i];
+                if (inNames[i].containsIgnoreCase ("loopback"))
+                    s->faderDb = minusInfinityDb;   // (your computer's own sound: down, so it can't feed back)
                 s->colour = stripColours[(size_t) (i / 2) % std::size (stripColours)];
                 strips.push_back (std::move (s));
             }
@@ -304,6 +306,15 @@ void Engine::syncToDevice()
 
     if (outputsChanged)
         applyDefaultOutputs (firstDevice);
+
+    // A session restored while the interface was still opening: now its strips exist
+    if (pendingSession != nullptr && ! strips.empty())
+    {
+        const auto session = std::move (pendingSession);
+        juce::StringArray problems;
+        loadSession (*session, problems, false);
+        return;   // (loadSession told the window)
+    }
 
     if (onLayoutChanged != nullptr)
         onLayoutChanged();
@@ -880,6 +891,13 @@ void Engine::loadSession (const juce::XmlElement& root, juce::StringArray& probl
     }
 
     talkbackInput = root.getIntAttribute ("talkbackInput", -1);
+
+    // The interface is still opening (on the Mac it's combined with the DAW device first): finish when it's open
+    if (strips.empty() && root.getChildByName ("STRIP") != nullptr)
+    {
+        pendingSession = std::make_unique<juce::XmlElement> (root);
+        return;
+    }
 
     for (auto* x : root.getChildWithTagNameIterator ("STRIP"))
     {

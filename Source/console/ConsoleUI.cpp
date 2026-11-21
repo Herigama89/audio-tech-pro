@@ -208,6 +208,70 @@ void ConsoleLook::drawFader (juce::Graphics& g, juce::Rectangle<float> area, flo
 }
 
 //==============================================================================
+void ConsoleSlider::mouseDown (const juce::MouseEvent& e)
+{
+    if (! isEnabled() || e.mods.isPopupMenu())
+    {
+        juce::Slider::mouseDown (e);
+        return;
+    }
+    if (e.mods.isAltDown() && isDoubleClickReturnEnabled())
+    {
+        setValue (getDoubleClickReturnValue(), juce::sendNotificationSync);   // (Option-click: back to the default)
+        return;
+    }
+    dragging = true;
+    proportion = valueToProportionOfLength (getValue());
+    lastX = e.position.x;
+    lastY = e.position.y;
+    e.source.enableUnboundedMouseMovement (true, false);   // (hides the pointer, and lets it travel past the screen's edge)
+    if (onDragStart != nullptr)
+        onDragStart();
+}
+
+void ConsoleSlider::mouseDrag (const juce::MouseEvent& e)
+{
+    if (! dragging)
+    {
+        juce::Slider::mouseDrag (e);
+        return;
+    }
+    const auto style = getSliderStyle();
+    const bool horizontal = style == LinearHorizontal || style == LinearBar;
+    const float moved = horizontal ? e.position.x - lastX : lastY - e.position.y;   // (up / right is more)
+    lastX = e.position.x;
+    lastY = e.position.y;
+
+    // A fader moves with the pointer (its whole travel); a knob takes 250 points for its whole turn
+    const float travel = isRotary() ? 250.0f
+                                    : juce::jmax (40.0f, (float) (horizontal ? getWidth() : getHeight())
+                                                             - 2.0f * (float) getLookAndFeel().getSliderThumbRadius (*this));
+    proportion = juce::jlimit (0.0, 1.0, proportion + (double) (moved / travel) * (e.mods.isShiftDown() ? 0.2 : 1.0));
+    setValue (proportionOfLengthToValue (proportion), juce::sendNotificationSync);
+}
+
+void ConsoleSlider::mouseUp (const juce::MouseEvent& e)
+{
+    if (! dragging)
+    {
+        juce::Slider::mouseUp (e);
+        return;
+    }
+    dragging = false;
+    e.source.enableUnboundedMouseMovement (false);
+
+    // The pointer comes back on the control: on a fader's cap, or a knob's centre
+    juce::Point<float> at = getLocalBounds().getCentre().toFloat();
+    if (isVertical())
+        at.y = getPositionOfValue (getValue());
+    else if (isHorizontal())
+        at.x = getPositionOfValue (getValue());
+    e.source.setScreenPosition (localPointToGlobal (at));
+    if (onDragEnd != nullptr)
+        onDragEnd();
+}
+
+//==============================================================================
 void SlotButton::set (const juce::String& pluginName, bool isLoaded, bool isBypassed)
 {
     if (name == pluginName && loaded == isLoaded && bypassed == isBypassed)
@@ -375,10 +439,10 @@ StripView::StripView (MainView& o, Channel& c, int index, int cue)
 
     setupKnob (trim, colours::orange, -24.0, 24.0, 0.0, true);
     trim.setTooltip ("Input trim (dB), before the PRE slot: drives the preamp plugin harder or softer");
-    trim.onValueChange = [this] { channel.trimDb = (float) trim.getValue(); };
+    trim.onValueChange = [this] { channel.trimDb = (float) trim.getValue(); repaint(); };
     setupKnob (pan, colours::green, -1.0, 1.0, 0.0, true);
     pan.setTooltip ("Pan");
-    pan.onValueChange = [this] { channel.pan = (float) pan.getValue(); };
+    pan.onValueChange = [this] { channel.pan = (float) pan.getValue(); repaint(); };
     if (isInput)
     {
         addAndMakeVisible (trim);
@@ -866,7 +930,10 @@ void MainView::timerCallback()
     for (auto* v : inputViews) v->updateMeters();
     for (auto* v : busViews) v->updateMeters();
 
-    if (++slowTicks % 15 == 0)   // (twice a second: the read-outs)
+    if (++slowTicks % (30 * 30) == 0)
+        saveAutosave();   // (every 30 seconds too, so even a crash or a forced quit keeps your setup)
+
+    if (slowTicks % 15 == 0)   // (twice a second: the read-outs)
     {
         rate = engine.getSampleRate();
         block = engine.getBlockSize();

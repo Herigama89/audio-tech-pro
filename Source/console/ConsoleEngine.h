@@ -202,6 +202,7 @@ private:
     struct MacLink { bool active = false; int inputOffset = 0, outputOffset = 0; } macLink;   // (under the lock)
     juce::String macInterface;   // (message thread)
     bool combining = false;
+    std::unique_ptr<juce::XmlElement> pendingSession;   // (a session that arrived before the strips existed)
     std::array<std::unique_ptr<Channel>, 2> cues;
     juce::StringArray outputNames;
     juce::MidiBuffer midi;

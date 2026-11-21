@@ -78,6 +78,23 @@ private:
     Meter* source = nullptr;
 };
 
+/** A fader or knob that drags like Logic's: the pointer hides while you drag (so you can keep going
+    past the screen's edge), and comes back on the control when you let go. Shift: fine. Option-click: reset. */
+class ConsoleSlider final : public juce::Slider
+{
+public:
+    using juce::Slider::Slider;
+
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+
+private:
+    bool dragging = false;
+    double proportion = 0.0;
+    float lastX = 0.0f, lastY = 0.0f;
+};
+
 class MainView;
 
 /** One channel strip (an input) or bus (FX, a cue, Main). */
@@ -108,9 +125,9 @@ private:
     juce::Slider hwGain { juce::Slider::LinearBar, juce::Slider::NoTextBox };
     juce::TextButton phantom { "48V" };
     std::array<SlotButton, numSlots> slots;
-    std::array<juce::Slider, numSends> sends;
-    juce::Slider fxReturn, trim, pan;
-    juce::Slider fader { juce::Slider::LinearVertical, juce::Slider::NoTextBox };
+    std::array<ConsoleSlider, numSends> sends;
+    ConsoleSlider fxReturn, trim, pan;
+    ConsoleSlider fader { juce::Slider::LinearVertical, juce::Slider::NoTextBox };
     MeterView meter;
     juce::TextButton mute { "M" }, solo { "S" }, polarity { juce::CharPointer_UTF8 ("\xc3\x98") };
     juce::ComboBox output;

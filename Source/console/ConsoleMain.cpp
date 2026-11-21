@@ -66,7 +66,10 @@ public:
     void shutdown() override
     {
         if (window != nullptr)
+        {
             window->view->saveAutosave();
+            properties.getUserSettings()->setValue ("windowState", window->getWindowStateAsString());
+        }
         if (engine != nullptr)
             if (auto xml = engine->knownPlugins.createXml())
                 properties.getUserSettings()->setValue ("knownPlugins", xml.get());
@@ -94,6 +97,9 @@ private:
             setResizeLimits (900, 680, 10000, 10000);
             centreWithSize (juce::jmin (1440, getParentMonitorArea().getWidth() - 40),
                             juce::jmin (900, getParentMonitorArea().getHeight() - 60));
+            // (where and how big it was last time)
+            if (const auto state = props.getUserSettings()->getValue ("windowState"); state.isNotEmpty())
+                restoreWindowStateFromString (state);
             setVisible (true);
         }
 
