@@ -409,6 +409,7 @@ if(RIFF_BUILD_TESTS)
         Tests/AutomixTests.cpp
         Tests/NoteToolsTests.cpp
         Tests/StockEffectsTests.cpp
+        Tests/PitchQualityTests.cpp
         Tests/NemixTests.cpp
         Source/ui/Theme.cpp
         Source/ui/ThemePack.cpp
