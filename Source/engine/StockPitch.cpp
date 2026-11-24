@@ -31,7 +31,7 @@ namespace
             while (size < latency * 4 + 8192)
                 size <<= 1;
             mask = size - 1;
-            for (auto* b : { &inL, &inR, &accL, &accR, &weights })
+            for (auto* b : { &inL, &inR, &accL, &accR })
                 b->assign ((size_t) size, 0.0f);
             decimated.assign (1024, 0.0f);
             periods.fill (0.0f);
@@ -93,12 +93,12 @@ namespace
                     while (synth <= (double) time + 1.5 * maxPeriod)
                         addGrain (ratioFor, formant, fixedPeriod);
 
+                // (each grain was weighted by its spacing over its width as it was laid: the overlap's sum is the
+                // voice's level without dividing sample by sample, which put hard edges where grains barely met)
                 const auto slot = (size_t) (t & mask);
-                const auto w = weights[slot];
-                const auto norm = 1.0f / std::max (0.35f, w);
-                l[i] = accL[slot] * norm;
-                r[i] = accR[slot] * norm;
-                accL[slot] = accR[slot] = weights[slot] = 0.0f;
+                l[i] = accL[slot];
+                r[i] = accR[slot];
+                accL[slot] = accR[slot] = 0.0f;
             }
         }
 
@@ -224,21 +224,27 @@ namespace
                     formant = 1.0f;
             }
             const auto reach = (int) std::ceil (halfWidth);
+            const auto level = levelFor (step, halfWidth);
             for (int k = -reach; k <= reach; ++k)
             {
                 const auto x = (float) k / halfWidth;
                 if (x <= -1.0f || x >= 1.0f)
                     continue;
-                const auto w = 0.5f + 0.5f * std::cos (pi * x);
+                const auto w = level * (0.5f + 0.5f * std::cos (pi * x));
                 const auto at = source + k * formant;
                 if (at > (double) (time - 2) || at < (double) (time - size + 4))
                     continue;   // (beyond what's been heard yet: only with extreme formant settings)
                 const auto slot = (size_t) ((centre + k) & mask);
                 accL[slot] += w * input (inL, at);
                 accR[slot] += w * input (inR, at);
-                weights[slot] += w;
             }
             synth += step;
+        }
+
+        /** A grain's level: Hann grains `halfWidth` either side, `step` apart, overlap to halfWidth / step. */
+        static float levelFor (float step, float halfWidth) noexcept
+        {
+            return juce::jlimit (0.25f, 2.5f, step / std::max (1.0f, halfWidth));
         }
 
         /** Live: the grain's source is the newest audio that can fill it, kept on the voice's period grid. */
@@ -270,22 +276,37 @@ namespace
                 if (! processUnvoiced)
                     formant = 1.0f;
             }
+            // (never reaching back before now: a grain cut off where it has already played starts on a step, heard
+            // as a click - at a note change, the period growing. Narrowed a little, or laid a little later)
+            // (its level and when the next is laid go by the width it should have, so one narrowed doesn't narrow the rest)
+            const auto intended = halfWidth;
+            const auto room = (float) (centre - (time - 1));
+            if (halfWidth > room)
+            {
+                if (room >= 0.6f * halfWidth)
+                    halfWidth = room;
+                else
+                {
+                    synth = (double) (time - 1) + std::ceil (halfWidth);
+                    centre = (juce::int64) std::llround (synth);
+                }
+            }
             const auto reach = (int) std::ceil (halfWidth);
+            const auto level = levelFor (step, intended);
             for (int k = -reach; k <= reach; ++k)
             {
                 const auto x = (float) k / halfWidth;
                 if (x <= -1.0f || x >= 1.0f || centre + k < time - 1)
                     continue;   // (already played)
-                const auto w = 0.5f + 0.5f * std::cos (pi * x);
+                const auto w = level * (0.5f + 0.5f * std::cos (pi * x));
                 const auto at = source + k * formant;
                 if (at > newest || at < (double) (time - size + 4))
                     continue;
                 const auto slot = (size_t) ((centre + k) & mask);
                 accL[slot] += w * input (inL, at);
                 accR[slot] += w * input (inR, at);
-                weights[slot] += w;
             }
-            lastHalf = halfWidth;
+            lastHalf = intended;
             synth += step;
         }
 
@@ -296,7 +317,7 @@ namespace
         double sampleRate = 48000.0, synth = 0.0, mark = 0.0;
         int latency = 2400, maxPeriod = 686, size = 0, mask = 0;
         juce::int64 time = 0, hopCount = 0;
-        std::vector<float> inL, inR, accL, accR, weights, decimated;
+        std::vector<float> inL, inR, accL, accR, decimated;
         std::array<float, 64> periods {};
         float lowPass = 0.0f, lastHalf = 128.0f;
     };

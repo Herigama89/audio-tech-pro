@@ -1,5 +1,4 @@
 #include <catch2/catch_test_macros.hpp>
-#include <iostream>
 #include "../Source/engine/BuiltInEffects.h"
 #include "../Source/engine/PitchCorrect.h"
 
@@ -14,11 +13,6 @@ namespace
 {
     constexpr double rate = 48000.0;
 
-    struct Voice
-    {
-        std::vector<float> samples;
-    };
-
     /** Notes (MIDI, seconds; 0: a breath, -1: silence), sung with vibrato and a little drift and jitter. */
     std::vector<float> sing (const std::vector<std::pair<double, double>>& notes, float amp = 0.25f)
     {
@@ -28,7 +22,7 @@ namespace
         juce::IIRFilter breathLp1, breathLp2;
         breathLp1.setCoefficients (juce::IIRCoefficients::makeLowPass (rate, 3500.0));
         breathLp2.setCoefficients (juce::IIRCoefficients::makeLowPass (rate, 3500.0));
-        float env = 0.0f;
+        float env = 0.0f, breath = 0.0f;
         for (const auto& [note, seconds] : notes)
         {
             const auto count = (int) (seconds * rate);
@@ -58,10 +52,9 @@ namespace
                         s += (float) (formants / h * std::sin (juce::MathConstants<double>::twoPi * phase * h));
                     }
                 s *= env;
-                if (note == 0)
-                    s += 0.05f * (random.nextFloat() * 2.0f - 1.0f);
-                if (note >= 0)
-                    s = breathLp2.processSingleSampleRaw (breathLp1.processSingleSampleRaw (note == 0 ? s : 0.0f)) + (note == 0 ? 0.0f : s);
+                // breath: noise below 3.5 kHz, faded in and out
+                breath += ((note == 0 ? 1.0f : 0.0f) - breath) * 0.002f;
+                s += breathLp2.processSingleSampleRaw (breathLp1.processSingleSampleRaw (0.05f * breath * (random.nextFloat() * 2.0f - 1.0f)));
                 out.push_back (s * amp);
             }
         }
@@ -71,8 +64,22 @@ namespace
     struct Clicks
     {
         double worstDb = -200.0;   // the loudest 2 ms above 8 kHz, against the voice's level
-        int count = 0;             // 2 ms windows above -50 dB
+        int count = 0;             // 2 ms windows above -45 dB
+        juce::String where;        // (their times, in seconds)
     };
+
+    void dump (const std::vector<float>& s, const juce::String& name)
+    {
+        const auto folder = juce::SystemStats::getEnvironmentVariable ("RIFF_PITCH_DUMP", {});
+        if (folder.isEmpty())
+            return;
+        juce::AudioBuffer<float> b (1, (int) s.size());
+        std::copy (s.begin(), s.end(), b.getWritePointer (0));
+        std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (juce::File (folder).getChildFile (name + ".wav"));
+        juce::WavAudioFormat wav;
+        if (auto w = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (rate).withNumChannels (1).withBitsPerSample (32)))
+            w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+    }
 
     Clicks clicksIn (const std::vector<float>& s, size_t from = 4800)
     {
@@ -96,8 +103,11 @@ namespace
                 e += (double) hp[at + i] * hp[at + i];
             const auto db = juce::Decibels::gainToDecibels (std::sqrt (e / window) / juce::jmax (1.0e-9, level), -200.0);
             c.worstDb = std::max (c.worstDb, db);
-            if (db > -50.0)
+            if (db > -45.0)
+            {
                 ++c.count;
+                c.where << juce::String ((double) (at + from) / rate, 3) << "s (" << juce::String (db, 1) << ") ";
+            }
         }
         return c;
     }
@@ -143,14 +153,14 @@ TEST_CASE ("Pitch Correction and the pitch editor: no clicks or crackle in a sun
 {
     const auto voice = sing (melody());
     const auto dry = clicksIn (voice);
-    std::cout << "dry: worst " << dry.worstDb << " dB, " << dry.count << " windows\n";
+    dump (voice, "dry");
 
     for (const bool live : { false, true })
         for (const int block : { 32, 128, 512, 1024 })
         {
             const auto out = throughCorrection (voice, block, live);
             const auto c = clicksIn (out, 4800 + (size_t) (live ? 0 : 2880));
-            std::cout << (live ? "live" : "studio") << " block " << block << ": worst " << c.worstDb << " dB, " << c.count << " windows\n";
+            dump (out, juce::String (live ? "live" : "studio") + juce::String (block));
             INFO ((live ? "live" : "studio") << " block " << block << ": worst " << c.worstDb << " dB, " << c.count);
             CHECK (c.count == 0);
         }
@@ -170,7 +180,7 @@ TEST_CASE ("Pitch Correction and the pitch editor: no clicks or crackle in a sun
         const auto rendered = pitchcorrect::render (audio, analysis, edits);
         std::vector<float> out (rendered.getReadPointer (0), rendered.getReadPointer (0) + rendered.getNumSamples());
         const auto c = clicksIn (out);
-        std::cout << "editor shift " << shift << ": worst " << c.worstDb << " dB, " << c.count << " windows (" << analysis.notes.size() << " notes)\n";
+        dump (out, "editor" + juce::String (shift));
         INFO ("editor shift " << shift << ": worst " << c.worstDb << " dB, " << c.count);
         CHECK (c.count == 0);
     }

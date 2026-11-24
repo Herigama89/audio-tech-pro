@@ -391,7 +391,6 @@ juce::AudioBuffer<float> synthesise (const juce::AudioBuffer<float>& audio, cons
     // Synthesis: a grain (two periods, Hann) from the nearest analysis mark, placed every period / ratio
     juce::AudioBuffer<float> out (channels, end - base);
     out.clear();
-    std::vector<float> weight ((size_t) (end - base), 0.0f);
     double ts = at.front();
     size_t k = 0;
     while (ts < end)
@@ -412,6 +411,18 @@ juce::AudioBuffer<float> synthesise (const juce::AudioBuffer<float>& audio, cons
         const auto g = (float) juce::Decibels::decibelsToGain (atSample (gain, ts));
         // Formant shift: the grain read faster (brighter) or slower (darker), its period's spacing kept
         const auto fs = pitched ? std::pow (2.0, atSample (formant, ts) / 12.0) : 1.0;
+        auto spacing = period / ratio;
+        if (pitched)
+            if (const auto w = atSample (absoluteWeight, ts); w > 0.0)
+            {
+                const auto f = juce::jlimit (0, frames - 1, (int) std::lround (ts / a.hop));
+                if (absolute[(size_t) f] > 0.0)
+                    spacing += (rate / hzOf (atSample (absolute, ts)) - spacing) * w;
+            }
+        spacing = juce::jmax (4.0, spacing);
+        // (each grain weighted by its spacing over its width - Hann grains overlap to width / spacing - rather than
+        // the sum divided out sample by sample, which put hard edges where grains barely met: clicks at a leap)
+        const auto level = (float) juce::jlimit (0.25, 2.5, spacing / half);
         const int first = juce::jmax (base, (int) std::ceil (ts - half)), last = juce::jmin (end - 1, (int) std::floor (ts + half));
         for (int dst = first; dst <= last; ++dst)
         {
@@ -421,25 +432,16 @@ juce::AudioBuffer<float> synthesise (const juce::AudioBuffer<float>& audio, cons
             if (pos < 1.0 || pos >= n - 2)
                 continue;
             for (int c = 0; c < channels; ++c)
-                out.getWritePointer (c)[dst - base] += read (audio.getReadPointer (c), pos) * w * g;
-            weight[(size_t) (dst - base)] += w;
+                out.getWritePointer (c)[dst - base] += read (audio.getReadPointer (c), pos) * w * g * level;
         }
-        auto spacing = period / ratio;
-        if (pitched)
-            if (const auto w = atSample (absoluteWeight, ts); w > 0.0)
-            {
-                const auto f = juce::jlimit (0, frames - 1, (int) std::lround (ts / a.hop));
-                if (absolute[(size_t) f] > 0.0)
-                    spacing += (rate / hzOf (atSample (absolute, ts)) - spacing) * w;
-            }
-        ts += juce::jmax (4.0, spacing);
+        ts += spacing;
     }
     for (int c = 0; c < channels; ++c)
     {
         const auto* o = out.getReadPointer (c);
         auto* d = span.getWritePointer (c);
         for (int i = spanFrom; i < spanTo; ++i)
-            d[i - spanFrom] = o[i - base] / juce::jmax (0.35f, weight[(size_t) (i - base)]);
+            d[i - spanFrom] = o[i - base];
     }
     return span;
 }
