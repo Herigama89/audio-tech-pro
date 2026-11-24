@@ -67,6 +67,13 @@ public:
                 {
                     mainWindow->setVisible (true);
                     mainWindow->toFront (true);
+                    // The New Project window, as Pro Tools' Dashboard (unless the last project opened, or it's off)
+                    juce::Timer::callAfterDelay (600, [this]
+                    {
+                        if (auto* m = mainWindow != nullptr ? dynamic_cast<riff::MainComponent*> (mainWindow->getContentComponent()) : nullptr)
+                            if (m->dashboardAtStartup())
+                                m->showDashboard();
+                    });
                 }
             });
         });

@@ -4,6 +4,7 @@
 #include "ui/InsertBar.h"
 #include "ui/EffectDesigns.h"
 #include "MainComponent.h"
+#include "engine/Wav64.h"
 #include "ui/StudioPanel.h"
 #include "model/StudioState.h"
 #include "engine/studio/Studio.h"
@@ -1458,6 +1459,7 @@ void MainComponent::setProject (juce::ValueTree newProject, const juce::File& fi
     mixer.setProject (project);
     canvas.setProject (project);
 
+    applyProjectAudio();
     dirty = false;
     refreshProjectControls();
     updateTitle();
@@ -1485,10 +1487,6 @@ void MainComponent::confirmDiscardChanges (std::function<void()> then)
     });                                              // 0: Cancel
 }
 
-void MainComponent::newProject()
-{
-    confirmDiscardChanges ([this] { setProject (model::createProject(), {}); });
-}
 
 void MainComponent::openProject()
 {
@@ -2438,7 +2436,8 @@ void MainComponent::beginRecording()
     if (! wasPlaying)
     {
         const bool countIn = project[ids::countIn];
-        const auto barLength = model::secondsPerBeat (project) * (int) project.getProperty (ids::timeSigNumerator, 4);
+        const auto barLength = model::secondsPerBeat (project) * (int) project.getProperty (ids::timeSigNumerator, 4)
+                             * juce::jlimit (1, 2, (int) project.getProperty (ids::countInBars, 1));
         engine.setPlayheadSecondsAllowingNegative (countIn ? playFrom - barLength : playFrom);
         engine.play();
     }
@@ -2580,12 +2579,12 @@ juce::File MainComponent::nextTakeFile (const juce::ValueTree& track) const
 
     for (int n = 1; n < 10000; ++n)
     {
-        auto f = folder.getChildFile (base + "#" + juce::String (n).paddedLeft ('0', 2) + ".wav");
+        auto f = folder.getChildFile (base + "#" + juce::String (n).paddedLeft ('0', 2) + extensionForFileType (engine.getRecordFileType()));
         if (! f.exists())
             return f;
     }
 
-    return folder.getNonexistentChildFile (base, ".wav");
+    return folder.getNonexistentChildFile (base, extensionForFileType (engine.getRecordFileType()));
 }
 
 void MainComponent::returnToStart()

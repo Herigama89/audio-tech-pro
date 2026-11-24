@@ -1,4 +1,5 @@
 #include "StockDsp.h"
+#include "Wav64.h"
 
 /*
     The stock reverbs (Logic's Reverb folder): an algorithmic studio reverb with six spaces (a
@@ -537,7 +538,7 @@ namespace
             if (path.isNotEmpty() && file.existsAsFile())
             {
                 juce::AudioFormatManager formats;
-                formats.registerBasicFormats();
+                riff::registerAudioFormats (formats);
                 if (std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file)); reader != nullptr)
                 {
                     const auto length = (int) std::min<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 30.0));

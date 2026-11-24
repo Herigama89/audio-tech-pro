@@ -8,7 +8,7 @@ title: Recording
 Click **Audio** at the top right, or choose **Audio Settings...** (`Cmd/Ctrl+,`):
 
 - **Device** - your interface. On Mac it's Core Audio. On Windows, set **Audio device type** to **ASIO** and choose your interface's driver (installed with the interface; get it from the maker's website) for the lowest delay; **Control Panel** opens the driver's own settings, where its buffer size is set. The app picks ASIO by itself the first time when one is installed.
-- **Sample rate** - 44.1 or 48 kHz for most music.
+- **Sample rate** - 44.1 or 48 kHz for most music. A project made in the **New Project** window keeps its own rate, and the interface is set to it when the project opens.
 - **Buffer size** - 64 or 128 samples while recording (you hear yourself with little delay); 512 or 1024 while mixing with many plugins.
 
 **Calibrate Recording Latency...** plays a click through your interface and measures how long it takes to come back, so recordings line up exactly with the music. Connect an output to an input with a cable (or hold a mic to a speaker) and click Measure.
@@ -26,7 +26,7 @@ Click **Audio** at the top right, or choose **Audio Settings...** (`Cmd/Ctrl+,`)
 4. Check the level: sing or play your loudest; the meter should stay out of the red. Turn the gain on your interface, not the fader.
 5. Press `R` to record, `Space` to stop.
 
-The format (16-bit, 24-bit or 32-bit float WAV) is set in **Settings > Recording format**. 24-bit is the usual choice.
+Each project records in the bit depth and file type chosen in the **New Project** window (**File > New Project...**): 16-bit, 24-bit, 32-bit float or 64-bit float, as WAV, AIFF or FLAC. 24-bit is the usual choice; 32-bit float can't clip in the file. Projects made before that window use **Settings > Recording format**.
 
 ## Record MIDI
 
@@ -37,7 +37,7 @@ Make an instrument track (`Cmd/Ctrl+Option/Alt+S`), choose its instrument, conne
 
 ## Helpers
 
-- **Metronome** (`K`) and **Count-in** (`Shift+K`, one bar of click before recording).
+- **Metronome** (`K`) and **Count-in** (`Shift+K`, one bar of click before recording, or two: set in the New Project window).
 - **Autopunch** (`Cmd/Ctrl+Option/Alt+I`) - records only between the punch locators: the red bar under the cycle in the ruler. Drag its ends to set where recording starts and stops. Play from before it; recording drops in and out by itself.
 - **Replace** - a new recording replaces the parts of regions it covers. Off, new recordings go on top (and become takes).
 - **Stop Recording on Clip** - if an input clips (hits 0 dB), recording stops by itself, keeping what came before.

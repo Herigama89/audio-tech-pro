@@ -3,6 +3,7 @@
 // regions with their notes spread out. The whole original file is rendered at the new length (once: kept in the
 // project's Stretched folder), so the region can still be trimmed open, and a stretch again starts from the original.
 #include "MainComponent.h"
+#include "engine/Wav64.h"
 #include "engine/RegionVariants.h"
 #include "model/Project.h"
 
@@ -41,7 +42,7 @@ namespace
     juce::String renderAll (const std::vector<Render>& renders)
     {
         juce::AudioFormatManager formats;
-        formats.registerBasicFormats();
+        riff::registerAudioFormats (formats);
         for (const auto& job : renders)
         {
             std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (job.source));

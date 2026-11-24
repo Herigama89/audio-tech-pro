@@ -1,4 +1,5 @@
 #include "StudioInstruments.h"
+#include "../Wav64.h"
 
 namespace riff::studio
 {
@@ -59,7 +60,7 @@ void StudioSampler::setSampleFile (int, const juce::File& f)
 {
     file = f;
     juce::AudioFormatManager formats;
-    formats.registerBasicFormats();
+    riff::registerAudioFormats (formats);
     std::shared_ptr<juce::AudioBuffer<float>> buffer;
     if (std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (f)); reader != nullptr)
     {

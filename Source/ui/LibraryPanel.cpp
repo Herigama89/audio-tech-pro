@@ -1,4 +1,5 @@
 #include "LibraryPanel.h"
+#include "../engine/Wav64.h"
 #include "Theme.h"
 #include "ConsoleLook.h"
 #include "../AppInfo.h"
@@ -166,7 +167,7 @@ class LibraryPanel::Analyser final : private juce::Thread
 public:
     Analyser() : juce::Thread ("Loop Browser analysis")
     {
-        formats.registerBasicFormats();
+        riff::registerAudioFormats (formats);
         if (const auto saved = juce::JSON::parse (cacheFile()); auto* o = saved.getDynamicObject())
             for (const auto& [path, entry] : o->getProperties())
                 known[path.toString()] = { (juce::int64) entry.getProperty ("size", 0), (juce::int64) entry.getProperty ("time", 0),
@@ -407,7 +408,7 @@ private:
 //==============================================================================
 LibraryPanel::LibraryPanel (AudioEngine& e, juce::PropertiesFile& s) : engine (e), settings (s)
 {
-    formats.registerBasicFormats();
+    riff::registerAudioFormats (formats);
     analyser = std::make_unique<Analyser>();
 
     for (auto* b : { &patchesTab, &loopsTab })

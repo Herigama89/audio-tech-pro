@@ -1,4 +1,5 @@
 #include "ProjectImport.h"
+#include "../engine/Wav64.h"
 #include "../model/Project.h"
 #include "../model/TempoMap.h"
 
@@ -57,7 +58,7 @@ juce::File findMedia (const juce::String& storedPath, const juce::File& projectF
 double audioFileLength (const juce::File& file)
 {
     juce::AudioFormatManager formats;
-    formats.registerBasicFormats();
+    riff::registerAudioFormats (formats);
     if (! file.existsAsFile())
         return 0.0;
     if (std::unique_ptr<juce::AudioFormatReader> reader { formats.createReaderFor (file) }; reader != nullptr && reader->sampleRate > 0.0)

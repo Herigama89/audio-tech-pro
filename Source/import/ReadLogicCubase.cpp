@@ -1,4 +1,5 @@
 #include "ProjectImport.h"
+#include "../engine/Wav64.h"
 #include "PropertyList.h"
 
 namespace riff::interchange
@@ -9,7 +10,7 @@ namespace
     double timeStampOf (const juce::File& file)
     {
         juce::AudioFormatManager formats;
-        formats.registerBasicFormats();
+        riff::registerAudioFormats (formats);
         std::unique_ptr<juce::AudioFormatReader> reader { formats.createReaderFor (file) };
         if (reader == nullptr || reader->sampleRate <= 0.0)
             return -1.0;
@@ -407,7 +408,7 @@ namespace
                     if (rate <= 0.0 && region.file.existsAsFile())
                     {
                         juce::AudioFormatManager fm;
-                        fm.registerBasicFormats();
+                        riff::registerAudioFormats (fm);
                         if (std::unique_ptr<juce::AudioFormatReader> rd { fm.createReaderFor (region.file) }; rd != nullptr)
                         {
                             rate = rd->sampleRate;

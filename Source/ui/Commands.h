@@ -44,7 +44,8 @@ namespace riff::commands
         toggleSnap = 0x3101, toggleCatch, toggleSuspendPlugins, consolidateRegions, alignAudio, toggleHeaderIO, splitStems, detectKey, toggleGpuDrawing, saveCopy, closeProject, findMissingFiles, compareBypass, resetChannels, toggleEco, toggleLayerMeters,
         showManual = 0x3201, openManualPdf,
         showConsoleView = 0x3301, showAnalogConsole,
-        newSamplerTrack = 0x3311, newStudioDrums, newStudioKeys, newStudioBass, newStudioGuitar, newBeatPad
+        newSamplerTrack = 0x3311, newStudioDrums, newStudioKeys, newStudioBass, newStudioGuitar, newBeatPad,
+        deleteUnusedAudio = 0x3321, showDashboard
     };
 
     struct Info

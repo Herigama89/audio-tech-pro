@@ -344,7 +344,10 @@ public:
     std::vector<juce::MidiMessage> takeIncomingMidi();
 
     /** The recording format: 16, 24 or 32 (float) bits. */
-    void setRecordBitDepth (int bits) noexcept { recordBitDepth = (bits == 16 || bits == 32) ? bits : 24; }
+    void setRecordBitDepth (int bits) noexcept { recordBitDepth = (bits == 16 || bits == 32 || bits == 64) ? bits : 24; }
+    /** The recordings' file type: "wav", "aiff" or "flac" (the project's; see createAudioWriter). */
+    void setRecordFileType (const juce::String& type) { recordFileType = (type == "aiff" || type == "flac") ? type : juce::String ("wav"); }
+    juce::String getRecordFileType() const { return recordFileType; }
     int getRecordBitDepth() const noexcept { return recordBitDepth; }
 
     /** While a fader or pan control is written as automation, the engine plays its value
@@ -722,6 +725,7 @@ private:
     juce::AudioBuffer<float>* stemCapture = nullptr;   // only while renderStems renders: 2 channels per slot
     bool stemBeforeFader = false;
     int recordBitDepth = 24;
+    juce::String recordFileType { "wav" };
 
     juce::SpinLock previewLock;
     std::unique_ptr<juce::AudioBuffer<float>> previewHold;   // message thread owns it

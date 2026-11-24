@@ -1,4 +1,5 @@
 #include "RegionVariants.h"
+#include "Wav64.h"
 #include "TimeStretch.h"
 #include "AudioEdit.h"
 
@@ -11,7 +12,7 @@ RegionVariants::RegionVariants (juce::File cacheFolder)
     if (folder == juce::File())
         folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("AudioTechPro Variants");
     folder.createDirectory();
-    formats.registerBasicFormats();
+    riff::registerAudioFormats (formats);
     startThread (juce::Thread::Priority::low);
 }
 

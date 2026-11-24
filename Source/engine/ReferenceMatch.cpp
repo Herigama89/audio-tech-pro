@@ -1,4 +1,5 @@
 #include "ReferenceMatch.h"
+#include "Wav64.h"
 
 namespace riff::reference
 {
@@ -60,7 +61,7 @@ Profile Analyser::result() const
 Profile analyseFile (const juce::File& file, juce::String& error, std::function<bool()> keepGoing)
 {
     juce::AudioFormatManager formats;
-    formats.registerBasicFormats();
+    riff::registerAudioFormats (formats);
     std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
     if (reader == nullptr)
     {

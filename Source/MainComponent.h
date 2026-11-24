@@ -97,10 +97,18 @@ public:
 
     juce::ApplicationCommandManager& getCommandManager() { return commandManager; }
 
+    /** The New Project window (Create, or `recent`: the Recent tab); at startup when it's on (Main.cpp). */
+    void showDashboard (bool recent = false);
+    bool dashboardAtStartup();
+
 private:
     // Project lifecycle
     void setProject (juce::ValueTree newProject, const juce::File& file);
     void newProject();
+    /** File > Delete Unused Audio */
+    void showDeleteUnusedAudio();
+    /** The project's sample rate, bit depth and file type: the interface and the recordings follow them. */
+    void applyProjectAudio();
     void openProject();
     void saveProject (std::function<void()> then = {});
     void saveProjectAs (std::function<void()> then = {});
@@ -305,6 +313,7 @@ private:
 
     // File > Open Recent
     juce::RecentlyOpenedFilesList recentProjects;
+    juce::Component::SafePointer<juce::DialogWindow> dashboardWindow, unusedAudioWindow;
     void openProjectFile (const juce::File& file);
 
     /** Another program's project (Ableton, FL Studio, Studio One, Pro Tools, Logic, Cubase, DAWproject, MIDI). */

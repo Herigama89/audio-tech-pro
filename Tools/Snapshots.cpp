@@ -22,6 +22,10 @@
 #include "../Source/ui/AutomixPanel.h"
 #include "../Source/ui/InsertBar.h"
 #include "../Source/ui/Looks.h"
+#include "../Source/ui/ProjectDashboard.h"
+#include "../Source/ui/UnusedAudioPanel.h"
+#include "../Source/model/StarterTemplates.h"
+#include "../Source/model/UnusedAudio.h"
 #include <JuceHeader.h>
 #include "MainComponent.h"
 #include "ui/ThemePanel.h"
@@ -1044,6 +1048,75 @@ public:
     }
 
     /** The Windows window: the menus along its top (as the Mac's menu bar), over the arrange and mixer. */
+    /** The New Project window (Create and Recent) and Delete Unused Audio, made from demo files. */
+    int newProjectOnly()
+    {
+        out.createDirectory();
+        MainComponent main (false);
+        theme::Settings t;
+        t.skin = juce::SystemStats::getEnvironmentVariable ("RIFF_SNAP_LIGHT", {}).isNotEmpty() ? theme::Skin::glassLight : theme::Skin::glassDark;
+        main.applyTheme (t);
+        const auto suffix = juce::String (t.skin == theme::Skin::glassLight ? "-light" : "-dark");
+
+        auto dir = out.getChildFile ("demo-projects");
+        dir.deleteRecursively();
+        dir.createDirectory();
+        juce::Array<juce::File> recent;
+        struct R { const char* name; const char* starter; double rate; int bits; double tempo; int key; bool minor; };
+        for (const auto& r : { R { "Summer Single v3", "beat", 48000, 32, 96, 9, true }, R { "Podcast Ep 14", "podcast", 48000, 24, 120, 0, false },
+                               R { "Beat Tape 07", "electronic", 44100, 24, 140, 6, true }, R { "Choir Live", "band", 96000, 32, 72, 2, false },
+                               R { "Mix Revision Final", "mixing", 48000, 64, 124, 7, false } })
+        {
+            auto p = starters::build (r.starter, r.name);
+            p.setProperty (ids::projectSampleRate, r.rate, nullptr);
+            p.setProperty (ids::projectBitDepth, r.bits, nullptr);
+            p.setProperty (ids::tempo, r.tempo, nullptr);
+            p.setProperty (ids::keyRoot, r.key, nullptr);
+            p.setProperty (ids::keyMinor, r.minor, nullptr);
+            const auto f = dir.getChildFile (juce::String (r.name) + model::fileExtension);
+            juce::String error;
+            model::save (p, f, error);
+            recent.add (f);
+        }
+        ProjectDashboard::Settings s;
+        s.folder = juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("Audio Tech Pro").getChildFile ("Projects");
+        s.name = "Untitled 1";
+        ProjectDashboard dash (s, { "Built-in Output", "Studio Interface 18i20" }, recent, dir.getChildFile ("Templates"), true, {});
+        dash.setSize (1120, 700);
+        pump (main, 100);
+        save (dash, "new-project" + suffix + ".png");
+        dash.showRecent (true);
+        save (dash, "new-project-recent" + suffix + ".png");
+
+        // Delete Unused Audio: a project using two of the files, an alternative using another
+        audioFolder = dir.getChildFile ("Audio Files");
+        audioFolder.createDirectory();
+        auto used1 = makeAudio ("Vocal Lead#01", 3.0, 220.0f, 0.6f, 1);
+        auto used2 = makeAudio ("Gtr DI#02", 3.0, 110.0f, 0.5f, 2);
+        makeAudio ("Vocal Lead#03", 2.0, 230.0f, 0.7f, 3);
+        makeAudio ("Vocal Lead#04", 6.0, 240.0f, 0.5f, 4);
+        makeAudio ("Gtr DI#01", 5.0, 120.0f, 0.4f, 5);
+        auto kept = makeAudio ("Room Tone", 4.0, 60.0f, 0.2f, 6);
+        makeAudio ("Imported Loop 05", 1.5, 330.0f, 0.9f, 7);
+        for (const auto& [sub, name] : { std::pair { "Freeze Files", "Pad Freeze" }, std::pair { "Stretched", "Bass x1.0500" } })
+        {
+            const auto from = makeAudio (name, 4.0, 90.0f, 0.5f, 8);
+            audioFolder.getChildFile (sub).createDirectory();
+            from.moveFileTo (audioFolder.getChildFile (sub).getChildFile (from.getFileName()));
+        }
+        auto project = model::createProject ("Summer Single v3");
+        auto track = model::addTrack (project, "Vocal", nullptr);
+        model::addRegion (track, used1, 0.0, 3.0, nullptr);
+        model::addRegion (model::addTrack (project, "Guitar", nullptr), used2, 0.0, 3.0, nullptr);
+        auto alternative = project.createCopy();
+        model::addRegion (model::addTrack (alternative, "Room", nullptr), kept, 0.0, 4.0, nullptr);
+        auto items = unusedaudio::find (project, audioFolder, { { "the alternative \"Mix B\"", alternative } }, main.engine.getFormatManager());
+        UnusedAudioPanel panel (std::move (items), "Summer Single v3", audioFolder, main.engine.getFormatManager(), true, {});
+        pump (main, 100);
+        save (panel, "unused-audio" + suffix + ".png");
+        return 0;
+    }
+
     int windowsMenuOnly()
     {
         out.createDirectory();
@@ -3138,6 +3211,12 @@ int main (int argc, char* argv[])
         juce::PNGImageFormat().writeImageToStream (img, out);
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         return 0;
+    }
+    if (argc > 2 && juce::String (argv[1]) == "newproject")
+    {
+        const auto r = riff::SnapshotTool (juce::File (juce::String (argv[2]))).newProjectOnly();
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        return r;
     }
     if (argc > 2 && juce::String (argv[1]) == "winmenu")
     {

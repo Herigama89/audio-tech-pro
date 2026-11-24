@@ -7,7 +7,7 @@ const std::vector<Info>& all()
 {
     static const std::vector<Info> list
     {
-        { newProject,             "New",                        "File",      "Start a new, empty project" },
+        { newProject,             "New Project...",             "File",      "The New Project window: a blank project or a template, its sample rate, bit depth, tempo and key" },
         { openProject,            "Open...",                    "File",      "Open a saved project" },
         { saveProject,            "Save",                       "File",      "Save the project" },
         { saveProjectAs,          "Save As...",                 "File",      "Save the project under a new name" },
@@ -53,6 +53,8 @@ const std::vector<Info>& all()
         { saveCopy,               "Save a Copy As...",          "File",      "A copy of the project with every audio file it uses, in one folder (and a .zip to send if you like): it opens on any computer" },
         { closeProject,           "Close Project",              "File",      "Closes the project (asking to save changes first)" },
         { findMissingFiles,       "Find Missing Audio Files...", "File",     "Looks for audio files the project can't find, in a folder you choose" },
+        { deleteUnusedAudio,      "Delete Unused Audio...", "File",          "Lists the project's audio files nothing uses any more, to move to the Trash or Deleted Audio" },
+        { showDashboard,          "Dashboard...",           "File",          "The New Project window: create a project, or open a recent one" },
         { detectKey,              "Detect Song Key...",         "Edit",      "Listens to the song (or the selected regions) and finds its key and scale, to set as the project's key" },
         { splitStems,             "Split to Stems...",          "Edit",      "Splits the selected audio regions into vocals, drums, bass and the rest (or six stems, with guitar and piano) - and the drums into kick, snare, toms, hi-hat and cymbals - each on a new track, as Logic's Stem Splitter does" },
         { muteRegions,            "Mute Regions",               "Edit",      "Mute or unmute the selected regions" },

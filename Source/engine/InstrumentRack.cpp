@@ -1,4 +1,5 @@
 #include "InstrumentRack.h"
+#include "Wav64.h"
 #include "../model/Project.h"
 #include "BuiltInInstruments.h"
 #include "nemix/Nemix.h"
@@ -20,7 +21,7 @@ InstrumentRack::InstrumentRack()
     formatManager.addFormat (std::make_unique<ClapPluginFormat>());
     knownPlugins.setCustomScanner (std::make_unique<pluginscan::OutOfProcessScanner>());   // (a crashing plugin can't take the app down)
    #endif
-    sampleFormats.registerBasicFormats();
+    riff::registerAudioFormats (sampleFormats);
 }
 
 BuiltInSynth::Settings InstrumentRack::synthSettingsFrom (const juce::ValueTree& track)

@@ -219,6 +219,10 @@ namespace riff::ids
     RIFF_DECLARE_ID (value)
     RIFF_DECLARE_ID (keyRoot)         // PROJECT: the song's key, 0 = C .. 11 = B
     RIFF_DECLARE_ID (keyMinor)        // PROJECT: minor (true) or major
+    RIFF_DECLARE_ID (projectSampleRate)   // PROJECT: the session's sample rate (Hz; the interface is set to it on opening)
+    RIFF_DECLARE_ID (projectBitDepth)     // PROJECT: its recordings' bit depth: 16, 24, 32 (float) or 64 (float)
+    RIFF_DECLARE_ID (projectFileType)     // PROJECT: its recordings' file type: "wav", "aiff" or "flac"
+    RIFF_DECLARE_ID (countInBars)         // PROJECT: bars of count-in (1 or 2) when countIn is on
     RIFF_DECLARE_ID (group)           // TRACK: 0 (none) or 1..8 - linked volume, mute, solo and record
     RIFF_DECLARE_ID (vca)             // TRACK: the VCA (or folder stack) track whose fader scales this one
     RIFF_DECLARE_ID (output)          // TRACK: the bus track it plays into (empty: the main output)

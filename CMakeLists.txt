@@ -7,7 +7,7 @@ if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the app runs on")
 endif()
 
-project(AudioTechPro VERSION 1.25.1 LANGUAGES C CXX)
+project(AudioTechPro VERSION 1.26.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -92,9 +92,12 @@ set(RIFF_CORE_SOURCES
     ThirdParty/ptformat/ptformat.cc
     Source/engine/ClapFormat.cpp
     Source/engine/RegionVariants.cpp
+    Source/engine/Wav64.cpp
     Source/engine/AudioSuite.cpp
     Source/engine/AraHost.cpp
     Source/model/Project.cpp
+    Source/model/StarterTemplates.cpp
+    Source/model/UnusedAudio.cpp
     Source/model/Presets.cpp
     Source/model/Automix.cpp
     Source/model/NoteTools.cpp
@@ -269,6 +272,9 @@ set(RIFF_UI_SOURCES
     Source/MainCommands.cpp
     Source/MainAssistant.cpp
     Source/MainExtras.cpp
+    Source/MainDashboard.cpp
+    Source/ui/ProjectDashboard.cpp
+    Source/ui/UnusedAudioPanel.cpp
     Source/MainStems.cpp
     Source/MainStretch.cpp
     Source/MainMixTools.cpp
@@ -385,6 +391,7 @@ if(RIFF_BUILD_TESTS)
         Tests/ModelTests.cpp
         Tests/EngineTests.cpp
         Tests/StudioTests.cpp
+        Tests/ProjectSetupTests.cpp
         Tests/CommandTests.cpp
         Tests/ConsoleTests.cpp
         Tests/GeneratorTests.cpp

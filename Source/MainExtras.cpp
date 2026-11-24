@@ -115,9 +115,10 @@ namespace
             addRow (autoBackup, "Automatic backups", { "Only when saving", "Every 5 minutes", "Every 10 minutes", "Every 15 minutes" },
                     [] (int m) { return m <= 0 ? 1 : m <= 5 ? 2 : m <= 10 ? 3 : 4; } (props.getIntValue ("backupMinutes", 5)),
                     [this] (int id) { props.setValue ("backupMinutes", std::array<int, 4> { 0, 5, 10, 15 }[(size_t) id - 1]); });
-            addRow (bitDepth, "Recording format", { "16-bit WAV", "24-bit WAV", "32-bit float WAV" },
-                    [] (int b) { return b == 16 ? 1 : b == 32 ? 3 : 2; } (props.getIntValue ("recordBitDepth", 24)),
-                    [this] (int id) { props.setValue ("recordBitDepth", std::array<int, 3> { 16, 24, 32 }[(size_t) id - 1]); });
+            addRow (bitDepth, "Recording format", { "16-bit", "24-bit", "32-bit float", "64-bit float" },
+                    [] (int b) { return b == 16 ? 1 : b == 32 ? 3 : b == 64 ? 4 : 2; } (props.getIntValue ("recordBitDepth", 24)),
+                    [this] (int id) { props.setValue ("recordBitDepth", std::array<int, 4> { 16, 24, 32, 64 }[(size_t) id - 1]); });
+            bitDepth.setTooltip ("For projects made before the New Project window (a new project keeps the bit depth chosen there)");
             addRow (stopBehaviour, "When you stop", { "Stay where it stopped", "Go back to where play started" },
                     props.getBoolValue ("stopReturnsToStart", false) ? 2 : 1,
                     [this] (int id) { props.setValue ("stopReturnsToStart", id == 2); });
@@ -236,7 +237,7 @@ void MainComponent::showPreferences()
     launch (new PreferencesPanel (*props, [this, props]
     {
         autosaveMinutes = props->getIntValue ("autosaveMinutes", 2);
-        engine.setRecordBitDepth (props->getIntValue ("recordBitDepth", 24));
+        applyProjectAudio();
         setStopReturnsToStart (props->getBoolValue ("stopReturnsToStart", false));
         eco::mode = juce::jlimit (0, 2, props->getIntValue ("ecoMode", 0));
         eco::batteryNow = eco::runningOnBattery();

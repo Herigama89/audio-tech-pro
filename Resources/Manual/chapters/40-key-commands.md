@@ -4,7 +4,7 @@ Every command, by menu, with its keys. `Cmd/Ctrl` is Cmd on a Mac and Ctrl on Wi
 
 ## File
 
-- **New** `Cmd/Ctrl+N` - Start a new, empty project
+- **New Project...** `Cmd/Ctrl+N` - The New Project window: a blank project or a template, its sample rate, bit depth, tempo and key
 - **Open...** `Cmd/Ctrl+O` - Open a saved project
 - **Save** `Cmd/Ctrl+S` - Save the project
 - **Save As...** `Cmd/Ctrl+Shift+S` - Save the project under a new name
@@ -20,6 +20,8 @@ Every command, by menu, with its keys. `Cmd/Ctrl` is Cmd on a Mac and Ctrl on Wi
 - **Save a Copy As...** - A copy of the project with every audio file it uses, in one folder (and a .zip to send if you like): it opens on any computer
 - **Close Project** - Closes the project (asking to save changes first)
 - **Find Missing Audio Files...** - Looks for audio files the project can't find, in a folder you choose
+- **Delete Unused Audio...** - Lists the project's audio files nothing uses any more, to move to the Trash or Deleted Audio
+- **Dashboard...** - The New Project window: create a project, or open a recent one
 
 ## Edit
 
@@ -38,7 +40,7 @@ Every command, by menu, with its keys. `Cmd/Ctrl` is Cmd on a Mac and Ctrl on Wi
 - **Consolidate Clips** `Cmd/Ctrl+Shift+J` - The selected audio regions on each track become one region playing one new file (gain, fades and transpose in it; gaps silent)
 - **Align Audio to Guide...** - Lines the timing of the selected regions up with a guide region (the top one), as VocAlign and Cubase's AudioAlign do
 - **Detect Song Key...** - Listens to the song (or the selected regions) and finds its key and scale, to set as the project's key
-- **Split to Stems...** - Splits the selected audio regions into vocals, drums, bass and the rest (or six stems, with guitar and piano), each on a new track, as Logic's Stem Splitter does
+- **Split to Stems...** - Splits the selected audio regions into vocals, drums, bass and the rest (or six stems, with guitar and piano) - and the drums into kick, snare, toms, hi-hat and cymbals - each on a new track, as Logic's Stem Splitter does
 - **Mute Regions** - Mute or unmute the selected regions
 - **Nudge Left** `Option/Alt+Left` - Move the selected regions a 16th note earlier
 - **Nudge Right** `Option/Alt+Right` - Move the selected regions a 16th note later
@@ -52,11 +54,17 @@ Every command, by menu, with its keys. `Cmd/Ctrl` is Cmd on a Mac and Ctrl on Wi
 - **Insert Silence Between Locators** - Open a gap the length of the cycle at its start
 - **Repeat Section Between Locators** - Play the cycle's stretch twice: a copy right after it
 - **Tool Menu** `T` - Choose a tool: pointer, pencil, eraser, scissors, glue, mute
-- **AudioSuite...** - Process the selected audio regions offline with an effect or plugin (VST3, AU, CLAP), into new files
+- **Audio Process...** - Process the selected audio regions offline with an effect or plugin (VST3, AU, CLAP), into new files
 - **Snap to Grid** `N` - Snap on or off: regions and notes land on the grid, or anywhere (Cmd while dragging does the opposite once)
 
 ## Track
 
+- **New Sampler Track** - A track that plays one recording across the keys (drop audio on it)
+- **New Drums Track** - Studio Drums: the drum kit with its pieces, mics and multi-output
+- **New Keys Track** - Studio Keys: the workstation - pianos, keys, strings, brass, the polysynth
+- **New Bass Track** - Studio Bass: the recorded basses, 4 or 5 strings, styles, DI and amp
+- **New Guitar Track** - Studio Guitar: strummed chords or picked notes, through its amp
+- **New Beat Pad Track** - Beat Pad: 4 banks of pads, drum machine kits, a sequencer, samples
 - **Bounce in Place** - Render the selected track to a new audio track and mute the original
 - **New Audio Track** `Cmd/Ctrl+Option/Alt+A` - Add an audio track
 - **New Software Instrument Track** `Cmd/Ctrl+Option/Alt+S` - Add an instrument (MIDI) track
@@ -105,6 +113,8 @@ Every command, by menu, with its keys. `Cmd/Ctrl` is Cmd on a Mac and Ctrl on Wi
 
 - **Exclusive Solo** - Soloing a track unsolos the others (as in LUNA)
 - **MultiMeter** - The master's meters: levels, loudness (LUFS), spectrum, goniometer and phase correlation
+- **Console** `Shift+X` - Every channel with its plug-ins' live faces above its strip (as LUNA's mixer)
+- **Analog Console** `Option/Alt+X` - The whole mixer as a desk: every channel's knobs, keys and fader
 - **Automix...** - A balanced starting mix for a genre: each track measured and its fader set (one undo step)
 - **Bypass All (Compare)** - Hear the mix with every channel's processing bypassed - preamps, channel strips, inserts, tape - and the master's inserts, bus compressor and tape; again to hear it all back (as one switch, to compare)
 - **Reset Channels...** - Every channel (or the selected ones) and the master back to a fresh start: faders, pans, mute and solo, the channel strips, inserts and sends (as Cubase's Reset MixConsole Channels)

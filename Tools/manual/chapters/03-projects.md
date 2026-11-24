@@ -5,10 +5,40 @@ title: Projects and Files
 
 A **project** is your song: its tracks, regions, mixer, plugins and settings, saved in one file, with the audio it records in an **Audio Files** folder beside it.
 
-## New, open and save
+## The New Project window
 
-- **File > New** (`Cmd/Ctrl+N`) - an empty project. **File > New from Template** starts from one of your templates.
-- **File > Open...** (`Cmd/Ctrl+O`) - open a saved project. Recent projects are listed in the File menu.
+When the app opens, the **New Project** window comes up. **File > New Project...** (`Cmd/Ctrl+N`) opens it at any time, and **File > Dashboard...** opens it on its **Recent** tab.
+
+![The New Project window: starts on the left and in the middle, the project's settings on the right](img/new-project.jpg)
+
+**Create** - pick how the project starts, set it up on the right, and click **Create** (or double-click a start):
+
+- **Blank Project** - **Empty** (no tracks), **Audio** (one audio track), **Instrument** (one Studio Keys track) or **Vocal Session** (a lead with EQ and compressor, two doubles, ad-libs, a vocal reverb and a vocal delay).
+- **Music Production** - **Beat Starter** (Studio Drums, Beat Pad, an 808, keys, a pad), **Song Writer** (acoustic guitar, keys, vocal, drums, a reverb) and **Electronic** (beat pad, bass, lead and pad synths, an FX bus).
+- **Recording** - **Live Band**: kick, snare and overheads into a drum bus, bass DI, two guitars, a vocal and a room reverb.
+- **Vocals & Podcast** - **Podcast** (a host and two guests into a dialogue bus) and **Voice-over** (one voice with EQ, compressor and limiter).
+- **Mixing & Mastering** - **Mixing** (16 tracks into drum, music and vocal buses, with a reverb and a delay) and **Mastering** (one stereo track with EQ, compressor and limiter).
+- **My Templates** - the projects you saved with **File > Save as Template...**
+
+The settings on the right:
+
+- **Name** and **Location** - the project gets its own folder there (Music > Audio Tech Pro > Projects at first), saved straight away, with its recordings in the folder's **Audio Files**.
+- **Sample rate** - 44.1, 48, 88.2, 96, 176.4, 192, 352.8 or 384 kHz. Your interface is switched to it whenever the project opens. If the interface can't run at that rate, you're told, and the project plays at the interface's rate.
+- **Bit depth** - **16-bit**, **24-bit**, **32-bit float** or **64-bit float**: what the project's recordings are written in. 24-bit is plenty for most music; 32-bit float can't clip in the file, however hot the input; 64-bit float takes twice the space for the same safety.
+- **File type** - **WAV**, **AIFF** or **FLAC**. FLAC files are smaller but hold whole numbers only (recorded at 24-bit when you choose float); AIFF has no 64-bit float (32-bit instead).
+- **Interface** - keep the audio interface in use, or switch to another for this project.
+- **Tempo** - type it, or click **TAP** in time a few times. **Key**, **Time signature** and **Count-in** (off, 1 bar or 2 bars) set the song up before you start.
+- **Show this window when the app opens** - untick it to start on an empty project instead (or turn on *Open the last project when the app starts* in **Settings**).
+
+The window remembers what you chose last time, so the next project starts the same way.
+
+**Recent** - your recent projects with when they were saved, their sample rate and bit depth, how many tracks, the tempo and the key. Click one to open it. **Open Project...** opens any other.
+
+![The Recent tab](img/new-project-recent.jpg)
+
+## Open and save
+
+- **File > Open...** (`Cmd/Ctrl+O`) - open a saved project. Recent projects are listed in the File menu and the New Project window.
 - **File > Save** (`Cmd/Ctrl+S`) and **Save As...** (`Cmd/Ctrl+Shift+S`).
 - **File > Close Project** - asks to save changes first.
 
@@ -26,6 +56,21 @@ A **project** is your song: its tracks, regions, mixer, plugins and settings, sa
 - **File > Consolidate Project...** - copies every audio file the project uses into its own folder, so it's all in one place.
 - **File > Save a Copy As...** - a copy of the project with all its audio in one folder (and a .zip if you like), to open on any computer or send to someone.
 - **File > Find Missing Audio Files...** - when a project can't find its audio (it was moved), look for it in a folder you choose.
+- **File > Delete Unused Audio...** - clears out audio the project doesn't use any more (see below).
+
+## Delete Unused Audio
+
+Recording takes you didn't keep, bounces a newer one replaced, renders of regions you've since changed and freeze files of tracks you unfroze all stay in the project's folder. **File > Delete Unused Audio...** lists them, so you can get the space back.
+
+![Delete Unused Audio](img/unused-audio.jpg)
+
+- Each file shows **why it's unused**, its **length** and its **size**. Click the **play** button to listen before you decide; click a row to tick or untick it.
+- **All**, **Recordings**, **Bounces & renders** and **Imports** filter the list. Imported files aren't ticked at first (you may want them again); **Select All** ticks everything shown.
+- A file anything in the project still uses is never listed: regions, takes, a stretched region's original, freeze files, the studio instruments' samples, impulse responses. Files the project's **alternatives** use - or the saved project, when you've deleted a region but not saved yet - are shown greyed, and kept.
+- **Keep audio recorded in the last 24 hours** unticks today's takes.
+- **Move them to:** **Trash** - your computer's Trash (the Recycle Bin on Windows), where **Put Back** (Mac) or **Restore** (Windows) brings a file back until you empty it; or the **Deleted Audio folder** inside the project's Audio Files, which you empty from this window with **Empty Deleted Audio** (that one deletes for good).
+- Afterwards the undo history starts again, so undo can't bring back a region whose audio has gone.
+- Exports in the **Stems** folder are never listed.
 
 ## Bringing in work from other programs
 

@@ -1,4 +1,5 @@
 #include "StockDsp.h"
+#include "Wav64.h"
 
 /*
     More of Logic's set: a linear-phase EQ (the Channel EQ's curve with no phase shift), a multi-tap
@@ -228,7 +229,7 @@ namespace
             if (path.isEmpty() || ! file.existsAsFile())
                 return;
             juce::AudioFormatManager formats;
-            formats.registerBasicFormats();
+            riff::registerAudioFormats (formats);
             std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
             if (reader == nullptr)
                 return;

@@ -1,9 +1,9 @@
 {
   "commands": [
     {
-      "name": "New",
+      "name": "New Project...",
       "menu": "File",
-      "description": "Start a new, empty project",
+      "description": "The New Project window: a blank project or a template, its sample rate, bit depth, tempo and key",
       "keys": [
         "Cmd/Ctrl+N"
       ]
@@ -111,6 +111,58 @@
       "menu": "Mix",
       "description": "The master's meters: levels, loudness (LUFS), spectrum, goniometer and phase correlation",
       "keys": []
+    },
+    {
+      "name": "Console",
+      "menu": "Mix",
+      "description": "Every channel with its plug-ins' live faces above its strip (as LUNA's mixer)",
+      "keys": [
+        "Shift+X"
+      ]
+    },
+    {
+      "name": "New Sampler Track",
+      "menu": "Track",
+      "description": "A track that plays one recording across the keys (drop audio on it)",
+      "keys": []
+    },
+    {
+      "name": "New Drums Track",
+      "menu": "Track",
+      "description": "Studio Drums: the drum kit with its pieces, mics and multi-output",
+      "keys": []
+    },
+    {
+      "name": "New Keys Track",
+      "menu": "Track",
+      "description": "Studio Keys: the workstation - pianos, keys, strings, brass, the polysynth",
+      "keys": []
+    },
+    {
+      "name": "New Bass Track",
+      "menu": "Track",
+      "description": "Studio Bass: the recorded basses, 4 or 5 strings, styles, DI and amp",
+      "keys": []
+    },
+    {
+      "name": "New Guitar Track",
+      "menu": "Track",
+      "description": "Studio Guitar: strummed chords or picked notes, through its amp",
+      "keys": []
+    },
+    {
+      "name": "New Beat Pad Track",
+      "menu": "Track",
+      "description": "Beat Pad: 4 banks of pads, drum machine kits, a sequencer, samples",
+      "keys": []
+    },
+    {
+      "name": "Analog Console",
+      "menu": "Mix",
+      "description": "The whole mixer as a desk: every channel's knobs, keys and fader",
+      "keys": [
+        "Option/Alt+X"
+      ]
     },
     {
       "name": "Automix...",
@@ -267,6 +319,18 @@
       "keys": []
     },
     {
+      "name": "Delete Unused Audio...",
+      "menu": "File",
+      "description": "Lists the project's audio files nothing uses any more, to move to the Trash or Deleted Audio",
+      "keys": []
+    },
+    {
+      "name": "Dashboard...",
+      "menu": "File",
+      "description": "The New Project window: create a project, or open a recent one",
+      "keys": []
+    },
+    {
       "name": "Detect Song Key...",
       "menu": "Edit",
       "description": "Listens to the song (or the selected regions) and finds its key and scale, to set as the project's key",
@@ -275,7 +339,7 @@
     {
       "name": "Split to Stems...",
       "menu": "Edit",
-      "description": "Splits the selected audio regions into vocals, drums, bass and the rest (or six stems, with guitar and piano), each on a new track, as Logic's Stem Splitter does",
+      "description": "Splits the selected audio regions into vocals, drums, bass and the rest (or six stems, with guitar and piano) - and the drums into kick, snare, toms, hi-hat and cymbals - each on a new track, as Logic's Stem Splitter does",
       "keys": []
     },
     {
@@ -509,7 +573,7 @@
       "keys": []
     },
     {
-      "name": "AudioSuite...",
+      "name": "Audio Process...",
       "menu": "Edit",
       "description": "Process the selected audio regions offline with an effect or plugin (VST3, AU, CLAP), into new files",
       "keys": []
@@ -1629,6 +1693,204 @@
             "Mid",
             "Side"
           ]
+        },
+        {
+          "id": "dyn2",
+          "name": "Band 2 Dynamic",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "thr2",
+          "name": "Band 2 Threshold",
+          "unit": "dB",
+          "min": -60.0,
+          "max": 0.0,
+          "default": -24.0,
+          "choices": []
+        },
+        {
+          "id": "rng2",
+          "name": "Band 2 Range",
+          "unit": "dB",
+          "min": -24.0,
+          "max": 24.0,
+          "default": -6.0,
+          "choices": []
+        },
+        {
+          "id": "dyn3",
+          "name": "Band 3 Dynamic",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "thr3",
+          "name": "Band 3 Threshold",
+          "unit": "dB",
+          "min": -60.0,
+          "max": 0.0,
+          "default": -24.0,
+          "choices": []
+        },
+        {
+          "id": "rng3",
+          "name": "Band 3 Range",
+          "unit": "dB",
+          "min": -24.0,
+          "max": 24.0,
+          "default": -6.0,
+          "choices": []
+        },
+        {
+          "id": "dyn4",
+          "name": "Band 4 Dynamic",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "thr4",
+          "name": "Band 4 Threshold",
+          "unit": "dB",
+          "min": -60.0,
+          "max": 0.0,
+          "default": -24.0,
+          "choices": []
+        },
+        {
+          "id": "rng4",
+          "name": "Band 4 Range",
+          "unit": "dB",
+          "min": -24.0,
+          "max": 24.0,
+          "default": -6.0,
+          "choices": []
+        },
+        {
+          "id": "dyn5",
+          "name": "Band 5 Dynamic",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "thr5",
+          "name": "Band 5 Threshold",
+          "unit": "dB",
+          "min": -60.0,
+          "max": 0.0,
+          "default": -24.0,
+          "choices": []
+        },
+        {
+          "id": "rng5",
+          "name": "Band 5 Range",
+          "unit": "dB",
+          "min": -24.0,
+          "max": 24.0,
+          "default": -6.0,
+          "choices": []
+        },
+        {
+          "id": "dyn6",
+          "name": "Band 6 Dynamic",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "thr6",
+          "name": "Band 6 Threshold",
+          "unit": "dB",
+          "min": -60.0,
+          "max": 0.0,
+          "default": -24.0,
+          "choices": []
+        },
+        {
+          "id": "rng6",
+          "name": "Band 6 Range",
+          "unit": "dB",
+          "min": -24.0,
+          "max": 24.0,
+          "default": -6.0,
+          "choices": []
+        },
+        {
+          "id": "dyn7",
+          "name": "Band 7 Dynamic",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "thr7",
+          "name": "Band 7 Threshold",
+          "unit": "dB",
+          "min": -60.0,
+          "max": 0.0,
+          "default": -24.0,
+          "choices": []
+        },
+        {
+          "id": "rng7",
+          "name": "Band 7 Range",
+          "unit": "dB",
+          "min": -24.0,
+          "max": 24.0,
+          "default": -6.0,
+          "choices": []
+        },
+        {
+          "id": "dynAttack",
+          "name": "Dynamic Attack",
+          "unit": "ms",
+          "min": 0.5,
+          "max": 200.0,
+          "default": 10.0,
+          "choices": []
+        },
+        {
+          "id": "dynRelease",
+          "name": "Dynamic Release",
+          "unit": "ms",
+          "min": 5.0,
+          "max": 2000.0,
+          "default": 150.0,
+          "choices": []
         }
       ]
     },
@@ -2483,6 +2745,18 @@
           "choices": [
             "Compress",
             "Limit"
+          ]
+        },
+        {
+          "id": "tubes",
+          "name": "Tubes",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "On"
           ]
         }
       ]
@@ -3577,6 +3851,1979 @@
             "Off",
             "On"
           ]
+        }
+      ]
+    },
+    {
+      "type": "classicOpto",
+      "name": "Vintage Opto 2A",
+      "category": "Classic Compressors",
+      "params": [
+        {
+          "id": "gain",
+          "name": "Gain",
+          "unit": "",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 40.0,
+          "choices": []
+        },
+        {
+          "id": "peak",
+          "name": "Peak Reduction",
+          "unit": "",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 40.0,
+          "choices": []
+        },
+        {
+          "id": "limit",
+          "name": "Compress/Limit",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Compress",
+            "Limit"
+          ]
+        },
+        {
+          "id": "emphasis",
+          "name": "HF Emphasis",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "meterMode",
+          "name": "Meter",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Output +10",
+            "Gain Reduction",
+            "Output +4"
+          ]
+        },
+        {
+          "id": "power",
+          "name": "Power",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "voice",
+          "name": "Tube Voice",
+          "unit": "",
+          "min": 0.0,
+          "max": 3.0,
+          "default": 2.0,
+          "choices": [
+            "Off",
+            "Clean",
+            "Opto",
+            "Vari-Mu"
+          ]
+        },
+        {
+          "id": "lowBump",
+          "name": "Low Bump",
+          "unit": "dB",
+          "min": 0.0,
+          "max": 6.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "texture",
+          "name": "Texture",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Warm",
+            "Off",
+            "Bright"
+          ]
+        },
+        {
+          "id": "mix",
+          "name": "Mix",
+          "unit": "%",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 100.0,
+          "choices": []
+        }
+      ]
+    },
+    {
+      "type": "classicFet",
+      "name": "Vintage FET 76",
+      "category": "Classic Compressors",
+      "params": [
+        {
+          "id": "input",
+          "name": "Input",
+          "unit": "",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 40.0,
+          "choices": []
+        },
+        {
+          "id": "output",
+          "name": "Output",
+          "unit": "",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 52.0,
+          "choices": []
+        },
+        {
+          "id": "attack",
+          "name": "Attack",
+          "unit": "",
+          "min": 1.0,
+          "max": 7.0,
+          "default": 4.0,
+          "choices": []
+        },
+        {
+          "id": "release",
+          "name": "Release",
+          "unit": "",
+          "min": 1.0,
+          "max": 7.0,
+          "default": 4.0,
+          "choices": []
+        },
+        {
+          "id": "ratio",
+          "name": "Ratio",
+          "unit": "",
+          "min": 0.0,
+          "max": 4.0,
+          "default": 0.0,
+          "choices": [
+            "4:1",
+            "8:1",
+            "12:1",
+            "20:1",
+            "All"
+          ]
+        },
+        {
+          "id": "meterMode",
+          "name": "Meter",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Output +10",
+            "Gain Reduction",
+            "Output +4"
+          ]
+        },
+        {
+          "id": "power",
+          "name": "Power",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "voice",
+          "name": "Tube Voice",
+          "unit": "",
+          "min": 0.0,
+          "max": 3.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "Clean",
+            "Opto",
+            "Vari-Mu"
+          ]
+        },
+        {
+          "id": "lowBump",
+          "name": "Low Bump",
+          "unit": "dB",
+          "min": 0.0,
+          "max": 6.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "texture",
+          "name": "Texture",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Warm",
+            "Off",
+            "Bright"
+          ]
+        },
+        {
+          "id": "mix",
+          "name": "Mix",
+          "unit": "%",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 100.0,
+          "choices": []
+        }
+      ]
+    },
+    {
+      "type": "classicVca",
+      "name": "Bus VCA",
+      "category": "Classic Compressors",
+      "params": [
+        {
+          "id": "threshold",
+          "name": "Threshold",
+          "unit": "dB",
+          "min": -20.0,
+          "max": 20.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "ratio",
+          "name": "Ratio",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "2:1",
+            "4:1",
+            "10:1"
+          ]
+        },
+        {
+          "id": "attack",
+          "name": "Attack",
+          "unit": "",
+          "min": 0.0,
+          "max": 5.0,
+          "default": 3.0,
+          "choices": [
+            "0.1 ms",
+            "0.3 ms",
+            "1 ms",
+            "3 ms",
+            "10 ms",
+            "30 ms"
+          ]
+        },
+        {
+          "id": "release",
+          "name": "Release",
+          "unit": "",
+          "min": 0.0,
+          "max": 4.0,
+          "default": 4.0,
+          "choices": [
+            "0.1 s",
+            "0.3 s",
+            "0.6 s",
+            "1.2 s",
+            "Auto"
+          ]
+        },
+        {
+          "id": "scHpf",
+          "name": "S/C HPF",
+          "unit": "",
+          "min": 0.0,
+          "max": 3.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "60 Hz",
+            "90 Hz",
+            "150 Hz"
+          ]
+        },
+        {
+          "id": "makeup",
+          "name": "Make-Up",
+          "unit": "dB",
+          "min": 0.0,
+          "max": 20.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "meterMode",
+          "name": "Meter",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Output +10",
+            "Gain Reduction",
+            "Output +4"
+          ]
+        },
+        {
+          "id": "power",
+          "name": "Power",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "voice",
+          "name": "Tube Voice",
+          "unit": "",
+          "min": 0.0,
+          "max": 3.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "Clean",
+            "Opto",
+            "Vari-Mu"
+          ]
+        },
+        {
+          "id": "lowBump",
+          "name": "Low Bump",
+          "unit": "dB",
+          "min": 0.0,
+          "max": 6.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "texture",
+          "name": "Texture",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Warm",
+            "Off",
+            "Bright"
+          ]
+        },
+        {
+          "id": "mix",
+          "name": "Mix",
+          "unit": "%",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 100.0,
+          "choices": []
+        }
+      ]
+    },
+    {
+      "type": "classicPunch",
+      "name": "Punch Bus 2500",
+      "category": "Classic Compressors",
+      "params": [
+        {
+          "id": "threshold",
+          "name": "Threshold",
+          "unit": "dB",
+          "min": -20.0,
+          "max": 10.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "attack",
+          "name": "Attack",
+          "unit": "",
+          "min": 0.0,
+          "max": 6.0,
+          "default": 3.0,
+          "choices": [
+            "0.03 ms",
+            "0.1 ms",
+            "0.3 ms",
+            "1 ms",
+            "3 ms",
+            "10 ms",
+            "30 ms"
+          ]
+        },
+        {
+          "id": "ratio",
+          "name": "Ratio",
+          "unit": "",
+          "min": 0.0,
+          "max": 6.0,
+          "default": 2.0,
+          "choices": [
+            "1.5:1",
+            "2:1",
+            "3:1",
+            "4:1",
+            "6:1",
+            "10:1",
+            "Inf:1"
+          ]
+        },
+        {
+          "id": "release",
+          "name": "Release",
+          "unit": "",
+          "min": 0.0,
+          "max": 5.0,
+          "default": 2.0,
+          "choices": [
+            "0.05 s",
+            "0.1 s",
+            "0.2 s",
+            "0.5 s",
+            "1 s",
+            "2 s"
+          ]
+        },
+        {
+          "id": "knee",
+          "name": "Knee",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Hard",
+            "Med",
+            "Soft"
+          ]
+        },
+        {
+          "id": "thrust",
+          "name": "Thrust",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 0.0,
+          "choices": [
+            "Norm",
+            "Med",
+            "Loud"
+          ]
+        },
+        {
+          "id": "type",
+          "name": "Type",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "New",
+            "Old"
+          ]
+        },
+        {
+          "id": "makeup",
+          "name": "Output",
+          "unit": "dB",
+          "min": 0.0,
+          "max": 20.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "meterMode",
+          "name": "Meter",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Output +10",
+            "Gain Reduction",
+            "Output +4"
+          ]
+        },
+        {
+          "id": "power",
+          "name": "Power",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "voice",
+          "name": "Tube Voice",
+          "unit": "",
+          "min": 0.0,
+          "max": 3.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "Clean",
+            "Opto",
+            "Vari-Mu"
+          ]
+        },
+        {
+          "id": "lowBump",
+          "name": "Low Bump",
+          "unit": "dB",
+          "min": 0.0,
+          "max": 6.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "texture",
+          "name": "Texture",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Warm",
+            "Off",
+            "Bright"
+          ]
+        },
+        {
+          "id": "mix",
+          "name": "Mix",
+          "unit": "%",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 100.0,
+          "choices": []
+        }
+      ]
+    },
+    {
+      "type": "classicVox",
+      "name": "Vox Tube Strip VB",
+      "category": "Classic Compressors",
+      "params": [
+        {
+          "id": "low",
+          "name": "Low 80",
+          "unit": "dB",
+          "min": -10.0,
+          "max": 10.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "mid",
+          "name": "Mid",
+          "unit": "dB",
+          "min": -10.0,
+          "max": 10.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "midFreq",
+          "name": "Mid Freq",
+          "unit": "",
+          "min": 0.0,
+          "max": 4.0,
+          "default": 2.0,
+          "choices": [
+            "500 Hz",
+            "1 kHz",
+            "2 kHz",
+            "3 kHz",
+            "5 kHz"
+          ]
+        },
+        {
+          "id": "high",
+          "name": "High 10k",
+          "unit": "dB",
+          "min": -10.0,
+          "max": 10.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "deEss",
+          "name": "De-Ess",
+          "unit": "",
+          "min": 0.0,
+          "max": 10.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "deEssFreq",
+          "name": "S Freq",
+          "unit": "",
+          "min": 0.0,
+          "max": 3.0,
+          "default": 1.0,
+          "choices": [
+            "3 kHz",
+            "5 kHz",
+            "7 kHz",
+            "9 kHz"
+          ]
+        },
+        {
+          "id": "drive",
+          "name": "Tube Drive",
+          "unit": "",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 20.0,
+          "choices": []
+        },
+        {
+          "id": "comp",
+          "name": "Compress",
+          "unit": "",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 30.0,
+          "choices": []
+        },
+        {
+          "id": "ratio",
+          "name": "Ratio",
+          "unit": "",
+          "min": 0.0,
+          "max": 4.0,
+          "default": 2.0,
+          "choices": [
+            "2:1",
+            "3:1",
+            "4:1",
+            "6:1",
+            "10:1"
+          ]
+        },
+        {
+          "id": "limit",
+          "name": "Limit",
+          "unit": "",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "output",
+          "name": "Output",
+          "unit": "dB",
+          "min": -12.0,
+          "max": 12.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "meterMode",
+          "name": "Meter",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Output +10",
+            "Gain Reduction",
+            "Output +4"
+          ]
+        },
+        {
+          "id": "power",
+          "name": "Power",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "voice",
+          "name": "Tube Voice",
+          "unit": "",
+          "min": 0.0,
+          "max": 3.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "Clean",
+            "Opto",
+            "Vari-Mu"
+          ]
+        },
+        {
+          "id": "lowBump",
+          "name": "Low Bump",
+          "unit": "dB",
+          "min": 0.0,
+          "max": 6.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "texture",
+          "name": "Texture",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Warm",
+            "Off",
+            "Bright"
+          ]
+        },
+        {
+          "id": "mix",
+          "name": "Mix",
+          "unit": "%",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 100.0,
+          "choices": []
+        }
+      ]
+    },
+    {
+      "type": "classicTube",
+      "name": "Class A Tube Strip 737",
+      "category": "Classic Compressors",
+      "params": [
+        {
+          "id": "lowFreq",
+          "name": "Low Freq",
+          "unit": "",
+          "min": 0.0,
+          "max": 3.0,
+          "default": 2.0,
+          "choices": [
+            "15 Hz",
+            "30 Hz",
+            "60 Hz",
+            "150 Hz"
+          ]
+        },
+        {
+          "id": "midFreq",
+          "name": "Mid Freq",
+          "unit": "",
+          "min": 0.0,
+          "max": 4.0,
+          "default": 2.0,
+          "choices": [
+            "220 Hz",
+            "500 Hz",
+            "1.5 kHz",
+            "3 kHz",
+            "6 kHz"
+          ]
+        },
+        {
+          "id": "highFreq",
+          "name": "High Freq",
+          "unit": "",
+          "min": 0.0,
+          "max": 3.0,
+          "default": 1.0,
+          "choices": [
+            "5 kHz",
+            "10 kHz",
+            "20 kHz",
+            "32 kHz"
+          ]
+        },
+        {
+          "id": "low",
+          "name": "Low",
+          "unit": "dB",
+          "min": -24.0,
+          "max": 24.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "mid",
+          "name": "Mid",
+          "unit": "dB",
+          "min": -16.0,
+          "max": 16.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "high",
+          "name": "High",
+          "unit": "dB",
+          "min": -20.0,
+          "max": 20.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "gain",
+          "name": "Tube Gain",
+          "unit": "",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 20.0,
+          "choices": []
+        },
+        {
+          "id": "threshold",
+          "name": "Threshold",
+          "unit": "dB",
+          "min": -30.0,
+          "max": 10.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "attack",
+          "name": "Attack",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Fast",
+            "Med",
+            "Slow"
+          ]
+        },
+        {
+          "id": "ratio",
+          "name": "Ratio",
+          "unit": ":1",
+          "min": 2.0,
+          "max": 20.0,
+          "default": 4.0,
+          "choices": []
+        },
+        {
+          "id": "release",
+          "name": "Release",
+          "unit": "",
+          "min": 0.0,
+          "max": 3.0,
+          "default": 1.0,
+          "choices": [
+            "Fast",
+            "Med",
+            "Slow",
+            "Auto"
+          ]
+        },
+        {
+          "id": "output",
+          "name": "Output",
+          "unit": "dB",
+          "min": -30.0,
+          "max": 10.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "meterMode",
+          "name": "Meter",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Output +10",
+            "Gain Reduction",
+            "Output +4"
+          ]
+        },
+        {
+          "id": "power",
+          "name": "Power",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "voice",
+          "name": "Tube Voice",
+          "unit": "",
+          "min": 0.0,
+          "max": 3.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "Clean",
+            "Opto",
+            "Vari-Mu"
+          ]
+        },
+        {
+          "id": "lowBump",
+          "name": "Low Bump",
+          "unit": "dB",
+          "min": 0.0,
+          "max": 6.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "texture",
+          "name": "Texture",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Warm",
+            "Off",
+            "Bright"
+          ]
+        },
+        {
+          "id": "mix",
+          "name": "Mix",
+          "unit": "%",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 100.0,
+          "choices": []
+        }
+      ]
+    },
+    {
+      "type": "classicDual",
+      "name": "Dual Comp 6176",
+      "category": "Classic Compressors",
+      "params": [
+        {
+          "id": "low",
+          "name": "Low 100",
+          "unit": "dB",
+          "min": -12.0,
+          "max": 12.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "high",
+          "name": "High 10k",
+          "unit": "dB",
+          "min": -12.0,
+          "max": 12.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "preamp",
+          "name": "Tube Gain",
+          "unit": "",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 20.0,
+          "choices": []
+        },
+        {
+          "id": "fetInput",
+          "name": "FET Input",
+          "unit": "",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 35.0,
+          "choices": []
+        },
+        {
+          "id": "optoPeak",
+          "name": "Opto Peak",
+          "unit": "",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 35.0,
+          "choices": []
+        },
+        {
+          "id": "mode",
+          "name": "Mode",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "FET",
+            "Both",
+            "Opto"
+          ]
+        },
+        {
+          "id": "ratio",
+          "name": "FET Ratio",
+          "unit": "",
+          "min": 0.0,
+          "max": 4.0,
+          "default": 0.0,
+          "choices": [
+            "4:1",
+            "8:1",
+            "12:1",
+            "20:1",
+            "All"
+          ]
+        },
+        {
+          "id": "attack",
+          "name": "Attack",
+          "unit": "",
+          "min": 1.0,
+          "max": 7.0,
+          "default": 4.0,
+          "choices": []
+        },
+        {
+          "id": "release",
+          "name": "Release",
+          "unit": "",
+          "min": 1.0,
+          "max": 7.0,
+          "default": 4.0,
+          "choices": []
+        },
+        {
+          "id": "output",
+          "name": "Output",
+          "unit": "dB",
+          "min": -20.0,
+          "max": 20.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "meterMode",
+          "name": "Meter",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Output +10",
+            "Gain Reduction",
+            "Output +4"
+          ]
+        },
+        {
+          "id": "power",
+          "name": "Power",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "voice",
+          "name": "Tube Voice",
+          "unit": "",
+          "min": 0.0,
+          "max": 3.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "Clean",
+            "Opto",
+            "Vari-Mu"
+          ]
+        },
+        {
+          "id": "lowBump",
+          "name": "Low Bump",
+          "unit": "dB",
+          "min": 0.0,
+          "max": 6.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "texture",
+          "name": "Texture",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Warm",
+            "Off",
+            "Bright"
+          ]
+        },
+        {
+          "id": "mix",
+          "name": "Mix",
+          "unit": "%",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 100.0,
+          "choices": []
+        }
+      ]
+    },
+    {
+      "type": "masterHill",
+      "name": "Mastering Hill Comp",
+      "category": "Mastering Compressors",
+      "params": [
+        {
+          "id": "optThreshL",
+          "name": "Optical Threshold L",
+          "unit": "",
+          "min": 0.0,
+          "max": 20.0,
+          "default": 6.0,
+          "choices": []
+        },
+        {
+          "id": "optThreshR",
+          "name": "Optical Threshold R",
+          "unit": "",
+          "min": 0.0,
+          "max": 20.0,
+          "default": 6.0,
+          "choices": []
+        },
+        {
+          "id": "optGainL",
+          "name": "Optical Gain L",
+          "unit": "dB",
+          "min": 0.0,
+          "max": 20.0,
+          "default": 2.0,
+          "choices": []
+        },
+        {
+          "id": "optGainR",
+          "name": "Optical Gain R",
+          "unit": "dB",
+          "min": 0.0,
+          "max": 20.0,
+          "default": 2.0,
+          "choices": []
+        },
+        {
+          "id": "optInL",
+          "name": "Optical L",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Bypass",
+            "In"
+          ]
+        },
+        {
+          "id": "optInR",
+          "name": "Optical R",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Bypass",
+            "In"
+          ]
+        },
+        {
+          "id": "discThreshL",
+          "name": "Discrete Threshold L",
+          "unit": "",
+          "min": 0.0,
+          "max": 20.0,
+          "default": 6.0,
+          "choices": []
+        },
+        {
+          "id": "discThreshR",
+          "name": "Discrete Threshold R",
+          "unit": "",
+          "min": 0.0,
+          "max": 20.0,
+          "default": 6.0,
+          "choices": []
+        },
+        {
+          "id": "discRatioL",
+          "name": "Discrete Ratio L",
+          "unit": "",
+          "min": 0.0,
+          "max": 4.0,
+          "default": 1.0,
+          "choices": [
+            "1.2:1",
+            "2:1",
+            "3:1",
+            "4:1",
+            "Flood"
+          ]
+        },
+        {
+          "id": "discRatioR",
+          "name": "Discrete Ratio R",
+          "unit": "",
+          "min": 0.0,
+          "max": 4.0,
+          "default": 1.0,
+          "choices": [
+            "1.2:1",
+            "2:1",
+            "3:1",
+            "4:1",
+            "Flood"
+          ]
+        },
+        {
+          "id": "discAttackL",
+          "name": "Discrete Attack L",
+          "unit": "",
+          "min": 0.0,
+          "max": 5.0,
+          "default": 2.0,
+          "choices": [
+            "1 ms",
+            "3 ms",
+            "5 ms",
+            "10 ms",
+            "15 ms",
+            "30 ms"
+          ]
+        },
+        {
+          "id": "discAttackR",
+          "name": "Discrete Attack R",
+          "unit": "",
+          "min": 0.0,
+          "max": 5.0,
+          "default": 2.0,
+          "choices": [
+            "1 ms",
+            "3 ms",
+            "5 ms",
+            "10 ms",
+            "15 ms",
+            "30 ms"
+          ]
+        },
+        {
+          "id": "discRecoverL",
+          "name": "Discrete Recovery L",
+          "unit": "",
+          "min": 0.0,
+          "max": 5.0,
+          "default": 2.0,
+          "choices": [
+            "0.1 s",
+            "0.25 s",
+            "0.5 s",
+            "0.8 s",
+            "1.2 s",
+            "Dual"
+          ]
+        },
+        {
+          "id": "discRecoverR",
+          "name": "Discrete Recovery R",
+          "unit": "",
+          "min": 0.0,
+          "max": 5.0,
+          "default": 2.0,
+          "choices": [
+            "0.1 s",
+            "0.25 s",
+            "0.5 s",
+            "0.8 s",
+            "1.2 s",
+            "Dual"
+          ]
+        },
+        {
+          "id": "discGainL",
+          "name": "Discrete Gain L",
+          "unit": "dB",
+          "min": 0.0,
+          "max": 20.0,
+          "default": 2.0,
+          "choices": []
+        },
+        {
+          "id": "discGainR",
+          "name": "Discrete Gain R",
+          "unit": "dB",
+          "min": 0.0,
+          "max": 20.0,
+          "default": 2.0,
+          "choices": []
+        },
+        {
+          "id": "discInL",
+          "name": "Discrete L",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Bypass",
+            "In"
+          ]
+        },
+        {
+          "id": "discInR",
+          "name": "Discrete R",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Bypass",
+            "In"
+          ]
+        },
+        {
+          "id": "scFilterL",
+          "name": "Sidechain Filter L",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "scFilterR",
+          "name": "Sidechain Filter R",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "meterL",
+          "name": "Meter L",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Optical",
+            "Discrete",
+            "Output"
+          ]
+        },
+        {
+          "id": "meterR",
+          "name": "Meter R",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Optical",
+            "Discrete",
+            "Output"
+          ]
+        },
+        {
+          "id": "xfmrL",
+          "name": "Transformer L",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Nickel",
+            "Iron",
+            "Steel"
+          ]
+        },
+        {
+          "id": "xfmrR",
+          "name": "Transformer R",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Nickel",
+            "Iron",
+            "Steel"
+          ]
+        },
+        {
+          "id": "stereo",
+          "name": "Mode",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Dual Mono",
+            "Stereo"
+          ]
+        },
+        {
+          "id": "power",
+          "name": "Power",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "mix",
+          "name": "Mix",
+          "unit": "%",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 100.0,
+          "choices": []
+        }
+      ]
+    },
+    {
+      "type": "masterChild",
+      "name": "Mastering Child Comp",
+      "category": "Mastering Compressors",
+      "params": [
+        {
+          "id": "meterL",
+          "name": "Metering L",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "In",
+            "GR",
+            "Out"
+          ]
+        },
+        {
+          "id": "meterR",
+          "name": "Metering R",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "In",
+            "GR",
+            "Out"
+          ]
+        },
+        {
+          "id": "inputL",
+          "name": "Input Gain L",
+          "unit": "",
+          "min": 0.0,
+          "max": 20.0,
+          "default": 6.0,
+          "choices": []
+        },
+        {
+          "id": "inputR",
+          "name": "Input Gain R",
+          "unit": "",
+          "min": 0.0,
+          "max": 20.0,
+          "default": 6.0,
+          "choices": []
+        },
+        {
+          "id": "threshL",
+          "name": "Threshold L",
+          "unit": "",
+          "min": 0.0,
+          "max": 10.0,
+          "default": 3.0,
+          "choices": []
+        },
+        {
+          "id": "threshR",
+          "name": "Threshold R",
+          "unit": "",
+          "min": 0.0,
+          "max": 10.0,
+          "default": 3.0,
+          "choices": []
+        },
+        {
+          "id": "timeL",
+          "name": "Time Constant L",
+          "unit": "",
+          "min": 0.0,
+          "max": 5.0,
+          "default": 1.0,
+          "choices": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6"
+          ]
+        },
+        {
+          "id": "timeR",
+          "name": "Time Constant R",
+          "unit": "",
+          "min": 0.0,
+          "max": 5.0,
+          "default": 1.0,
+          "choices": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6"
+          ]
+        },
+        {
+          "id": "scHpfL",
+          "name": "Sidechain Filter L",
+          "unit": "Hz",
+          "min": 0.0,
+          "max": 500.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "scHpfR",
+          "name": "Sidechain Filter R",
+          "unit": "Hz",
+          "min": 0.0,
+          "max": 500.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "outL",
+          "name": "Output L",
+          "unit": "dB",
+          "min": -20.0,
+          "max": 20.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "outR",
+          "name": "Output R",
+          "unit": "dB",
+          "min": -20.0,
+          "max": 20.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "agc",
+          "name": "AGC",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Left/Right",
+            "Lat/Vert"
+          ]
+        },
+        {
+          "id": "linkSc",
+          "name": "Link Sidechain",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Unlink",
+            "Link"
+          ]
+        },
+        {
+          "id": "linkCtl",
+          "name": "Link Controls",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Unlink",
+            "Link"
+          ]
+        },
+        {
+          "id": "power",
+          "name": "Power",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "mix",
+          "name": "Mix",
+          "unit": "%",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 100.0,
+          "choices": []
+        }
+      ]
+    },
+    {
+      "type": "masterIron",
+      "name": "Iron Master Comp",
+      "category": "Mastering Compressors",
+      "params": [
+        {
+          "id": "attackL",
+          "name": "Attack L",
+          "unit": "",
+          "min": 0.0,
+          "max": 5.0,
+          "default": 2.0,
+          "choices": [
+            "0.3 ms",
+            "1 ms",
+            "3 ms",
+            "10 ms",
+            "20 ms",
+            "40 ms"
+          ]
+        },
+        {
+          "id": "attackR",
+          "name": "Attack R",
+          "unit": "",
+          "min": 0.0,
+          "max": 5.0,
+          "default": 2.0,
+          "choices": [
+            "0.3 ms",
+            "1 ms",
+            "3 ms",
+            "10 ms",
+            "20 ms",
+            "40 ms"
+          ]
+        },
+        {
+          "id": "releaseL",
+          "name": "Release L",
+          "unit": "",
+          "min": 0.0,
+          "max": 5.0,
+          "default": 2.0,
+          "choices": [
+            "50 ms",
+            "100 ms",
+            "200 ms",
+            "400 ms",
+            "800 ms",
+            "1.6 s"
+          ]
+        },
+        {
+          "id": "releaseR",
+          "name": "Release R",
+          "unit": "",
+          "min": 0.0,
+          "max": 5.0,
+          "default": 2.0,
+          "choices": [
+            "50 ms",
+            "100 ms",
+            "200 ms",
+            "400 ms",
+            "800 ms",
+            "1.6 s"
+          ]
+        },
+        {
+          "id": "threshL",
+          "name": "Threshold L",
+          "unit": "",
+          "min": 0.0,
+          "max": 40.0,
+          "default": 20.0,
+          "choices": []
+        },
+        {
+          "id": "threshR",
+          "name": "Threshold R",
+          "unit": "",
+          "min": 0.0,
+          "max": 40.0,
+          "default": 20.0,
+          "choices": []
+        },
+        {
+          "id": "inputL",
+          "name": "Input L",
+          "unit": "dB",
+          "min": 2.0,
+          "max": 12.0,
+          "default": 7.0,
+          "choices": []
+        },
+        {
+          "id": "inputR",
+          "name": "Input R",
+          "unit": "dB",
+          "min": 2.0,
+          "max": 12.0,
+          "default": 7.0,
+          "choices": []
+        },
+        {
+          "id": "outputL",
+          "name": "Output L",
+          "unit": "dB",
+          "min": 2.0,
+          "max": 12.0,
+          "default": 7.0,
+          "choices": []
+        },
+        {
+          "id": "outputR",
+          "name": "Output R",
+          "unit": "dB",
+          "min": 2.0,
+          "max": 12.0,
+          "default": 7.0,
+          "choices": []
+        },
+        {
+          "id": "rectL",
+          "name": "Rectifier L",
+          "unit": "",
+          "min": 0.0,
+          "max": 3.0,
+          "default": 0.0,
+          "choices": [
+            "Germanium",
+            "LED",
+            "Silicon",
+            "Ge/Si"
+          ]
+        },
+        {
+          "id": "rectR",
+          "name": "Rectifier R",
+          "unit": "",
+          "min": 0.0,
+          "max": 3.0,
+          "default": 0.0,
+          "choices": [
+            "Germanium",
+            "LED",
+            "Silicon",
+            "Ge/Si"
+          ]
+        },
+        {
+          "id": "scEqL",
+          "name": "Side Chain EQ L",
+          "unit": "",
+          "min": 0.0,
+          "max": 4.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "EQ1",
+            "EQ2",
+            "EQ3",
+            "EQ4"
+          ]
+        },
+        {
+          "id": "scEqR",
+          "name": "Side Chain EQ R",
+          "unit": "",
+          "min": 0.0,
+          "max": 4.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "EQ1",
+            "EQ2",
+            "EQ3",
+            "EQ4"
+          ]
+        },
+        {
+          "id": "biasL",
+          "name": "Tube Bias L",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Low",
+            "Mid",
+            "High"
+          ]
+        },
+        {
+          "id": "biasR",
+          "name": "Tube Bias R",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "choices": [
+            "Low",
+            "Mid",
+            "High"
+          ]
+        },
+        {
+          "id": "meterL",
+          "name": "Meter L",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 0.0,
+          "choices": [
+            "GR",
+            "VU 0",
+            "VU +10"
+          ]
+        },
+        {
+          "id": "meterR",
+          "name": "Meter R",
+          "unit": "",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 0.0,
+          "choices": [
+            "GR",
+            "VU 0",
+            "VU +10"
+          ]
+        },
+        {
+          "id": "airBass",
+          "name": "AirBass",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Bypass",
+            "On"
+          ]
+        },
+        {
+          "id": "tape",
+          "name": "Tape Roll-Off",
+          "unit": "",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 0.0,
+          "choices": []
+        },
+        {
+          "id": "link",
+          "name": "SC Link",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "power",
+          "name": "Power",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "mix",
+          "name": "Mix",
+          "unit": "%",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 100.0,
+          "choices": []
         }
       ]
     },
@@ -12031,6 +14278,204 @@
             "Mid",
             "Side"
           ]
+        },
+        {
+          "id": "dyn2",
+          "name": "Band 2 Dynamic",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "thr2",
+          "name": "Band 2 Threshold",
+          "unit": "dB",
+          "min": -60.0,
+          "max": 0.0,
+          "default": -24.0,
+          "choices": []
+        },
+        {
+          "id": "rng2",
+          "name": "Band 2 Range",
+          "unit": "dB",
+          "min": -24.0,
+          "max": 24.0,
+          "default": -6.0,
+          "choices": []
+        },
+        {
+          "id": "dyn3",
+          "name": "Band 3 Dynamic",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "thr3",
+          "name": "Band 3 Threshold",
+          "unit": "dB",
+          "min": -60.0,
+          "max": 0.0,
+          "default": -24.0,
+          "choices": []
+        },
+        {
+          "id": "rng3",
+          "name": "Band 3 Range",
+          "unit": "dB",
+          "min": -24.0,
+          "max": 24.0,
+          "default": -6.0,
+          "choices": []
+        },
+        {
+          "id": "dyn4",
+          "name": "Band 4 Dynamic",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "thr4",
+          "name": "Band 4 Threshold",
+          "unit": "dB",
+          "min": -60.0,
+          "max": 0.0,
+          "default": -24.0,
+          "choices": []
+        },
+        {
+          "id": "rng4",
+          "name": "Band 4 Range",
+          "unit": "dB",
+          "min": -24.0,
+          "max": 24.0,
+          "default": -6.0,
+          "choices": []
+        },
+        {
+          "id": "dyn5",
+          "name": "Band 5 Dynamic",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "thr5",
+          "name": "Band 5 Threshold",
+          "unit": "dB",
+          "min": -60.0,
+          "max": 0.0,
+          "default": -24.0,
+          "choices": []
+        },
+        {
+          "id": "rng5",
+          "name": "Band 5 Range",
+          "unit": "dB",
+          "min": -24.0,
+          "max": 24.0,
+          "default": -6.0,
+          "choices": []
+        },
+        {
+          "id": "dyn6",
+          "name": "Band 6 Dynamic",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "thr6",
+          "name": "Band 6 Threshold",
+          "unit": "dB",
+          "min": -60.0,
+          "max": 0.0,
+          "default": -24.0,
+          "choices": []
+        },
+        {
+          "id": "rng6",
+          "name": "Band 6 Range",
+          "unit": "dB",
+          "min": -24.0,
+          "max": 24.0,
+          "default": -6.0,
+          "choices": []
+        },
+        {
+          "id": "dyn7",
+          "name": "Band 7 Dynamic",
+          "unit": "",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "choices": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "id": "thr7",
+          "name": "Band 7 Threshold",
+          "unit": "dB",
+          "min": -60.0,
+          "max": 0.0,
+          "default": -24.0,
+          "choices": []
+        },
+        {
+          "id": "rng7",
+          "name": "Band 7 Range",
+          "unit": "dB",
+          "min": -24.0,
+          "max": 24.0,
+          "default": -6.0,
+          "choices": []
+        },
+        {
+          "id": "dynAttack",
+          "name": "Dynamic Attack",
+          "unit": "ms",
+          "min": 0.5,
+          "max": 200.0,
+          "default": 10.0,
+          "choices": []
+        },
+        {
+          "id": "dynRelease",
+          "name": "Dynamic Release",
+          "unit": "ms",
+          "min": 5.0,
+          "max": 2000.0,
+          "default": 150.0,
+          "choices": []
         }
       ]
     },

@@ -1,4 +1,5 @@
 #include "AudioEngine.h"
+#include "Wav64.h"
 #include "Resampler.h"
 
 namespace riff
@@ -72,7 +73,7 @@ private:
 
 AudioEngine::AudioEngine()
 {
-    formatManager.registerBasicFormats(); // WAV, AIFF, FLAC, Ogg (+ MP3/CoreAudio formats on macOS)
+    riff::registerAudioFormats (formatManager); // WAV, AIFF, FLAC, Ogg (+ MP3/CoreAudio formats on macOS)
     currentGraph.store (new PlaybackGraph());
     outputSlots.fill (-1);
 
@@ -580,11 +581,7 @@ juce::String AudioEngine::renderOffline (const juce::File& file, double startSec
 
     std::unique_ptr<juce::OutputStream> stream = std::move (fileStream);
     const auto rate = sampleRate.load();
-    juce::WavAudioFormat wav;
-    auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}
-                                                   .withSampleRate (rate)
-                                                   .withNumChannels (2)
-                                                   .withBitsPerSample (bitDepth));
+    auto writer = createAudioWriter ("wav", bitDepth, rate, 2, stream);
     if (writer == nullptr)
         return "Couldn't create the WAV file.";
 
@@ -646,11 +643,7 @@ juce::String AudioEngine::renderStems (const std::vector<StemTarget>& targets, d
             break;
         }
         std::unique_ptr<juce::OutputStream> stream = std::move (fileStream);
-        juce::WavAudioFormat wav;
-        auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}
-                                                       .withSampleRate (rate)
-                                                       .withNumChannels (2)
-                                                       .withBitsPerSample (bitDepth));
+        auto writer = createAudioWriter ("wav", bitDepth, rate, 2, stream);
         if (writer == nullptr)
         {
             error = "Couldn't create " + target.file.getFileName();
@@ -835,13 +828,9 @@ bool AudioEngine::startRecording (const std::vector<RecordRequest>& requests, ju
 
         std::unique_ptr<juce::OutputStream> stream = std::move (fileStream);
 
-        juce::WavAudioFormat wav;
-        auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}
-                                                       .withSampleRate (rate)
-                                                       .withNumChannels (request.numChannels)
-                                                       .withBitsPerSample (recordBitDepth));
+        auto writer = createAudioWriter (recordFileType, recordBitDepth, rate, request.numChannels, stream);
         if (writer == nullptr)
-            return fail ("Couldn't create a WAV writer for " + request.file.getFileName());
+            return fail ("Couldn't create an audio writer for " + request.file.getFileName());
 
         auto take = std::make_unique<Take>();
         take->trackId = request.trackId;

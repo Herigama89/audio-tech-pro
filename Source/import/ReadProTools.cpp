@@ -1,4 +1,5 @@
 #include "ProjectImport.h"
+#include "../engine/Wav64.h"
 #include <ptformat/ptformat.h>
 
 /*
@@ -18,7 +19,7 @@ namespace
         if (target.existsAsFile())
             return target;
         juce::AudioFormatManager formats;
-        formats.registerBasicFormats();
+        riff::registerAudioFormats (formats);
         std::unique_ptr<juce::AudioFormatReader> l { formats.createReaderFor (left) }, r { formats.createReaderFor (right) };
         if (l == nullptr || r == nullptr || l->sampleRate != r->sampleRate)
             return {};

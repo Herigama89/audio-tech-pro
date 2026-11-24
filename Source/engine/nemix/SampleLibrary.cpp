@@ -1,4 +1,5 @@
 #include "SampleLibrary.h"
+#include "../Wav64.h"
 
 namespace riff::nemix::samples
 {
@@ -17,7 +18,7 @@ namespace
     void load (Instrument& ins, const juce::File& dir)
     {
         juce::AudioFormatManager formats;
-        formats.registerBasicFormats();
+        riff::registerAudioFormats (formats);
         std::map<juce::String, int> recordingIndex;
         std::vector<juce::String> files;
         float levelDb = 0.0f;

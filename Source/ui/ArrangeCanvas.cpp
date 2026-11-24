@@ -1,4 +1,5 @@
 #include "Profile.h"
+#include "../engine/Wav64.h"
 #include "ArrangeCanvas.h"
 #include "../import/ProjectImport.h"
 #include "Commands.h"
@@ -2243,7 +2244,7 @@ void ArrangeCanvas::mouseUp (const juce::MouseEvent& e)
             {
                 double seconds = 0.0;
                 juce::AudioFormatManager formats;
-                formats.registerBasicFormats();
+                riff::registerAudioFormats (formats);
                 if (std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file)); reader != nullptr && reader->sampleRate > 0.0)
                     seconds = (double) reader->lengthInSamples / reader->sampleRate;
                 undoManager.beginNewTransaction ("Sampler: sample");

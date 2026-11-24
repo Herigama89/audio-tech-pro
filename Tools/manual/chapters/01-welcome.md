@@ -34,8 +34,8 @@ The recorded instruments for Nemix (the **Nemix Library**) are installed with th
 
 ## Your first song in ten steps
 
-1. **Choose your audio interface.** Click **Audio** at the top right (or press `Cmd/Ctrl+,`). Pick your interface, a sample rate of 48 kHz and a buffer of 128 samples. Smaller buffers feel tighter when you play; larger ones let you use more plugins.
-2. **Set the tempo and key.** Double-click the tempo in the display at the top (BPM) and type a number. Click the key (for example *Cmaj*) to choose the song's key.
+1. **Make the project.** The **New Project** window opens with the app. Pick **Beat Starter** or **Empty**, give it a name, choose 48 kHz and 24-bit (or 32-bit float), set the tempo and key, and click **Create**. To change the interface's buffer, click **Audio** at the top right (or press `Cmd/Ctrl+,`): 128 samples is a good start - smaller feels tighter when you play, larger lets you use more plugins.
+2. **Change the tempo and key later** if you like: double-click the tempo in the display at the top (BPM) and type a number; click the key (for example *Cmaj*) to choose another.
 3. **Add a drum track.** Choose **Track > New Drummer Track**. A drummer plays along with the song. In its editor below the tracks, drag the dot in the square to make it busier or louder.
 4. **Add an instrument.** Press `Cmd/Ctrl+Option/Alt+S` for a new instrument track. Click the instrument key on its track header (it shows *Tech Synth*), or the input slot on its mixer strip, and choose **Nemix (wavetable synth)**, then pick a sound in Nemix's **BROWSE** page - "Grand Piano", "Finger Bass" or "Supersaw Lead", for example.
 5. **Record MIDI.** Press `K` to turn the click on, then `R` to record. Play your MIDI keyboard. Press `Space` to stop.
