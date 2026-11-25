@@ -1127,7 +1127,17 @@ TEST_CASE ("The Master Bus Compressor", "[buscomp]")
         CHECK (gr > 13.0f);
         CHECK (gr < 16.5f);
 
-        comp.meterRead();
+        // The meter falls back by itself (40 dB a second) - in silence, and with the compressor no longer run -
+        // and reading it doesn't change it (it used to stick until a reader reset it)
+        CHECK (comp.getGainReductionDb() == gr);
+        std::vector<float> l (4800, 0.0f), r (4800, 0.0f);
+        for (int i = 0; i < 40; ++i)
+            comp.process (l.data(), r.data(), 4800);   // 4 s of silence: released
+        CHECK (comp.getGainReductionDb() < 0.5f);
+        compressSine (comp, 1.0f);
+        CHECK (comp.getGainReductionDb() > 13.0f);
+        for (int i = 0; i < 10; ++i)
+            comp.meterIdle (4800);                     // a second not run at all (another compressor on the bus)
         CHECK (comp.getGainReductionDb() == 0.0f);
     }
 

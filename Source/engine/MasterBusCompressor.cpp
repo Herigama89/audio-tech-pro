@@ -155,10 +155,16 @@ void MasterBusCompressor::process (float* left, float* right, int numSamples) no
         peakReduction = juce::jmax (peakReduction, envelopeDb * wet);
     }
 
-    // Hold the largest reduction until the meter reads it.
-    auto previous = meterGainReduction.load (std::memory_order_relaxed);
-    while (peakReduction > previous
-           && ! meterGainReduction.compare_exchange_weak (previous, peakReduction, std::memory_order_relaxed)) {}
+    publishMeter (peakReduction, numSamples);
+}
+
+void MasterBusCompressor::publishMeter (float blockReduction, int numSamples) noexcept
+{
+    // (it used to hold the largest until a reader reset it: a reader that only looked - the console's meter - or
+    // none at all, with the compressor no longer run, left the needle stuck where the loudest moment put it)
+    const auto fall = 40.0f * (float) numSamples / (float) sampleRate;
+    const auto previous = meterGainReduction.load (std::memory_order_relaxed);
+    meterGainReduction.store (juce::jmax (blockReduction, previous - fall, 0.0f), std::memory_order_relaxed);
 }
 
 juce::String MasterBusCompressor::ratioText (int index)

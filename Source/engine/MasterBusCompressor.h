@@ -60,11 +60,12 @@ public:
 
     void process (float* left, float* right, int numSamples) noexcept;
 
-    /** Gain reduction in dB (positive), held for the meter. Safe from any thread. */
+    /** Gain reduction in dB (positive) for the meters: each block's largest, falling back at 40 dB a second, so
+        every reader sees the peaks between its frames and none has to reset it. Safe from any thread. */
     float getGainReductionDb() const noexcept { return meterGainReduction.load (std::memory_order_relaxed); }
 
-    /** Lets the meter's hold fall back (called by the UI after reading). */
-    void meterRead() noexcept { meterGainReduction.store (0.0f, std::memory_order_relaxed); }
+    /** The meter falling back while the compressor isn't run (another compressor on the bus, no project). Audio thread. */
+    void meterIdle (int numSamples) noexcept { publishMeter (0.0f, numSamples); }
 
     static juce::String ratioText (int index);
     static juce::String attackText (int index);
@@ -72,6 +73,7 @@ public:
 
 private:
     float coefficient (float seconds) const noexcept;
+    void publishMeter (float blockReduction, int numSamples) noexcept;
 
     Settings settings;
     double sampleRate = 48000.0;

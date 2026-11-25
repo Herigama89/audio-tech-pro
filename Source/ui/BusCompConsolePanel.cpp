@@ -316,8 +316,10 @@ float BusCompConsolePanel::gainReduction()
     // from the quietest difference lately (when it isn't compressing, the difference is just the
     // make-up), so it works whatever the plugin calls its output knob.
     float measured = 0.0f;
+    bool silent = true;
     {
         const auto [in, out] = engine.takeBusPluginLevels();
+        silent = in <= 1.0e-4f;
         if (in > 1.0e-4f && out > 1.0e-6f)
         {
             const auto diff = juce::Decibels::gainToDecibels (in) - juce::Decibels::gainToDecibels (out);
@@ -374,7 +376,8 @@ float BusCompConsolePanel::gainReduction()
             meterMoves = true;
         meterSeen = true;
         lastMeterValue = value;
-        if (meterMoves && value <= 40.0f)
+        // (not in silence: some plugins stop updating their meter when nothing plays, leaving it on its last reading)
+        if (meterMoves && value <= 40.0f && ! silent)
             return juce::jmin (20.0f, value);
     }
     return measured;

@@ -304,9 +304,7 @@ public:
 
     float takeBusCompGainReduction() noexcept
     {
-        const auto gr = busComp.getGainReductionDb();
-        busComp.meterRead();
-        return gr;
+        return busComp.getGainReductionDb();
     }
 
     // --- Export (message thread) ------------------------------------------------

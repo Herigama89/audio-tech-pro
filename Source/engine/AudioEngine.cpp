@@ -1447,6 +1447,7 @@ void AudioEngine::render (const float* const* inputs, int numInputs,
                 busPluginIn.store (busPluginIn.load (std::memory_order_relaxed) + energy (mixL, mixR), std::memory_order_relaxed);
                 for (const auto& effect : graph->busCompPlugins)
                     effect->process (mixL, mixR, n);
+                busComp.meterIdle (n);
                 busPluginOut.store (busPluginOut.load (std::memory_order_relaxed) + energy (mixL, mixR), std::memory_order_relaxed);
                 busPluginSamples.fetch_add (n, std::memory_order_release);
             }
